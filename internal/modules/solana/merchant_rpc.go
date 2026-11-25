@@ -11,12 +11,12 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // MerchantRPCBuilder resolves one merchant's Solana RPC client at use time for
@@ -25,12 +25,12 @@ import (
 // late-bound; a nil fn or service arms nothing.
 type MerchantRPCBuilder struct {
 	MerchantsFn func() *merchants.Service
-	// Endpoint replaces the network's public endpoint: a sandbox run's
-	// loopback node (provider_sandbox.solana_rpc_url).
+	// Endpoint replaces the network's public endpoint: a loopback fake node
+	// (Deps.ProviderEndpoints.SolanaRPCURL).
 	Endpoint string
 	// Postures is each merchant's write posture: a readonly merchant's client
 	// submits nothing, and so does every client without Postures.
-	Postures writeposture.Reader
+	Postures controls.Reader
 	Log      *slog.Logger
 }
 

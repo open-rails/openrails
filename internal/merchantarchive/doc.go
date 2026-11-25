@@ -33,8 +33,8 @@
 // not a substitute), prepare the destination identity with
 // `openrails billing prepare-target`, and import into an empty book
 // (not_empty otherwise). A successful export leaves the source readonly and an
-// import lands the destination readonly until `openrails merchant arm`; never
-// arm both. The restore guard is one billing_restore receipt per merchant,
+// import lands the destination readonly and disarmed until
+// `openrails merchant writes full`; never restore both. The restore guard is one billing_restore receipt per merchant,
 // under a merchant-row lock, with triggers suppressed only for the inserting
 // transaction; an identical retry returns already_imported and a different
 // archive is refused. New OpenRails tables need an explicit portability

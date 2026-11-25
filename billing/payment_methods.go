@@ -178,6 +178,11 @@ const (
 	CodeDefaultPaymentMethodInvalid ErrorCode = "default_payment_method_invalid"
 )
 
+// CodeBillingDetailsRequired: a billing detail the merchant's
+// checkout.billing_fields require of a new card is missing (400); param
+// names it.
+const CodeBillingDetailsRequired ErrorCode = "billing_details_required"
+
 // SetDefaultPaymentMethodParams makes a saved card the customer's default for
 // one currency: it collects their invoices there and pays every card
 // subscription in it without a card of its own.

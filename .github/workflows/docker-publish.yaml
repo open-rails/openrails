@@ -139,8 +139,9 @@ jobs:
             VERSION=${{ needs.verify-source.outputs.version }}
             COMMIT=${{ github.sha }}
             DATE=${{ needs.verify-source.outputs.date }}
+          # Only a tag build saves layers; a pull request's would be readable by that PR alone.
           cache-from: type=gha,scope=openrails-amd64
-          cache-to: type=gha,mode=max,scope=openrails-amd64
+          cache-to: ${{ startsWith(github.ref, 'refs/tags/') && 'type=gha,mode=max,scope=openrails-amd64' || '' }}
 
       # ci.yaml's Required Security job only scans the Go dependency graph
       # (go.sum) -- never the image contents, so base-image/OS-package CVEs
@@ -241,7 +242,7 @@ jobs:
             COMMIT=${{ github.sha }}
             DATE=${{ needs.verify-source.outputs.date }}
           cache-from: type=gha,scope=openrails-arm64
-          cache-to: type=gha,mode=max,scope=openrails-arm64
+          cache-to: ${{ startsWith(github.ref, 'refs/tags/') && 'type=gha,mode=max,scope=openrails-arm64' || '' }}
 
       - name: Report version
         run: |
@@ -252,14 +253,14 @@ jobs:
       - name: Migrate smoke database
         run: |
           docker run --rm --network host \
-            -e AUTH_DEFAULT_TENANT_ID=51336692-ef57-4cdb-a189-a8d388465c11 \
-            -e DATABASE_HOST=127.0.0.1 \
-            -e DATABASE_PORT=5434 \
-            -e DATABASE_NAME=openrails_db \
-            -e DATABASE_USERNAME=smoke \
-            -e DATABASE_PASSWORD=smoke_password \
-            -e DATABASE_SSLMODE=disable \
-            -e REDIS_ADDR=127.0.0.1:6380 \
+            -e PUBLIC_URL=http://127.0.0.1:3053 \
+            -e PGHOST=127.0.0.1 \
+            -e PGPORT=5434 \
+            -e PGDATABASE=openrails_db \
+            -e PGUSER=smoke \
+            -e PGPASSWORD=smoke_password \
+            -e PGSSLMODE=disable \
+            -e REDIS_URL=redis://127.0.0.1:6380 \
             "openrails-smoke:${GITHUB_SHA}" migrate pg
 
       - name: Boot server and check readiness
@@ -267,27 +268,21 @@ jobs:
           # Readiness requires an OpenRails-managed River consumer; smoke the
           # normal server mode so /health/ready can prove the full image posture.
           # The smoke declares no merchant, so it never writes to a provider.
-          # Enabling the console proves it is embedded; the
-          # console needs a staff route group and a sign-in method, so the server
-          # turns on the admin group and serves its own sign-in; a session of its
-          # own accounts reaches a merchant by token exchange for its resource.
+          # Serving the console proves it is embedded; its sign-in is the
+          # server's own, and a session of its own accounts reaches a merchant
+          # by token exchange for its resource. The database is named by
+          # libpq's variables.
           cid="$(docker run -d --network host \
-            -e AUTH_DEFAULT_TENANT_ID=51336692-ef57-4cdb-a189-a8d388465c11 \
-            -e ROUTE_GROUPS_ADMIN=true \
             -e PORT=3053 \
-            -e AUTH_KEYS_ALLOW_EPHEMERAL_DEV_KEYS=true \
-            -e AUTH_REGISTRATION_ALLOW_MISSING_SENDERS=true \
-            -e AUTH_HTTP_DIRECT_PEER_IP=true \
-            -e AUTH_KEYS_PATH=/tmp/openrails-smoke-keys.json \
-            -e AUTH_TOKEN_ISSUER=http://127.0.0.1:3053 \
-            -e AUTH_RESOURCE_ID=http://127.0.0.1:3053 \
-            -e DATABASE_HOST=127.0.0.1 \
-            -e DATABASE_PORT=5434 \
-            -e DATABASE_NAME=openrails_db \
-            -e DATABASE_USERNAME=smoke \
-            -e DATABASE_PASSWORD=smoke_password \
-            -e DATABASE_SSLMODE=disable \
-            -e REDIS_ADDR=127.0.0.1:6380 \
+            -e AUTH_KEYS_PATH=/tmp/openrails-smoke-keys \
+            -e PUBLIC_URL=http://127.0.0.1:3053 \
+            -e PGHOST=127.0.0.1 \
+            -e PGPORT=5434 \
+            -e PGDATABASE=openrails_db \
+            -e PGUSER=smoke \
+            -e PGPASSWORD=smoke_password \
+            -e PGSSLMODE=disable \
+            -e REDIS_URL=redis://127.0.0.1:6380 \
             "openrails-smoke:${GITHUB_SHA}" run-server)"
           trap 'docker logs "$cid"; docker rm -f "$cid"' EXIT
           for _ in $(seq 1 60); do

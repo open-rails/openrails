@@ -2,7 +2,7 @@
 
 An API whose requests count toward usage limits, admitted in process by
 `openrails.Gate` (`main.go`) against a hosted or standalone OpenRails
-([client: the Gate](../../docs/client.md#limits-admissions-and-the-gate)).
+([client: the Gate](../../docs/client.md#limits-and-the-gate)).
 `catalog.yaml` declares the limits, a priced product and a $10 credit pack.
 
 - `OPENRAILS_URL`, the merchant's API URL; `OPENRAILS_MERCHANT_ID`, its id;

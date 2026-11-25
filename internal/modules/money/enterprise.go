@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -24,9 +25,6 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, meter catalogrules.
 	}
 	if err := catalogrules.ValidateMeter("usage meter", &meter); err != nil {
 		return err
-	}
-	if !catalogrules.BillingSupported(meter.Aggregation) {
-		return fmt.Errorf("usage meter: aggregation %q is not supported for billing", meter.Aggregation)
 	}
 	groupByJSON, err := json.Marshal(meter.GroupBy)
 	if err != nil {
@@ -118,9 +116,9 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	meterKey := catalogrules.NormalizeKey(in.MeterKey)
-	if meterKey == "" {
-		return invalidUsageRateCard(fmt.Errorf("meter_key required"))
+	meterKey := in.MeterKey
+	if err := syntax.ValidateApplicationKey(meterKey, "meter"); err != nil {
+		return invalidUsageRateCard(err)
 	}
 	if in.ProductID == nil || *in.ProductID == uuid.Nil {
 		return invalidUsageRateCard(fmt.Errorf("product_id required for a rate card"))
@@ -198,9 +196,8 @@ func (s *MoneyService) DeleteDefaultUsageRateCard(ctx context.Context, meterKey 
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	meterKey = catalogrules.NormalizeKey(meterKey)
-	if meterKey == "" {
-		return fmt.Errorf("meter_key required")
+	if err := syntax.ValidateApplicationKey(meterKey, "meter"); err != nil {
+		return err
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {

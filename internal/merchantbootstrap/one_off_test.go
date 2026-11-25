@@ -10,12 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/stripemock"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // A one-off tool's load of a merchant registers its Stripe PSPs' posture as
@@ -23,7 +23,7 @@ import (
 // refused for want of one.
 func TestAOneOffToolsStripeWriteIsSentOnItsPSPsCheck(t *testing.T) {
 	stripe := stripemock.NewUnstarted(stripemock.Options{})
-	svc := &merchants.Service{StripeClients: stripeapi.NewWiredFactory(stripe, writeposture.Fixed(writeposture.Full))}
+	svc := &merchants.Service{StripeClients: stripeapi.NewWiredFactory(stripe, controls.Fixed(controls.Full))}
 	id := billing.MerchantID(uuid.New())
 	name := strings.ReplaceAll(uuid.NewString(), "-", "")
 	key := "sk_test_acct_" + name

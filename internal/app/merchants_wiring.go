@@ -17,7 +17,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/logx"
@@ -58,14 +57,10 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	}
 	svc.WithPlatformVaultStore(conn.PlatformKV)
 	svc.WithBasisTheoryTransport(custodianTransport)
-	// The merchant purge answers to the kill switch and per-merchant policy
-	// that hold a mass cancellation, and queues its Vault cleanup with itself.
+	// The merchant purge answers to the merchant's destructive arming, which
+	// holds a mass cancellation, and queues its Vault cleanup with itself.
 	svc.WithDestructivePolicy(destructive.New(r.DB)).WithJobs(r.DB)
-	overlap, err := config.WebhookSecretOverlapDuration(r.Config)
-	if err != nil {
-		overlap = billing.DefaultConfig().WebhookSecretOverlap
-	}
-	svc.WithClock(r.Clock).WithWebhookSecretOverlap(overlap).WithDataLinkPacing(r.DataLinkPacing())
+	svc.WithClock(r.Clock).WithDataLinkPacing(r.DataLinkPacing()).WithDataLinkURL(r.ProviderEndpoints.CCBillDataLinkURL)
 	if r.NMIClients != nil {
 		svc.WithNMIWire(r.NMIClients.Wire)
 	}

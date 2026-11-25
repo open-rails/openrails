@@ -8,11 +8,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/server"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	"github.com/open-rails/openrails/server/internal/hostdeps"
@@ -40,9 +38,6 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 	if h == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
-	if err := controlplane.RequireDefaultTenant(h.Server.Auth); err != nil {
-		return nil, err
-	}
 	c := &commandControlPlane{}
 	defer func() {
 		if err != nil {
@@ -58,20 +53,15 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 	if err != nil {
 		return nil, err
 	}
-	opts := controlplane.Options{LocalSignIn: h.Server.LocalSignIn, Naming: h.Server.Naming}
-	if h.Server.LocalSignIn && !h.Server.AdminConsole.Disabled {
-		opts.ConsoleClientID = server.ConsoleClientID
-	}
-	akCfg, err := controlplane.AuthKit(&h.Server.Engine, h.Server.Auth, opts)
+	// An operator command declares what it registers: its applications may
+	// read their keys on a private network.
+	opts := controlplane.Options{KeysPath: h.Server.Auth.Keys.Path, Naming: h.Server.Naming, Console: !h.Server.AdminConsole.Disabled, Configure: privateNetworkKeys}
+	akCfg, err := controlplane.AuthKit(&h.Server.Engine, opts)
 	if err != nil {
 		return nil, err
 	}
 	// AuthKit requires its HTTP configuration while the merchant persona can
 	// register OAuth clients. Retain that policy, but never mount its handler.
-	key, err := h.SigningKey.Source()
-	if err != nil {
-		return nil, err
-	}
 	// Keep AuthKit's pool independent: its authority reads may run inside a
 	// merchant transaction even when the configured billing pool has one slot.
 	pool, err := pgxpool.NewWithConfig(ctx, c.db.Pool().Config())
@@ -79,7 +69,7 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 		return nil, err
 	}
 	c.cleanups = append(c.cleanups, pool.Close)
-	deps := authkit.Deps{Postgres: pool, KeySource: key}
+	deps := authkit.Deps{Postgres: pool, Logger: slog.Default()}
 	if h.SMTP != nil {
 		sender, err := hostdeps.NewEmailSender(*h.SMTP)
 		if err != nil {
@@ -110,12 +100,6 @@ func (c *commandControlPlane) loadMerchants(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	overlap, err := config.WebhookSecretOverlapDuration(cfg)
-	if err != nil {
-		opened.Close()
-		return err
-	}
-	opened.Service.WithWebhookSecretOverlap(overlap)
 	c.cleanups = append(c.cleanups, opened.Close)
 	c.directory = opened.Service
 	c.cp.BindMerchants(c.directory)

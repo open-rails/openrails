@@ -427,7 +427,7 @@ func waitDisputeJobs(t *testing.T, a *authorityWorld, keep ...rivertype.JobState
 	}
 	require.Eventually(t, func() bool {
 		var n int
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "river_job"}.Sanitize()+
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema + "_river", "river_job"}.Sanitize()+
 			" WHERE kind IN ('openrails.dispute_monitor', 'openrails.dispute_response') AND state::text = ANY($1)", waiting).Scan(&n))
 		return n == 0
 	}, 20*time.Second, 50*time.Millisecond, "the dispute jobs ran")
@@ -520,22 +520,6 @@ func disputeFraudWarning(t *testing.T) {
 		}, 20*time.Second, 50*time.Millisecond, "a full posture wakes it")
 		require.False(t, m.entitled(t))
 		require.Eventually(t, func() bool { return waiting(t, m.a) == nil }, 20*time.Second, 50*time.Millisecond, "and resolves the finding")
-	})
-	t.Run("the-merchant-stop-holds-it", func(t *testing.T) {
-		m := newDisputedMembership(t)
-		stopMerchant(t, m.a, true)
-		startFleet(t, m.a.world)
-		m.fraudWarning(t, "evt_efw_stopped", "radar.early_fraud_warning.created", "issfr_stopped", true)
-		require.Eventually(t, func() bool { return waiting(t, m.a) != nil }, 20*time.Second, 50*time.Millisecond,
-			"the merchant's own emergency stop holds even a protective refund")
-		waitDisputeJobs(t, m.a)
-		require.Empty(t, m.reversals(t))
-		require.True(t, m.entitled(t))
-		stopMerchant(t, m.a, false)
-		require.Eventually(t, func() bool {
-			reversals := m.reversals(t)
-			return len(reversals) == 1 && reversals[0].Status == billing.PaymentSucceeded
-		}, 20*time.Second, 50*time.Millisecond, "lifting it wakes the refund")
 	})
 	t.Run("nothing-to-refund-still-ends", func(t *testing.T) {
 		m := newDisputedMembership(t)
@@ -1025,22 +1009,16 @@ func waiting(t *testing.T, a *authorityWorld) *billing.Finding {
 	return nil
 }
 
-// setPosture stores the merchant's write posture as an operator would.
+// setPosture stores the merchant's writes as an operator would.
 func setPosture(t *testing.T, a *authorityWorld, mode string) {
 	t.Helper()
-	_, err := a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "merchant_write_posture"}.Sanitize()+
-		" (merchant_id, mode, reason, set_by) VALUES ($1, $2, 'operator', 'critical fixture operator') ON CONFLICT (merchant_id) DO UPDATE SET mode = EXCLUDED.mode, set_at = now()",
-		a.alpha.MerchantID().UUID(), mode)
-	require.NoError(t, err)
+	setWritePosture(t, a.world, mode, a.alpha.MerchantID())
 }
 
-// armMerchant arms the merchant for enforcing pulls as an operator would.
+// armMerchant arms the merchant's destructive actions as an operator would.
 func armMerchant(t *testing.T, a *authorityWorld) {
 	t.Helper()
-	_, err := a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "merchant_destructive_policy"}.Sanitize()+
-		" (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason) VALUES ($1, true, now(), 'critical fixture operator', 'reviewed')"+
-		" ON CONFLICT (merchant_id) DO UPDATE SET enforce_armed_at = now(), destructive_actions_enabled = true", a.alpha.MerchantID().UUID())
-	require.NoError(t, err)
+	setControl(t, a.world, "destructive_armed", true, a.alpha.MerchantID())
 }
 
 // absorbedRefund is the provider refund a prevented dispute took as its own.
@@ -1053,14 +1031,4 @@ func absorbedRefund(t *testing.T, a *authorityWorld, dispute string) string {
 		return ""
 	}
 	return *ref
-}
-
-// stopMerchant sets the merchant's own destructive emergency stop as an
-// operator would.
-func stopMerchant(t *testing.T, a *authorityWorld, stopped bool) {
-	t.Helper()
-	_, err := a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "merchant_destructive_policy"}.Sanitize()+
-		" (merchant_id, destructive_actions_enabled, updated_by, reason) VALUES ($1, $2, 'critical fixture operator', 'incident')"+
-		" ON CONFLICT (merchant_id) DO UPDATE SET destructive_actions_enabled = EXCLUDED.destructive_actions_enabled", a.alpha.MerchantID().UUID(), !stopped)
-	require.NoError(t, err)
 }

@@ -7,8 +7,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/destructive"
-	"github.com/open-rails/openrails/internal/writeposture"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -85,7 +85,7 @@ func (h *HyperSwitchMethodDeleteHandler) Verify(ctx context.Context, in gen.Bill
 	return Retryable("qualified native deletion permits exact retry through write gates")
 }
 func deletionBinding(row merchants.CustodianScope, cfg *billing.Config) (charge.HyperSwitchBinding, error) {
-	if cfg == nil || cfg.HyperSwitch == (billing.HyperSwitchConfig{}) || row.Kind != models.CustodianHyperSwitch || row.Environment == config.ClassLive && cfg.HyperSwitch.AllowLoopbackHTTP {
+	if cfg == nil || cfg.HyperSwitch == (billing.HyperSwitchConfig{}) || row.Kind != models.CustodianHyperSwitch || row.Environment == config.ClassLive && config.HyperSwitchFixture(cfg) {
 		return charge.HyperSwitchBinding{}, hyperswitch.ErrBinding
 	}
 	parsed, err := custodians.ParseSettings(row.Kind, row.Settings)
@@ -142,7 +142,7 @@ func (h *HyperSwitchMethodDeleteHandler) Execute(ctx context.Context, in gen.Bil
 	if err != nil || binding != p.Binding {
 		return parkedBeforeEffect("accepted custodian binding changed")
 	}
-	client, err := railresolve.HyperSwitchClient(h.Rails.Config, billing.MerchantID(current.MerchantID), row, writeposture.View{DB: h.DB}.Posture(ctx, current.MerchantID).ReadOnly())
+	client, err := railresolve.HyperSwitchClient(h.Rails.Config, billing.MerchantID(current.MerchantID), row, controls.View{DB: h.DB}.Posture(ctx, current.MerchantID).ReadOnly())
 	if err != nil {
 		return parkedBeforeEffect("accepted custodian credentials are unavailable")
 	}

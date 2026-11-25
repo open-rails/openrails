@@ -7,10 +7,8 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"maps"
 	"net"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/auth"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/authkit/userinfo"
 	riverhelpers "github.com/open-rails/helpers/river"
 
@@ -54,31 +53,33 @@ type MerchantCreationConfig struct {
 	FreeAllowance int
 }
 
-// AdminConsole is Config.AdminConsole: the console at /admin and its app
-// sign-in.
+// AdminConsole is Config.AdminConsole: the console at /admin.
 type AdminConsole struct {
 	// Disabled omits the console's pages, assets and bootstrap endpoints.
 	// The default keeps the console available; billing and auth APIs are
 	// separate.
 	Disabled bool `yaml:"disabled"`
-	// Issuers are keyed by a merchant id or name, or "root" for operators.
-	Issuers map[string]ConsoleIssuer `yaml:"issuers"`
+	// OwnAccountsOnly signs staff in with the server's own accounts alone,
+	// offering no trusted issuer: a hosted product's choice. Set in code.
+	OwnAccountsOnly bool `yaml:"-"`
 }
 
-// ConsoleIssuer is an authorization server the console signs staff in at,
-// as an OAuth 2.0 public client (code flow with PKCE).
-type ConsoleIssuer struct {
-	// URL is the issuer: one of AuthKit's trusted issuers.
-	URL string `yaml:"url"`
-	// ClientID is the console's public client there, registered with the
-	// console path plus /callback as a redirect URI.
-	ClientID string `yaml:"client_id"`
-	// Name is shown on the sign-in button; empty is the trusted issuer's.
-	Name string `yaml:"name"`
-	// Scope is what the console asks for; empty is "openid profile email
-	// openrails:merchant". An issuer that grants refresh tokens only for
-	// offline_access needs it added.
-	Scope string `yaml:"scope"`
+// AuthConfig is Config.Auth: what a deployment states about the server's
+// AuthKit. OpenRails derives the rest from the engine's settings: the issuer
+// and resource (Engine.PublicURL), its schema
+// (<database.schema>_auth), the client-IP posture, and the rules of the
+// server's own accounts.
+type AuthConfig struct {
+	// Keys is where AuthKit's keys live.
+	Keys AuthKeys `yaml:"keys"`
+}
+
+// AuthKeys is AuthConfig.Keys.
+type AuthKeys struct {
+	// Path is the directory holding AuthKit's signing keys (keys.json) and its
+	// authenticator-app key (totp.key). Empty is /vault/auth, or for a
+	// loopback public_url development keys AuthKit generates.
+	Path string `yaml:"path"`
 }
 
 // Config is a standalone deployment: plain data, as the openrails binary's
@@ -93,53 +94,43 @@ type Config struct {
 	// Host, and must also be apart from AuthKit's issuer and public URLs.
 	Engine openrails.Config `yaml:",inline"`
 
-	// Auth is the server's AuthKit, as AuthKit documents its configuration:
-	// accounts, sign-in and the tokens it issues (Auth.SignIn.DPoP), the
-	// resource server (Auth.Resource; its ID defaults to
-	// Engine.PublicBillingBaseURL) and its trusted issuers. It decides who
-	// every request is; the server only maps merchants to AuthKit groups.
-	// Auth.Token.Issuer and Auth.DefaultTenantID are required. DefaultTenantID
-	// identifies the persisted platform/operator account directory, not a
-	// merchant's customer tenant. The server sets what is the product's:
-	// the merchant roles, the API key prefix, the issued audience, the
-	// resource's scopes, the enabled console's OAuth client (openrails-console),
-	// a 15-minute access-token lifetime unless
-	// Auth.AuthorizationServer.AccessTokenTTL sets one, AuthKit's River schema
-	// (the engine's) and its HTTP mount. An empty client-IP posture takes the
-	// engine's TrustedProxies. Hosted account policy belongs to the host.
-	Auth authkit.Config `yaml:"auth"`
-	// LocalSignIn serves sign-in to the server's own accounts (password,
-	// passwordless, registration). Off, the default, people sign in at a
-	// trusted issuer and AuthKit serves only its JWKS.
-	LocalSignIn bool `yaml:"local_sign_in"`
-	// Naming is the rename policy for merchant names; AuthKit's own
-	// (Auth.Username) governs usernames.
-	Naming billing.NamingConfig `yaml:"naming"`
+	// Auth is what the deployment states about the server's AuthKit, which
+	// decides who every request is; the server maps merchants to AuthKit
+	// groups. Its own accounts are staff: they join by invitation, need a
+	// second factor (a passkey or an authenticator app) and stay signed in
+	// for 30 days.
+	Auth AuthConfig `yaml:"auth"`
+	// AuthKit adjusts the AuthKit configuration the server derives, before
+	// the product's invariants are applied: the merchant roles, the API key
+	// prefix, the issued audience, the resource's billing scopes, the
+	// console's OAuth client, the client-IP posture and the HTTP mount. A
+	// hosted product sets its account policy here (open registration with
+	// MerchantCreation, agreements, usernames, group OAuth clients, SMS). Set
+	// in code.
+	AuthKit func(*authkit.Config) `yaml:"-"`
+	// Naming is the rename policy for merchant names: renames allowed every
+	// 72 hours, a former name forwarding and reserved 90 days. AuthKit's
+	// username policy governs usernames. Set in code.
+	Naming billing.NamingConfig `yaml:"-"`
 	// MerchantCreation is the policy for the merchants users create and
 	// rename through a hosted product (ProvisionMerchant with an owner,
-	// RenameUserMerchant); nil for operator-provisioned
-	// deployments. Hosted products with LocalSignIn may explicitly enable
-	// open Auth.Registration; contact verification still defaults to required.
-	// Set in code.
+	// RenameUserMerchant); nil for operator-provisioned deployments. With it,
+	// AuthKit may open native registration. Set in code.
 	MerchantCreation *MerchantCreationConfig `yaml:"-"`
 
-	// RouteGroups turns the merchant route groups on, each off by default:
-	// Admin, Catalog, MerchantConfig and Metrics, and Programmatic, each
-	// route behind the server's own merchant permission (the Merchant*
-	// permissions).
-	RouteGroups openrails.RouteGroups `yaml:"route_groups"`
-	// AdminConsole controls the console at /admin and declares app sign-in
-	// methods; the zero value keeps it on. LocalSignIn is independent. Alert
-	// links point at it.
+	// AdminConsole controls the console at /admin; the zero value keeps it
+	// on. Staff sign in with the server's own accounts, at root's trusted
+	// issuers, or at their merchant's, found by its name; only issuers whose
+	// metadata names an authorization endpoint sign people in. Alert links
+	// point at it.
 	AdminConsole AdminConsole `yaml:"admin_console"`
 
-	// Host and Port are where Run and Serve listen.
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
-	// PrivatePort is where Run and Serve also serve PrivateHandler, the
-	// operator's /metrics, on Host, apart from the public surface. Zero
+	// Port is where Run and Serve listen, on every interface.
+	Port int `yaml:"port"`
+	// MetricsPort is where Run and Serve also serve MetricsHandler, the
+	// operator's Prometheus /metrics, apart from the public surface. Zero
 	// serves none.
-	PrivatePort int `yaml:"private_port"`
+	MetricsPort int `yaml:"metrics_port"`
 }
 
 // DefaultConfig is every setting's default: the engine's (openrails.
@@ -152,7 +143,6 @@ func DefaultConfig() Config {
 			Enabled: new(true), RenameInterval: new(72 * time.Hour),
 			FormerNames: billing.FormerNamesConfig{Mode: billing.FormerNamesFinite},
 		},
-		Host: "0.0.0.0",
 		Port: 3053,
 	}
 }
@@ -162,7 +152,6 @@ func DefaultConfig() Config {
 func (c Config) WithDefaults() Config {
 	d := DefaultConfig()
 	c.Engine = c.Engine.WithDefaults()
-	c.Host = cmp.Or(c.Host, d.Host)
 	c.Port = cmp.Or(c.Port, d.Port)
 	c.Naming.Enabled = cmp.Or(c.Naming.Enabled, d.Naming.Enabled)
 	c.Naming.RenameInterval = cmp.Or(c.Naming.RenameInterval, d.Naming.RenameInterval)
@@ -179,23 +168,20 @@ func formerNamesDuration(f billing.FormerNamesConfig) billing.FormerNamesConfig 
 	return f
 }
 
-// resolveConsoleIssuers are the console's sign-in choices, by key, for
-// tokens to resource.
-func resolveConsoleIssuers(declared map[string]ConsoleIssuer, resource string) ([]adminconsole.Issuer, error) {
-	out := []adminconsole.Issuer{}
-	for _, key := range slices.Sorted(maps.Keys(declared)) {
-		d := declared[key]
-		issuer, err := adminconsole.NewIssuer(key, d.URL, d.ClientID, d.Name, d.Scope, resource)
-		if err != nil {
-			return nil, err
+// registrationGuard runs controlplane.RegistrationGuard inside a host's own
+// Wrap.
+func registrationGuard(host func(iam.Route, http.Handler) http.Handler) func(iam.Route, http.Handler) http.Handler {
+	return func(route iam.Route, next http.Handler) http.Handler {
+		next = controlplane.RegistrationGuard(route, next)
+		if host != nil {
+			next = host(route, next)
 		}
-		out = append(out, issuer)
+		return next
 	}
-	return out, nil
 }
 
-// Addr is c's public listener, host:port.
-func (c Config) Addr() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
+// Addr is c's public listener, :port on every interface.
+func (c Config) Addr() string { return ":" + strconv.Itoa(c.Port) }
 
 const (
 	// drainDelay is how long Run and Serve keep serving once ctx ends, with
@@ -216,9 +202,9 @@ type Deps struct {
 	Engine openrails.Deps
 	// Auth is what the server's AuthKit reaches: its email and SMS senders,
 	// its signing key source and the rest of authkit.Deps. Nil Postgres is a
-	// pool of its own on the engine's database, nil Redis the engine's, and
-	// nil Email renders AuthKit's email and sends it through the engine's
-	// sender.
+	// pool of its own on the engine's database, nil Redis the engine's, nil
+	// Logger the engine's, and nil Email renders AuthKit's email and sends it
+	// through the engine's sender.
 	Auth authkit.Deps
 	// CustomerAdmissionPolicy may refuse an otherwise verified ordinary customer
 	// request before automatic customer admission. The original identity and
@@ -260,21 +246,26 @@ func init() {
 // engine, then its own AuthKit (which creates or upgrades its tables), then
 // the control plane over both and the HTTP surface. ctx bounds the wait for
 // the database.
-// Engine.Database.SkipMigrations applies to the internal AuthKit as well.
 func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	cfg = cfg.WithDefaults()
-	if err := controlplane.RequireDefaultTenant(cfg.Auth); err != nil {
-		return nil, err
-	}
 	for _, m := range cfg.Engine.Merchants {
 		if m.Issuer != "" {
 			return nil, fmt.Errorf("server: Engine.Merchants %q's Issuer binds an embedded host's own issuer to its merchant; a standalone server's credentials are bound to a merchant by its AuthKit group", m.Slug)
 		}
 	}
-	if err := checkCheckoutOrigin(cfg); err != nil {
+	consoleEnabled := !cfg.AdminConsole.Disabled
+	opts := controlplane.Options{KeysPath: cfg.Auth.Keys.Path, Naming: cfg.Naming, Console: consoleEnabled, Configure: cfg.AuthKit}
+	if c := cfg.MerchantCreation; c != nil {
+		opts.MerchantCreation = &controlplane.MerchantCreationConfig{ReservedSlugs: c.ReservedSlugs, ReservedEscalationRole: c.ReservedEscalationRole, SlugPattern: c.SlugPattern}
+	}
+	akCfg, err := controlplane.AuthKit(&cfg.Engine, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkCheckoutOrigin(cfg, akCfg); err != nil {
 		return nil, err
 	}
 	if cfg.Engine.CheckoutOrigin != "" && deps.Engine.CheckoutAssets == nil {
@@ -298,23 +289,14 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		return nil, err
 	}
 
-	consoleEnabled := !cfg.AdminConsole.Disabled
-	opts := controlplane.Options{LocalSignIn: cfg.LocalSignIn, Naming: cfg.Naming}
-	if cfg.LocalSignIn && consoleEnabled {
-		opts.ConsoleClientID = ConsoleClientID
-	}
-	if c := cfg.MerchantCreation; c != nil {
-		policy := controlplane.MerchantCreationConfig{ReservedSlugs: c.ReservedSlugs, ReservedEscalationRole: c.ReservedEscalationRole, SlugPattern: c.SlugPattern}
-		if c.FreeAllowance > 0 {
-			admission, err := operator.MerchantCreationAdmission(logger, func() *controlplane.ControlPlane { return s.cp }, operator.MerchantCreationPolicy{
-				FreeAllowance: c.FreeAllowance, HasVaultedPaymentMethod: deps.HasVaultedPaymentMethod,
-			})
-			if err != nil {
-				return fail(err)
-			}
-			policy.Admission = admission
+	if c := cfg.MerchantCreation; c != nil && c.FreeAllowance > 0 {
+		admission, err := operator.MerchantCreationAdmission(logger, func() *controlplane.ControlPlane { return s.cp }, operator.MerchantCreationPolicy{
+			FreeAllowance: c.FreeAllowance, HasVaultedPaymentMethod: deps.HasVaultedPaymentMethod,
+		})
+		if err != nil {
+			return fail(err)
 		}
-		opts.MerchantCreation = &policy
+		opts.MerchantCreation.Admission = admission
 	}
 
 	akDeps := deps.Auth
@@ -326,16 +308,16 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		}
 		akDeps.Postgres = s.pool
 	}
+	if akDeps.Logger == nil {
+		akDeps.Logger = logger
+	}
 	if akDeps.Redis == nil && s.graph.RedisClient != nil {
 		akDeps.Redis = s.graph.RedisClient
 	}
 	if akDeps.Email == nil && deps.Engine.Email != nil {
 		akDeps.Email = controlplane.AuthKitSender{Sender: deps.Engine.Email}
 	}
-	akCfg, err := controlplane.AuthKit(s.graph.Config, cfg.Auth, opts)
-	if err != nil {
-		return fail(err)
-	}
+	akDeps.Wrap = registrationGuard(akDeps.Wrap)
 	if akDeps.GroupName == nil {
 		akDeps.GroupName = s.merchantName
 	}
@@ -354,12 +336,6 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if consoleEnabled && consoleAssets == nil {
 		consoleAssets = console.FS()
 	}
-	var consoleIssuers []adminconsole.Issuer
-	if consoleEnabled {
-		if consoleIssuers, err = resolveConsoleIssuers(cfg.AdminConsole.Issuers, akCfg.Resource.ID); err != nil {
-			return fail(err)
-		}
-	}
 	checkout, page := eng.CheckoutPage()
 	var admission func(context.Context, auth.Verified, config.CustomerBinding) error
 	if policy := deps.CustomerAdmissionPolicy; policy != nil {
@@ -368,14 +344,14 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		}
 	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
-		RouteGroups: config.RouteGroups(cfg.RouteGroups), ConsoleDisabled: !consoleEnabled, ConsoleIssuers: consoleIssuers, Resource: akCfg.Resource.ID,
+		RouteGroups: config.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}, ConsoleDisabled: !consoleEnabled, ConsoleOwnAccountsOnly: cfg.AdminConsole.OwnAccountsOnly, Resource: akCfg.Resource.ID,
 		CustomerAdmissionPolicy: admission,
 		CheckoutOrigin:          checkout, CheckoutHandler: page, ConsoleAssets: consoleAssets,
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))
 	}
 	if consoleEnabled {
-		s.graph.Runtime.AlertService.SetConsoleURL(strings.TrimRight(cfg.Engine.PublicBillingBaseURL, "/") + adminconsole.Path)
+		s.graph.Runtime.AlertService.SetConsoleURL(strings.TrimRight(cfg.Engine.PublicURL, "/") + adminconsole.Path)
 	}
 	return s, nil
 }
@@ -389,7 +365,7 @@ func (s *Server) AuthKit() *authkit.Client { return s.cp.Core() }
 
 // Handler is the whole public surface: health, the engine's routes gated by
 // the server's Auth, AuthKit's and the admin console. The operator's
-// /metrics is PrivateHandler.
+// /metrics is MetricsHandler.
 func (s *Server) Handler() http.Handler { return s.surface.Handler() }
 
 // Routes is the standalone surface without the health routes, for a host's
@@ -459,16 +435,16 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	served := make(chan error, 2)
 	go func() { served <- hs.Serve(ln) }()
 	s.log.InfoContext(ctx, "OpenRails serving", "addr", ln.Addr().String())
-	var private *http.Server
-	if s.cfg.PrivatePort != 0 {
-		pln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.PrivatePort)))
+	var metrics *http.Server
+	if s.cfg.MetricsPort != 0 {
+		mln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", ":"+strconv.Itoa(s.cfg.MetricsPort))
 		if err != nil {
 			_ = hs.Close()
 			return err
 		}
-		private = &http.Server{Handler: s.PrivateHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
-		go func() { served <- private.Serve(pln) }()
-		s.log.InfoContext(ctx, "OpenRails private listener (metrics)", "addr", pln.Addr().String())
+		metrics = &http.Server{Handler: s.MetricsHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
+		go func() { served <- metrics.Serve(mln) }()
+		s.log.InfoContext(ctx, "OpenRails metrics listener", "addr", mln.Addr().String())
 	}
 	if workers {
 		err = s.Start(ctx)
@@ -481,7 +457,7 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 		}
 	}
 	deadline = time.Now().Add(shutdownTimeout)
-	shutdown(s.log, deadline, hs, private)
+	shutdown(s.log, deadline, hs, metrics)
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil
 	}

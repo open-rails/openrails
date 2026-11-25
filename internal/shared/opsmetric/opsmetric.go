@@ -20,6 +20,10 @@ const (
 	// MetricRetentionSweep is one retention pass: how many merchants had due
 	// work, how many rows each sweep removed, and how long it took.
 	MetricRetentionSweep = "retention.sweep"
+
+	// MetricAttributionDropped is one attribution field a checkout left out
+	// (too long, unprintable, or carrying personal data), by field and reason.
+	MetricAttributionDropped = "checkout.attribution_dropped"
 )
 
 // Emit writes one metric line. Info level: these are measurements, not

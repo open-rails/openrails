@@ -147,7 +147,7 @@ func localMerchantConfigurationClient(ctx context.Context, cfg *billing.Config, 
 	if err != nil {
 		return nil, cleanup, err
 	}
-	opened, err := boot.OneOffMerchants(ctx, cfg, database, vault, selected.ID, nil, "", hostconfig.FromContext(ctx).MerchantManifestOverlays)
+	opened, err := boot.OneOffMerchants(ctx, cfg, database, vault, selected.ID, nil, "")
 	if err != nil {
 		return nil, cleanup, err
 	}

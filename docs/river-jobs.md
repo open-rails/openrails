@@ -17,7 +17,7 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) �
 | Kind | Queue | When it runs | What it does |
 | --- | --- | --- | --- |
 | `openrails.billing_pass` | `billing` | At the top of each UTC hour | Runs the [hourly billing scans](#hourly-billing-scans) and records any critical work still overdue. [Worker](../internal/river/jobs_billing_pass.go) |
-| `openrails.cleanup_expired_data` | `billing` | Every hour, with continuation jobs for large passes | Deletes expired operational data and maintains rolling monthly partitions. [Worker](../internal/river/jobs_cleanup.go) |
+| `openrails.cleanup_expired_data` | `billing` | Every hour, with continuation jobs for large passes | Deletes expired operational data. [Worker](../internal/river/jobs_cleanup.go) |
 | `openrails.customer_messages_dispatch` | `billing` | Every 5 minutes | Queues the send job of each pending customer message a dispatcher's database notification missed. [Worker](../internal/river/jobs_customer_messages.go) · [Dispatch](../internal/modules/messages/dispatch.go) |
 | `openrails.merchant_health` | `billing` | Every hour | Evaluates payment and recovery health, held renewals, the unverified backlog, stuck or abandoned provider operations, and timed access lapses, for merchants with activity. [Worker](../internal/river/jobs_merchant_health.go) |
 | `openrails.mrr_risk` | `billing` | Every 30 seconds | Drains the MRR risk changes in `mrr_risk_due` that no drain woken by their database notification took. [Worker](../internal/river/jobs_mrr_risk.go) · [Drain](../internal/modules/subscriptions/mrr_risk.go) |
@@ -84,9 +84,7 @@ openrails --config /path/to/config.yaml workers
 openrails --config /path/to/config.yaml workers --json
 ```
 
-For individual rows, query `river_job` in the configured
-`database.river_schema` (`Config.Database.RiverSchema` in Go). It defaults to the
-billing schema plus `_river`, so the default table is `billing_river.river_job`.
+For individual rows, query `river_job` in River's schema: the billing schema plus `_river` (`Config.Database.RiverSchema` in Go sets another), so the default table is `billing_river.river_job`.
 Replace `billing_river` with your configured schema if it differs. The query
 shows recent retained rows across all components in the selected schema.
 [Schema configuration](../billing/config.go) · [River table usage](../internal/river/health.go)

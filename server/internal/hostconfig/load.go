@@ -89,8 +89,31 @@ func topLevelKeys(types ...reflect.Type) (scalar, nested map[string]bool) {
 	return scalar, nested
 }
 
+// envNames are the variables whose key is not their mechanical spelling:
+// HashiCorp's VAULT_ADDR and VAULT_CACERT, AuthKit's AUTHKIT_* inline key (the
+// unprefixed names refuse boot), and naming's nested former_names.
+var envNames = map[string]string{
+	"vault_addr":   "vault.address",
+	"vault_cacert": "vault.ca_cert",
+}
+
+// fileOnlySections are policy, set in config.yaml alone: the environment
+// holds secrets and per-environment facts. A variable naming one refuses
+// boot.
+var fileOnlySections = []string{"rate_limits"}
+
+// fileOnlySection is the file-only section key is in, "" for none.
+func fileOnlySection(key string) string {
+	for _, section := range fileOnlySections {
+		if key == section || strings.HasPrefix(key, section+".") {
+			return section
+		}
+	}
+	return ""
+}
+
 // envKeyToConfigKey maps an environment variable's name to its key:
-// PUBLIC_BILLING_BASE_URL is public_billing_base_url, DATABASE_URL
+// PUBLIC_URL is public_url, DATABASE_URL
 // database.url. A name that routes to no section is "" and never loaded (the
 // process environment is full of names that are not ours: PATH, HOME,
 // Compose's interpolation); a name inside a section that hits no key
@@ -98,31 +121,8 @@ func topLevelKeys(types ...reflect.Type) (scalar, nested map[string]bool) {
 func envKeyToConfigKey(s string) string {
 	s = strings.ToLower(s)
 
-	// VAULT_ADDR and VAULT_CACERT are HashiCorp's canonical names for the
-	// server URL and its CA file (the mechanical split would yield vault.addr
-	// and vault.cacert).
-	switch s {
-	case "vault_addr":
-		return "vault.address"
-	case "vault_cacert":
-		return "vault.ca_cert"
-	}
-
-	// AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM /
-	// AUTHKIT_PUBLIC_KEYS are AuthKit's canonical inline-key env names
-	// (mirrored by cmd/authkit-server). The unprefixed names are poison: Load
-	// refuses boot on them.
-	switch s {
-	case "naming_former_names_mode":
-		return "naming.former_names.mode"
-	case "naming_former_names_duration":
-		return "naming.former_names.duration"
-	case "authkit_active_key_id":
-		return "signing_key.active_key_id"
-	case "authkit_active_private_key_pem":
-		return "signing_key.active_private_key_pem"
-	case "authkit_public_keys":
-		return "signing_key.public_keys"
+	if key, ok := envNames[s]; ok {
+		return key
 	}
 	// AUTH_* is AuthKit's configuration, by AuthKit's keys.
 	if rest, ok := strings.CutPrefix(s, "auth_"); ok && rest != "" {
@@ -167,12 +167,13 @@ func Load(configPath string) (*Config, error) {
 		return nil, err
 	}
 
+	var fileOnly []string
 	envCallbackWithValue := func(key string, value string) (string, interface{}) {
 		upperKey := strings.ToUpper(key)
 		if serviceLink(upperKey, strings.TrimSpace(value)) {
 			return "", nil
 		}
-		if upperKey == "MERCHANT" || upperKey == "AUTH_ISSUERS" || upperKey == "CORS_ORIGINS" || strings.HasPrefix(upperKey, "RAILS_") || strings.HasPrefix(upperKey, "STORE_") {
+		if upperKey == "MERCHANT" || upperKey == "CORS_ORIGINS" || strings.HasPrefix(upperKey, "RAILS_") || strings.HasPrefix(upperKey, "STORE_") {
 			return "", nil
 		}
 		// VAULT_SECRETS_PATH names the mounted secret files directory, which
@@ -184,6 +185,10 @@ func Load(configPath string) (*Config, error) {
 
 		mapped := envKeyToConfigKey(key)
 		if mapped == "" {
+			return "", nil
+		}
+		if section := fileOnlySection(mapped); section != "" && !slices.ContainsFunc(retiredSettings, func(r retiredSetting) bool { return r.names(upperKey) }) {
+			fileOnly = append(fileOnly, fmt.Sprintf("%s is set in config.yaml, not the environment: unset %s", section, upperKey))
 			return "", nil
 		}
 
@@ -233,6 +238,10 @@ func Load(configPath string) (*Config, error) {
 	if err := k.Load(env.ProviderWithValue("", ".", envCallbackWithValue), nil); err != nil {
 		return nil, fmt.Errorf("loading environment variables: %w", err)
 	}
+	if len(fileOnly) > 0 {
+		slices.Sort(fileOnly)
+		return nil, errors.New(strings.Join(fileOnly, "; "))
+	}
 
 	// Merchant configuration authority is broader than provider secrets. Retired
 	// spellings must fail even if a new spelling is also supplied.
@@ -265,9 +274,11 @@ func Load(configPath string) (*Config, error) {
 	// Settings that left the file: an environment variable or a mounted
 	// secret file names one as surely as a key does.
 	for _, retired := range retiredSettings {
-		_, inEnv := os.LookupEnv(retired.env)
-		_, inSecrets := secretFiles[retired.env]
-		if k.Exists(retired.key) || inEnv || inSecrets {
+		inSecrets := false
+		for name := range secretFiles {
+			inSecrets = inSecrets || retired.names(name)
+		}
+		if k.Exists(retired.key) || retired.inEnv() || inSecrets {
 			return nil, fmt.Errorf("%s / %s was removed: %s", retired.key, retired.env, retired.now)
 		}
 	}
@@ -275,32 +286,24 @@ func Load(configPath string) (*Config, error) {
 	for _, retired := range []string{"ENV", "API_URL", "NEW_SUBSCRIPTION_COLLECTION_POLICY"} {
 		_, present := os.LookupEnv(retired)
 		if present || k.Exists(strings.ToLower(retired)) {
-			return nil, fmt.Errorf("%s is retired: use explicit security settings, public_billing_base_url and default engine collection", retired)
+			return nil, fmt.Errorf("%s is retired: use explicit security settings, public_url and default engine collection", retired)
 		}
 	}
 
-	for _, old := range []string{"admin_console.enabled", "admin_console.path"} {
+	for _, old := range []string{"admin_console.enabled", "admin_console.path", "admin_console.issuer"} {
 		if k.Exists(old) {
-			return nil, fmt.Errorf("%s was removed: use admin_console.disabled to omit the console at /admin; configure admin_console.issuers and local_sign_in for sign-in", old)
+			return nil, fmt.Errorf("%s was removed: admin_console.disabled omits the console at /admin; its sign-in buttons are the merchants' trusted issuers", old)
 		}
 	}
-	if k.Exists("admin_console.issuer") {
-		return nil, fmt.Errorf("admin_console.issuer was renamed: declare admin_console.issuers keyed by merchant id or name (root for operators)")
-	}
-	// HARD CUT (#469): the AuthKit control plane is always on in standalone
-	// mode; the verifier-only deployment mode is gone. The former
-	// auth.control_plane.enabled knob is rejected — not silently ignored — so a
-	// deployment that believed it was toggling the control plane finds out at
-	// load time. Private posture is fixed in this repo, not a disabled control
-	// plane.
-	if k.Exists("auth.control_plane.enabled") {
-		return nil, fmt.Errorf("auth.control_plane.enabled was removed: the control plane is always on in standalone mode — delete the key; private/self-hosted registration is the default")
+	// One rule for the auth section: only server.AuthConfig's keys are set.
+	if err := retiredAuth(k.Keys()); err != nil {
+		return nil, err
 	}
 	if k.Exists("dashboard_base_url") {
 		return nil, fmt.Errorf("dashboard_base_url was removed: alert links point at the server's console")
 	}
 	if k.Exists("ccbill_webhook_ip_allowlist") {
-		return nil, fmt.Errorf("ccbill_webhook_ip_allowlist was renamed: set provider_sandbox.ccbill_webhook_sources")
+		return nil, fmt.Errorf("ccbill_webhook_ip_allowlist was removed: CCBill webhooks are accepted from CCBill's published ranges")
 	}
 	if k.Exists("merchant_cors") {
 		return nil, fmt.Errorf("merchant_cors was removed: browser CORS belongs to the host app, not OpenRails merchant config")
@@ -310,16 +313,17 @@ func Load(configPath string) (*Config, error) {
 	}
 	// #712: ad-hoc library env knobs moved into config; the old names fail loudly.
 	if os.Getenv("OPENRAILS_SQL_TRACE") != "" {
-		return nil, fmt.Errorf("OPENRAILS_SQL_TRACE was renamed: set database.sql_trace (env DATABASE_SQL_TRACE)")
+		return nil, fmt.Errorf("OPENRAILS_SQL_TRACE was removed: trace statements in Postgres (log_statement, pg_stat_statements)")
 	}
-	// HARD CUT (or#917, authkit ak#266/v0.89.0): the inline signing-key env
-	// names are AUTHKIT_-prefixed, matching the authkit binary. The old names
-	// would silently boot an ephemeral dev key / keys.json fallback instead of
-	// the operator's key — refuse, never silently drop key material.
+	// An inline signing key would otherwise be dropped silently for
+	// auth.keys.path: refuse, never lose key material unnoticed.
 	for _, old := range []string{"ACTIVE_KEY_ID", "ACTIVE_PRIVATE_KEY_PEM", "PUBLIC_KEYS"} {
 		if os.Getenv(old) != "" {
-			return nil, fmt.Errorf("%s was renamed: set AUTHKIT_%s", old, old)
+			return nil, fmt.Errorf("%s was removed: %s", old, signingKeyHint)
 		}
+	}
+	if k.Exists("host") {
+		return nil, fmt.Errorf("host was removed: the server listens on every interface, at port")
 	}
 	if k.Exists("billing_hot_path") || os.Getenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY") != "" || os.Getenv("BILLING_HOT_PATH_FAIL_POLICY") != "" {
 		return nil, fmt.Errorf("billing_hot_path was removed: OpenRails does not enforce client degraded-mode policy; configure any fail-open/fail-closed behavior in the calling client")
@@ -350,35 +354,9 @@ func Load(configPath string) (*Config, error) {
 	retiredMerchantConfig := k.Exists("merchant") || os.Getenv("MERCHANT") != ""
 	retiredCORSConfig := k.Exists("cors_origins") || os.Getenv("CORS_ORIGINS") != ""
 	retiredDBRequireRLS := k.Exists("db.require_rls") || os.Getenv("DB_REQUIRE_RLS") != ""
-	retiredAuthIssuers := k.Exists("auth.issuers") || k.Exists("auth.expected_audience") ||
-		os.Getenv("AUTH_ISSUERS") != "" || os.Getenv("AUTH_EXPECTED_AUDIENCE") != ""
 	retiredRails := k.Exists("rails") || hasEnvPrefix("RAILS_")
-	retiredControlPlaneLegacy := k.Exists("auth.control_plane.issuer") ||
-		k.Exists("auth.control_plane.issued_audiences") ||
-		k.Exists("auth.control_plane.expected_audiences") ||
-		k.Exists("auth.control_plane.public_user_registration") ||
-		k.Exists("auth.control_plane.public_tenant_registration") ||
-		k.Exists("auth.control_plane.public_hosted") ||
-		k.Exists("auth.control_plane.token_prefix") ||
-		k.Exists("auth.control_plane.platform_admin_user_id") ||
-		os.Getenv("AUTH_CONTROL_PLANE_ISSUER") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_ISSUED_AUDIENCES") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_EXPECTED_AUDIENCES") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_PUBLIC_USER_REGISTRATION") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_PUBLIC_TENANT_REGISTRATION") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_PUBLIC_HOSTED") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_TOKEN_PREFIX") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_BOOTSTRAP_ADMIN_SERVICE_TOKEN_NAME") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_PLATFORM_ADMIN_USER_ID") != ""
-	// HARD CUT (#1185): auth is AuthKit's own configuration, by AuthKit's
-	// keys; the server's former auth keys name their replacements.
 	if _, present := os.LookupEnv("AUTHKIT_KEYS_PATH"); present {
 		return nil, fmt.Errorf("AUTHKIT_KEYS_PATH was renamed: set AUTH_KEYS_PATH (auth.keys.path)")
-	}
-	for old, now := range retiredAuthKeys {
-		if k.Exists(old) {
-			return nil, fmt.Errorf("%s was removed: auth is AuthKit's configuration; set %s", old, now)
-		}
 	}
 	if retiredStoreConfig {
 		return nil, fmt.Errorf("store config was removed: seed merchant profile fields with openrails push-merchant-config under merchants[].profile; delete the store yaml key and STORE_* env vars")
@@ -392,14 +370,8 @@ func Load(configPath string) (*Config, error) {
 	if retiredDBRequireRLS {
 		return nil, fmt.Errorf("db.require_rls config was removed: merchant isolation uses explicit scoped queries, not PostgreSQL RLS; delete the db.require_rls yaml key and DB_REQUIRE_RLS env var")
 	}
-	if retiredAuthIssuers {
-		return nil, fmt.Errorf("auth.issuers / auth.expected_audience config was removed: declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest; delete the keys and AUTH_ISSUERS / AUTH_EXPECTED_AUDIENCE env vars")
-	}
 	if retiredRails {
 		return nil, fmt.Errorf("rails config was removed: seed merchant PSPs and secrets with openrails push-merchant-config under merchants[].psps; delete the rails yaml key and RAILS_* env vars")
-	}
-	if retiredControlPlaneLegacy {
-		return nil, fmt.Errorf("auth.control_plane config was removed: use auth.token.issuer (env AUTH_TOKEN_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in the hosted product; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars")
 	}
 
 	// The db section merged into database.
@@ -410,7 +382,7 @@ func Load(configPath string) (*Config, error) {
 		retiredDB = retiredDB || inEnv || inSecrets
 	}
 	if retiredDB {
-		return nil, fmt.Errorf("db was merged into database: set database.url (DATABASE_URL), or database.host, port, name, username and password (DATABASE_HOST, …, DATABASE_NAME for DB_DATABASE); sslmode, sslrootcert, sql_trace and lease_conns moved beside them")
+		return nil, fmt.Errorf("db was merged into database: set database.url (DATABASE_URL), or libpq's PG* variables (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD)")
 	}
 
 	// One tree, two targets: a key either reads is known, and one neither
@@ -489,35 +461,111 @@ func hasEnvPrefix(prefix string) bool {
 }
 
 // WritePostureHint is where provider writes are held now.
-const WritePostureHint = "each merchant's write posture decides its provider writes: hold them with `openrails merchant hold --merchant NAME --mode readonly|limited --by NAME`, restore them with `openrails merchant arm`"
+const WritePostureHint = "each merchant's controls decide its provider writes: `openrails merchant writes readonly|limited|full --merchant NAME --by NAME --reason TEXT`"
 
 // retiredDBEnv are the db section's environment variables.
 var retiredDBEnv = []string{"DB_URL", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD", "DB_SSLMODE", "DB_SSLROOTCERT", "DB_SQL_TRACE", "DB_LEASE_CONNS"}
 
-// retiredSettings are former settings: a key, its environment variable and
-// what replaced it.
-var retiredSettings = []struct{ key, env, now string }{
+// retiredSettings are former settings: a key, its environment variable (a
+// section's ends in "_*") and what replaced it.
+type retiredSetting struct{ key, env, now string }
+
+var retiredSettings = []retiredSetting{
 	{"provider_write_mode", "PROVIDER_WRITE_MODE", WritePostureHint},
+	{"engine_admission_hold", "ENGINE_ADMISSION_HOLD", "hold a merchant's rebills with `openrails merchant rebills hold --merchant NAME | --all-merchants --by NAME --reason TEXT`"},
 	{"drain_delay", "DRAIN_DELAY", "on SIGTERM the server drains for 5s, then stops within 20s"},
 	{"shutdown_timeout", "SHUTDOWN_TIMEOUT", "on SIGTERM the server drains for 5s, then stops within 20s"},
+	{"usage_billing_enabled", "USAGE_BILLING_ENABLED", "a merchant with usage_billing terms bills its usage; one without has none"},
+	{"private_port", "PRIVATE_PORT", "set metrics_port (METRICS_PORT), the operator's Prometheus /metrics listener"},
+	{"cloudflare_proxies", "CLOUDFLARE_PROXIES", "Cloudflare's published ranges are built in; list only your own proxies in trusted_proxies"},
+	{"rate_limits_disabled", "RATE_LIMITS_DISABLED", "set each rate_limits bucket's requests_per_minute to 0 to leave it unlimited; captcha is on only with its keys"},
+	{"merchant_manifest_overlays", "MERCHANT_MANIFEST_OVERLAYS", "the merchant manifest is one file: keep PSP secrets in it and mount it from a Secret, or in Vault (vault.kv_mount)"},
+	{"webhook_secret_overlap", "WEBHOOK_SECRET_OVERLAP", "a rotated-out webhook signing secret keeps verifying for 24 hours; retire_webhook_overlap ends it early"},
+	{"return_origins", "RETURN_ORIGINS", "return URLs may name the billing origin, the merchant's issuer and its checkout.embed_origins"},
+	{"event_retention", "EVENT_RETENTION", "the event log keeps 90 days"},
+	{"local_sign_in", "LOCAL_SIGN_IN", "the server's own accounts always sign staff in to the console, by invitation"},
+	{"admin_console.issuers", "ADMIN_CONSOLE_ISSUERS", "staff sign in at root's trusted issuers (bootstrap.yaml) or at their merchant's, found by its name, as the client openrails-console"},
+	{"resource_server", "RESOURCE_SERVER", "the server's resource is public_url, and each merchant's trusted issuers are its applications in AuthKit"},
+	{"llm.provider", "LLM_PROVIDER", noCatalogAssistant},
+	{"llm.model", "LLM_MODEL", noCatalogAssistant},
+	{"llm.base_url", "LLM_BASE_URL", noCatalogAssistant},
+	{"llm.api_key", "LLM_API_KEY", noCatalogAssistant},
+	{"llm.catalog_copilot_enabled", "LLM_CATALOG_COPILOT_ENABLED", noCatalogAssistant},
+	{"llm.catalog_drafting_enabled", "LLM_CATALOG_DRAFTING_ENABLED", noCatalogAssistant},
+	{"public_billing_base_url", "PUBLIC_BILLING_BASE_URL", "renamed public_url (PUBLIC_URL)"},
+	{"database.host", "DATABASE_HOST", "set database.url (DATABASE_URL), or libpq's PGHOST"},
+	{"database.port", "DATABASE_PORT", "set database.url (DATABASE_URL), or libpq's PGPORT"},
+	{"database.name", "DATABASE_NAME", "set database.url (DATABASE_URL), or libpq's PGDATABASE"},
+	{"database.username", "DATABASE_USERNAME", "set database.url (DATABASE_URL), or libpq's PGUSER"},
+	{"database.password", "DATABASE_PASSWORD", "set database.url (DATABASE_URL), or libpq's PGPASSWORD or PGPASSFILE"},
+	{"database.sslmode", "DATABASE_SSLMODE", "set sslmode in database.url, or libpq's PGSSLMODE; off this machine it is verify-full"},
+	{"database.sslrootcert", "DATABASE_SSLROOTCERT", "set sslrootcert in database.url, or libpq's PGSSLROOTCERT"},
+	{"database.sql_trace", "DATABASE_SQL_TRACE", "trace statements in Postgres (log_statement, pg_stat_statements)"},
+	{"database.skip_migrations", "DATABASE_SKIP_MIGRATIONS", "boot always migrates, replicas taking turns on a lock; `openrails migrate up` runs it ahead of a deploy"},
+	{"database.lease_conns", "DATABASE_LEASE_CONNS", "the lease pool is 4 connections: count them in max_connections"},
+	{"database.river_schema", "DATABASE_RIVER_SCHEMA", "River's schema is database.schema plus _river"},
+	{"redis.addr", "REDIS_ADDR", "set redis.url (REDIS_URL): redis://host:port"},
+	{"redis.username", "REDIS_USERNAME", "put it in redis.url (REDIS_URL): redis://user:password@host:port/db"},
+	{"redis.password", "REDIS_PASSWORD", "put it in redis.url (REDIS_URL): redis://user:password@host:port/db"},
+	{"redis.db", "REDIS_DB", "put it in redis.url (REDIS_URL): redis://host:port/db"},
+	{"redis.tls", "REDIS_TLS", "use a rediss:// redis.url (REDIS_URL)"},
+	{"clickhouse.addr", "CLICKHOUSE_ADDR", "set clickhouse.url (CLICKHOUSE_URL): clickhouse://user:password@host:9000/database"},
+	{"clickhouse.username", "CLICKHOUSE_USERNAME", "put it in clickhouse.url (CLICKHOUSE_URL): clickhouse://user:password@host:9000/database"},
+	{"clickhouse.password", "CLICKHOUSE_PASSWORD", "put it in clickhouse.url (CLICKHOUSE_URL): clickhouse://user:password@host:9000/database"},
+	{"clickhouse.database", "CLICKHOUSE_DATABASE", "name it in clickhouse.url's path (CLICKHOUSE_URL): clickhouse://host:9000/database"},
+	{"route_groups.admin", "ROUTE_GROUPS_ADMIN", routeGroupsHint},
+	{"route_groups.catalog", "ROUTE_GROUPS_CATALOG", routeGroupsHint},
+	{"route_groups.merchant_config", "ROUTE_GROUPS_MERCHANT_CONFIG", routeGroupsHint},
+	{"route_groups.metrics", "ROUTE_GROUPS_METRICS", routeGroupsHint},
+	{"route_groups.programmatic", "ROUTE_GROUPS_PROGRAMMATIC", routeGroupsHint},
+	{"signing_key.active_key_id", "AUTHKIT_ACTIVE_KEY_ID", signingKeyHint},
+	{"signing_key.active_private_key_pem", "AUTHKIT_ACTIVE_PRIVATE_KEY_PEM", signingKeyHint},
+	{"signing_key.public_keys", "AUTHKIT_PUBLIC_KEYS", signingKeyHint},
+	{"naming.enabled", "NAMING_ENABLED", namingHint},
+	{"naming.rename_interval", "NAMING_RENAME_INTERVAL", namingHint},
+	{"naming.former_names.mode", "NAMING_FORMER_NAMES_MODE", namingHint},
+	{"naming.former_names.duration", "NAMING_FORMER_NAMES_DURATION", namingHint},
+	{"user_action_rate_limit.minimum_customers_per_hour", "USER_ACTION_RATE_LIMIT_MINIMUM_CUSTOMERS_PER_HOUR", userActionsHint},
+	{"user_action_rate_limit.paid_customers_per_hourly_customer", "USER_ACTION_RATE_LIMIT_PAID_CUSTOMERS_PER_HOURLY_CUSTOMER", userActionsHint},
+	{"user_action_rate_limit.minimum_customers_per_day", "USER_ACTION_RATE_LIMIT_MINIMUM_CUSTOMERS_PER_DAY", userActionsHint},
+	{"user_action_rate_limit.paid_customers_per_daily_customer", "USER_ACTION_RATE_LIMIT_PAID_CUSTOMERS_PER_DAILY_CUSTOMER", userActionsHint},
+	{"destructive_action_limits.actor_per_hour", "DESTRUCTIVE_ACTION_LIMITS_ACTOR_PER_HOUR", destructiveLimitsHint},
+	{"destructive_action_limits.actor_per_day", "DESTRUCTIVE_ACTION_LIMITS_ACTOR_PER_DAY", destructiveLimitsHint},
+	{"destructive_action_limits.merchant_per_hour", "DESTRUCTIVE_ACTION_LIMITS_MERCHANT_PER_HOUR", destructiveLimitsHint},
+	{"destructive_action_limits.merchant_per_day", "DESTRUCTIVE_ACTION_LIMITS_MERCHANT_PER_DAY", destructiveLimitsHint},
+	{"destructive_action_limits.deployment_per_hour", "DESTRUCTIVE_ACTION_LIMITS_DEPLOYMENT_PER_HOUR", destructiveLimitsHint},
+	{"destructive_action_limits.deployment_per_day", "DESTRUCTIVE_ACTION_LIMITS_DEPLOYMENT_PER_DAY", destructiveLimitsHint},
+	{"destructive_action_limits.erasure_per_hour", "DESTRUCTIVE_ACTION_LIMITS_ERASURE_PER_HOUR", destructiveLimitsHint},
+	{"destructive_action_limits.erasure_per_day", "DESTRUCTIVE_ACTION_LIMITS_ERASURE_PER_DAY", destructiveLimitsHint},
+	{"logger.format", "LOGGER_FORMAT", "logs are text on a terminal, JSON otherwise"},
+	{"hyperswitch.allow_loopback_http", "HYPERSWITCH_ALLOW_LOOPBACK_HTTP", "an http hyperswitch URL on a loopback IP literal is a fixture, refused beside a live PSP"},
+	{"card_vault.kind", "CARD_VAULT_KIND", "the platform card vault is Basis Theory"},
+	{"provider_sandbox", "PROVIDER_SANDBOX_*", "no setting redirects a provider: a PSP's environment (test or sandbox) and its test credentials reach the provider's own test system; tests wire fakes in Go (Deps.ProviderEndpoints)"},
 }
 
-// retiredAuthKeys are the server's former auth keys and their replacements.
-var retiredAuthKeys = map[string]string{
-	"auth.issuer":                      "auth.token.issuer (AUTH_TOKEN_ISSUER)",
-	"auth.schema":                      "auth.database.schema (AUTH_DATABASE_SCHEMA)",
-	"auth.keys_path":                   "auth.keys.path (AUTH_KEYS_PATH)",
-	"auth.mint_disabled":               "auth.keys.verify_only (AUTH_KEYS_VERIFY_ONLY)",
-	"auth.allow_ephemeral_signing_key": "auth.keys.allow_ephemeral_dev_keys (AUTH_KEYS_ALLOW_EPHEMERAL_DEV_KEYS)",
-	"auth.allow_private_network_jwks":  "auth.token.allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)",
-	"auth.allow_missing_senders":       "auth.registration.allow_missing_senders (AUTH_REGISTRATION_ALLOW_MISSING_SENDERS)",
-	"auth.direct_peer_ip":              "auth.http.direct_peer_ip (AUTH_HTTP_DIRECT_PEER_IP)",
-	"auth.request_origin":              "auth.resource.public_url (AUTH_RESOURCE_PUBLIC_URL)",
-	"auth.naming":                      "naming (NAMING_*) for merchant names, auth.username for usernames",
-	"auth.allow_loopback_http":         "nothing: AuthKit admits http only on a loopback host",
-	"auth.allow_memory":                "nothing: AuthKit keeps its limits and proofs in Redis or memory",
-	"auth.active_key_id":               "signing_key.active_key_id (AUTHKIT_ACTIVE_KEY_ID)",
-	"auth.active_private_key_pem":      "signing_key.active_private_key_pem (AUTHKIT_ACTIVE_PRIVATE_KEY_PEM)",
-	"auth.public_keys":                 "signing_key.public_keys (AUTHKIT_PUBLIC_KEYS)",
-	"resource_server":                  "auth.resource (id, public_url) and each merchant's trusted issuers in AuthKit",
+// names reports whether an environment variable or secret file is the
+// setting's.
+func (r retiredSetting) names(name string) bool {
+	if prefix, section := strings.CutSuffix(r.env, "*"); section {
+		return strings.HasPrefix(name, prefix)
+	}
+	return name == r.env
 }
+
+func (r retiredSetting) inEnv() bool {
+	if prefix, section := strings.CutSuffix(r.env, "*"); section {
+		return hasEnvPrefix(prefix)
+	}
+	_, present := os.LookupEnv(r.env)
+	return present
+}
+
+const noCatalogAssistant = "the catalog assistant was removed; OpenRails calls no language model"
+
+const (
+	routeGroupsHint       = "every route group is served; each route's permission gates it"
+	signingKeyHint        = "keep the signing key in keys.json under auth.keys.path (AUTH_KEYS_PATH)"
+	namingHint            = "a merchant renames at most every 72 hours and a former name forwards for 90 days; a hosted product sets server.Config.Naming in Go"
+	userActionsHint       = "customers' own card removals and cancellations are capped at the larger of 5 an hour or one per 400 paying customers, and of 10 a day or one per 100"
+	destructiveLimitsHint = "staff destructive-action limits are fixed; a person clears a hold with `openrails destructive-holds clear`"
+)

@@ -103,7 +103,7 @@ func (v *vaultCards) saveExpiringCard(t *testing.T, bearer, number, last4 string
 	t.Helper()
 	v.journal.core.AddNumber(number, nmimock.Card{Brand: "visa", Last4: last4})
 	token := v.vendor.collectCard(merchantBTTenant, number, basistheory.CardDetails{Brand: "visa", Last4: last4, ExpirationMonth: month, ExpirationYear: year})
-	status, raw := v.request(t, http.MethodPost, "/v1/me/payment-methods", bearer, billing.CreatePaymentMethodParams{PSPID: v.psp, Token: token})
+	status, raw := v.request(t, http.MethodPost, "/v1/me/payment-methods", bearer, billing.CreatePaymentMethodParams{PSPID: v.psp, Token: token, BillingDetails: billedTo("US", "10001")})
 	require.Equal(t, http.StatusCreated, status, string(raw))
 	var method billing.PaymentMethod
 	require.NoError(t, json.Unmarshal(raw, &method))
@@ -298,7 +298,7 @@ func TestMRRRisk(t *testing.T) {
 	})
 
 	t.Run("OR-J42-S15/usage-delinquency-puts-the-customers-mrr-at-risk-and-clears-it", func(t *testing.T) {
-		a, p, customer := usageBillingWorld(t, true, true)
+		a, p, customer := usageBillingWorld(t, true)
 		sub := nmiMembershipOn(t, a, p, catalog.Field[int]{})
 		oneUsage(t, a.alpha, usageInput(customer, "overdue-work", 3))
 		fleet := startFleet(t, a.world)

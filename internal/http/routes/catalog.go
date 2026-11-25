@@ -11,7 +11,7 @@ var (
 	productErrors = []billing.ErrorCode{"catalog_benefit_overlap", "product_not_found", "product_tier_group_conflict", "product_tier_group_in_use", "resource_conflict", "revision_mismatch"}
 	priceErrors   = []billing.ErrorCode{"catalog_benefit_overlap", "price_key_cadence_conflict", "price_key_not_found", "price_not_found", "price_not_sellable", "product_not_found", "resource_conflict", "revision_mismatch", "trial_unsupported_on_rail"}
 	meterErrors   = []billing.ErrorCode{
-		"default_rate_card_not_found", "meter_in_use", "meter_rate_card_conflict", "rate_card_product_not_found",
+		"default_rate_card_not_found", "invalid_param", "meter_in_use", "meter_rate_card_conflict", "rate_card_product_not_found",
 		"revision_mismatch", "usage_meter_invalid", "usage_meter_not_found", "usage_rate_card_invalid",
 	}
 )
@@ -26,7 +26,8 @@ var catalogRoutes = []Route{
 		Doc: "ApplyCatalog applies a catalog document as the apply manager. Each product, price key and meter in " +
 			"it applies whole, unless a field it names was set differently by an edit: that object is skipped and " +
 			"listed in the receipt's Conflicts, the rest applies, and the document is not recorded as applied, so " +
-			"applying it again retries the skipped objects. params.Force overwrites those fields instead. A " +
+			"applying it again retries the skipped objects. params.Force overwrites those fields instead. The " +
+			"receipt lists deleted objects in Changes with Deleted true, empty Fields and their last Revision before deletion. A " +
 			"document that applied whole is remembered by its canonical content hash: applying it again returns " +
 			"the original receipt even after later catalog edits. It is an operator action, never a side effect " +
 			"of starting: run it from a command (openrails catalog apply, or the host's own) or the console.",
@@ -47,11 +48,6 @@ var catalogRoutes = []Route{
 			"params.RateCard sets or (null) removes the rate card that prices its usage. A meter with recorded " +
 			"usage keeps its definition (billing.ErrConflict, code meter_in_use).",
 		Request: billing.SetMeterParams{}, Responses: []Reply{{200, billing.Meter{}}}, Errors: codes(append([]billing.ErrorCode{"currency_unsupported"}, meterErrors...)...), Handler: h(handlers.SetMeter)},
-
-	// The catalog assistant answers questions about the catalog and drafts
-	// price changes for a person to review; it never changes a catalog row.
-	{Method: POST, Path: "/v1/console/catalog/ask", Group: CatalogAdmin, Auth: AuthMerchant, ConsoleOnly: true, Level: LevelRead, When: FeatureCatalogCopilot,
-		Request: billing.AskCatalogParams{}, Responses: []Reply{{200, billing.CatalogAnswer{}}}, Errors: codes("invalid_param", "model_unavailable", "rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.AskCatalog)},
 
 	{Method: POST, Path: "/v1/catalog/products", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreateProduct", Level: LevelUpdate,
 		Doc:     "CreateProduct creates a product.",

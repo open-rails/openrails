@@ -1,6 +1,6 @@
 # A merchant with one PSP on each rail, as Config.Merchants reads it (in a
-# standalone manifest, under merchants.<slug>). Real secrets go in an overlay
-# or in Vault, never in a committed file.
+# standalone manifest, under merchants.<slug>). Real secrets go in Vault, or
+# in a manifest mounted from a secret, never in a committed file.
 slug: shop
 display_name: Shop
 # guide:psps

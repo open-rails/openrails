@@ -11,12 +11,12 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const KindMerchantHealth = "openrails.merchant_health"
@@ -64,7 +64,7 @@ func (w MerchantHealthWorker) Work(ctx context.Context, _ *river.Job[MerchantHea
 	if w.Alerts != nil {
 		engine.Notifier = w.Alerts
 	}
-	postures := writeposture.View{DB: w.DB}
+	postures := controls.View{DB: w.DB}
 	var workErr error
 	after := uuid.Nil
 	for {

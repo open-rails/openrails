@@ -391,11 +391,7 @@ func (s *Service) CancelSubscriptionForCustomer(ctx context.Context, customer bi
 	}
 	// A completed cancellation is a domain no-op, including after reservation pruning.
 	if sub.Status != models.StatusCanceled {
-		policy := billing.UserActionRateLimitConfig{}
-		if rt.Config != nil {
-			policy = rt.Config.UserActionRateLimit
-		}
-		limiter := destructive.NewUserActionLimiter(rt.DB, policy)
+		limiter := destructive.NewUserActionLimiter(rt.DB)
 		if err := limiter.Reserve(ctx, destructive.CancelSubscription, fmt.Sprintf("cancel:%s:%d", sub.ID, sub.LifecycleRev), sub.CustomerID); err != nil {
 			return err
 		}

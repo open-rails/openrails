@@ -1,6 +1,6 @@
 # Credits
 
-A customer's prepaid balance in a currency is a set of credit lots: staff grants, credit packs and deposits a customer buys, and the credit a recurring plan delivers each paid cycle. Usage, admissions and running charges spend the lots soonest expiry first; a lot can lapse, be revoked, or be reversed by a refund or chargeback of the payment that bought it. Each lot is a `credit_grants` row; every movement of its units is a transfer in the units book of [Books](books.md) naming it in `credit_grant_id`, and a paid lot's money moves with them in the general ledger.
+A customer's prepaid balance in a currency is a set of credit lots: staff grants, credit packs and deposits a customer buys, and the credit a recurring plan delivers each paid cycle. Usage and running charges spend the lots soonest expiry first; a lot can lapse, be revoked, or be reversed by a refund or chargeback of the payment that bought it. Each lot is a `credit_grants` row; every movement of its units is a transfer in the units book of [Books](books.md) naming it in `credit_grant_id`, and a paid lot's money moves with them in the general ledger.
 
 ## Concepts
 
@@ -9,7 +9,7 @@ A customer's prepaid balance in a currency is a set of credit lots: staff grants
 - **Purchased lot**: `paid_amount` and `paid_currency` are set, and `payment_id` and `order_line_id` name what bought it. Face is the credit delivered; paid is the cash of the order line that bought it, always in a registry currency (`credit_grants_paid_currency_registry_check`): a pack of a merchant's unit is paid in any currency, its rate paid over units, bonus units included. A gift has neither; a lot imported without a payment is a gift unless the import declares a paid amount.
 - **Rate and lot money**: a paid lot's `units` are worth its `paid_amount` at the rate paid ÷ units, a pack's bonus included ($50 for 55 credits: $0.909 a credit). `deferred_credited - deferred_debited` is its money still deferred in the general ledger, kept by `ledger_transfers_apply_lot_deferred` from the legs on its customer's `deferred_revenue_credit` in `paid_currency`. n units left are worth `paid - floor(paid × (units - n) ÷ units)` (`books.CreditLot.Worth`), so the last unit carries the remainder.
 - **Reserved**: `units_reserved`, what the pending refunds of a purchased lot's payment will withdraw (`credit_grant_reservation`): their share of its paid amount, up to what no reversal returned, rounded up. **Available** in a lot is remaining less reserved.
-- **Held**: the `balance` part of live request holds (`limit_holds`, `limit_hold_parts`) and of what live gates report in flight (`lease_in_flight`), what pending refunds reserve of a lot (all of a lapsed one not yet expired), unposted usage accruals and running-charge accrual (`GetFinancialHeldAmount`), all outside the ledger. **Available** is balance less held (`billing.Balance.AvailableAmount`).
+- **Held**: the `balance` part of what live gates report in flight (`lease_in_flight`), what pending refunds reserve of a lot (all of a lapsed one not yet expired), unposted usage accruals and running-charge accrual (`GetFinancialHeldAmount`), all outside the ledger. **Available** is balance less held (`billing.Balance.AvailableAmount`).
 - **Grant state** (`billing.CreditGrantState`), the first that holds: `revoked`; `pending`, none of its units posted; `refunded`, refunds of its payment took all of it, whatever its expiry; `expired`, past its expiry; `spent`, nothing left (refunds' part in `refunded_amount`); `scheduled`, before it starts; else `active`.
 - **Balance watch** (`balance_watches`): when to look at a customer's balance
   next, and which low or depleted notice it has sent.
@@ -28,24 +28,23 @@ A customer's prepaid balance in a currency is a set of credit lots: staff grants
 
 ### Spending
 
-- An admission holds its estimate against available. A capture
-  (`MoneyService.CaptureAdmission`) closes the hold and takes its usage into the
-  event store, held as the customer's unposted usage until it posts; a release
-  returns the hold (OR-J22-S01).
-- A posting (`postUsageTx`, running-charge postings) runs `spendBalanceThenOwedTx`. The balance leg is capped at what the spendable lots have available (`ListSpendableCreditLots`: started, not lapsed, not revoked, with units left, `credit_grants_live_idx`), and `credits.Lots.Spend` draws them soonest expiry first, one `credit_spend` per lot at the posting's coordinate. The rest is `owed_accrual` plus `owed_items`; a usage posting's owed is also usage revenue receivable in the general ledger (`books.Books.AccrueUsage`, `usage_accrued`), and a period whose price fell gives its difference back as a lot priced at face (`books.Books.ReverseUsage`, `usage_reversed`: `revenue_adjustments` to `deferred_revenue_credit`). A posting of admitted usage is never re-gated (`preAuthorized`): beyond the balance it is owed even without a credit line.
+- A gate decides a request against available, which what live gates report in
+  flight lowers. A lease sync takes its usage into the event store, held as the
+  customer's unposted usage until it posts (OR-J22-S01).
+- A posting (`postUsageTx`, running-charge postings) runs `spendBalanceThenOwedTx`. The balance leg is capped at what the spendable lots have available (`ListSpendableCreditLots`: started, not lapsed, not revoked, with units left, `credit_grants_live_idx`), and `credits.Lots.Spend` draws them soonest expiry first, one `credit_spend` per lot at the posting's coordinate. The rest is `owed_accrual` plus `owed_items`; a usage posting's owed is also usage revenue receivable in the general ledger (`books.Books.AccrueUsage`, `usage_accrued`), and a period whose price fell gives its difference back as a lot priced at face (`books.Books.ReverseUsage`, `usage_reversed`: `revenue_adjustments` to `deferred_revenue_credit`). A posting of usage is never re-gated (`preAuthorized`): beyond the balance it is owed even without a credit line.
 - Each lot's leg releases its money at the lot's rate, cumulatively (`books.Books.MoveCredit`): `deferred_revenue_credit` to `usage_revenue` (`credit_released`) for the difference between what the lot had deferred and the worth of its units left, at the leg's coordinate. `credits.Lots.SpendInto` sends it to an order line's `deferred_revenue` instead, for a product priced in the lot's unit. A gift in a registry currency grosses usage revenue up at face, `promotional_credit` to `usage_revenue` (`promotional_credit_applied`); a gift in a merchant's own unit posts nothing.
 - Owed repaid from a lot (`owed.Repay`) is repaid at face (`books.Books.RepayFromCredit`): as many of the units as the general ledger holds receivable repay it, `usage_receivable` falling by them, the lot's money at its rate paying for them (`usage_repaid`) and `promotional_credit` for the rest, a gift's all promotional. The rest repay owed that accrued before the credit books, which has no receivable, and are revenue as a spend is (a gift's at (`deposit`, `grant:unaccrued`, ...)). The split depends only on the books when it posts.
 - Unposted usage posts before a deposit. Before a lot is expired, revoked or refunded, the usage and then the running charges that accrued while it lived post first (`SettleRunningCharges`, through the usage ledger the runtime binds, `db.UsageLedger`, and the `credits.PostRunningCharges` hook). Those postings hold no unposted usage: as of the lapse there is none, so usage after it never keeps the lot from what came before (OR-J24-S61).
-- A merchant's unit is never owed: its owed account is refused (`ErrMerchantUnitOwed`, `ledger_accounts_owed_currency_check`). An admission in a unit holds against its balance alone (a billing policy's money limits do not bind it), and one that holds nothing is refused while nothing is left unheld. Usage in a unit arrives only through an admission's capture. A posting in a unit takes what the lots live before its cut hold (`spendableUnits`), whatever other holds keep, and forgives the rest: `usage_postings.forgiven`, never owed, shared as it posts across what the period charged each invoker, event type and meter cell, by largest remainder (`forgiven_lines`). A reversal of the period takes that forgiveness back from the stored shares before it credits anything. Forgiveness shows in the `usage_charged` measure as `charge: forgiven`, moved out of `charged` at the posting's cut, read from the stored shares (`MoneyService.UsageForgiveness`).
+- A merchant's unit is never owed: its owed account is refused (`ErrMerchantUnitOwed`, `ledger_accounts_owed_currency_check`). A gate decides a request in a unit against its balance alone (a billing policy's money limits do not bind it). Usage in a unit arrives on a lease sync, in a unit the merchant declares (`MoneyService.UsageCurrencies`). A posting in a unit takes what the lots live before its cut hold (`spendableUnits`), whatever in-flight reports keep, and forgives the rest: `usage_postings.forgiven`, never owed, shared as it posts across what the period charged each invoker, event type and meter cell, by largest remainder (`forgiven_lines`). A reversal of the period takes that forgiveness back from the stored shares before it credits anything. Forgiveness shows in the `usage_charged` measure as `charge: forgiven`, moved out of `charged` at the posting's cut, read from the stored shares (`MoneyService.UsageForgiveness`).
 - An order in a merchant's unit draws its lots the same way, one `credit_spend` per lot naming the order, into the line's deferred revenue (`orders`' `payFromBalance`, `SpendInto`): one revenue schedule per currency the lots were paid in, recognised over the line's service, ratably for an access window and at once otherwise.
 
 ### Lapse
 
-A lot with `expires_at` is watched (`ledger.WatchLapsingCredit`). Spending stops at `expires_at` because the lot query excludes it, before any expiry posts. `credits.Lots.ExpireLapsedBy` then posts the remainder as `credit_expire` at (`credit_expire`, `credit_expiry`, lot id), after settling what accrued up to the lapse, and a paid lot's unreleased money as breakage, `deferred_revenue_credit` to `breakage_revenue` (`credit_breakage`). Callers include the balance watch (`MoneyService.WatchBalanceInTx`), admission capacity (`AdmissionCapacityTx`), a reversal, a released refund (`MarkFailed`) and a running charge's stop.
+A lot with `expires_at` is watched (`ledger.WatchLapsingCredit`). Spending stops at `expires_at` because the lot query excludes it, before any expiry posts. `credits.Lots.ExpireLapsedBy` then posts the remainder as `credit_expire` at (`credit_expire`, `credit_expiry`, lot id), after settling what accrued up to the lapse, and a paid lot's unreleased money as breakage, `deferred_revenue_credit` to `breakage_revenue` (`credit_breakage`). Callers include the balance watch (`MoneyService.WatchBalanceInTx`), an order paid from the balance, a reversal, a released refund (`MarkFailed`) and a running charge's stop.
 
 ### Revocation
 
-`MoneyService.RevokeCreditGrant` runs inside `destructive.RunLocal` (`destructive.RevokeCredit`) under the customer lock. It posts accrued running charges and usage, refuses `credit_grant_held` when holds or a pending refund (`units_reserved`) need the remainder and `credit_grant_unavailable` when nothing remains, and `credits.Lots.Revoke` appends a `revoke` event and moves the remainder to `units_revoked` (`credit_revoke`, once per revocation) and a paid lot's unreleased money to `breakage_revenue` (`credit_forfeited`). Revoking a revoked lot replays. A revocation is a destructive command keyed by the grant and the lot's latest event, so a reinstated lot can be revoked again; an `Idempotency-Key` keys it by the caller's key instead, so a retry of an earlier revocation replays even after a reinstatement or a spend, found before the lot's remainder is read.
+`MoneyService.RevokeCreditGrant` runs inside `destructive.RunLocal` (`destructive.RevokeCredit`) under the customer lock. It posts accrued running charges and usage, refuses `credit_grant_held` when in-flight reports, unposted usage or a pending refund (`units_reserved`) need the remainder and `credit_grant_unavailable` when nothing remains, and `credits.Lots.Revoke` appends a `revoke` event and moves the remainder to `units_revoked` (`credit_revoke`, once per revocation) and a paid lot's unreleased money to `breakage_revenue` (`credit_forfeited`). Revoking a revoked lot replays. A revocation is a destructive command keyed by the grant and the lot's latest event, so a reinstated lot can be revoked again; an `Idempotency-Key` keys it by the caller's key instead, so a retry of an earlier revocation replays even after a reinstatement or a spend, found before the lot's remainder is read.
 
 ### Reinstatement
 
@@ -71,14 +70,12 @@ re-arms them) and sets the next look.
 
 - Go: `Client.CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`,
   `RevokeCreditGrant`, `ReinstateCreditGrant`, `GetBalance`, `ListBalanceTransactions`; spending through
-  `Admit`, `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions`, and
-  `LocalClient.AdmitTx`, `CaptureAdmissionsTx`, `ReleaseAdmissionsTx`.
+  a gate's usage (`SyncLeases`) and running charges.
 - HTTP: `POST /v1/admin/credit-grants`, `POST /v1/admin/credit-grants/{id}/revoke`,
   `POST /v1/admin/credit-grants/{id}/reinstate` (`merchant:customer:manage`); `GET /v1/admin/credit-grants`,
   `GET /v1/admin/credit-grants/{id}` (`merchant:customer:read`); the customer's
   `GET /v1/me/balance/transactions` and `PUT /v1/me/low-balance-lines/{currency}`;
-  `POST /v1/app/admissions` and its `capture`, `release` and `extend`
-  (`merchant:usage:manage`).
+  `POST /v1/app/leases/sync` (`merchant:usage:manage`).
 - Catalog: a product's `credit_grant` (`catalog.CreditGrantSpec`: `currency`,
   `amount` or `from_payment`, `expires_after_days`); a price's `customer_amount`.
 - Events: `balance.low`, `balance.depleted` (`billing.BalanceHostEvent`).
@@ -123,7 +120,7 @@ Checks:
 - A lot's money is released by `books.CreditLot.Worth` of its units left, never by a per-spend rate, so rounding never drifts and the last unit releases the remainder (OR-J40-S10); `ledger-audit` lot drift compares `deferred_credited` and `deferred_debited` with the lot's legs.
 
 ### 4. Access control and tenant isolation
-Staff routes need `merchant:customer:read` or `manage`, admission routes `merchant:usage:manage`; a customer reads its own balance and sets its own line (`selfAccountPayer`). `credit_grants` keys on `(merchant_id, id)` with composite foreign keys to `customers`, its balance account (customer and currency included), `payments`, `products` and `order_lines`; `ledger_transfers.credit_grant_id` and `credit_grant_events` reference it.
+Staff routes need `merchant:customer:read` or `manage`, lease syncs `merchant:usage:manage`; a customer reads its own balance and sets its own line (`selfAccountPayer`). `credit_grants` keys on `(merchant_id, id)` with composite foreign keys to `customers`, its balance account (customer and currency included), `payments`, `products` and `order_lines`; `ledger_transfers.credit_grant_id` and `credit_grant_events` reference it.
 
 Checks:
 - Each query in `internal/db/queries/credit_grants.sql` and `purchased_credits.sql` filters `merchant_id`.
@@ -142,12 +139,11 @@ Checks:
 - A new grant state, funding source or catalog field adds a value without renaming one.
 
 ### 6. Data lifecycle
-`credit_grants`, `credit_grant_events` and `usage_postings` are permanent; `balance_watches` and `customer_low_balance_lines` are state. `limit_holds` and `limit_hold_parts` are partitioned by month, and the held total names a range: `created_at` and `hold_created_at` at or after `limits.HeldSince`.
+`credit_grants`, `credit_grant_events` and `usage_postings` are permanent; `balance_watches` and `customer_low_balance_lines` are state. The held total counts only live leases' reports (`limits.LeaseLiveSince`).
 
 Checks:
 - Those classes are in `internal/retention/tables.go` and the table comments.
-- `GetFinancialHeldAmount` and `GetAdmissionCapacity` bound both columns by
-  `held_since`; a capture addresses its hold by `created_at`.
+- `GetFinancialHeldAmount` and `GetAdmissionCapacity` count a report only while its lease is live (`lease_live_since`).
 - `credit_grants` and `credit_grant_events` are in `NeverRollbackableTables`. A lot refuses DELETE and any change but its counters, `revoked_at` and `units_reserved`; only the transfer and event triggers move the counters and `revoked_at` (`guard_credit_grant_facts`), and events refuse UPDATE and DELETE.
 - A restore inserts lots with their counters, money included; `check_billing_restore_credit_grants` proves them against the restored legs and events at commit.
 
@@ -158,7 +154,7 @@ Checks:
 - `ListDueBalanceWatches` and `ListDueUsageUnposted` filter on the due instant and page in key order.
 
 ### 8. Abuse protection
-Customers buy credit only through checkout (`POST /v1/me/orders`: the `purchase` bucket and card-testing checks). `middleware.AdminOperationGrant` meters each invoker by item: `billing.MaxBatchItems` (100) a minute, one full batch, shared by `UpdateCustomer`, `AdjustCustomerLimit`, `CreateCreditGrants` and `CreateProductAccess`; going over locks the invoker out for an hour. An application acting as itself is not metered. Admission routes are server-to-server; they, the customer's balance reads and its low-balance line are in no bucket.
+Customers buy credit only through checkout (`POST /v1/me/orders`: the `purchase` bucket and card-testing checks). `middleware.AdminOperationGrant` meters each invoker by item: `billing.MaxBatchItems` (100) a minute, one full batch, shared by `UpdateCustomer`, `AdjustCustomerLimit`, `CreateCreditGrants` and `CreateProductAccess`; going over locks the invoker out for an hour. An application acting as itself is not metered. Lease syncs are server-to-server; they, the customer's balance reads and its low-balance line are in no bucket.
 
 Checks:
 - `CreateCreditGrants` carries `Limit: middleware.AdminOperationGrant` in
@@ -178,14 +174,14 @@ Checks:
 
 ## Tests
 
-- J22: OR-J22-S01 grant, hold, capture and release (`TestCredits`); OR-J22-S02
-  capture against revocation (`TestAdmissionBoundaries`); OR-J22-S03, OR-J22-S06,
-  OR-J22-S50 expiry, lapse and admission after a lapse (`TestCreditExpiry`);
+- J22: OR-J22-S01 grant, in-flight and settled usage (`TestCredits`); OR-J22-S02
+  usage against revocation (`TestCreditRevocation`); OR-J22-S03, OR-J22-S06,
+  OR-J22-S50 expiry, lapse and a view after a lapse (`TestCreditExpiry`);
   OR-J22-S04 atomic batches and replay (`TestCreditAtomicity`,
   `TestLedgerMaintenance`); OR-J22-S05 recurring credits (`TestRecurringCredits`);
   OR-J22-S07 to S09 refunds, chargebacks and won disputes of a mixed order
   (`TestMixedOrderCreditRefunds`).
-- J48 (merchant units): OR-J48-S01 packs at their own rates, S02 the same units bought in EUR, S03 a plan allowance and a gift, S04 a unit-priced product paid from the balance, S05 usage by rate card soonest-expiring lot first and never owed, S06 expiry, S07 refund by lot, S08 admission holds the unit balance and an overrun is forgiven usage, S09 a pack's reversals in the order they settle, S10 a price fall takes back forgiveness first, S11 no unit usage on a lease sync, S12 the first balance in a unit takes the units lock, S13 a unit-priced order's revenue scheduled per paid currency, applied once and moved by an archive, S14 a pack's chargeback reducing the schedule its spends funded and its won dispute restoring it, S15 a line paid with given units booking nothing, S16 a later release adding to its schedule's funding and the audit failing a release with no schedule, S17 a refund at the provider, S18 a chargeback split between usage and a schedule, S19 a chargeback of one currency's pack (`TestMerchantUnits`).
+- J48 (merchant units): OR-J48-S01 packs at their own rates, S02 the same units bought in EUR, S03 a plan allowance and a gift, S04 a unit-priced product paid from the balance, S05 usage by rate card soonest-expiring lot first and never owed, S06 expiry, S07 refund by lot, S08 a gate decides on the unit balance and an overrun is forgiven usage, S09 a pack's reversals in the order they settle, S10 a price fall takes back forgiveness first, S11 a lease sync takes usage in a declared unit only, S12 the first balance in a unit takes the units lock, S13 a unit-priced order's revenue scheduled per paid currency, applied once and moved by an archive, S14 a pack's chargeback reducing the schedule its spends funded and its won dispute restoring it, S15 a line paid with given units booking nothing, S16 a later release adding to its schedule's funding and the audit failing a release with no schedule, S17 a refund at the provider, S18 a chargeback split between usage and a schedule, S19 a chargeback of one currency's pack (`TestMerchantUnits`).
 - OR-J22-S10 a lot's view equals its ledger counters through spend, expiry, revocation, refund and restore, and `ledger-audit` names lot drift; OR-J22-S11 a refunded pack raises no refunded-source grant finding; OR-J22-S13 two lapsed lots expire only what each still holds; OR-J26-S62 a usage order's change is a bought lot; OR-J40-S04 a deposit that did not post is pending and not spendable until convergence posts it (`TestCreditLotCounters`); OR-J31-S15 the move out of `grants` keeps every lot's old remainder and pending-refund share, and refuses a lot drawn before its deposit (`TestCreditGrantsMigration`).
 - OR-J40-S10 a $50 pack of 55 credits releases exactly $10 for 11 credits and the remainder with its last; OR-J40-S11 expiry, revocation and reinstatement; OR-J40-S12 a gift spend, and owed repaid from a gift and from a bonus pack; OR-J40-S13 refunds of spent and unspent credit and a won dispute (`TestCreditBooks`).
 - Also: OR-J24-S22 and OR-J04-S44 (a lapsed lot is never drawn); OR-J24-S12 (two

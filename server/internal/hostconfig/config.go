@@ -9,14 +9,7 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"slices"
-	"strconv"
 	"strings"
-	"time"
-
-	"github.com/google/uuid"
-	"github.com/open-rails/authkit"
-	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -31,34 +24,20 @@ import (
 // comma-separated or a JSON array); envKeyToConfigKey holds the exceptions.
 type Config struct {
 	Server server.Config `yaml:"-"`
-	// Database is the database section's connection; its schemas and lease
-	// pool are Server.Engine.Database.
+	// Database is the database section's connection; its schema is
+	// Server.Engine.Database.
 	Database DatabaseConnection `yaml:"database"`
 	// Redis is the redis section; nil declares none.
 	Redis *RedisConfig `yaml:"redis"`
 	// ClickHouse is the clickhouse section's connection, the event store
-	// usage needs; nil declares none, and usage is off. Its database is
+	// usage needs; nil declares none, and usage is off. Its database becomes
 	// Server.Engine.ClickHouse.
-	ClickHouse *ClickHouseLogin `yaml:"clickhouse"`
+	ClickHouse *ClickHouseConnection `yaml:"clickhouse"`
 	// SMTP is the email_smtp section; nil sends no email.
 	SMTP *SMTPConfig `yaml:"email_smtp"`
 	// Vault is the vault section's login: declaring any vault key connects;
 	// nil logs in to no Vault. Its mounts are Server.Engine.Vault.
 	Vault *VaultLogin `yaml:"vault"`
-	// SigningKey is AuthKit's inline signing key (AUTHKIT_ACTIVE_KEY_ID,
-	// AUTHKIT_ACTIVE_PRIVATE_KEY_PEM, AUTHKIT_PUBLIC_KEYS); without one
-	// AuthKit reads auth.keys.path.
-	SigningKey SigningKey `yaml:"signing_key"`
-	// CloudflareProxies are Cloudflare's egress CIDRs, set only where
-	// Cloudflare fronts this origin: trusted like trusted_proxies, and the
-	// only peers whose CF-Connecting-IP AuthKit takes.
-	CloudflareProxies []string `yaml:"cloudflare_proxies"`
-	// RateLimitsDisabled limits nothing: an empty rate_limits.
-	RateLimitsDisabled bool `yaml:"rate_limits_disabled"`
-	// MerchantManifestOverlays are YAML files in the merchant manifest's own
-	// shape (secrets rendered by Vault Agent or a Kubernetes Secret volume),
-	// merged over the boot manifest in order; later wins.
-	MerchantManifestOverlays []string `yaml:"merchant_manifest_overlays"`
 	// Logger is the binary's logger.
 	Logger LoggerConfig `yaml:"logger"`
 	// EnvFile is the .env file the load consumed; empty when none.
@@ -96,199 +75,101 @@ func Engine(ctx context.Context) *billing.Config {
 func defaults() *Config {
 	return &Config{
 		Server: server.DefaultConfig(),
-		// database.url: defaultDatabaseURL; database.sslmode: defaultSSLMode.
-		// No redis: rate limits and lockouts live in memory, for one instance.
-		// No clickhouse.addr: no event store, so usage is off.
-		ClickHouse: &ClickHouseLogin{Username: "default"},
-		Logger:     LoggerConfig{Level: "info", Format: "json"},
-		// public_billing_base_url: defaultPublicBillingBaseURL; auth: authDefaults.
+		// database.url: DSN. No redis: rate limits and lockouts live in
+		// memory, for one instance. No clickhouse: no event store, so usage
+		// is off. public_url has no default: boot refuses without it.
+		Logger: LoggerConfig{Level: "info"},
 	}
 }
 
-// defaultDatabaseURL is Compose's Postgres, used when no database connection
-// key is set. A deploy that forgets its database fails to connect; it never
-// reaches another.
+// defaultDatabaseURL is Compose's Postgres, used when neither database.url
+// nor a libpq variable names a connection. A deploy that forgets its
+// database fails to connect; it never reaches another.
 const defaultDatabaseURL = "postgres://app:app_password@localhost:5434/openrails_db?sslmode=disable"
 
-// defaultPublicBillingBaseURL is the local server: http://localhost:<port>.
-func defaultPublicBillingBaseURL(port int) string {
-	return "http://localhost:" + strconv.Itoa(port)
-}
+// libpqConnection are the libpq variables that name a connection.
+var libpqConnection = []string{"PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER", "PGSERVICE"}
 
-// defaultSSLMode verifies the server's certificate and name off this
-// machine; a loopback host or a Unix socket only requires TLS.
-func defaultSSLMode(host string) string {
+// loopbackHost reports a host on this machine, or a Unix socket.
+func loopbackHost(host string) bool {
 	if strings.HasPrefix(host, "/") || strings.EqualFold(host, "localhost") {
-		return "require"
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return "require"
-	}
-	return "verify-full"
-}
-
-// localTenantID is the platform account directory of a server whose token
-// issuer is on this machine. A deployed server names its own.
-var localTenantID = iam.TenantID(uuid.MustParse("51336692-ef57-4cdb-a189-a8d388465c11"))
-
-// authDefaults are AuthKit's settings the binary defaults: the token issuer
-// is public_billing_base_url, and a loopback issuer's account directory is
-// localTenantID (elsewhere boot refuses an unnamed one). AuthKit's refresh
-// sessions last 30 days and its tables live in "profiles". Registration
-// stays the server's: closed, or invite_only with local_sign_in.
-func authDefaults(a *authkit.Config, publicBillingBaseURL string) {
-	a.Token.Issuer = cmp.Or(strings.TrimSpace(a.Token.Issuer), publicBillingBaseURL)
-	if a.DefaultTenantID.IsZero() && loopbackURL(a.Token.Issuer) {
-		a.DefaultTenantID = localTenantID
-	}
-	a.Token.RefreshTokenDuration = cmp.Or(a.Token.RefreshTokenDuration, 30*24*time.Hour)
-	a.Database.Schema = cmp.Or(a.Database.Schema, "profiles")
-}
-
-// cloudflare makes Cloudflare's egress a trusted proxy like any other to the
-// engine, and the only peers AuthKit takes CF-Connecting-IP from, unless
-// auth.http sets its own client-IP posture.
-func cloudflare(s *server.Config, ranges []string) {
-	if len(ranges) == 0 {
-		return
-	}
-	http := authkit.HTTPConfig{}
-	if s.Auth.HTTP != nil {
-		http = *s.Auth.HTTP
-	}
-	if !http.DirectPeerIP && len(http.TrustedProxies) == 0 && len(http.CloudflareProxies) == 0 {
-		http.TrustedProxies, http.CloudflareProxies = slices.Clone(s.Engine.TrustedProxies), ranges
-	}
-	s.Auth.HTTP = &http
-	s.Engine.TrustedProxies = append(slices.Clone(s.Engine.TrustedProxies), ranges...)
-}
-
-// loopbackURL reports a URL whose host is this machine.
-func loopbackURL(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return false
-	}
-	if strings.EqualFold(u.Hostname(), "localhost") {
 		return true
 	}
-	ip := net.ParseIP(u.Hostname())
+	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
 }
 
-// DatabaseConnection is the database section's connection: URL, or the
-// connection string its parts assemble.
+// DatabaseConnection is the database section's connection.
 type DatabaseConnection struct {
-	URL      string `yaml:"url"`
-	Host     string `yaml:"host"`
-	Port     string `yaml:"port"`
-	Name     string `yaml:"name"`
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-	// SSLMode is libpq's sslmode for the parts: verify-full by default,
-	// require for a loopback host or a Unix socket.
-	SSLMode string `yaml:"sslmode"`
-	// SSLRootCert is the PEM file of the CAs that verify the server's
-	// certificate; unset, the system roots.
-	SSLRootCert string `yaml:"sslrootcert"`
-	// SQLTrace logs every query at debug level.
-	SQLTrace bool `yaml:"sql_trace"`
-}
-
-// ConnectionString is URL, or the URL the parts assemble; "" when they are
-// incomplete. Credentials and the database name are percent-encoded: a
-// password with '@' or '/' must not change the host.
-func (c DatabaseConnection) ConnectionString() string {
-	if c.URL != "" {
-		return c.URL
-	}
-	if c.Host == "" || c.Port == "" || c.Name == "" || c.Username == "" {
-		return ""
-	}
-	query := url.Values{"sslmode": {cmp.Or(c.SSLMode, defaultSSLMode(c.Host))}}
-	if c.SSLRootCert != "" {
-		query.Set("sslrootcert", c.SSLRootCert)
-	}
-	u := url.URL{
-		Scheme:   "postgresql",
-		User:     url.UserPassword(c.Username, c.Password),
-		Host:     net.JoinHostPort(c.Host, c.Port),
-		Path:     "/" + c.Name,
-		RawQuery: query.Encode(),
-	}
-	return u.String()
-}
-
-// databaseURL is database.url, or the URL the parts assemble, or with neither
-// defaultDatabaseURL. A missing part refuses boot: nothing stands in for it.
-func databaseURL(db DatabaseConnection) (string, error) {
-	if url := strings.TrimSpace(db.URL); url != "" {
-		return url, nil
-	}
-	var missing []string
-	for _, part := range []struct{ key, value string }{
-		{"database.host (DATABASE_HOST)", db.Host}, {"database.port (DATABASE_PORT)", db.Port},
-		{"database.name (DATABASE_NAME)", db.Name}, {"database.username (DATABASE_USERNAME)", db.Username},
-	} {
-		if strings.TrimSpace(part.value) == "" {
-			missing = append(missing, part.key)
-		}
-	}
-	switch len(missing) {
-	case 0:
-		return db.ConnectionString(), nil
-	case 4:
-		return defaultDatabaseURL, nil
-	default:
-		return "", fmt.Errorf("database: database.url (DATABASE_URL) is unset and its parts are incomplete: set %s", strings.Join(missing, ", "))
-	}
-}
-
-// RedisConfig is the redis section: Addr, or a redis:// or rediss:// URL.
-type RedisConfig struct {
-	// Addr is host:port.
-	Addr string `yaml:"addr"`
-	// URL is redis://[user[:password]@]host[:port][/db], or rediss:// over
-	// TLS, in place of Addr, DB and TLS. Username and Password, when set, are
-	// used over the URL's.
+	// URL is the connection string. Unset, libpq's variables name it
+	// (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD or PGPASSFILE,
+	// PGSSLMODE, PGSSLROOTCERT); with neither, Compose's local Postgres.
 	URL string `yaml:"url"`
-	// Username is the ACL user; empty is the default user.
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-	DB       int    `yaml:"db"`
-	// TLS connects over TLS, verifying the server against the system roots,
-	// or against CACert, which implies TLS.
-	TLS bool `yaml:"tls"`
-	// CACert is the PEM bundle of the CA that signed the server's certificate.
+}
+
+// DSN is the connection string the pool opens, getenv reading the process
+// environment: URL; else "" for pgx to read the libpq variables, with
+// sslmode verify-full off this machine unless PGSSLMODE names another; else
+// defaultDatabaseURL.
+func (c DatabaseConnection) DSN(getenv func(string) string) string {
+	if url := strings.TrimSpace(c.URL); url != "" {
+		return url
+	}
+	named := false
+	for _, v := range libpqConnection {
+		named = named || getenv(v) != ""
+	}
+	switch {
+	case !named:
+		return defaultDatabaseURL
+	case getenv("PGSSLMODE") == "" && !loopbackHost(cmp.Or(getenv("PGHOST"), getenv("PGHOSTADDR"), "localhost")):
+		return "sslmode=verify-full"
+	}
+	return ""
+}
+
+// RedisConfig is the redis section.
+type RedisConfig struct {
+	// URL is redis://[user[:password]@]host[:port][/db], or rediss:// over
+	// TLS.
+	URL string `yaml:"url"`
+	// CACert is the PEM bundle of the CA that signed the server's
+	// certificate, for a rediss:// URL; unset, the system roots.
 	CACert string `yaml:"ca_cert"`
 }
 
-// ClickHouseLogin is how the binary connects to ClickHouse, over its native
-// protocol. The password is a secret: CLICKHOUSE_PASSWORD, from the
-// environment or a mounted secret file.
-type ClickHouseLogin struct {
-	// Addr is host:port of the native protocol, 9000 by default.
-	Addr     string `yaml:"addr"`
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
+// ClickHouseConnection is how the binary connects to ClickHouse, over its
+// native protocol.
+type ClickHouseConnection struct {
+	// URL is clickhouse://[user[:password]@]host[:port][/database], port 9000
+	// by default; the path names the event store's database, openrails by
+	// default. A secret: CLICKHOUSE_URL, from the environment or a mounted
+	// secret file.
+	URL string `yaml:"url"`
 }
 
 // SMTPConfig is the email_smtp section (EMAIL_SMTP_HOST, …), the same names
 // every app uses; an empty host sends no email. From is one RFC 5322
 // mailbox: "Shop <noreply@shop.example>".
 type SMTPConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
+	// Host is the SMTP server; empty sends no email.
+	Host string `yaml:"host"`
+	// Port is the server's port: 465 is implicit TLS, others STARTTLS.
+	Port int `yaml:"port"`
+	// Username is the SMTP login.
 	Username string `yaml:"username"`
+	// Password is the login's password.
 	Password string `yaml:"password"`
-	From     string `yaml:"from"`
+	// From is the deployment's own mailbox.
+	From string `yaml:"from"`
 }
 
 // VaultLogin is how the binary logs in to Vault (helpers/vault).
 type VaultLogin struct {
 	// Address is the server URL (VAULT_ADDR); empty is Vault's default,
 	// https://127.0.0.1:8200.
-	Address   string `yaml:"address"`
+	Address string `yaml:"address"`
+	// Namespace is a Vault Enterprise namespace.
 	Namespace string `yaml:"namespace"`
 	// CACert is the path of the PEM bundle of the CA that signed Vault's
 	// certificate (VAULT_CACERT). Set, it is the only trust: the system
@@ -298,14 +179,17 @@ type VaultLogin struct {
 	// token.
 	AuthMethod string `yaml:"auth_method"`
 	// Token is a pre-issued Vault token.
-	Token    string `yaml:"token"`
-	RoleID   string `yaml:"role_id"`
+	Token string `yaml:"token"`
+	// RoleID is the AppRole role id.
+	RoleID string `yaml:"role_id"`
+	// SecretID is the AppRole secret id, when SecretsPath holds none.
 	SecretID string `yaml:"secret_id"`
 	// SecretsPath is a directory of operator-mounted secret files named after
 	// environment variables. Every approle login reads VAULT_SECRET_ID there,
 	// so a rotated secret is used; without one, SecretID.
 	SecretsPath string `yaml:"secrets_path"`
-	K8sRole     string `yaml:"k8s_role"`
+	// K8sRole is the kubernetes auth method's role.
+	K8sRole string `yaml:"k8s_role"`
 	// AuthMount is where the approle or kubernetes auth method is mounted:
 	// the -path of `vault auth enable`, without auth/. Empty is the method's
 	// name.
@@ -316,28 +200,25 @@ type VaultLogin struct {
 // and drops the sections that declare nothing.
 func (c *Config) finish(secretsDir string) error {
 	s := &c.Server
-	s.Engine.PublicBillingBaseURL = cmp.Or(strings.TrimSpace(s.Engine.PublicBillingBaseURL), defaultPublicBillingBaseURL(cmp.Or(s.Port, server.DefaultConfig().Port)))
+	s.Engine.PublicURL = strings.TrimSpace(s.Engine.PublicURL)
 	s.Engine.CheckoutOrigin = strings.TrimSpace(s.Engine.CheckoutOrigin)
-	authDefaults(&s.Auth, s.Engine.PublicBillingBaseURL)
-	cloudflare(s, c.CloudflareProxies)
-	if c.RateLimitsDisabled {
-		s.Engine.RateLimits, s.Engine.Captcha = billing.RateLimitsConfig{}, billing.CaptchaAccount{}
-	}
 	*s = s.WithDefaults()
 	if _, err := c.Logger.Handler(io.Discard); err != nil {
 		return err
 	}
-	url, err := databaseURL(c.Database)
-	if err != nil {
-		return err
-	}
-	c.Database.URL = url
-	if c.Redis != nil && *c.Redis == (RedisConfig{}) { // a blank REDIS_PASSWORD
+	if c.Redis != nil && strings.TrimSpace(c.Redis.URL) == "" && strings.TrimSpace(c.Redis.CACert) == "" { // a blank REDIS_URL
 		c.Redis = nil
 	}
+	if c.ClickHouse != nil && strings.TrimSpace(c.ClickHouse.URL) == "" {
+		c.ClickHouse = nil
+	}
 	if c.ClickHouse != nil {
-		if c.ClickHouse.Addr = strings.TrimSpace(c.ClickHouse.Addr); c.ClickHouse.Addr == "" {
-			c.ClickHouse = nil
+		u, err := url.Parse(strings.TrimSpace(c.ClickHouse.URL))
+		if err != nil || u.Scheme != "clickhouse" || u.Host == "" {
+			return fmt.Errorf("clickhouse.url (CLICKHOUSE_URL) must be clickhouse://[user[:password]@]host[:port][/database]")
+		}
+		if name := strings.Trim(u.Path, "/"); name != "" {
+			s.Engine.ClickHouse.Database = name
 		}
 	}
 	if c.SMTP != nil && strings.TrimSpace(c.SMTP.Host) == "" {
@@ -356,8 +237,11 @@ func Validate(cfg *Config) error {
 	if s.Port < 1 || s.Port > 65535 {
 		return fmt.Errorf("invalid port %d: must be 1-65535", s.Port)
 	}
-	if s.PrivatePort < 0 || s.PrivatePort > 65535 || (s.PrivatePort != 0 && s.PrivatePort == s.Port) {
-		return fmt.Errorf("invalid private_port %d: must be 1-65535 and not port", s.PrivatePort)
+	if s.MetricsPort < 0 || s.MetricsPort > 65535 || (s.MetricsPort != 0 && s.MetricsPort == s.Port) {
+		return fmt.Errorf("invalid metrics_port %d: must be 1-65535 and not port", s.MetricsPort)
+	}
+	if s.Engine.PublicURL == "" {
+		return fmt.Errorf("public_url (PUBLIC_URL) is required: where browsers and PSPs reach this server, without /v1 (http://localhost:%d locally)", s.Port)
 	}
 	return config.Validate(&s.Engine)
 }

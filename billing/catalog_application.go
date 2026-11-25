@@ -53,13 +53,30 @@ func (r *CatalogApplicationReceipt) String() string {
 		fmt.Fprintf(&b, "%s: catalog revision %d -> %d\n", r.ApplicationID, r.BaseRevision, r.AppliedRevision)
 	}
 	for _, c := range r.Changes {
+		if c.Deleted {
+			fmt.Fprintf(&b, "  deleted %s\n", catalogObjectName(c.Object, c.Key, c.ProductKey))
+			continue
+		}
 		fmt.Fprintf(&b, "  changed %s (%s), now revision %d\n", catalogObjectName(c.Object, c.Key, c.ProductKey), strings.Join(c.Fields, ", "), c.Revision)
 	}
 	for _, c := range r.Conflicts {
 		fmt.Fprintf(&b, "  %s\n", c)
 	}
+	var refused int
+	for _, w := range r.Warnings {
+		name := catalogObjectName(CatalogObjectPrice, w.Key, &w.ProductKey)
+		if w.Refused {
+			refused++
+			fmt.Fprintf(&b, "  refused %s: %s\n", name, w.Message)
+		} else {
+			fmt.Fprintf(&b, "  applied %s with warning: %s\n", name, w.Message)
+		}
+	}
 	if len(r.Conflicts) > 0 {
 		fmt.Fprintf(&b, "%d object(s) skipped: an edit set the fields above. Change the file to agree, remove those fields, or apply with force.\n", len(r.Conflicts))
+	}
+	if refused > 0 {
+		fmt.Fprintf(&b, "%d price(s) refused and left out; the rest of the document applied. Fix the file and apply it again.\n", refused)
 	}
 	return b.String()
 }
@@ -89,12 +106,15 @@ const (
 
 // CatalogChange is one object a document changed: the fields it set and the
 // object's revision after. ProductKey names a price's product.
+// Deleted marks an object removed by the apply: Fields is empty and Revision
+// is its last revision before deletion.
 type CatalogChange struct {
 	Object     CatalogObjectKind `json:"object"`
 	Key        string            `json:"key"`
 	ProductKey *string           `json:"product_key"`
 	Fields     []string          `json:"fields"`
 	Revision   int64             `json:"revision"`
+	Deleted    bool              `json:"deleted"`
 }
 
 // CatalogConflict is one object a document skipped: none of its changes

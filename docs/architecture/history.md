@@ -1,11 +1,11 @@
 # History
 
-Append-only history of what changed, who changed it and how, in one envelope: configuration history (`change_log`), every change to the catalog and to a merchant's configuration documents, and operations history (`operation_log`), each phase of each provider operation, written before the call. A subscription's history reads the operations history beside its own transitions. What each system records is on its page: [catalog](catalog.md), [merchant configuration](merchant-configuration.md), [payment providers](payment-providers.md). Integration guide: [`ListChanges`](../client.md#merchant-configuration-and-psps).
+Append-only history of what changed, who changed it and how, in one envelope: configuration history (`change_log`), every change to the catalog, to a merchant's configuration documents and to its controls, and operations history (`operation_log`), each phase of each provider operation, written before the call. A subscription's history reads the operations history beside its own transitions. What each system records is on its page: [catalog](catalog.md), [merchant configuration](merchant-configuration.md), [payment providers](payment-providers.md). Integration guide: [`ListChanges`](../client.md#merchant-configuration-and-psps).
 
 ## Concepts
 
 - **Entry** (`billing.LogEntry`, id `log_`): when (`occurred_at`), the actor (`billing.LogActor`: `staff:<invoker>` as the route gate admitted it, `customer:<invoker>`, `provider:<rail>`, or `system`, `file` and `vault` where no person acted), the source (`billing.LogSource`: `api`, `console`, `customer`, `catalog_apply`, `cli`, `reload`, `job`, `intent`, `webhook`, `provider_read`), the object (`billing.LogObjectType` and its id), the action (`billing.LogAction`), a versioned payload (`history.Version`), and an optional reason, request id and operation id.
-- **Configuration history** (`change_log`): products, price keys, meters and limits (`create`, `update`, `archive`, `unarchive`, `delete`, `key_add`, `key_remove`, `key_rename`, `move`), and the merchant, messages, PSP and custodian documents, each changed field before and after.
+- **Configuration history** (`change_log`): products, price keys, meters and limits (`create`, `update`, `archive`, `unarchive`, `delete`, `key_add`, `key_remove`, `key_rename`, `move`), the merchant, messages, PSP and custodian documents, each changed field before and after, and the merchant's controls (`controls`: writes, rebills, destructive arming; `controls.Set`).
 - **Operations history** (`operation_log`): each phase of a provider operation (attempting before the call, then its result or a hold), with its address: rail, PSP or custodian, and subscription.
 
 ## How it works

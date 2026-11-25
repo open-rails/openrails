@@ -33,7 +33,8 @@ status change to `subscription_status_transitions`.
 `RunInMerchantScope`) calls `MoneyService.AdmitDueSubscriptionCollection`. Under
 customer and subscription locks it replays an unresolved
 `subscription_collection`; refuses during an upgrade
-(`ErrRenewalHeldByUpgrade`), under `engine_admission_hold`, before
+(`ErrRenewalHeldByUpgrade`), while the merchant's rebills are held
+(`controls.ErrRebillsHeld`; the scan selects none then), before
 `EngineCollectionDue` or for a wholly elapsed period
 (`SelectEngineRenewalPeriod`); takes terms from the one paid agreement at the
 boundary (`PrepareEngineRenewalTerms`), never the catalog, with any due
@@ -79,7 +80,7 @@ The due pass moves a provider-billed renewal still unpaid 48 hours
   `PUT /{id}/payment-method`, `POST` on `/{id}/cancel`, `/{id}/resume`,
   `/{id}/change`, `/{id}/confirm`, `/{id}/change/preview`, `/{id}/retry-now`.
 - Events ([events](../client.md#events)): `premium_started`, `premium_renewed`, `premium_ended`, `subscription_canceled`, `subscription_changed`, `payment_method_failed`, `payment_method_update_required`.
-- Config: `dunning_policy`, `engine_admission_hold`, `user_action_rate_limit`, `destructive_action_limits`.
+- Config: `dunning_policy`; the customer-action cap and the destructive limits are fixed; the merchant's controls (`openrails merchant rebills hold|release`, [merchant controls](../standalone.md#merchant-controls)).
 
 ## Guarantees
 

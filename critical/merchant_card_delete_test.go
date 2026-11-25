@@ -43,7 +43,7 @@ func TestMerchantCardRemoval(t *testing.T) {
 				func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
 					return answer(r, http.StatusBadRequest, refusal.envelope), nil
 				})
-			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 			journal.core.ClearIntercepts()
 			require.Equal(t, refusal.status, status, string(raw))
 			require.Contains(t, string(raw), refusal.code)
@@ -53,7 +53,7 @@ func TestMerchantCardRemoval(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, tried.Items, 1, "the attempt records NMI's error code")
 		}
-		status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 		require.Equal(t, 201, status, string(raw))
 		var method billing.PaymentMethod
 		require.NoError(t, json.Unmarshal(raw, &method))
@@ -95,8 +95,9 @@ func TestMerchantCardRemoval(t *testing.T) {
 
 		for _, failReadBeforeDelete := range []bool{true, false} {
 			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{
-				PSPID: psps.Items[0].ID,
-				Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}),
+				PSPID:          psps.Items[0].ID,
+				Token:          journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}),
+				BillingDetails: billedTo("US", "10001"),
 			})
 			require.Equal(t, http.StatusCreated, status, string(raw))
 			var method billing.PaymentMethod
@@ -165,7 +166,7 @@ func TestMerchantCardRemoval(t *testing.T) {
 		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
 		require.Len(t, psps.Items, 1)
-		status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var method billing.PaymentMethod
 		require.NoError(t, json.Unmarshal(raw, &method))
@@ -177,11 +178,21 @@ func TestMerchantCardRemoval(t *testing.T) {
 			return n
 		}
 		require.Equal(t, 1, versions(), "a saved card's history starts with it")
+		// A live card is also held by its card-on-file mandate, whose foreign
+		// key acts first. Removed, nothing but its versions holds it.
+		status, raw = a.request(t, http.MethodDelete, "/v1/admin/customers/"+method.CustomerID.String()+"/payment-methods/"+method.ID.String(), a.alphaKey.Secret, nil)
+		require.Equal(t, http.StatusNoContent, status, string(raw))
+		var live int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "mandates"}.Sanitize()+" WHERE merchant_id = $1 AND payment_method_id = $2 AND status NOT IN ('revoked', 'ended')",
+			a.alpha.MerchantID().UUID(), method.ID.UUID()).Scan(&live))
+		require.Zero(t, live, "removal ends the card's mandates")
+		kept := versions()
 		_, err = a.pool.Exec(t.Context(), "DELETE FROM "+pgx.Identifier{a.schema, "payment_methods"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2", a.alpha.MerchantID().UUID(), method.ID.UUID())
 		var refused *pgconn.PgError
 		require.ErrorAs(t, err, &refused, "a card's permanent versions refuse its deletion")
-		require.Equal(t, "23503", refused.Code)
-		require.Equal(t, 1, versions())
+		require.Equal(t, "23001", refused.Code, "PostgreSQL 18 reports a RESTRICT refusal as restrict_violation: "+refused.Message)
+		require.Equal(t, "payment_method_versions_payment_method_id_fkey", refused.ConstraintName)
+		require.Equal(t, kept, versions())
 	})
 
 	t.Run("OR-J12-S73/a-card-an-unverified-membership-bills-is-kept", func(t *testing.T) {

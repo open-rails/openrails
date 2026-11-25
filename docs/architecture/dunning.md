@@ -2,7 +2,7 @@
 
 Collection decides what happens when a customer's card refuses money OpenRails asked for. The decline table maps every rail code to one reason and action; the retry schedule collects money owed (renewals OpenRails collects, usage orders); arrears delinquency tracks how long a usage debt goes unpaid. Merchants set the retry schedule, for renewals and usage orders alike, and the arrears grace periods. Renewal admission and the state machine are in
 [subscriptions](subscriptions.md), usage rating in [usage billing](usage-billing.md).
-Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limits-admissions-and-the-gate).
+Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limits-and-the-gate).
 
 ## Concepts
 
@@ -74,7 +74,7 @@ CCBill-owned subscriptions retry at the provider; OpenRails mirrors `past_due`.)
   `payment_method_update_required` (`payment_method_failed` when it queues a
   refresh of a possibly reissued card) and sets `grace_ends_at` to the window's end;
   an expired card may queue a refresh ([payment methods](payment-methods.md)).
-- `NonRecoverable` or a spent schedule cancels, ends access and queues the provider cancel, given a certainty leg and an open `destructive.Gate`. Otherwise `lifecycle.TerminalHeld` keeps engine members `past_due`, makes NMI-schedule members `unverified`, and raises `life.terminal_outcome.held`, which alerts the merchant's operator once per case; its recommended action names what lets the outcome apply (the switch, a billing import's cancellation cap, a re-import, or a provider check).
+- `NonRecoverable` or a spent schedule cancels, ends access and queues the provider cancel, given a certainty leg and an open `destructive.Gate`. Otherwise `lifecycle.TerminalHeld` keeps engine members `past_due`, makes NMI-schedule members `unverified`, and raises `life.terminal_outcome.held`, which alerts the merchant's operator once per case; its recommended action names what lets the outcome apply (the merchant's destructive arming, a billing import's cancellation cap, a re-import, or a provider check).
 - Access while dunning is a grace grant (`dunningAccess`), unless
   `access_during_dunning` is `suspend`.
 
@@ -242,6 +242,6 @@ Other tests: `internal/decline`, `internal/modules/collection` and
 Gaps:
 - No scenario sends advice on a declined usage-order collection: the Stripe fake has no invoice collection.
 - Untested: `access_during_dunning: suspend`; the `life.decline.unmapped` and
-  `life.cadence.unknown` findings; a Solana schedule spent with the switch off.
+  `life.cadence.unknown` findings; a Solana schedule spent while the merchant is disarmed.
 - Nothing checks that `decline`'s `reasons` covers every
   `billing.DeclineReasons()` entry.

@@ -396,7 +396,7 @@ type BillingCustomerMrr struct {
 	FirstActiveAt *time.Time
 }
 
-// Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|cohort|heading|programs), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant's profile.
+// Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|cohort|funnel|heading|programs), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant's profile.
 type BillingDashboardConfig struct {
 	MerchantID uuid.UUID
 	Layout     []byte
@@ -427,15 +427,6 @@ type BillingDestructiveAction struct {
 	FinishedAt         *time.Time
 	CompletionSequence *int64
 	Result             *string
-}
-
-// Global by design: instance-level operator kill switch for destructive convergence, not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.
-type BillingDestructiveActionSwitch struct {
-	Singleton bool
-	Enabled   bool
-	UpdatedBy *string
-	Reason    *string
-	UpdatedAt time.Time
 }
 
 // Deployment-authoritative destructive incident episodes. Merchant_id identifies only the triggering tenant; actor/deployment holds span tenants. An audited clear ends one episode, never an ordinary finding resolution. Retention: permanent, never pruned.
@@ -703,7 +694,7 @@ type BillingIdempotencyKey struct {
 	UpdatedAt      time.Time
 }
 
-// One gate's lease, or a batch job's usage stream: its numbered usage, its in-flight report and the request holds its gate admitted. It is live while it is not closed and synced within the lease lifetime; a later sync makes it live again. Retention: rows are deleted 61 days after last_sync_at.
+// One gate's lease, or a batch job's usage stream: its numbered usage and its in-flight report. It is live while it is not closed and synced within the lease lifetime; a later sync makes it live again. Retention: rows are deleted 61 days after last_sync_at.
 type BillingLease struct {
 	MerchantID uuid.UUID
 	// The UUID the client chose; lse_ on the wire.
@@ -712,7 +703,7 @@ type BillingLease struct {
 	LastSyncAt time.Time
 	// The highest usage item number settled. Items are numbered once per lease and settle in order.
 	SettledThroughN int64
-	// When a sync with close ended the lease, released its request holds and cleared its in-flight report. Usage against it still settles.
+	// When a sync with close ended the lease and cleared its in-flight report. Usage against it still settles.
 	ClosedAt *time.Time
 	// The receipts of the lease's latest settlements, oldest first: each one's from_n, through_n, the digest of its items and the numbers and codes of the items it refused.
 	Receipts []byte
@@ -842,54 +833,6 @@ type BillingLimitAdjustment struct {
 	CreatedAt      time.Time
 }
 
-// Capacity set aside for one admitted request of one customer, in one currency, until it is captured, released or reaches expires_at; a gate's hold (lease_id) has no deadline and counts while its lease is live. What it holds of each limit is in limit_hold_parts. Retention: monthly partitions on created_at, dropped once older than the 61-day replay horizon.
-type BillingLimitHold struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	// When the hold was issued; the partition key. A hold row is live at most 30 days past it. request_id is unique per merchant among retained holds: admission serializes on it, because a partitioned key must carry created_at.
-	CreatedAt  time.Time
-	CustomerID uuid.UUID
-	Currency   string
-	// The gate lease that admitted the request near its limit: the hold counts while the lease is live, is captured by the lease's usage and released by its sync or close.
-	LeaseID   *uuid.UUID
-	RequestID string
-	// A request's hold: its money estimate, the host's or what its usage estimate was priced at.
-	EstimatedAmount int64
-	// A request's hold: what the customer could spend when it was admitted, before the hold.
-	AvailableAmount int64
-	// The admission terms: {invoker, invoker_type, trust_level, roles, resource, source, accrual_rate_delta_per_hour}.
-	Terms []byte
-	// The estimated usage ({event_type, dimensions, metadata, amount}); dynamic cards charge its optional amount. Null for a host-stated hold.
-	EstimateUsage []byte
-	// The rate cards that priced the money estimate, pinned: the capture is priced by them, whatever the catalog says later.
-	RateCards          []byte
-	RequestedExpiresAt *time.Time
-	// A request's deadline: past it the hold reserves no money and no end-less limit, and still counts in its windows until it is captured or released.
-	ExpiresAt      *time.Time
-	State          string
-	CaptureTerms   []byte
-	CapturedAmount *int64
-	CapturedAt     *time.Time
-	ReleasedAt     *time.Time
-	UpdatedAt      time.Time
-	// What each meter charged a captured request: [{meter_key, model, cell, quantity, amount}].
-	CapturedCharges []byte
-}
-
-// What one hold sets aside of one limit: the window it was issued in, which its capture settles into, and the units held there. balance has the Unix epoch and no end. A window's held units are its live holds' parts. It has no foreign key to limit_holds, because PostgreSQL cannot drop a partition a foreign key references: every reader joins the part to its hold, so a part whose hold is gone counts nowhere. Retention: monthly partitions on hold_created_at, dropped with their hold's, each month before its month of holds.
-type BillingLimitHoldPart struct {
-	MerchantID uuid.UUID
-	HoldID     uuid.UUID
-	// The hold's created_at: the partition key, shared with the hold so both drop together.
-	HoldCreatedAt  time.Time
-	CustomerID     uuid.UUID
-	LimitKey       string
-	Unit           string
-	WindowStartsAt time.Time
-	WindowEndsAt   *time.Time
-	Held           int64
-}
-
 // One customer's window of one limit, identified by the server clock: a session or first-use window a use opened, a window staff adjusted, or one whose usage reached capacity; a rolling limit's bucket, a rate or lifetime limit's one row, or a billing policy's spend window (spend:<identity>). What usage took of it is in the event store (limit_usage). Retention: rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does.
 type BillingLimitWindow struct {
 	MerchantID uuid.UUID
@@ -993,16 +936,21 @@ type BillingMerchant struct {
 	TenantID *uuid.UUID
 }
 
-// Per-merchant destructive-action policy: destructive_actions_enabled is the per-merchant emergency stop (the instance switch in destructive_action_switch gates it globally); enforce_armed_at is the first-enforce gate — NULL means the merchant's provider pull runs advisory (findings only, zero mutations) until an operator reviews the first pull and arms it.
-type BillingMerchantDestructivePolicy struct {
-	MerchantID                uuid.UUID
-	DestructiveActionsEnabled bool
-	// NULL = advisory-only pulls for this merchant. Absence of a row is the same as NULL, so a newly onboarded merchant is surveyed before it is enforced.
-	EnforceArmedAt       *time.Time
+// One merchant's operator controls; no row is writes full, rebills released, destructive actions disarmed. A copy of the billing book writes nothing whatever writes says. Export sets the source's writes readonly and restore the destination's; each change is a change_log entry (object_type controls).
+type BillingMerchantControl struct {
+	MerchantID uuid.UUID
+	// Provider writes: full, limited (what the system initiates waits) or readonly (nothing reaches a provider).
+	Writes string
+	// The rebill brake: merchant-initiated charges (renewals and rebills OpenRails charges, dunning retries, scheduled usage collection) wait until it is released; customer-initiated charges never wait.
+	RebillsHeld bool
+	// Destructive convergence (cancellation, revocation, provider deletes, pull overwrites) runs only when armed; arm once the merchant's first pull has been reviewed.
+	DestructiveArmed bool
+	// When a completed pull first surveyed the merchant, so its findings are ready to review; a destructive decision rests on no older evidence. Stamped once, never a control.
 	FirstPullCompletedAt *time.Time
-	UpdatedBy            *string
-	Reason               *string
-	UpdatedAt            time.Time
+	// Who made the last change, with its reason and instant; NULL until a control changes.
+	ChangedBy *string
+	Reason    *string
+	ChangedAt *time.Time
 }
 
 // A merchant's exclusive work while it runs, one row per kind: pull is one mutating provider pull at a time (a provider refresh or a prune), across every replica and the operator's CLI. Its holder renews expires_at while the work runs and deletes the row when it ends; a holder that stops renewing loses it at expires_at.
@@ -1023,15 +971,6 @@ type BillingMerchantSlugAlias struct {
 	MerchantID uuid.UUID
 	ExpiresAt  *time.Time
 	CreatedAt  time.Time
-}
-
-// One merchant's provider write posture; no row is full. A copy of the billing book is readonly whatever it says. Export sets the source readonly and restore the destination; an operator arms it back to full.
-type BillingMerchantWritePosture struct {
-	MerchantID uuid.UUID
-	Mode       string
-	Reason     string
-	SetBy      string
-	SetAt      time.Time
 }
 
 // Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; arrears owed exposure is derived from open invoices.
@@ -1363,7 +1302,7 @@ type BillingOperationLog struct {
 	SubscriptionID *uuid.UUID
 }
 
-// One payable (ord_ id): frozen lines and total in one currency, paid by at most one live order attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from order_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
+// One payable (ord_ id): frozen lines and total in one currency, paid by at most one live order attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from order_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 397 days after they closed; every other order is permanent.
 type BillingOrder struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
@@ -1430,6 +1369,32 @@ type BillingOrder struct {
 	LinesDigest []byte
 	// The merchant's page frames the pay URL, only on its registered origins (settings payment_page.embed_origins); otherwise the customer is sent to it.
 	Embedded *bool
+	// Set on a checkout when it was created: reactivated when the customer had MRR with the merchant and has none now, new on a first purchase without MRR history, returning otherwise.
+	CustomerType *string
+	// Set on a checkout (an order OpenRails started for its customer to pay): 1 + the customer's paid purchases when it was created. Two checkouts open at once can share one. NULL on every other order and on checkouts created before it was recorded.
+	PurchaseNumber *int32
+	// When the customer first read the open checkout in person (the payment form loaded), or created it with its payment.
+	OpenedAt *time.Time
+	// When the customer first asked to pay the checkout, whatever the answer.
+	SubmittedAt *time.Time
+	// ISO 3166-1 alpha-2 country of the billing address the latest pay request gave, or of the saved card it charged.
+	BillingCountry *string
+	// ISO 3166-1 alpha-2 issuing country of the card; not recorded yet.
+	CardCountry *string
+	// ISO 3166-1 alpha-2 country a Cloudflare proxy reported for the customer's first request in person. The address itself is never stored.
+	IpCountry *string
+	// The language the customer's first request in person preferred (Accept-Language), as language[-region].
+	Language            *string
+	AttributionSource   *string
+	AttributionMedium   *string
+	AttributionCampaign *string
+	AttributionTerm     *string
+	AttributionContent  *string
+	// The host of the referrer the merchant reported; never its path or query.
+	AttributionReferrer  *string
+	AttributionAffiliate *string
+	// On a subscription's bill: the checkout that bought the subscription, whose facts its money is reported under.
+	CheckoutOrderID *uuid.UUID
 }
 
 // An order payment attempt: provider execution and any customer action are tied to the order. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.
@@ -2480,6 +2445,8 @@ type BillingSubscription struct {
 	RailSubscriptionKey *string
 	// The earliest retry the network's advice allowed, when that advice set the scheduled retry: at or past the next renewal it deferred every retry, and the case ends at grace_ends_at. NULL when the dunning policy set it.
 	RetryAdvisedAt *time.Time
+	// The checkout whose payment created the subscription; NULL for one bought before checkouts were recorded, imported or started at its provider.
+	CheckoutOrderID *uuid.UUID
 }
 
 // Append-only observed subscription card and retry changes. References and before/after values are snapshots, not charging instructions. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.

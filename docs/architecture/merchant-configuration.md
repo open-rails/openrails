@@ -20,8 +20,7 @@ points at; routes callbacks to their PSP; and moves a book between deployments. 
   (KV v2, check-and-set).
 - **PSP and custodian identities**: `billing.psps` and `billing.custodians` rows;
   their settings and credentials are their documents.
-- **Write posture**: `billing.merchant_write_posture`, a `readonly` or `limited` hold
-  on the merchant's provider writes; no row is full.
+- **Controls**: `billing.merchant_controls`, the merchant's operator controls (`internal/controls`): `writes` (`full`, `limited`, `readonly`), `rebills_held` and `destructive_armed`, with the last change; no row is full, released and disarmed. Each change is a `controls` entry of `change_log`.
 
 ## How it works
 
@@ -68,7 +67,7 @@ points at; routes callbacks to their PSP; and moves a book between deployments. 
   one, and fingerprint credentials (`CredentialFingerprinter`) to catch one gateway
   account declared twice. A refused document keeps its previous version serving
   (`keepServed`) and opens `consistency.merchant_config.not_served`.
-- **Currencies.** `merchantconfig.NormalizeCurrencies` checks `settings.currencies` (`currency.Unit`) into the merchant's `currency.Registry` (`merchantconfig.Settings.Currencies`): OpenRails' registry and the merchant's own units. `Registry.Money` refuses a unit where money is taken; `refuseUnits` refuses one in a money setting with `merchant_unit_unsupported`. Balances, lots, admissions, prices, credit grants and rate cards take the merchant's units ([credits](credits.md)); a unit the merchant does not declare is `currency_unsupported` there (`balanceCurrency`, `ownUnit`, `checkCatalogUnits`). The units book records each unit, with the scale its document in the file or Vault declares then, when a catalog write first names it or a deposit first holds it, under the lock every catalog write and settings edit takes, taken before any customer lock (`ledger_units`, `Ledger.CountUnits`, `ledger.UnitsLock`). An edit that removes or rescales a unit something counts (`UnitsInUse`) is refused; a document loaded from a file or Vault that does so, at start-up too, keeps serving the unit at its recorded scale, or else its previous declaration, with a finding (`KeepCountedUnits`). Configuration is authored in a file or Vault, never Postgres, but a unit's scale is what its stored amounts mean: the ledger supplies it, and a unit the document dropped keeps serving at it, named by its code.
+- **Currencies.** `merchantconfig.NormalizeCurrencies` checks `settings.currencies` (`currency.Unit`) into the merchant's `currency.Registry` (`merchantconfig.Settings.Currencies`): OpenRails' registry and the merchant's own units. `Registry.Money` refuses a unit where money is taken; `refuseUnits` refuses one in a money setting with `merchant_unit_unsupported`. Balances, lots, lease syncs, prices, credit grants and rate cards take the merchant's units ([credits](credits.md)); a unit the merchant does not declare is `currency_unsupported` there (`balanceCurrency`, `ownUnit`, `checkCatalogUnits`). The units book records each unit, with the scale its document in the file or Vault declares then, when a catalog write first names it or a deposit first holds it, under the lock every catalog write and settings edit takes, taken before any customer lock (`ledger_units`, `Ledger.CountUnits`, `ledger.UnitsLock`). An edit that removes or rescales a unit something counts (`UnitsInUse`) is refused; a document loaded from a file or Vault that does so, at start-up too, keeps serving the unit at its recorded scale, or else its previous declaration, with a finding (`KeepCountedUnits`). Configuration is authored in a file or Vault, never Postgres, but a unit's scale is what its stored amounts mean: the ledger supplies it, and a unit the document dropped keeps serving at it, named by its code.
 - **Follow-ups.** `syncMerchantConfig` normalizes settings (`merchantconfig.Normalize`)
   and applies `secrets.scim_token` (`scim.Declare`); `followPSPPosture`,
   `followStripeWebhooks` and others react to the change.
@@ -115,18 +114,18 @@ answers `503`, so the provider retries.
   (`checkSchema`), refuses unresolved work (`preflight`), checks the ledger
   (`CheckBillingRestoreLedger`) and writes and counts each `contract.Profiles` table.
   The footer holds the row count and SHA-256 (`internal/archivewire`). A failed export
-  puts back the posture it found.
+  puts back the writes it found unless the controls changed since.
 - **Restore** (`merchantarchive.Restore`). The header's merchant and tenant must be the
   target's. In one merchant transaction: `destructiveArchiveBarrier`, a
   `billing_restore` receipt (`BeginBillingRestore`), the rows, `validateReferences`,
   due work rebuilt for this merchant (`RebuildBalanceWatches`, `RebuildDelinquencyDue`,
   `RebuildUsageDue`), live operations queued for their due time (`queueWakes`), the
-  merchant left `readonly` (`landReadonly`), the receipt finished. The same archive
+  merchant left `readonly` and disarmed (`landReadonly`), the receipt finished. The guard refuses a destination already armed or pulled. The same archive
   again is a no-op (`AlreadyImported`); another is `billing_archive_not_empty`.
 - **Not moved**: configuration and credentials, `customer_contacts`,
   `provisioning_tokens`, the directory (`internal/merchantarchive/checks.go`). The
   destination identity is prepared first (`ProvisionForRestore`, `RegisterForRestore`,
-  `openrails billing prepare-target`); `openrails merchant arm` restores writes.
+  `openrails billing prepare-target`); `openrails merchant writes full` restores writes.
 
 ## Interfaces
 
@@ -134,7 +133,7 @@ answers `503`, so the provider retries.
 - HTTP (`RouteGroups.MerchantConfig`): `/v1/merchant/configuration`,
   `/v1/merchant/alert-webhooks`, `/v1/merchant/psps`, `/v1/merchant/custodians`,
   `/v1/merchant/billing-archive`. No route creates or deletes a merchant.
-- CLI: `openrails merchants`, `merchant arm|hold|purge`, `book`, `billing
+- CLI: `openrails merchants`, `merchant controls|writes|rebills|destructive|purge`, `book`, `billing
   export|import|prepare-target`, `get-merchant-config`, `apply-merchant-config`,
   `push-merchant-config`, `dump-merchant-config`.
 - Configuration: `vault.kv_mount`, `vault.scope_prefix`, `card_vault.kv_mount`, `naming`.
@@ -202,16 +201,15 @@ Checks:
 - OR-J31-S08 and OR-J31-S11: archives written before a schema cleanup still restore.
 
 ### 6. Data lifecycle
-The directory, alias, posture, book, PSP and custodian tables are `State`;
-`maintenance_runs` (inventories, purges, restore receipts) is `Permanent`. Restore
-creates partitions before its transaction (`retention.EnsureRetainedPartitions`). The
+The directory, alias, controls, book, PSP and custodian tables are `State`;
+`maintenance_runs` (inventories, purges, restore receipts) is `Permanent`. The
 archive refuses an OpenRails table or column without a reviewed decision.
 
 `change_log` is `Permanent` and append-only: a purge keeps it, the archive moves it, and a restore adds the archive's entries to the destination's own, once per merchant (the restore receipt makes a replay a no-op). It is not in the restore guard: the destination records history as soon as its configuration loads.
 
 Checks:
 - `internal/retention/tables.go` classifies `merchants`, `merchant_slug_aliases`,
-  `merchant_write_posture`, `book_identity`, `psps`, `custodians`.
+  `merchant_controls`, `book_identity`, `psps`, `custodians`.
 - `ownedTables` and the exclusion lists in `checks.go` cover every owned table.
 
 ### 7. Work scales with activity

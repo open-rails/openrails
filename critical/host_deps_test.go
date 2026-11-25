@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/stretchr/testify/require"
 )
@@ -52,7 +54,6 @@ func TestHostDeps(t *testing.T) {
 			t.Cleanup(pool.Close)
 			require.Empty(t, pool.Config().ConnString())
 			w.deps.Postgres = pool
-			w.cfg.Database.LeaseConns = 2
 		})
 		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "settings-pool", DisplayName: "Settings pool"})
 		require.NoError(t, err)
@@ -63,6 +64,41 @@ func TestHostDeps(t *testing.T) {
 
 		_, err = openrails.New(t.Context(), w.cfg, openrails.Deps{Clock: w.clock})
 		require.ErrorContains(t, err, "Deps.Postgres is required")
+	})
+	t.Run("OR-J04-S82/provider-endpoints-are-loopback-fakes-never-beside-a-live-psp", func(t *testing.T) {
+		gateway := nmimock.New(nmimock.Options{})
+		t.Cleanup(gateway.Close)
+		nmi := func(environment billing.Environment) billing.PSPs {
+			return billing.PSPs{"nmi": openrails.NMIPSP{Environment: environment, GatewayID: "endpoints", SecurityKey: "critical-endpoints", TokenizationKey: "critical-endpoints-tokenization"}.PSPConfig()}
+		}
+		w := newWorld(t, func(w *world) {
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{NMIGatewayURL: gateway.URL()}
+			m := cfgMerchant(w.cfg, "alpha")
+			m.PSPs = nmi(billing.EnvironmentSandbox)
+			setCfgMerchant(&w.cfg, "alpha", m)
+		})
+		require.NoError(t, configurationState(t, w.engine), "a sandbox PSP serves beside a loopback fake")
+
+		for _, c := range []struct {
+			endpoints openrails.ProviderEndpoints
+			says      string
+		}{
+			{openrails.ProviderEndpoints{NMIGatewayURL: "http://localhost:9091"}, `NMIGatewayURL: provider endpoint refused: host "localhost" must be a loopback IP literal`},
+			{openrails.ProviderEndpoints{StripeAPIURL: "http://192.0.2.1:9092"}, `StripeAPIURL: provider endpoint refused: host "192.0.2.1" is not a loopback address`},
+			{openrails.ProviderEndpoints{CCBillDataLinkURL: "http://user:secret@127.0.0.1:9094"}, "CCBillDataLinkURL: provider endpoint refused:"},
+			{openrails.ProviderEndpoints{CCBillWebhookSources: []string{"0.0.0.0/0"}}, `CCBillWebhookSources: CIDR "0.0.0.0/0" matches every address`},
+		} {
+			_, err := openrails.New(t.Context(), w.cfg, openrails.Deps{Postgres: w.pool, ProviderEndpoints: c.endpoints})
+			require.ErrorContains(t, err, "Deps.ProviderEndpoints: "+c.says)
+		}
+
+		live := w.cfg
+		live.Merchants = slices.Clone(w.cfg.Merchants)
+		m := cfgMerchant(live, "alpha")
+		m.PSPs = nmi(billing.EnvironmentLive)
+		setCfgMerchant(&live, "alpha", m)
+		_, err := openrails.New(t.Context(), live, openrails.Deps{Postgres: w.pool, ProviderEndpoints: openrails.ProviderEndpoints{NMIGatewayURL: gateway.URL()}})
+		require.ErrorContains(t, err, "Deps.ProviderEndpoints.NMIGatewayURL is a test seam and is refused beside a live PSP (alpha/nmi)")
 	})
 	t.Run("OR-J04-S73/a-kv-mount-without-a-vault-client-is-refused-and-reported", func(t *testing.T) {
 		w := newWorld(t, func(w *world) {

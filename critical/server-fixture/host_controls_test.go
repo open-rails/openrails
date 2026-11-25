@@ -43,6 +43,19 @@ func hostCommand(t *testing.T, srv *server.Server, clock *clockwork.FakeClock, c
 			owner, _ := server.MerchantRole("owner")
 			result, err = srv.AuthKit().CreateAPIKey(t.Context(), iam.SystemIdentity(), iam.GroupByID(mid.String()), iam.NewAPIKey{Name: "other issuer", Role: owner, ProvisionsFor: app.ID})
 		}
+	case "trust-application":
+		// The operator declares an application in the merchant's group (or
+		// root's): Body is the registration.
+		var app iam.RemoteApplication
+		if err = json.Unmarshal(cmd.Body, &app); err != nil {
+			break
+		}
+		group := iam.RootGroup()
+		if cmd.Merchant != "root" {
+			group = iam.GroupByID(mid.String())
+		}
+		app.Enabled = true
+		result, err = srv.AuthKit().UpsertRemoteApplication(t.Context(), iam.SystemIdentity(), group, app)
 	case "revoke-directory-key":
 		err = srv.AuthKit().RevokeAPIKey(t.Context(), iam.SystemIdentity(), iam.GroupByID(mid.String()), cmd.ID)
 		result = true

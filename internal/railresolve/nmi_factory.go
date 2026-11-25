@@ -10,9 +10,9 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // NMIFactory is the only way OpenRails builds an NMI client for a PSP. The
@@ -20,22 +20,23 @@ import (
 // security key and its declared environment, so its posture key is the one
 // startup verified. There is no bare-key path.
 type NMIFactory struct {
-	Config *billing.Config
+	// Gateway is the loopback NMI gateway (Deps.ProviderEndpoints), or empty
+	// for NMI's own endpoints.
+	Gateway string
 	// Postures is each merchant's write posture: a readonly merchant's
 	// client writes nothing, and so does every client without Postures.
-	Postures writeposture.Reader
+	Postures controls.Reader
 	// Transport replaces the wire at the real endpoints (test seam). Unlike
 	// the sandbox gateway it exempts nothing: posture is verified through it.
 	Transport http.RoundTripper
 	Log       *slog.Logger
 }
 
-// gateway is config.ProviderSandbox's loopback NMI gateway, or empty for NMI.
 func (f *NMIFactory) gateway() string {
 	if f == nil {
 		return ""
 	}
-	return config.SandboxNMIGatewayURL(f.Config)
+	return f.Gateway
 }
 
 // Settings reads the PSP's credential set: its versioned security key, the

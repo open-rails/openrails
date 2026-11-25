@@ -20,8 +20,6 @@ internal/modules/payment/purchase_service.go|return time.Now()|business_time_bou
 internal/modules/payment/service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/payment/attempt_repo.go|now = time.Now()|db_audit_timestamp|Default updated_at timestamp; expiry lookup requires caller time|1
 internal/modules/payment/attempt_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/modules/copilot/service.go|d.Clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/modules/copilot/service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/dashboard/dashboard.go|return validateWidgetsAt(widgets, time.Now().UTC())|business_time_boundary|Standalone convenience validation; explicit-time API used by clock-aware services|1
 internal/modules/delinquency/service.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/entitlements/entitlement_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
@@ -61,7 +59,7 @@ internal/modules/webhooks/converge_stripe.go|return time.Now()|business_time_bou
 internal/modules/webhooks/nmi.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/stripe.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/reconcile/appliers.go|return time.Now().UTC()|business_time_boundary|Explicit default local-writer clock boundary; owning engine clock takes precedence|1
-internal/reconcile/destructive_run_converge.go|now := time.Now().UTC()|db_audit_timestamp|Before-image capture and reversal audit timestamps use the actual operation time|2
+internal/reconcile/destructive_run_converge.go|now := time.Now().UTC()|db_audit_timestamp|Before-image capture and reversal audit timestamps use the actual operation time|3
 internal/reconcile/destructive_run_converge.go|MerchantID: mid, ID: runID, Status: status, Now: time.Now().UTC(), Affected: payload,|db_audit_timestamp|Destructive-run completion audit timestamp|1
 internal/reconcile/engine.go|return time.Now().UTC()|business_time_boundary|Explicit reconcile-engine default clock boundary; supplied engine clock takes precedence|1
 internal/reconcile/prune.go|now := time.Now().UTC()|db_audit_timestamp|Prune and rollback row audit timestamps use the actual operator-action time|2

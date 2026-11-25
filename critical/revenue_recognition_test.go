@@ -455,10 +455,10 @@ func TestRevenueRecognition(t *testing.T) {
 		require.Nil(t, done.Next)
 	})
 
-	t.Run("OR-J41-S09/a-usage-orders-payment-books-its-cash-and-leaves-it-for-the-receivable", func(t *testing.T) {
+	t.Run("OR-J41-S09/a-usage-orders-payment-books-its-cash-and-applies-it-to-the-receivable", func(t *testing.T) {
 		for _, collection := range []string{"card", "remittance"} {
 			t.Run(collection, func(t *testing.T) {
-				a, _, customer := usageBillingWorld(t, true, collection == "remittance")
+				a, _, customer := usageBillingWorld(t, collection == "remittance")
 				oneUsage(t, a.alpha, usageInput(customer, "billed-work", 3))
 				// The pass posts usage taken in before its instant.
 				a.clock.Advance(time.Second)
@@ -484,10 +484,12 @@ func TestRevenueRecognition(t *testing.T) {
 				if collection == "remittance" {
 					debit = "external_receipts"
 				}
-				require.Equal(t, []glRow{{Type: "cash_received", Operation: "cash", Source: "payment", SourceID: payment.String(), Debit: debit, DebitPSP: psp, Credit: "unapplied_cash", Amount: 30_000_000, At: paidAt.UTC()}},
-					glFor(t, a.world, "payment", payment.String()), "the money is booked once and applied to no line")
+				require.Equal(t, []glRow{
+					{Type: "cash_received", Operation: "cash", Source: "payment", SourceID: payment.String(), Debit: debit, DebitPSP: psp, Credit: "unapplied_cash", Amount: 30_000_000, At: paidAt.UTC()},
+					{Type: "usage_collected", Operation: "usage_collection", Source: "payment", SourceID: payment.String(), Debit: "unapplied_cash", Credit: "usage_receivable", Amount: 30_000_000, At: paidAt.UTC()},
+				}, glFor(t, a.world, "payment", payment.String()), "the money is booked once and applied to the receivable, to no line")
 				require.Empty(t, orderSchedules(t, a.world, order.ID.UUID()))
-				require.EqualValues(t, 30_000_000, unappliedCash(t, a.world, "USD"), "it waits for the usage receivable")
+				require.Zero(t, unappliedCash(t, a.world, "USD"), "it settles the usage receivable")
 				require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", "id:"+a.alpha.MerchantID().String()), "Ledger integrity OK")
 			})
 		}
@@ -559,7 +561,7 @@ func TestRevenueRecognition(t *testing.T) {
 	t.Run("OR-J41-S11/a-late-payment-on-an-order-another-holds-stays-unapplied", func(t *testing.T) {
 		a, provider := newPaymentWorld(t, func(w *world) {
 			w.clock.Advance(-30 * 24 * time.Hour)
-			w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{CCBillWebhookSources: []string{"127.0.0.1/32"}}
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{CCBillWebhookSources: []string{"127.0.0.1/32"}}
 			m := cfgMerchant(w.cfg, "alpha")
 			m.PSPs["ccbill"] = openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
 			setCfgMerchant(&w.cfg, "alpha", m)
@@ -588,7 +590,7 @@ func TestRevenueRecognition(t *testing.T) {
 		// Alice opens the CCBill page and leaves; the order expires and she
 		// buys the membership by card in another.
 		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, billing.CreateMyOrderParams{Lines: lines, ExpectedTotal: ptr(int64(10_000_000)),
-			Payment: &billing.OrderPaymentParams{PSPID: &page, ReturnURL: "https://critical.invalid/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
+			Payment: &billing.OrderPaymentParams{PSPID: &page, ReturnURL: alphaSite + "/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var abandoned billing.Order
 		require.NoError(t, json.Unmarshal(raw, &abandoned))

@@ -20,14 +20,16 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/logx"
+	"github.com/open-rails/openrails/internal/migrate"
 )
 
-// attachEventStore migrates (or validates) the event store's database and
+// attachEventStore migrates the event store's database and
 // matches its identity with the one this database recorded, recording it on
 // first attach. Another identity is an empty or different ClickHouse under a
 // database that has used one: refused.
 func attachEventStore(ctx context.Context, cfg *billing.Config, database *db.DB, conn driver.Conn, logger *slog.Logger) (*eventstore.Store, error) {
-	store, err := eventstore.Open(ctx, conn, config.ClickHouseDatabase(cfg), eventstore.Options{Validate: cfg.Database.SkipMigrations, Logger: logger})
+	store, err := eventstore.Open(ctx, conn, config.ClickHouseDatabase(cfg), eventstore.Options{Logger: logger,
+		Serialize: migrate.ClickHouseLock(database.Pool(), config.ClickHouseDatabase(cfg))})
 	if err != nil {
 		return nil, err
 	}
@@ -44,25 +46,6 @@ func attachEventStore(ctx context.Context, cfg *billing.Config, database *db.DB,
 			"Deps.ClickHouse names an empty or different ClickHouse; restore that one, or attach this one with openrails usage attach", config.ClickHouseDatabase(cfg), store.ID(), recorded)
 	}
 	return store, nil
-}
-
-// refuseUnpostedUsage refuses to start without an event store when this
-// database has usage the ledger has not taken: only the store can post it,
-// and starting would let customers spend balance their usage already used.
-func refuseUnpostedUsage(ctx context.Context, database *db.DB) error {
-	rows, err := database.GenDirectory().CountUsageUnpostedByMerchant(ctx)
-	if err != nil {
-		return fmt.Errorf("read unposted usage: %w", err)
-	}
-	if len(rows) == 0 {
-		return nil
-	}
-	named := make([]string, 0, len(rows))
-	for _, r := range rows {
-		named = append(named, fmt.Sprintf("%s (%d customers)", r.MerchantID, r.Customers))
-	}
-	return fmt.Errorf("%w: usage the ledger has not taken is in the event store, and Deps.ClickHouse is unset; attach the store "+
-		"(openrails usage attach --discard-unposted discards it instead): %s", billing.ErrEventStoreRequired, strings.Join(named, ", "))
 }
 
 // RequireEventStore refuses what needs the event store, named by what, on a
@@ -82,6 +65,7 @@ func (r *Runtime) ReportDormantUsage(ctx context.Context) {
 	if r == nil || r.DB == nil {
 		return
 	}
+	r.reportUnpostedUsage(ctx)
 	rows, err := r.DB.GenDirectory().ListUsageCatalogObjects(ctx)
 	if err != nil {
 		r.Log.WarnContext(ctx, "event store: cannot list the usage catalog objects without a store", logx.Err(err))
@@ -202,4 +186,45 @@ func AttachEventStore(ctx context.Context, database *db.DB, store *eventstore.St
 		return q.ReattachEventStore(ctx, gen.ReattachEventStoreParams{StoreID: store.ID(), Now: now})
 	})
 	return out, err
+}
+
+// reportUnpostedUsage opens, on a deployment without an event store, a
+// finding for each merchant whose customers have usage the ledger has not
+// taken: only the store can post it, so those customers' balances can be
+// neither read nor moved, while every other customer bills as before. An
+// attached store resolves them.
+func (r *Runtime) reportUnpostedUsage(ctx context.Context) {
+	rows, err := r.DB.GenDirectory().CountUsageUnpostedByMerchant(ctx)
+	if err != nil {
+		r.Log.WarnContext(ctx, "event store: cannot read unposted usage", logx.Err(err))
+		return
+	}
+	for _, row := range rows {
+		mid := billing.MerchantID(row.MerchantID)
+		if r.EventStore == nil {
+			r.Log.WarnContext(ctx, "no event store (Deps.ClickHouse): usage the ledger has not taken waits for one; these customers' balances can be neither read nor moved",
+				"merchant_id", mid.String(), "customers", row.Customers)
+		}
+		err := r.DB.RunInMerchantScope(ctx, mid, "unposted usage finding", func(ctx context.Context) error {
+			return r.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				q := gen.New(tx)
+				if r.EventStore != nil {
+					_, err := q.ResolveConfigFinding(ctx, gen.ResolveConfigFindingParams{MerchantID: mid.UUID(), FindingType: eventstore.UnpostedFindingType, SubjectKey: eventstore.UnpostedFindingSubject})
+					return err
+				}
+				action := fmt.Sprintf("%d customers have usage the ledger has not taken, and the deployment has no event store (Deps.ClickHouse): their balances can be "+
+					"neither read nor moved, and new usage is refused (event_store_required). Attach the store, or discard the usage with openrails usage attach --discard-unposted.", row.Customers)
+				evidence, err := json.Marshal(map[string]int64{"customers": row.Customers})
+				if err != nil {
+					return err
+				}
+				_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), FindingType: eventstore.UnpostedFindingType,
+					SubjectKey: eventstore.UnpostedFindingSubject, Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
+				return err
+			})
+		})
+		if err != nil {
+			r.Log.WarnContext(ctx, "event store: cannot record the unposted usage finding", logx.Err(err), "merchant_id", mid.String())
+		}
+	}
 }

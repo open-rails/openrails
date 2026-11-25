@@ -25,12 +25,13 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	}
 	cfg := adminconsole.Config{
 		AuthBaseURL: s.controlPlane.AuthAPIBase(), APIBaseURL: StandaloneV1Prefix,
-		LocalSignIn: s.controlPlane.LocalSignIn(), Issuers: append([]adminconsole.Issuer{}, s.consoleIssuer...),
+		Exchange: &adminconsole.Exchange{TokenEndpoint: s.controlPlane.TokenEndpoint(), ClientID: s.controlPlane.ConsoleClientID(), Resource: s.resource, Scope: billing.ScopeMerchant},
 	}
-	if cfg.LocalSignIn && s.resource != "" {
-		cfg.Exchange = &adminconsole.Exchange{TokenEndpoint: s.controlPlane.TokenEndpoint(), ClientID: s.controlPlane.ConsoleClientID(), Resource: s.resource, Scope: billing.ScopeMerchant}
+	var issuers *adminconsole.Directory
+	if !s.consoleOwnOnly {
+		issuers = adminconsole.NewDirectory(s.controlPlane.RootConsoleSources, s.controlPlane.MerchantConsoleSources, s.resource)
 	}
-	console, err := adminconsole.Handler(s.Log, path, cfg, s.consoleAssets)
+	console, err := adminconsole.Handler(s.Log, path, cfg, issuers, s.consoleAssets)
 	if err != nil {
 		return err
 	}

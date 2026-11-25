@@ -1,6 +1,6 @@
-# The stack with NMI played by the server's fake gateway, and the browser
-# tests in web/e2e run inside the server's network namespace, so the browser
-# sees the localhost URLs a person does. Nothing is published on the host.
+# The stack with NMI played by a fake inside the server, and the browser tests
+# in web/e2e run inside the server's network namespace, so the browser sees
+# the localhost URLs a person does. Nothing is published on the host.
 #
 #   cp openrails/merchant.example.yaml openrails/merchant.yaml  # its placeholder keys suit the fake gateway
 #   (cd web && pnpm install)
@@ -8,29 +8,18 @@
 #     docker compose -f compose.yaml -f compose.e2e.yaml run --rm e2e
 #   docker compose -f compose.yaml -f compose.e2e.yaml down -v
 services:
-  openrails:
-    network_mode: service:nmi
+  openrails: # the server/ci/standalone fixture: run-server with an in-process NMI fake
+    build: { args: { MAIN: ./ci/standalone } }
+    image: openrails-example-e2e-server
+    command: [--config, /etc/openrails/config.e2e.yaml, --merchant-manifest, /etc/openrails/merchant.yaml, --max-lifetime, 1h]
     ports: !reset []
-    environment:
-      PROVIDER_SANDBOX_NMI_GATEWAY_URL: http://127.0.0.1:9091
-      RATE_LIMITS_DISABLED: "true" # every purchase comes from one browser
-    depends_on:
-      nmi: { condition: service_started }
-
-  app:
-    network_mode: service:nmi
 
   mailpit:
     ports: !reset []
 
-  nmi: # owns the namespace the server and app join, as a pod's first container
-    build: { context: ../.., dockerfile: Dockerfile }
-    image: openrails-example-server
-    command: [sandbox, nmi-gateway, --listen, 127.0.0.1:9091, --max-lifetime, 1h]
-
   e2e:
     image: mcr.microsoft.com/playwright:v1.60.0-noble
-    network_mode: service:nmi
+    network_mode: service:openrails
     working_dir: /example/web
     volumes:
       - ./:/example

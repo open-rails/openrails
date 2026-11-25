@@ -21,7 +21,7 @@ func (e *Engine) serveCheckout(cfg billing.Config, declarations []billing.Mercha
 	if strings.TrimSpace(cfg.CheckoutOrigin) == "" {
 		return
 	}
-	forbidden := []string{cfg.PublicBillingBaseURL}
+	forbidden := []string{cfg.PublicURL}
 	for _, m := range declarations {
 		forbidden = append(forbidden, m.Issuer)
 	}

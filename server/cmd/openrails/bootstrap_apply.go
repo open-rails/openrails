@@ -144,7 +144,7 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 		path = bootstrap.DefaultMerchantConfigManifestPath
 	}
 
-	manifest, err := bootstrap.LoadMerchantConfigManifestFiles(path)
+	manifest, err := bootstrap.LoadMerchantConfigManifestFile(path)
 	if err != nil {
 		return err
 	}
@@ -267,7 +267,7 @@ func readBootstrapManifest(path string) (iam.BootstrapManifest, error) {
 	if err != nil {
 		return iam.BootstrapManifest{}, fmt.Errorf("read AuthKit authority manifest: %w", err)
 	}
-	manifest, err := authkit.ParseBootstrapManifestYAML(raw)
+	manifest, err := authkit.ParseBootstrapManifestYAML(raw, slog.Default())
 	if err != nil {
 		return iam.BootstrapManifest{}, fmt.Errorf("AuthKit authority manifest %s: %w", path, err)
 	}

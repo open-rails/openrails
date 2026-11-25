@@ -309,7 +309,7 @@ func TestMerchantOwnedBasisTheoryCardLifecycle(t *testing.T) {
 				w.cfg.Vault = vault.Config()
 				w.deps.Vault = vault.Client()
 				if profile == "hosted-isolated-vault" {
-					w.cfg.CardVault = billing.CardVaultConfig{Kind: "basis_theory", TenantID: merchantBTTenant, KVMount: vault.Config().KVMount}
+					w.cfg.CardVault = billing.CardVaultConfig{TenantID: merchantBTTenant, KVMount: vault.Config().KVMount}
 				}
 				vendor.gateway = w.deps.NMITransport
 				target, err := url.Parse(vendor.server.URL)
@@ -338,7 +338,7 @@ func TestMerchantOwnedBasisTheoryCardLifecycle(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, psps.Items, 1)
 			collected := vendor.collect(merchantBTTenant)
-			input := billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: collected}
+			input := billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: collected, BillingDetails: billedTo("US", "10001")}
 			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, input)
 			require.Equal(t, http.StatusCreated, status, string(raw))
 			var method billing.PaymentMethod

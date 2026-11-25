@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/paymentpage"
 	"github.com/open-rails/openrails/internal/shared/iputil"
-	"github.com/open-rails/openrails/server/internal/adminconsole"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 )
 
@@ -44,10 +43,9 @@ type Dependencies struct {
 	ConsoleAssets fs.FS
 	// RouteGroups turns the merchant route groups on.
 	RouteGroups config.RouteGroups
-	// ConsoleDisabled omits the console; ConsoleIssuers are its sign-in
-	// choices.
-	ConsoleDisabled bool
-	ConsoleIssuers  []adminconsole.Issuer
+	// ConsoleDisabled omits the console; ConsoleOwnAccountsOnly offers no
+	// trusted issuer's sign-in.
+	ConsoleDisabled, ConsoleOwnAccountsOnly bool
 	// CheckoutOrigin serves CheckoutHandler, the engine's payment page,
 	// there (by Host); empty serves none.
 	CheckoutOrigin  string
@@ -70,7 +68,8 @@ type Server struct {
 	// consoleAssets is the host/binary-supplied admin console build (#754).
 	consoleAssets fs.FS
 	consoleOff    bool
-	consoleIssuer []adminconsole.Issuer
+	// consoleOwnOnly offers no trusted issuer's sign-in.
+	consoleOwnOnly bool
 	// groups are the route groups the server mounts.
 	groups config.RouteGroups
 
@@ -206,7 +205,7 @@ func New(logger *slog.Logger, deps Dependencies) (*Server, error) {
 		adminLimiter:            middleware.NewAdminOperationLimiter(logger, deps.Runtime.AbuseState),
 		consoleAssets:           deps.ConsoleAssets,
 		consoleOff:              deps.ConsoleDisabled,
-		consoleIssuer:           deps.ConsoleIssuers,
+		consoleOwnOnly:          deps.ConsoleOwnAccountsOnly,
 		groups:                  deps.RouteGroups,
 		browserTierRoutes:       middleware.NewBrowserTierRoutes(),
 		Log:                     logger,
@@ -338,7 +337,7 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 
 // Handler returns the full public HTTP surface: health + user + self/customer
 // + merchant + webhooks + API-key-authenticated server-to-server service routes
-// (issue #222). There is no separate private/service handler — embedded hosts use
+// (issue #222). Service routes have no separate handler — embedded hosts use
 // the in-process internal/service facade (Embedded.Service()) or this same public
 // surface. It is designed to be mounted at a path prefix via http.StripPrefix.
 func (s *Server) Handler() http.Handler { return s.publicHandler }

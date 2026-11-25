@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -37,7 +38,10 @@ import (
 )
 
 type config struct {
-	MappedCustomers, CustomerAdmissionPolicy   bool
+	MappedCustomers, CustomerAdmissionPolicy bool
+	// Console serves the admin console; StaffMFA keeps the production rule
+	// that every own account needs a second factor.
+	Console, StaffMFA                          bool
 	Schema, Ready, ControlKey, FXURL, RedisURL string
 	CheckoutOrigin, PaymentAssets              string
 	At                                         time.Time
@@ -158,20 +162,22 @@ func TestServerFixture(t *testing.T) {
 			return nil
 		}
 	}
-	resourceScopes := map[string][]string{"fixture:host": {}, billing.ScopeSelf: {"merchant:*"}}
 	renameInterval := 72 * time.Hour
 	srv, err := server.New(t.Context(), server.Config{
-		Engine: openrails.Config{Database: billing.DatabaseConfig{Schema: cfg.Schema, RiverSchema: cfg.Schema}, PublicBillingBaseURL: httpServer.URL, RateLimits: billing.RateLimitsConfig{}, CheckoutOrigin: cfg.CheckoutOrigin},
-		Auth: authkit.Config{
-			DefaultTenantID: iam.NewTenantID(), Database: authkit.DatabaseConfig{Schema: cfg.Schema + "_auth", RiverSchema: cfg.Schema},
-			Token: authkit.TokenConfig{Issuer: httpServer.URL, AllowPrivateNetworkJWKS: true}, Resource: authkit.ResourceConfig{ID: httpServer.URL, PublicURL: httpServer.URL, Scopes: resourceScopes},
-			AuthorizationServer: authkit.AuthorizationServerConfig{Resources: []authkit.ResourceServerConfig{{ID: httpServer.URL, Scopes: []string{billing.ScopeSelf, "fixture:host"}}}, GroupClients: authkit.GroupClientsConfig{Scopes: []authkit.GroupClientScope{{Name: billing.ScopeSelf, Resource: httpServer.URL, Description: "Use own billing"}, {Name: "fixture:host", Resource: httpServer.URL, Description: "Host-owned consent"}}}},
-			Registration:        authkit.RegistrationConfig{AllowMissingSenders: true}, TwoFactor: authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
-			Agreements: []authkit.AgreementConfig{{Key: "network-terms", Version: "critical-v1", URL: "https://critical.invalid/network-terms"}},
-			HTTP:       &authkit.HTTPConfig{DirectPeerIP: true},
+		Engine: openrails.Config{Database: billing.DatabaseConfig{Schema: cfg.Schema, RiverSchema: cfg.Schema}, PublicURL: httpServer.URL, RateLimits: billing.RateLimitsConfig{Purchase: &billing.RateLimit{}, Payment: &billing.RateLimit{}, Subscribe: &billing.RateLimit{}, Webhook: &billing.RateLimit{}}, CheckoutOrigin: cfg.CheckoutOrigin},
+		// A hosted product's account policy: a host-owned consent scope,
+		// network terms and codes handed back instead of sent.
+		AuthKit: func(c *authkit.Config) {
+			c.Resource.Scopes = map[string][]string{"fixture:host": {}}
+			c.AuthorizationServer = authkit.AuthorizationServerConfig{Resources: []authkit.ResourceServerConfig{{ID: httpServer.URL, Scopes: []string{billing.ScopeSelf, "fixture:host"}}}, GroupClients: authkit.GroupClientsConfig{Scopes: []authkit.GroupClientScope{{Name: billing.ScopeSelf, Resource: httpServer.URL, Description: "Use own billing"}, {Name: "fixture:host", Resource: httpServer.URL, Description: "Host-owned consent"}}}}
+			c.Registration.AllowMissingSenders = true
+			c.Agreements = []authkit.AgreementConfig{{Key: "network-terms", Version: "critical-v1", URL: "https://critical.invalid/network-terms"}}
+			if !cfg.StaffMFA {
+				c.TwoFactor.Mode = iam.TwoFactorDisabled
+			}
 		},
-		Naming:      billing.NamingConfig{RenameInterval: &renameInterval},
-		LocalSignIn: true, AdminConsole: server.AdminConsole{Disabled: true}, RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true},
+		Naming:       billing.NamingConfig{RenameInterval: &renameInterval},
+		AdminConsole: server.AdminConsole{Disabled: !cfg.Console},
 	}, server.Deps{CustomerAdmissionPolicy: customerPolicy, Engine: openrails.Deps{Postgres: pool, Redis: shared, Clock: clock, FXTransport: wire{fx, transport}, CheckoutAssets: hostPaymentAssets(cfg.PaymentAssets)}, Auth: authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}}})
 	require.NoError(t, err)
 	defer srv.Close(context.Background())
@@ -313,12 +319,21 @@ func TestServerFixture(t *testing.T) {
 				require.NoError(t, err)
 				result.Result = map[string]string{"access_token": signed}
 			case "external-user-token":
-				token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, jwt.MapClaims{"iss": "https://" + cmd.Merchant + ".critical.invalid", "aud": httpServer.URL, "sub": cmd.ID, "client_id": "critical-directory-client", "scope": "openrails:self", "iat": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix(), "jti": uuid.NewString()})
+				scope := billing.ScopeSelf
+				if len(cmd.Scopes) > 0 {
+					scope = strings.Join(cmd.Scopes, " ")
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, jwt.MapClaims{"iss": "https://" + cmd.Merchant + ".critical.invalid", "aud": httpServer.URL, "sub": cmd.ID, "client_id": "critical-directory-client", "scope": scope, "iat": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix(), "jti": uuid.NewString()})
 				token.Header["kid"] = "merchant-key"
 				token.Header["typ"] = "at+jwt"
 				signed, err := token.SignedString(issuerKeys[cmd.Merchant])
 				require.NoError(t, err)
 				result.Result = billing.CustomerToken{AccessToken: signed, TokenType: "Bearer", ExpiresAt: time.Now().Add(5 * time.Minute)}
+			case "new-user":
+				// An account of the server's own, with a password and no
+				// second factor yet.
+				user := authtest.NewUser(t, ak)
+				result.Result = map[string]string{"ID": user.ID, "Email": user.Email, "Password": user.Password}
 			case "customer-token":
 				id, err := billing.ParseCustomerID(cmd.ID)
 				require.NoError(t, err)

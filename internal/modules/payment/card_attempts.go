@@ -80,14 +80,26 @@ func (s *OrderAttemptService) paymentPage(raw string) bool {
 	return ok && err == nil && u.User == nil && origin != "" && origin == s.checkoutOrigin() && strings.HasPrefix(u.Path, paymentpage.PagePrefix)
 }
 
-// validateReturnURLs refuses redirect targets outside the host's allowed
-// return origins.
-func (s *OrderAttemptService) validateReturnURLs(urls ...string) error {
+// validateReturnURLs refuses redirect targets outside the merchant's return
+// origins and the payment page.
+func (s *OrderAttemptService) validateReturnURLs(ctx context.Context, urls ...string) error {
+	var allowed []string
+	if s != nil && s.returnOrigins == nil {
+		allowed = config.ReturnOrigins(s.config, "", nil)
+	} else if s != nil {
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		if allowed, err = s.returnOrigins(ctx, mid); err != nil {
+			return err
+		}
+	}
 	for _, raw := range urls {
 		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		if s == nil || !config.ReturnURLAllowed(s.config, raw) && !s.paymentPage(raw) {
+		if s == nil || !config.ReturnURLAllowed(allowed, raw) && !s.paymentPage(raw) {
 			return fmt.Errorf("%w: return URL origin is not allowed", ErrOrderAttemptValidation)
 		}
 	}

@@ -20,6 +20,7 @@ guards() {
   bash scripts/scan-injected-code.sh --all
   go run ./scripts/contracts -lint
   go run ./scripts/docscheck
+  (cd server && go run ./internal/examplegen)
   gofmt_clean
 }
 gofmt_clean() {
@@ -58,20 +59,23 @@ unit() {
     [[ -z "$packages" ]] || (cd "$module" && go test ./...)
   done
 }
-browser() {
-  # The SDK and both consuming apps share this one SDK build. E2E behavior
-  # runs only in critical/public_sdk_test.go against its real service fixture.
+# The SDK and both consuming apps share this one SDK build. E2E behavior
+# runs only in critical/public_sdk_test.go against its real service fixture.
+browser_build() {
   pnpm --dir web/billing-ui install --frozen-lockfile --ignore-scripts
   pnpm --dir web/billing-ui critical:build
-  pnpm --dir web/billing-ui critical:static
-  pnpm --dir web/billing-ui contract:check
   local project
   for project in web/console web/pay; do
     pnpm --dir "$project" install --frozen-lockfile --ignore-scripts
     pnpm --dir "$project" build
     test -f "$project/dist/index.html"
-    git diff --exit-code -- "$project/dist/.gitkeep"
   done
+}
+browser() {
+  browser_build
+  pnpm --dir web/billing-ui critical:static
+  pnpm --dir web/billing-ui contract:check
+  git diff --exit-code -- web/console/dist/.gitkeep web/pay/dist/.gitkeep
   pnpm --dir web/console lint
 }
 chart() {
@@ -88,6 +92,7 @@ case "${1:-all}" in
   vet) vet ;;
   unit) unit ;;
   browser) browser ;;
+  browser-build) browser_build ;;
   chart) chart ;;
   critical) bash scripts/critical-tests.sh ;;
   all)
@@ -95,5 +100,5 @@ case "${1:-all}" in
     guards; build; vet; unit; browser; chart
     bash scripts/critical-tests.sh
     ;;
-  *) echo 'usage: scripts/check.sh [guards|build|vet|unit|browser|chart|critical|all]' >&2; exit 2 ;;
+  *) echo 'usage: scripts/check.sh [guards|build|vet|unit|browser|browser-build|chart|critical|all]' >&2; exit 2 ;;
 esac

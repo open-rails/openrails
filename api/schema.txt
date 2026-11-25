@@ -29,7 +29,7 @@ migration 0030_stripe_fees.up.sql sha256:9eaf00b0f211b60fe71ab2d91e59e5303c3cb04
 migration 0031_credit_books.up.sql sha256:43b97e4cf3684cce22e027d3264dfb68739a8eb421167cc98ba2244c96b97ba4
 migration 0032_run_leases.up.sql sha256:dffb969002908c162478fb3e9a3e0ceafa0072e528a70b48719c70d8b52427a3
 migration 0033_merchant_unit_spending.up.sql sha256:dd34eca4ad7958bbf2a0a3e51086d800637e7edccacbf7b416ffe37b1f1dcd93
-migration 0034_reporting_mrr.up.sql sha256:1ce46f787d8c7f33c7cf5c6d169911e87e22b135ea4ca9b15b1c295f0caba4d0
+migration 0034_reporting_mrr.up.sql sha256:57124e50805a61ce50616eb403834e6efa020b5cc0225bd1ef530141f806fd95
 migration 0035_dashboard_retired_mrr_measures.up.sql sha256:51fd4f28c5c9beb058121664bc24cb3738ea51761a3c87eaeafd9fec7c8fe7b3
 migration 0036_books_reversals.up.sql sha256:390b570664add0417f7c4e3905dd0a71d520563b924aca5535256045ba8ca8d8
 migration 0037_unit_order_revenue.up.sql sha256:5c5569cedec95ee75775645cea9ab575745c51fa5505d0c35f4bcaa5ca7c2769
@@ -37,6 +37,11 @@ migration 0038_write_posture_comments.up.sql sha256:4e52a41d97043af3c86dffd550e7
 migration 0039_lease_in_flight_off_customers.up.sql sha256:c0290a0816eb44a2edef247a2116743b5ddfa57a2f4114056cf4b63b77d82edc
 migration 0040_migration_cohort_order.up.sql sha256:72f4a45e6f1533ec1dca16b01d24db219b14490cd071402e8fe61d02964e702a
 migration 0041_mrr_totals_settle.up.sql sha256:88d0cea1c62392fc13958c7e9b917d6b4c7c7f109ba392dbd60ea90c24c55c6e
+migration 0044_drop_request_holds.up.sql sha256:f7ab167c764da9a5b518fe6984c20e48a413311864bbfefea75f1ae8da8ed31d
+migration 0046_mrr_keyed_reads.up.sql sha256:3d48a85fc96faea77697c4e71260216ae3d08728881ff8982d2b0c5ace2c8c80
+migration 0047_usage_receivable.up.sql sha256:e03ef2a943130a26447ce0f63a55724a77e2f2d282441be4664a12aa628a9ee2
+migration 0048_checkout_analytics.up.sql sha256:dcacd14f32148717d7be07654f4ce8d7f989a7a113b39ec4508cfdd86f76f38b
+migration 0049_merchant_controls.up.sql sha256:05e5d9df346d3db1f9c796c5b1bda6896847821f50342bead3d5b6d0836213d1
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -260,7 +265,7 @@ table billing.change_log
   constraint change_log_changes_check CHECK (((jsonb_typeof(changes) = 'object'::text) AND (jsonb_typeof((changes -> 'version'::text)) = 'number'::text) AND (octet_length((changes)::text) <= 262144)))
   constraint change_log_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint change_log_object_id_check CHECK (((octet_length(object_id) >= 1) AND (octet_length(object_id) <= 512)))
-  constraint change_log_object_type_check CHECK ((object_type = ANY (ARRAY['product'::text, 'price'::text, 'meter'::text, 'limit'::text, 'merchant'::text, 'messages'::text, 'psp'::text, 'custodian'::text])))
+  constraint change_log_object_type_check CHECK ((object_type = ANY (ARRAY['product'::text, 'price'::text, 'meter'::text, 'limit'::text, 'merchant'::text, 'messages'::text, 'psp'::text, 'custodian'::text, 'controls'::text])))
   constraint change_log_pkey PRIMARY KEY (merchant_id, id)
   constraint change_log_reason_check CHECK (((octet_length(reason) >= 1) AND (octet_length(reason) <= 1024)))
   constraint change_log_request_id_check CHECK (((octet_length(request_id) >= 1) AND (octet_length(request_id) <= 128)))
@@ -568,17 +573,6 @@ table billing.dashboard_configs
   constraint dashboard_configs_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint dashboard_configs_pkey PRIMARY KEY (merchant_id)
   index CREATE UNIQUE INDEX dashboard_configs_pkey ON billing.dashboard_configs USING btree (merchant_id)
-
-table billing.destructive_action_switch
-  column singleton boolean NOT NULL DEFAULT true
-  column enabled boolean NOT NULL
-  column updated_by text
-  column reason text
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint destructive_action_switch_pkey PRIMARY KEY (singleton)
-  constraint destructive_action_switch_singleton_check CHECK ((singleton = true))
-  index CREATE UNIQUE INDEX destructive_action_switch_pkey ON billing.destructive_action_switch USING btree (singleton)
-  trigger CREATE TRIGGER destructive_action_switch_wake_dispute_responses AFTER UPDATE OF enabled ON billing.destructive_action_switch FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
 
 table billing.destructive_actions
   column merchant_id uuid NOT NULL
@@ -1112,7 +1106,7 @@ table billing.ledger_transfers
   constraint ledger_transfers_revenue_schedule_check CHECK (((book = 'general'::text) OR (revenue_schedule_id IS NULL)))
   constraint ledger_transfers_source_check CHECK (((octet_length(source) >= 1) AND (octet_length(source) <= 512)))
   constraint ledger_transfers_source_id_check CHECK (((octet_length(source_id) >= 1) AND (octet_length(source_id) <= 512)))
-  constraint ledger_transfers_type_check CHECK ((((book = 'units'::text) AND (transfer_type = ANY (ARRAY['deposit'::text, 'deposit_bonus'::text, 'credit_purchase_revenue'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text, 'owed_repayment'::text, 'credit_refund'::text, 'credit_refund_restore'::text, 'credit_refund_cash'::text, 'credit_refund_cash_restore'::text, 'credit_refund_funding'::text, 'usage_reversed'::text]))) OR ((book = 'general'::text) AND (transfer_type = ANY (ARRAY['cash_received'::text, 'cash_applied'::text, 'cash_returned'::text, 'revenue_adjusted'::text, 'revenue_recognized'::text, 'refund_deferred'::text, 'refund_recognized'::text, 'chargeback_deferred'::text, 'chargeback_recognized'::text, 'dispute_won'::text, 'credit_released'::text, 'credit_breakage'::text, 'credit_forfeited'::text, 'credit_forfeit_reversed'::text, 'promotional_credit_applied'::text, 'usage_accrued'::text, 'usage_collected'::text, 'usage_repaid'::text, 'usage_waived'::text, 'usage_reopened'::text, 'bad_debt'::text, 'bad_debt_recovery'::text, 'processor_fee'::text, 'chargeback_fee'::text, 'opening_balance'::text, 'usage_reversed'::text])))))
+  constraint ledger_transfers_type_check CHECK ((((book = 'units'::text) AND (transfer_type = ANY (ARRAY['deposit'::text, 'deposit_bonus'::text, 'credit_purchase_revenue'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text, 'owed_repayment'::text, 'owed_reopened'::text, 'credit_refund'::text, 'credit_refund_restore'::text, 'credit_refund_cash'::text, 'credit_refund_cash_restore'::text, 'credit_refund_funding'::text, 'usage_reversed'::text]))) OR ((book = 'general'::text) AND (transfer_type = ANY (ARRAY['cash_received'::text, 'cash_applied'::text, 'cash_returned'::text, 'revenue_adjusted'::text, 'revenue_recognized'::text, 'refund_deferred'::text, 'refund_recognized'::text, 'chargeback_deferred'::text, 'chargeback_recognized'::text, 'dispute_won'::text, 'credit_released'::text, 'credit_breakage'::text, 'credit_forfeited'::text, 'credit_forfeit_reversed'::text, 'promotional_credit_applied'::text, 'usage_accrued'::text, 'usage_collected'::text, 'usage_repaid'::text, 'usage_waived'::text, 'usage_reopened'::text, 'bad_debt'::text, 'bad_debt_recovery'::text, 'processor_fee'::text, 'chargeback_fee'::text, 'opening_balance'::text, 'usage_reversed'::text])))))
   index CREATE INDEX ledger_transfers_created_at_idx ON billing.ledger_transfers USING btree (merchant_id, created_at)
   index CREATE INDEX ledger_transfers_credit_account_id_idx ON billing.ledger_transfers USING btree (merchant_id, credit_account_id)
   index CREATE INDEX ledger_transfers_credit_grant_id_idx ON billing.ledger_transfers USING btree (merchant_id, credit_grant_id) WHERE (credit_grant_id IS NOT NULL)
@@ -1175,73 +1169,6 @@ table billing.limit_adjustments
   index CREATE INDEX limit_adjustments_created_at_idx ON billing.limit_adjustments USING btree (merchant_id, created_at)
   index CREATE INDEX limit_adjustments_limit_key_idx ON billing.limit_adjustments USING btree (merchant_id, limit_key)
   index CREATE UNIQUE INDEX limit_adjustments_pkey ON billing.limit_adjustments USING btree (merchant_id, customer_id, source_id)
-
-table billing.limit_hold_parts PARTITION BY RANGE (hold_created_at)
-  column merchant_id uuid NOT NULL
-  column hold_id uuid NOT NULL
-  column hold_created_at timestamp with time zone NOT NULL
-  column customer_id uuid NOT NULL
-  column limit_key text NOT NULL
-  column unit text NOT NULL
-  column window_starts_at timestamp with time zone NOT NULL
-  column window_ends_at timestamp with time zone
-  column held bigint NOT NULL
-  constraint limit_hold_parts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint limit_hold_parts_held_check CHECK ((held >= 0))
-  constraint limit_hold_parts_limit_key_check CHECK (((limit_key ~ '^[a-z][a-z0-9_-]{0,63}$'::text) OR (limit_key ~ '^spend:[0-9a-f]{64}$'::text)))
-  constraint limit_hold_parts_pkey PRIMARY KEY (merchant_id, hold_id, limit_key, hold_created_at)
-  constraint limit_hold_parts_unit_check CHECK (((unit ~ '^[a-z][a-z0-9_]{0,63}$'::text) OR (unit ~ '^[A-Z0-9]{3,12}$'::text)))
-  constraint limit_hold_parts_window_check CHECK (((window_ends_at IS NULL) OR (window_ends_at > window_starts_at)))
-  index CREATE UNIQUE INDEX limit_hold_parts_pkey ON ONLY billing.limit_hold_parts USING btree (merchant_id, hold_id, limit_key, hold_created_at)
-  index CREATE INDEX limit_hold_parts_window_idx ON ONLY billing.limit_hold_parts USING btree (merchant_id, customer_id, limit_key, window_starts_at)
-
-table billing.limit_holds PARTITION BY RANGE (created_at)
-  column merchant_id uuid NOT NULL
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column customer_id uuid NOT NULL
-  column currency text NOT NULL
-  column lease_id uuid
-  column request_id text NOT NULL
-  column estimated_amount bigint NOT NULL
-  column available_amount bigint NOT NULL
-  column terms jsonb NOT NULL
-  column estimate_usage jsonb
-  column rate_cards jsonb
-  column requested_expires_at timestamp with time zone
-  column expires_at timestamp with time zone
-  column state text NOT NULL
-  column capture_terms jsonb
-  column captured_amount bigint
-  column captured_at timestamp with time zone
-  column released_at timestamp with time zone
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  column captured_charges jsonb
-  constraint limit_holds_available_amount_check CHECK ((available_amount >= 0))
-  constraint limit_holds_capture_terms_check CHECK (((jsonb_typeof(capture_terms) = 'object'::text) AND (octet_length((capture_terms)::text) <= 65536)))
-  constraint limit_holds_captured_charges_check CHECK (((captured_charges IS NULL) OR ((state = 'captured'::text) AND (jsonb_typeof(captured_charges) = 'array'::text))))
-  constraint limit_holds_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-  constraint limit_holds_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint limit_holds_estimate_usage_check CHECK ((((estimate_usage IS NULL) OR ((jsonb_typeof(estimate_usage) = 'object'::text) AND (octet_length((estimate_usage)::text) <= 65536))) AND ((rate_cards IS NULL) OR ((jsonb_typeof(rate_cards) = 'array'::text) AND (octet_length((rate_cards)::text) <= 262144)))))
-  constraint limit_holds_estimated_amount_check CHECK ((estimated_amount >= 0))
-  constraint limit_holds_expires_at_check CHECK (((requested_expires_at IS NULL) OR ((expires_at IS NOT NULL) AND (expires_at >= requested_expires_at))))
-  constraint limit_holds_hold_lifetime_check CHECK (((expires_at IS NULL) OR (expires_at <= (created_at + '720:00:00'::interval))))
-  constraint limit_holds_lease_id_check CHECK (((lease_id IS NULL) OR ((requested_expires_at IS NULL) AND (expires_at IS NULL))))
-  constraint limit_holds_pkey PRIMARY KEY (merchant_id, id, created_at)
-  constraint limit_holds_rate_cards_check CHECK (((estimate_usage IS NULL) = (rate_cards IS NULL)))
-  constraint limit_holds_request_id_check CHECK (((octet_length(request_id) >= 1) AND (octet_length(request_id) <= 255)))
-  constraint limit_holds_requested_expires_at_check CHECK ((((requested_expires_at IS NULL) OR (requested_expires_at > created_at)) AND ((lease_id IS NOT NULL) OR (estimated_amount = 0) OR (requested_expires_at IS NOT NULL))))
-  constraint limit_holds_state_check CHECK ((state = ANY (ARRAY['open'::text, 'released'::text, 'captured'::text])))
-  constraint limit_holds_state_fields_check CHECK ((((state = 'open'::text) AND (capture_terms IS NULL) AND (captured_amount IS NULL) AND (captured_at IS NULL) AND (released_at IS NULL)) OR ((state = 'released'::text) AND (capture_terms IS NULL) AND (captured_amount IS NULL) AND (captured_at IS NULL) AND (released_at IS NOT NULL)) OR ((state = 'captured'::text) AND (capture_terms IS NOT NULL) AND (captured_amount IS NOT NULL) AND (captured_amount >= 0) AND (captured_at IS NOT NULL))))
-  constraint limit_holds_terms_check CHECK (((jsonb_typeof(terms) = 'object'::text) AND (octet_length((terms)::text) <= 65536)))
-  index CREATE INDEX limit_holds_created_at_request_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, created_at DESC, request_id COLLATE "C" DESC) WHERE (request_id IS NOT NULL)
-  index CREATE INDEX limit_holds_customer_created_at_request_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, customer_id, created_at DESC, request_id COLLATE "C" DESC) WHERE (request_id IS NOT NULL)
-  index CREATE INDEX limit_holds_customer_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, customer_id)
-  index CREATE INDEX limit_holds_lease_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, lease_id) WHERE ((lease_id IS NOT NULL) AND (state = 'open'::text))
-  index CREATE INDEX limit_holds_open_idx ON ONLY billing.limit_holds USING btree (merchant_id, customer_id, currency) WHERE (state = 'open'::text)
-  index CREATE UNIQUE INDEX limit_holds_pkey ON ONLY billing.limit_holds USING btree (merchant_id, id, created_at)
-  index CREATE INDEX limit_holds_request_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, request_id, created_at DESC) WHERE (request_id IS NOT NULL)
-  trigger CREATE TRIGGER immutable_request_hold_facts BEFORE DELETE OR UPDATE ON billing.limit_holds FOR EACH ROW WHEN ((old.request_id IS NOT NULL)) EXECUTE FUNCTION billing.guard_billing_fact_columns('expires_at', 'state', 'capture_terms', 'captured_amount', 'captured_at', 'captured_charges', 'released_at', 'updated_at')
 
 table billing.limit_windows
   column merchant_id uuid NOT NULL
@@ -1346,18 +1273,23 @@ table billing.mandates
   index CREATE UNIQUE INDEX mandates_unscheduled_live_key ON billing.mandates USING btree (merchant_id, customer_id, currency) WHERE ((kind = 'unscheduled'::text) AND (status = ANY (ARRAY['active'::text, 'requires_reconsent'::text])))
   trigger CREATE TRIGGER guard_mandate_update BEFORE UPDATE ON billing.mandates FOR EACH ROW EXECUTE FUNCTION billing.guard_mandate_update()
 
-table billing.merchant_destructive_policy
+table billing.merchant_controls
   column merchant_id uuid NOT NULL
-  column destructive_actions_enabled boolean NOT NULL DEFAULT true
-  column enforce_armed_at timestamp with time zone
+  column writes text NOT NULL
+  column rebills_held boolean NOT NULL
+  column destructive_armed boolean NOT NULL
   column first_pull_completed_at timestamp with time zone
-  column updated_by text
+  column changed_by text
   column reason text
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint merchant_destructive_policy_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint merchant_destructive_policy_pkey PRIMARY KEY (merchant_id)
-  index CREATE UNIQUE INDEX merchant_destructive_policy_pkey ON billing.merchant_destructive_policy USING btree (merchant_id)
-  trigger CREATE TRIGGER merchant_destructive_policy_wake_dispute_responses AFTER INSERT OR UPDATE OF destructive_actions_enabled, enforce_armed_at ON billing.merchant_destructive_policy FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
+  column changed_at timestamp with time zone
+  constraint merchant_controls_change_check CHECK ((((changed_by IS NULL) = (reason IS NULL)) AND ((reason IS NULL) = (changed_at IS NULL))))
+  constraint merchant_controls_changed_by_check CHECK ((changed_by <> ''::text))
+  constraint merchant_controls_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint merchant_controls_pkey PRIMARY KEY (merchant_id)
+  constraint merchant_controls_reason_check CHECK ((reason <> ''::text))
+  constraint merchant_controls_writes_check CHECK ((writes = ANY (ARRAY['full'::text, 'limited'::text, 'readonly'::text])))
+  index CREATE UNIQUE INDEX merchant_controls_pkey ON billing.merchant_controls USING btree (merchant_id)
+  trigger CREATE TRIGGER merchant_controls_wake_dispute_responses AFTER INSERT OR UPDATE OF writes, destructive_armed ON billing.merchant_controls FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
 
 table billing.merchant_leases
   column merchant_id uuid NOT NULL
@@ -1379,20 +1311,6 @@ table billing.merchant_slug_aliases
   constraint merchant_slug_aliases_pkey PRIMARY KEY (slug)
   index CREATE INDEX merchant_slug_aliases_merchant_id_idx ON billing.merchant_slug_aliases USING btree (merchant_id)
   index CREATE UNIQUE INDEX merchant_slug_aliases_pkey ON billing.merchant_slug_aliases USING btree (slug)
-
-table billing.merchant_write_posture
-  column merchant_id uuid NOT NULL
-  column mode text NOT NULL
-  column reason text NOT NULL
-  column set_by text NOT NULL
-  column set_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint merchant_write_posture_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
-  constraint merchant_write_posture_mode_check CHECK ((mode = ANY (ARRAY['full'::text, 'limited'::text, 'readonly'::text])))
-  constraint merchant_write_posture_pkey PRIMARY KEY (merchant_id)
-  constraint merchant_write_posture_reason_check CHECK ((reason = ANY (ARRAY['exported'::text, 'restored'::text, 'operator'::text])))
-  constraint merchant_write_posture_set_by_check CHECK ((set_by <> ''::text))
-  index CREATE UNIQUE INDEX merchant_write_posture_pkey ON billing.merchant_write_posture USING btree (merchant_id)
-  trigger CREATE TRIGGER merchant_write_posture_wake_dispute_responses AFTER INSERT OR UPDATE OF mode ON billing.merchant_write_posture FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
 
 table billing.merchants
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2035,19 +1953,42 @@ table billing.orders
   column subscription_bill_kind text
   column lines_digest bytea
   column embedded boolean
+  column customer_type text
+  column purchase_number integer
+  column opened_at timestamp with time zone
+  column submitted_at timestamp with time zone
+  column billing_country text
+  column card_country text
+  column ip_country text
+  column language text
+  column attribution_source text
+  column attribution_medium text
+  column attribution_campaign text
+  column attribution_term text
+  column attribution_content text
+  column attribution_referrer text
+  column attribution_affiliate text
+  column checkout_order_id uuid
   constraint orders_attempt_id_fkey FOREIGN KEY (merchant_id, attempt_id) REFERENCES billing.order_attempts(merchant_id, id) ON DELETE SET NULL (attempt_id) DEFERRABLE INITIALLY DEFERRED
+  constraint orders_attribution_check CHECK (((octet_length(attribution_source) >= 1) AND (octet_length(attribution_source) <= 100) AND (octet_length(attribution_medium) >= 1) AND (octet_length(attribution_medium) <= 100) AND (octet_length(attribution_campaign) >= 1) AND (octet_length(attribution_campaign) <= 100) AND (octet_length(attribution_term) >= 1) AND (octet_length(attribution_term) <= 100) AND (octet_length(attribution_content) >= 1) AND (octet_length(attribution_content) <= 100) AND (attribution_referrer ~ '^[a-z0-9_]([a-z0-9_.-]{0,251}[a-z0-9_])?$'::text) AND (octet_length(attribution_affiliate) >= 1) AND (octet_length(attribution_affiliate) <= 100)))
   constraint orders_billing_contacts_check CHECK ((jsonb_typeof(billing_contacts) = 'array'::text))
   constraint orders_cancel_url_check CHECK ((cancel_url <> ''::text))
   constraint orders_canceled_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
+  constraint orders_checkout_facts_check CHECK (((purchase_number IS NOT NULL) OR ((opened_at IS NULL) AND (submitted_at IS NULL) AND (billing_country IS NULL) AND (card_country IS NULL) AND (ip_country IS NULL) AND (language IS NULL) AND (attribution_source IS NULL) AND (attribution_medium IS NULL) AND (attribution_campaign IS NULL) AND (attribution_term IS NULL) AND (attribution_content IS NULL) AND (attribution_referrer IS NULL) AND (attribution_affiliate IS NULL))))
+  constraint orders_checkout_order_check CHECK (((checkout_order_id IS NULL) OR (origin = 'subscription'::text)))
+  constraint orders_checkout_order_id_fkey FOREIGN KEY (merchant_id, checkout_order_id) REFERENCES billing.orders(merchant_id, id) ON DELETE SET NULL (checkout_order_id) DEFERRABLE INITIALLY DEFERRED
   constraint orders_collection_method_check CHECK ((collection_method = ANY (ARRAY['charge_automatically'::text, 'send_invoice'::text])))
   constraint orders_collection_owner_check CHECK ((collection_owner = ANY (ARRAY['engine'::text, 'nmi_schedule'::text, 'provider'::text])))
   constraint orders_complete_check CHECK (((status = 'complete'::text) = ((number IS NOT NULL) AND (completed_at IS NOT NULL))))
   constraint orders_complete_payment_check CHECK (((status <> 'complete'::text) OR (total = 0) OR (payment_id IS NOT NULL) OR (origin = 'usage'::text) OR (collection_owner <> 'engine'::text) OR (currency <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
+  constraint orders_country_check CHECK (((billing_country ~ '^[A-Z]{2}$'::text) AND (card_country ~ '^[A-Z]{2}$'::text) AND (ip_country ~ '^[A-Z]{2}$'::text)))
   constraint orders_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint orders_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint orders_customer_id_id_key UNIQUE (merchant_id, customer_id, id)
+  constraint orders_customer_type_check CHECK (((customer_type = ANY (ARRAY['new'::text, 'returning'::text, 'reactivated'::text])) AND ((customer_type IS NULL) = (purchase_number IS NULL))))
   constraint orders_expired_check CHECK (((status <> 'expired'::text) OR (expired_at IS NOT NULL)))
   constraint orders_idempotency_key_check CHECK (((octet_length(idempotency_key) >= 1) AND (octet_length(idempotency_key) <= 512)))
+  constraint orders_language_check CHECK ((language ~ '^[a-z]{2,3}(-([A-Z]{2}|[0-9]{3}))?$'::text))
   constraint orders_lines_digest_check CHECK (((lines_digest IS NULL) OR ((origin = 'customer'::text) AND (octet_length(lines_digest) = 32))))
   constraint orders_memo_check CHECK ((memo <> ''::text))
   constraint orders_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
@@ -2061,8 +2002,10 @@ table billing.orders
   constraint orders_pkey PRIMARY KEY (merchant_id, id)
   constraint orders_po_number_check CHECK ((po_number <> ''::text))
   constraint orders_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id)
+  constraint orders_purchase_number_check CHECK (((purchase_number IS NULL) OR ((purchase_number >= 1) AND (origin = ANY (ARRAY['customer'::text, 'merchant'::text])))))
   constraint orders_request_digest_check CHECK ((((idempotency_key IS NULL) = (request_digest IS NULL)) AND ((request_digest IS NULL) OR (octet_length(request_digest) = 32))))
   constraint orders_status_check CHECK ((status = ANY (ARRAY['open'::text, 'processing'::text, 'complete'::text, 'canceled'::text, 'expired'::text, 'void'::text, 'uncollectible'::text])))
+  constraint orders_submitted_check CHECK (((submitted_at IS NULL) OR (opened_at IS NOT NULL)))
   constraint orders_subscription_bill_kind_check CHECK (((subscription_bill_kind = ANY (ARRAY['initial'::text, 'renewal'::text, 'adjustment'::text])) AND ((subscription_bill_kind IS NULL) OR (origin = 'subscription'::text))))
   constraint orders_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id)
   constraint orders_succeeded_check CHECK (((payment_status = 'succeeded'::text) = ((status = 'complete'::text) OR (payment_id IS NOT NULL))))
@@ -2072,10 +2015,13 @@ table billing.orders
   constraint orders_uncollectible_check CHECK ((((status = 'uncollectible'::text) = (uncollectible_at IS NOT NULL)) AND ((status <> 'uncollectible'::text) OR (origin = 'usage'::text))))
   constraint orders_usage_check CHECK ((((origin = 'usage'::text) = ((amount_paid IS NOT NULL) AND (collection_method IS NOT NULL) AND (tax IS NOT NULL) AND (billing_contacts IS NOT NULL) AND (collection_failure_count IS NOT NULL))) AND ((amount_paid IS NULL) OR ((amount_paid >= 0) AND (amount_paid <= total))) AND ((status <> 'complete'::text) OR (amount_paid IS NULL) OR (amount_paid = total)) AND (collection_failure_count >= 0) AND ((next_collection_attempt_at IS NULL) OR (origin = 'usage'::text)) AND ((collection_failed_at IS NULL) OR (origin = 'usage'::text))))
   constraint orders_void_check CHECK (((status = 'void'::text) = (voided_at IS NOT NULL)))
+  index CREATE INDEX orders_checkout_created_at_idx ON billing.orders USING btree (merchant_id, created_at) WHERE (purchase_number IS NOT NULL)
+  index CREATE INDEX orders_checkout_order_id_idx ON billing.orders USING btree (merchant_id, checkout_order_id) WHERE (checkout_order_id IS NOT NULL)
   index CREATE INDEX orders_closed_at_unpaid_idx ON billing.orders USING btree (merchant_id, COALESCE(canceled_at, expired_at)) WHERE ((status = ANY (ARRAY['canceled'::text, 'expired'::text])) AND (payment_id IS NULL) AND (attempt_id IS NULL))
   index CREATE INDEX orders_created_at_id_idx ON billing.orders USING btree (merchant_id, created_at DESC, id DESC)
   index CREATE INDEX orders_customer_id_created_at_id_idx ON billing.orders USING btree (merchant_id, customer_id, created_at DESC, id DESC)
   index CREATE UNIQUE INDEX orders_customer_id_id_key ON billing.orders USING btree (merchant_id, customer_id, id)
+  index CREATE INDEX orders_customer_purchases_idx ON billing.orders USING btree (merchant_id, customer_id) WHERE ((status = 'complete'::text) AND ((origin = ANY (ARRAY['customer'::text, 'merchant'::text])) OR (subscription_bill_kind = 'initial'::text)))
   index CREATE INDEX orders_due_at_open_idx ON billing.orders USING btree (merchant_id, due_at) WHERE ((status = 'open'::text) AND (due_at IS NOT NULL))
   index CREATE INDEX orders_expires_at_live_idx ON billing.orders USING btree (merchant_id, expires_at) WHERE (status = 'open'::text)
   index CREATE INDEX orders_id_idx ON billing.orders USING btree (id)
@@ -2086,10 +2032,12 @@ table billing.orders
   index CREATE INDEX orders_payment_method_id_idx ON billing.orders USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL)
   index CREATE UNIQUE INDEX orders_pkey ON billing.orders USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX orders_renewal_key ON billing.orders USING btree (merchant_id, subscription_id, period_starts_at) WHERE ((origin = 'subscription'::text) AND (collection_owner = 'engine'::text) AND (subscription_bill_kind = 'renewal'::text))
+  index CREATE INDEX orders_sale_completed_at_idx ON billing.orders USING btree (merchant_id, completed_at) WHERE ((purchase_number IS NOT NULL) AND (status = 'complete'::text))
   index CREATE INDEX orders_subscription_period_idx ON billing.orders USING btree (merchant_id, subscription_id, period_starts_at) WHERE (origin = 'subscription'::text)
   index CREATE INDEX orders_usage_collection_due_idx ON billing.orders USING btree (next_collection_attempt_at, merchant_id, id) WHERE ((origin = 'usage'::text) AND (status = 'open'::text) AND (collection_method = 'charge_automatically'::text) AND (next_collection_attempt_at IS NOT NULL))
   index CREATE INDEX orders_usage_open_idx ON billing.orders USING btree (merchant_id, customer_id, currency) WHERE ((origin = 'usage'::text) AND (status = ANY (ARRAY['open'::text, 'processing'::text, 'uncollectible'::text])))
   index CREATE UNIQUE INDEX orders_usage_period_key ON billing.orders USING btree (merchant_id, customer_id, currency, period_starts_at, period_ends_at) WHERE (origin = 'usage'::text)
+  trigger CREATE TRIGGER assign_checkout_order BEFORE INSERT ON billing.orders FOR EACH ROW WHEN (((new.origin = 'subscription'::text) AND (new.checkout_order_id IS NULL))) EXECUTE FUNCTION billing.assign_checkout_order()
 
 table billing.owed_items
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -3596,11 +3544,13 @@ table billing.subscriptions
   column due_recheck_at timestamp with time zone
   column rail_subscription_key text GENERATED ALWAYS AS (billing.rail_subscription_key(rail, rail_subscription_id)) STORED
   column retry_advised_at timestamp with time zone
+  column checkout_order_id uuid
   constraint subscriptions_access_duration_hours_snapshot_check CHECK (((access_duration_hours_snapshot IS NULL) OR (access_duration_hours_snapshot > 0)))
   constraint subscriptions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text, 'provider'::text, 'abandoned'::text])))
   constraint subscriptions_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
   constraint subscriptions_canceled_has_type_check CHECK (((status <> 'canceled'::text) OR (cancel_type IS NOT NULL)))
   constraint subscriptions_canceled_no_retry_schedule_check CHECK (((status <> 'canceled'::text) OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL))))
+  constraint subscriptions_checkout_order_id_fkey FOREIGN KEY (merchant_id, checkout_order_id) REFERENCES billing.orders(merchant_id, id) ON DELETE SET NULL (checkout_order_id) DEFERRABLE INITIALLY DEFERRED
   constraint subscriptions_collection_policy_check CHECK ((collection_policy = ANY (ARRAY['provider'::text, 'nmi_schedule'::text, 'engine'::text])))
   constraint subscriptions_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint subscriptions_customer_id_id_key UNIQUE (merchant_id, customer_id, id)
@@ -3628,6 +3578,7 @@ table billing.subscriptions
   constraint trg_subscriptions_track_unverified TRIGGER DEFERRABLE INITIALLY DEFERRED
   index CREATE INDEX subscriptions_canceled_at_id_idx ON billing.subscriptions USING btree (merchant_id, canceled_at DESC, id DESC) WHERE ((deleted_at IS NULL) AND (canceled_at IS NOT NULL))
   index CREATE INDEX subscriptions_canceled_at_idx ON billing.subscriptions USING btree (merchant_id, canceled_at) WHERE (canceled_at IS NOT NULL)
+  index CREATE INDEX subscriptions_checkout_order_id_idx ON billing.subscriptions USING btree (merchant_id, checkout_order_id) WHERE (checkout_order_id IS NOT NULL)
   index CREATE INDEX subscriptions_created_at_id_idx ON billing.subscriptions USING btree (merchant_id, created_at DESC, id DESC) WHERE (deleted_at IS NULL)
   index CREATE INDEX subscriptions_current_period_ends_at_engine_due_global_idx ON billing.subscriptions USING btree (current_period_ends_at, merchant_id) WHERE ((collection_policy = 'engine'::text) AND (status = ANY (ARRAY['active'::text, 'past_due'::text])) AND (deleted_at IS NULL))
   index CREATE INDEX subscriptions_current_period_ends_at_id_idx ON billing.subscriptions USING btree (merchant_id, current_period_ends_at, id) WHERE ((deleted_at IS NULL) AND (current_period_ends_at IS NOT NULL))
@@ -3825,6 +3776,20 @@ function billing.arm_book(text,timestamp with time zone)
           schema_oid = EXCLUDED.schema_oid,
           armed_by = EXCLUDED.armed_by,
           armed_at = EXCLUDED.armed_at;
+  END;
+  $function$
+
+function billing.assign_checkout_order()
+  CREATE OR REPLACE FUNCTION billing.assign_checkout_order()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      SELECT s.checkout_order_id INTO NEW.checkout_order_id
+      FROM billing.subscriptions s
+      WHERE s.merchant_id = NEW.merchant_id AND s.id = NEW.subscription_id;
+      RETURN NEW;
   END;
   $function$
 
@@ -4375,33 +4340,6 @@ function billing.dispute_network_activity()
   END;
   $function$
 
-function billing.drop_month_partitions(name,timestamp with time zone)
-  CREATE OR REPLACE FUNCTION billing.drop_month_partitions(p_table name, p_before timestamp with time zone)
-   RETURNS integer
-   LANGUAGE plpgsql
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-   SET lock_timeout TO '2s'
-  AS $function$
-  DECLARE
-      parent regclass := to_regclass(quote_ident(p_table));
-      parent_schema name;
-      child record;
-      dropped integer := 0;
-  BEGIN
-      SELECT n.nspname INTO parent_schema
-        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-       WHERE c.oid = parent AND c.relkind = 'p';
-      IF NOT FOUND THEN
-          RAISE EXCEPTION '% is not a partitioned table', p_table USING ERRCODE='42809';
-      END IF;
-      FOR child IN SELECT m.partition FROM billing.month_partitions(p_table) m WHERE m.range_to <= p_before LOOP
-          EXECUTE format('DROP TABLE IF EXISTS %I.%I', parent_schema, child.partition);
-          dropped := dropped + 1;
-      END LOOP;
-      RETURN dropped;
-  END;
-  $function$
-
 function billing.effect_due_mrr(uuid,uuid,timestamp with time zone)
   CREATE OR REPLACE FUNCTION billing.effect_due_mrr(p_merchant uuid, p_subscription uuid, p_at timestamp with time zone)
    RETURNS boolean
@@ -4536,46 +4474,6 @@ function billing.enqueue_payment_settlement_event()
           ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
       END IF;
       RETURN NEW;
-  END;
-  $function$
-
-function billing.ensure_month_partitions(name,timestamp with time zone,timestamp with time zone)
-  CREATE OR REPLACE FUNCTION billing.ensure_month_partitions(p_table name, p_from timestamp with time zone, p_through timestamp with time zone)
-   RETURNS integer
-   LANGUAGE plpgsql
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-   SET "TimeZone" TO 'UTC'
-   SET lock_timeout TO '2s'
-  AS $function$
-  DECLARE
-      parent regclass := to_regclass(quote_ident(p_table));
-      parent_schema name;
-      month_start timestamptz := date_trunc('month', p_from);
-      partition name;
-      created integer := 0;
-  BEGIN
-      SELECT n.nspname INTO parent_schema
-        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-       WHERE c.oid = parent AND c.relkind = 'p';
-      IF NOT FOUND THEN
-          RAISE EXCEPTION '% is not a partitioned table', p_table USING ERRCODE='42809';
-      END IF;
-      WHILE month_start <= p_through LOOP
-          partition := p_table || to_char(month_start, '"_y"YYYY"m"MM');
-          IF to_regclass(format('%I.%I', parent_schema, partition)) IS NULL THEN
-              BEGIN
-                  EXECUTE format('CREATE TABLE %I.%I (LIKE %I.%I INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES INCLUDING GENERATED INCLUDING STORAGE)',
-                      parent_schema, partition, parent_schema, p_table);
-                  EXECUTE format('ALTER TABLE %I.%I ATTACH PARTITION %I.%I FOR VALUES FROM (%L) TO (%L)',
-                      parent_schema, p_table, parent_schema, partition, month_start, month_start + interval '1 month');
-                  created := created + 1;
-              EXCEPTION WHEN duplicate_table OR duplicate_object OR unique_violation THEN
-                  NULL; -- another session created it first
-              END;
-          END IF;
-          month_start := month_start + interval '1 month';
-      END LOOP;
-      RETURN created;
   END;
   $function$
 
@@ -4833,12 +4731,9 @@ function billing.guard_billing_restore_receipt()
                     'ledger_type_totals',
                     'ledger_units',
                     'limit_adjustments',
-                    'limit_hold_parts',
-                    'limit_holds',
                     'limit_windows',
                     'maintenance_runs',
                     'mandates',
-                    'merchant_destructive_policy',
                     'merchant_leases',
                     'money_settings',
                     'mrr_cohort_flows',
@@ -4914,6 +4809,10 @@ function billing.guard_billing_restore_receipt()
                   INTO occupied USING NEW.merchant_id;
               IF occupied THEN RAISE EXCEPTION 'billing restore destination is not empty: %',item.relname USING ERRCODE='55000'; END IF;
           END LOOP;
+          IF EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id=NEW.merchant_id
+              AND (c.destructive_armed OR c.first_pull_completed_at IS NOT NULL)) THEN
+              RAISE EXCEPTION 'billing restore destination is not empty: merchant_controls' USING ERRCODE='55000';
+          END IF;
       ELSE
           IF OLD.kind<>'billing_restore' OR NEW.kind<>'billing_restore'
              OR OLD.status<>'running' OR NEW.status<>'completed'
@@ -5455,22 +5354,6 @@ function billing.money_settings_track_mrr_risk()
   END;
   $function$
 
-function billing.month_partitions(name)
-  CREATE OR REPLACE FUNCTION billing.month_partitions(p_table name)
-   RETURNS TABLE(partition name, range_from timestamp with time zone, range_to timestamp with time zone)
-   LANGUAGE sql
-   STABLE
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-  AS $function$
-      SELECT c.relname,
-             (regexp_match(pg_get_expr(c.relpartbound, c.oid), 'FROM \(''([^'']+)''\)'))[1]::timestamptz,
-             (regexp_match(pg_get_expr(c.relpartbound, c.oid), 'TO \(''([^'']+)''\)'))[1]::timestamptz
-        FROM pg_inherits i
-        JOIN pg_class c ON c.oid = i.inhrelid
-       WHERE i.inhparent = to_regclass(quote_ident(p_table))
-       ORDER BY 2
-  $function$
-
 function billing.monthly_normalized_amount(bigint,integer)
   CREATE OR REPLACE FUNCTION billing.monthly_normalized_amount(p_amount bigint, p_hours integer)
    RETURNS bigint
@@ -5612,6 +5495,8 @@ function billing.pending_mrr_lines(uuid,uuid,text)
    RETURNS TABLE(subscription_id uuid, product_id uuid, price_id uuid, mrr_before bigint, mrr_after bigint, cause text, changed_at timestamp with time zone)
    LANGUAGE sql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
+   SET plan_cache_mode TO 'force_custom_plan'
   AS $function$
   SELECT m.subscription_id,
          CASE WHEN m.currency = p_currency THEN m.product_id ELSE m.recorded_product_id END,
@@ -5885,6 +5770,8 @@ function billing.refresh_subscription_mrr(billing.subscriptions,timestamp with t
    RETURNS void
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
+   SET plan_cache_mode TO 'force_custom_plan'
   AS $function$
   DECLARE
       v_price billing.prices;
@@ -5902,7 +5789,7 @@ function billing.refresh_subscription_mrr(billing.subscriptions,timestamp with t
       IF NOT FOUND THEN
           RETURN;
       END IF;
-      SELECT * INTO v_prev FROM billing.subscription_mrr WHERE merchant_id = s.merchant_id AND subscription_id = s.id;
+      SELECT * INTO v_prev FROM billing.subscription_mrr WHERE merchant_id = s.merchant_id AND customer_id = s.customer_id AND subscription_id = s.id;
       IF s.deleted_at IS NULL THEN
           IF s.status = 'canceled' THEN
               -- A cancellation at period end contributes until it ends (an older
@@ -5948,7 +5835,7 @@ function billing.refresh_subscription_mrr(billing.subscriptions,timestamp with t
                      THEN v_at ELSE v_prev.changed_at END,
                  cause = CASE WHEN ROW(v_prev.currency, v_prev.product_id, v_prev.price_id, v_prev.mrr) IS DISTINCT FROM ROW(v_price.currency, s.product_id, s.price_id, v_level)
                      THEN p_cause ELSE v_prev.cause END
-           WHERE merchant_id = s.merchant_id AND subscription_id = s.id;
+           WHERE merchant_id = s.merchant_id AND customer_id = s.customer_id AND subscription_id = s.id;
       END IF;
       SELECT * INTO v_open FROM billing.mrr_scheduled
        WHERE merchant_id = s.merchant_id AND subscription_id = s.id AND status = 'scheduled' FOR UPDATE;
@@ -6095,6 +5982,8 @@ function billing.schedule_mrr_change(uuid,uuid,timestamp with time zone)
    RETURNS void
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
+   SET plan_cache_mode TO 'force_custom_plan'
   AS $function$
   DECLARE
       v_change billing.scheduled_changes;
@@ -6224,12 +6113,14 @@ function billing.settle_at_commit()
    RETURNS trigger
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
+   SET plan_cache_mode TO 'force_custom_plan'
   AS $function$
   BEGIN
       IF TG_TABLE_NAME = 'ledger_rollup_pending' THEN
           PERFORM 1 FROM billing.ledger_rollup_pending WHERE merchant_id = NEW.merchant_id AND transfer_id = NEW.transfer_id;
       ELSIF TG_TABLE_NAME = 'subscription_mrr' THEN
-          PERFORM 1 FROM billing.subscription_mrr WHERE merchant_id = NEW.merchant_id AND subscription_id = NEW.subscription_id AND dirty;
+          PERFORM 1 FROM billing.subscription_mrr WHERE merchant_id = NEW.merchant_id AND customer_id = NEW.customer_id AND subscription_id = NEW.subscription_id AND dirty;
       ELSE
           PERFORM 1 FROM billing.eventlog_pending WHERE ordinal = NEW.ordinal;
       END IF;
@@ -6323,6 +6214,8 @@ function billing.settle_mrr(uuid)
    RETURNS void
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
+   SET plan_cache_mode TO 'force_custom_plan'
   AS $function$
   DECLARE
       v_pair record;
@@ -6947,6 +6840,7 @@ function billing.subscriptions_row_version()
       unchanged.row_version := OLD.row_version;
       unchanged.destructive_run_class := OLD.destructive_run_class;
       unchanged.rail_subscription_key := OLD.rail_subscription_key;
+      unchanged.checkout_order_id := OLD.checkout_order_id;
       IF billing.rail_subscription_key(NEW.rail, NEW.rail_subscription_id) IS NOT DISTINCT FROM OLD.rail_subscription_key THEN
           unchanged.rail_subscription_id := OLD.rail_subscription_id;
       END IF;

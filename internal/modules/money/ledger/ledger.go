@@ -81,6 +81,9 @@ const (
 	// OwedRepayment pays debt from a newly funded credit lot (customer_units
 	// -> customer_owed), naming that lot.
 	OwedRepayment TransferType = "owed_repayment"
+	// OwedReopened is a chargeback of a usage order payment owing again what
+	// it paid (customer_owed -> units_sold): the inverse of OwedPayment.
+	OwedReopened TransferType = "owed_reopened"
 	// UsageReversed credits a lot with what a period's usage posted beyond
 	// its price, once a volume tier's price fell (units_redeemed ->
 	// customer_units), naming the lot; a leg that reduces owed names none.
@@ -90,7 +93,7 @@ const (
 
 // AllTransferTypes is the units book's whole vocabulary (OR-J40-S01 checks it
 // against ledger_transfers_type_check).
-var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditRefund, CreditRefundRestore, CreditRefundCash, CreditRefundCashRestore, CreditRefundFunding, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff, OwedRepayment, UsageReversed}
+var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditRefund, CreditRefundRestore, CreditRefundCash, CreditRefundCashRestore, CreditRefundFunding, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff, OwedRepayment, OwedReopened, UsageReversed}
 
 // fundingTransfers re-arm a customer's balance notices: money added to its
 // balance, and debt it paid.
@@ -544,6 +547,24 @@ func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency strin
 	c := customer
 	return l.Apply(ctx, Transfer{
 		Debit: clearing, Credit: liab, Amount: amount, Currency: currency, Type: OwedPayment,
+		Coord: coord, Customer: &c, Order: order,
+	})
+}
+
+// ReopenOwed owes again what a charged-back usage order payment paid (DR
+// customer_owed / CR units_sold).
+func (l *Ledger) ReopenOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, order *uuid.UUID) (gen.BillingLedgerTransfer, error) {
+	liab, err := l.EnsureCustomerArrears(ctx, customer, currency)
+	if err != nil {
+		return gen.BillingLedgerTransfer{}, err
+	}
+	sold, err := l.EnsureSystemAccount(ctx, UnitsSold, currency)
+	if err != nil {
+		return gen.BillingLedgerTransfer{}, err
+	}
+	c := customer
+	return l.Apply(ctx, Transfer{
+		Debit: liab, Credit: sold, Amount: amount, Currency: currency, Type: OwedReopened,
 		Coord: coord, Customer: &c, Order: order,
 	})
 }

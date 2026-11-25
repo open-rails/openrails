@@ -306,6 +306,49 @@ func (q *Queries) GetLiveRecurringMandateForShare(ctx context.Context, arg GetLi
 	return i, err
 }
 
+const getLiveUnscheduledMandate = `-- name: GetLiveUnscheduledMandate :one
+SELECT id, merchant_id, customer_id, payment_method_id, psp_id, rail, kind, subscription_id, currency, status, end_reason, ended_at, card_brand, initial_transaction_id, network_transaction_id, transaction_link_id, storing_attempt_id, accepted_at, created_at, updated_at FROM billing.mandates
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND currency = $3::text
+  AND kind = 'unscheduled' AND status IN ('active', 'requires_reconsent')
+`
+
+type GetLiveUnscheduledMandateParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// The customer's collection agreement in one currency, read without a lock
+// (a capacity read, in a read-only snapshot).
+func (q *Queries) GetLiveUnscheduledMandate(ctx context.Context, arg GetLiveUnscheduledMandateParams) (BillingMandate, error) {
+	row := q.db.QueryRow(ctx, getLiveUnscheduledMandate, arg.MerchantID, arg.CustomerID, arg.Currency)
+	var i BillingMandate
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.PaymentMethodID,
+		&i.PspID,
+		&i.Rail,
+		&i.Kind,
+		&i.SubscriptionID,
+		&i.Currency,
+		&i.Status,
+		&i.EndReason,
+		&i.EndedAt,
+		&i.CardBrand,
+		&i.InitialTransactionID,
+		&i.NetworkTransactionID,
+		&i.TransactionLinkID,
+		&i.StoringAttemptID,
+		&i.AcceptedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getLiveUnscheduledMandateForShare = `-- name: GetLiveUnscheduledMandateForShare :one
 SELECT id, merchant_id, customer_id, payment_method_id, psp_id, rail, kind, subscription_id, currency, status, end_reason, ended_at, card_brand, initial_transaction_id, network_transaction_id, transaction_link_id, storing_attempt_id, accepted_at, created_at, updated_at FROM billing.mandates
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid

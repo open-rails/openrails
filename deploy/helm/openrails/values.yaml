@@ -21,24 +21,16 @@ args: [run-server]
 
 # config.yaml, rendered as is (config.example.yaml lists every key). Keep
 # secrets out: they come from `secrets`, as environment variables or files
-# named like them (database.url is DATABASE_URL). host, port and private_port are the
+# named like them (database.url is DATABASE_URL). port and metrics_port are the
 # chart's (ports.http, metrics.port).
 config:
-  # public_billing_base_url: https://billing.example.com
-  # The server's AuthKit, in AuthKit's keys (AUTH_<PATH> env).
-  # auth:
-  #   # Required: generate once and keep this deployment's account directory ID.
-  #   default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11
-  #   token:
-  #     issuer: https://billing.example.com # https, required
-  #   resource:
-  #     id: https://billing.example.com # trusted issuers' tokens' aud
+  # public_url: https://billing.example.com # required: the server's AuthKit issuer and resource
   # Optional, no default; more than one replica needs it.
   # redis:
-  #   addr: redis:6379 # or url: rediss://…; username, tls, ca_cert
+  #   url: redis://redis:6379 # or rediss://user:password@host/db, from a REDIS_URL secret; ca_cert
   # The event store usage needs; without it usage is off.
   # clickhouse:
-  #   addr: clickhouse:9000 # password from a CLICKHOUSE_PASSWORD secret
+  #   url: clickhouse://clickhouse:9000/openrails # with a password, from a CLICKHOUSE_URL secret
   # The ingress controller's pod or node CIDR: without it the client IP is the
   # proxy's.
   # trusted_proxies: [10.244.0.0/16]
@@ -57,8 +49,9 @@ config:
 
 # More files in /etc/openrails, each a YAML document or a string. The server
 # reads these names when present:
-#   merchants.yaml  merchant manifest, applied at every boot (its secrets go in
-#                   secrets.merchantOverlays)
+#   merchants.yaml  merchant manifest, applied at every boot; with PSP secrets
+#                   in it, mount it from a Secret (secrets.merchantManifest)
+#                   instead, or keep them in Vault (config.vault.kv_mount)
 #   bootstrap.yaml  AuthKit's first-run operators and trusted applications
 #   catalog.yaml    the catalog document `openrails catalog apply` takes
 files: {}
@@ -69,19 +62,18 @@ secrets:
   #   DATABASE_URL: {name: openrails-db-app, key: uri}
   env: {}
   # Secrets whose keys are environment variable names (DATABASE_URL, REDIS_URL,
-  # REDIS_PASSWORD, REDIS_CA_CERT, EMAIL_SMTP_PASSWORD, VAULT_TOKEN, …),
+  # REDIS_CA_CERT, CLICKHOUSE_URL, EMAIL_SMTP_PASSWORD, VAULT_TOKEN, …),
   # mounted as files at /vault/secrets.
   # Environment variables win over files.
   files: []
   # A Secret holding AuthKit's keys.json and totp.key, mounted at /vault/auth
-  # and reloaded when it changes. Empty mounts a scratch directory, which
-  # only auth.keys.allow_ephemeral_dev_keys can use, and only with one replica.
+  # and reloaded when it changes. Empty mounts a scratch directory, which only
+  # a loopback issuer's generated development keys can use, with one replica.
   authKeys: ""
-  # Merchant manifest overlays: a Secret key holding YAML in the manifest's
-  # shape (PSP credentials kept outside Vault), added to
-  # merchant_manifest_overlays.
-  #   - {name: shop-psps, key: overlay.yaml}
-  merchantOverlays: []
+  # The merchant manifest with its PSP secrets: a Secret key mounted as
+  # /etc/openrails/merchants.yaml, in place of files.merchants.yaml.
+  #   {name: shop-merchants, key: merchants.yaml}
+  merchantManifest: {}
 
 env: []
 envFrom: []
@@ -89,8 +81,11 @@ envFrom: []
 ports:
   http: 3053
 
-# The private listener: GET /metrics, on its own ClusterIP Service
-# (<fullname>-metrics), never routed by the ingress.
+# The metrics listener (config's metrics_port): the operator's Prometheus
+# GET /metrics (dependency up/down, abuse-state fallbacks, per-job-kind
+# health), on its own ClusterIP Service (<fullname>-metrics) so it is never
+# public; the ingress never routes it. Not the merchant dashboard's business
+# metrics, which are the /v1/metrics API on ports.http.
 metrics:
   enabled: true
   port: 9090

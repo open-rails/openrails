@@ -33,7 +33,7 @@ const reservationReason = "operator correction"
 func newReservationWorld(t *testing.T) *reservationWorld {
 	t.Helper()
 	a := newAuthorityWorld(t, func(w *world) {
-		w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ActorPerHour: 2}
+		w.limits = func(l *destructive.Limits) { l.ActorPerHour = 2 }
 	})
 	var in []billing.CreateCreditGrantParams
 	for i := range 4 {

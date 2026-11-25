@@ -24,17 +24,21 @@ type NMIPSP struct {
 	// Environment is live (the default), test (a gateway account in test
 	// mode) or sandbox (a sandbox.nmi.com account).
 	Environment billing.Environment `psp:"environment"`
-	Archived    bool                `psp:"archived"`
+	// Archived drains the PSP: its subscriptions stay, it takes no new work.
+	Archived bool `psp:"archived"`
 	// Custodian is the key of a declared custodian holding this PSP's cards;
 	// "" means NMI's customer vault holds them.
 	Custodian string `psp:"custodian"`
 
-	SecurityKey          string `psp:"secrets.security_key,required"`
+	// SecurityKey is the gateway's private API key.
+	SecurityKey string `psp:"secrets.security_key,required"`
+	// WebhookSigningSecret verifies NMI's webhooks.
 	WebhookSigningSecret string `psp:"secrets.webhook_signing_secret,required"`
 	// WebhookSigningSecretPrevious is the rotated-out secret. It verifies only
 	// until WebhookOverlapExpiresAt, which must be set with it.
-	WebhookSigningSecretPrevious string    `psp:"secrets.webhook_signing_secret_previous"`
-	WebhookOverlapExpiresAt      time.Time `psp:"webhook_overlap_expires_at"`
+	WebhookSigningSecretPrevious string `psp:"secrets.webhook_signing_secret_previous"`
+	// WebhookOverlapExpiresAt ends the previous secret's verification, RFC 3339.
+	WebhookOverlapExpiresAt time.Time `psp:"webhook_overlap_expires_at"`
 
 	// TokenizationKey is the public Collect.js key the browser's card fields use.
 	TokenizationKey string `psp:"tokenization_key"`
@@ -75,16 +79,20 @@ type StripePSP struct {
 	// Environment is live (the default) or test, as the secret key's prefix
 	// says.
 	Environment billing.Environment `psp:"environment"`
-	Archived    bool                `psp:"archived"`
+	// Archived drains the PSP: its subscriptions stay, it takes no new work.
+	Archived bool `psp:"archived"`
 
-	SecretKey            string `psp:"secrets.secret_key,required"`
+	// SecretKey is the account's secret or restricted key.
+	SecretKey string `psp:"secrets.secret_key,required"`
+	// WebhookSigningSecret verifies the webhook endpoint's events.
 	WebhookSigningSecret string `psp:"secrets.webhook_signing_secret,required"`
 	// WebhookSigningSecretThin verifies the thin-event endpoint.
 	WebhookSigningSecretThin string `psp:"secrets.webhook_signing_secret_thin"`
 	// WebhookSigningSecretPrevious is the rotated-out secret. It verifies only
 	// until WebhookOverlapExpiresAt, which must be set with it.
-	WebhookSigningSecretPrevious string    `psp:"secrets.webhook_signing_secret_previous"`
-	WebhookOverlapExpiresAt      time.Time `psp:"webhook_overlap_expires_at"`
+	WebhookSigningSecretPrevious string `psp:"secrets.webhook_signing_secret_previous"`
+	// WebhookOverlapExpiresAt ends the previous secret's verification, RFC 3339.
+	WebhookOverlapExpiresAt time.Time `psp:"webhook_overlap_expires_at"`
 
 	// PublishableKey (pk_…) enables embedded Elements; without it purchase
 	// redirects to Stripe Checkout.
@@ -121,11 +129,14 @@ type CCBillPSP struct {
 	ClientSubacc string `psp:"client_subacc"`
 	// Environment is live (the default) or sandbox (CCBill's sandbox).
 	Environment billing.Environment `psp:"environment"`
-	Archived    bool                `psp:"archived"`
+	// Archived drains the PSP: its subscriptions stay, it takes no new work.
+	Archived bool `psp:"archived"`
 
 	// Salt signs FlexForm links and verifies their callbacks.
-	Salt             string `psp:"secrets.salt,required"`
+	Salt string `psp:"secrets.salt,required"`
+	// DatalinkUsername is the DataLink user OpenRails reads transactions as.
 	DatalinkUsername string `psp:"secrets.datalink_username"`
+	// DatalinkPassword is the DataLink user's password.
 	DatalinkPassword string `psp:"secrets.datalink_password"`
 	// DisputeRatioLimit is the acquirer's limit on chargebacks over settled
 	// sales in a month, as a percentage ("0.9%"): monitored like a card
@@ -154,7 +165,8 @@ func (p CCBillPSP) PSPConfig() billing.PSPConfig {
 type SolanaPSP struct {
 	// Environment is mainnet (the default), devnet or testnet.
 	Environment billing.Environment `psp:"environment"`
-	Archived    bool                `psp:"archived"`
+	// Archived drains the PSP: its subscriptions stay, it takes no new work.
+	Archived bool `psp:"archived"`
 	// Treasury is the Solana address every payment to the merchant lands in:
 	// the PSP's identity.
 	Treasury string `psp:"treasury"`

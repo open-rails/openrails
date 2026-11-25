@@ -12,7 +12,7 @@ The `server/` module (`github.com/open-rails/openrails/server`): the `openrails`
   A merchant is an AuthKit group whose id is the merchant id; teams, API keys and
   trusted issuers are AuthKit's, in that group.
 - **Merchant manifest**: the file of merchant declarations (`--merchant-manifest`,
-  default `DefaultMerchantConfigManifestPath`) and its overlays.
+  default `DefaultMerchantConfigManifestPath`), one file.
 - **Operator**: `server/internal/operator`, the operations the CLI and the
   `server.Server` methods share.
 - **Console**: the SPA at `/admin`, built from `web/console` (package `console`,
@@ -24,27 +24,33 @@ The `server/` module (`github.com/open-rails/openrails/server`): the `openrails`
 
 `server.New` (`server/server.go`):
 
-1. Refuses an empty `Auth.DefaultTenantID` (`controlplane.RequireDefaultTenant`), a
-   declared merchant's `Issuer` (a credential's merchant is its group) and a host
-   `Engine.UserInfo`.
+1. Fills unset settings (`Config.WithDefaults`), and refuses a declared merchant's
+   `Issuer` (a credential's merchant is its group) and a host `Engine.UserInfo`.
 2. Installs `customerDirectory` as the engine's `UserInfo`
    ([customer directory](customer-directory.md)) and calls `openrails.New`, which
-   migrates unless `SkipMigrations`.
-3. Builds AuthKit: `controlplane.AuthKit` fixes merchant roles, the API-key prefix,
-   the resource's scopes, the console's client (`ConsoleClientID`), AuthKit's River
-   schema and mount, and `SkipMigrations`. AuthKit gets its own pool on the engine's
-   database unless one is given.
+   migrates.
+3. Builds AuthKit, single-tenant (it creates or adopts its one account directory).
+   `controlplane.AuthKit` derives its configuration in three steps: facts from the
+   engine's settings (issuer and resource from `PublicURL`, schema `<schema>_auth`,
+   `Auth.Keys.Path`), the rules of the server's own accounts (invite-only, a
+   required second factor by passkey or TOTP, 30-day sessions, the console's link
+   landings), then `Config.AuthKit`, a hosted product's hook, and the invariants:
+   merchant roles, the API-key prefix, the issued audience, the resource's scopes,
+   the console's client (`ConsoleClientID`), the client-IP posture, AuthKit's River
+   schema and mount. `RegistrationGuard` wraps AuthKit's run-time application and
+   OAuth-client registrations: their key and logout URLs must be https on public
+   hosts. AuthKit gets its own pool on the engine's database unless one is given.
 4. `controlplane.New`, `operator.Join`, then `operator.StandaloneServer` builds the
    HTTP surface.
 
 ### Configuration
 
-`hostconfig.Load` (`server/internal/hostconfig`) layers `server.DefaultConfig()` (the engine's `billing.DefaultConfig()` with the server's own), `config.yaml` (`--config`, `OPENRAILS_CONFIG`), a logged `.env`, files under `VAULT_SECRETS_PATH` and the environment (`DATABASE_URL` is `database.url`). It decodes the one tree twice, into `server.Config` (the engine's keys inline) and the binary's own keys (connections, logger, signing key); a key neither reads, and a retired name (`ENV`, `API_URL`, `db`, …), refuses boot. Every command loads the same way. `server.New` takes `server.Config` as decoded and passes its `Engine` to `openrails.New`.
+`hostconfig.Load` (`server/internal/hostconfig`) layers `server.DefaultConfig()` (the engine's `billing.DefaultConfig()` with the server's own), `config.yaml` (`--config`, `OPENRAILS_CONFIG`), a logged `.env`, files under `VAULT_SECRETS_PATH` and the environment (`DATABASE_URL` is `database.url`). It decodes the one tree twice, into `server.Config` (the engine's keys inline) and the binary's own keys (connections and `logger`); a key neither reads, and a retired name (`ENV`, `API_URL`, `db`, …), refuses boot. One rule (`retiredAuth`) refuses every `auth` key and `AUTH_*` variable but `auth.keys.path`. The binary lets AuthKit read keys on a private network when the boot merchant manifest or the bootstrap manifest declares an application there (`bootstrap.PrivateNetworkApplications`). Every command loads the same way. `server.New` takes `server.Config` as decoded and passes its `Engine` to `openrails.New`.
 
 ### Boot merchants
 
 `serverboot.ReconcileBootMerchantManifest` runs on `run-server` and `run-worker`. It
-loads the manifest and overlays (`bootstrap.LoadMerchantConfigManifestWithOverlays`),
+loads the manifest (`bootstrap.LoadMerchantConfigManifest`),
 creates each missing merchant with its AuthKit group and `remote_application` (a
 trusted issuer), and puts file declarations in place
 (`merchantbootstrap.ProvisionMerchant`). Only PostgreSQL or an unreadable manifest
@@ -71,7 +77,9 @@ Without the default manifest the server boots control-plane only.
 
 ### HTTP
 
-`server/internal/http` builds one public handler: health and meta, the engine's route groups (`RouteGroups`, each off by default), `/v1/me`, `/v1/webhooks/{rail}/{account_id}`, AuthKit's routes, `/admin`, and the payment page on `Engine.CheckoutOrigin` by Host. Every native route passes `wrapHandler`: recovery, request log, security headers, CORS for browser-tier routes only (`BrowserTierRoutes`), `RequestLimitsHTTP`, explicit billing credentials (`billingauth.ExplicitCredentials`) and the engine's `RateLimitHTTP`. `PrivateHandler` serves `/metrics` on `server.Config.PrivatePort`.
+`server/internal/http` builds one public handler: health and meta, the engine's route groups (all of them), `/v1/me`, `/v1/webhooks/{rail}/{account_id}`, AuthKit's routes, `/admin`, and the payment page on `CheckoutOrigin` by Host. Every native route passes `wrapHandler`: recovery, request log, security headers, CORS for browser-tier routes only (`BrowserTierRoutes`), `RequestLimitsHTTP`, explicit billing credentials (`billingauth.ExplicitCredentials`) and the engine's `RateLimitHTTP`.
+
+`MetricsHandler` is the metrics listener on `MetricsPort`: the operator's Prometheus `GET /metrics` (dependency up/down, abuse-state fallbacks, per-job-kind health), apart from the public handler so it is never public; zero serves none, and the chart sets 9090 with its own ClusterIP Service. It is not the merchant dashboard's business metrics, the `/v1/metrics` route group on the public handler.
 
 `Server.Run` binds job producers (`InitRiver`) before listening on `:3053`, starts the
 workers, and on stop fails `/health/ready` (`Drain`) and keeps serving for
@@ -81,7 +89,7 @@ adds `RiverJobs` to its fleet.
 
 ### Console
 
-`registerAdminConsoleRoutes` serves the SPA and its `config.json` (AuthKit base, sign-in issuers, the token exchange for `ConsoleClientID`) under `adminconsole.Path` (`/admin`). `GET /admin/merchants` (`consoleMerchants`) is the selector's directory: it needs an explicit `Authorization` header and lists only merchants the credential's permissions reach. The SPA calls `/v1` with the staff token. `AdminConsole.Disabled` removes the subtree.
+`registerAdminConsoleRoutes` serves the SPA and its `config.json` (AuthKit base, the token exchange for `ConsoleClientID`, and the sign-in issuers) under `adminconsole.Path` (`/admin`). `adminconsole.Directory` keeps the trusted issuers whose OpenID Connect metadata names an authorization endpoint (cached 10 minutes): root's (`ControlPlane.RootConsoleSources`, cached 30 s) in `config.json`, and one named merchant's (`ControlPlane.MerchantConsoleSources`) at `adminconsole.SignInPath`, which answers an unknown name and a merchant without one with the same 404. The SPA's `/m/<merchant>` route reads it at once. `AdminConsole.OwnAccountsOnly` turns both off. Readiness also runs `ControlPlane.SecondFactor`. `GET /admin/merchants` (`consoleMerchants`) is the selector's directory: it needs an explicit `Authorization` header and lists only merchants the credential's permissions reach. The SPA calls `/v1` with the staff token. `AdminConsole.Disabled` removes the subtree.
 
 ### Binary, image and chart
 
@@ -99,11 +107,11 @@ adds `RiverJobs` to its fleet.
 
 ## Interfaces
 
-- Go: `server.New`, `Run`, `Serve`, `Start`, `Handler`, `Routes`, `RiverJobs`, `PrivateHandler`, `Engine`, `AuthKit`, and the control-plane methods ([server package](../../server/doc.go)), including `ListOpenDestructiveHolds`; `console.FS`.
+- Go: `server.New`, `Run`, `Serve`, `Start`, `Handler`, `Routes`, `RiverJobs`, `MetricsHandler`, `Engine`, `AuthKit`, and the control-plane methods ([server package](../../server/doc.go)), including `ListOpenDestructiveHolds`; `console.FS`.
 - HTTP: the engine's catalog ([routes](../api/routes.md)), AuthKit's routes under its
-  issuer path, `/admin`, `/health/live`, `/health/ready`; `/metrics` privately.
+  issuer path, `/admin`, `/health/live`, `/health/ready`; `/metrics` on the metrics port.
 - Configuration: `config.yaml` keys ([configuration](../standalone.md#configuration-reference)), the
-  manifest and `merchant_manifest_overlays`, and the chart's `values.yaml`.
+  manifest, and the chart's `values.yaml`.
 
 ## Guarantees
 
@@ -166,7 +174,7 @@ Checks:
 - `CompletePendingMerchantRetirements` takes a bounded limit.
 
 ### 8. Abuse protection
-Every native route passes the engine's rate limiter and the 1 MiB body cap, and AuthKit applies its own buckets (`auth.http.rate_limits`). Listener timeouts bound slow peers. Native registration is closed by default and invite-only with `LocalSignIn`; open registration needs `MerchantCreation`, whose admission, with a free allowance set, asks for a verified email and, past the allowance, a vaulted payment method.
+Every native route passes the engine's rate limiter and the 1 MiB body cap, and AuthKit applies its own default buckets. Listener timeouts bound slow peers. Native registration is invite-only; open registration needs `MerchantCreation`, whose admission asks for a verified email and, past the free allowance, a vaulted payment method.
 
 Checks:
 - `wrapHandler` chains `RequestLimitsHTTP(middleware.DefaultMaxBodyBytes)` and
@@ -189,17 +197,16 @@ Checks:
 
 ## Tests
 
-- **Server fixture.** `critical/server-fixture` is built once as a test binary (`OPENRAILS_CRITICAL_SERVER_BINARY`) around `server.New` and driven over HTTP and a command channel (`newStandaloneWorld`): OR-J01-S09, OR-J01-S16, OR-J04-S76, OR-J07-S01 to S03, OR-J07-S05, OR-J32-S01 to S04. It runs with the console disabled.
+- **Server fixture.** `critical/server-fixture` is built once as a test binary (`OPENRAILS_CRITICAL_SERVER_BINARY`) around `server.New` and driven over HTTP and a command channel (`newStandaloneWorld`): OR-J01-S09, OR-J01-S16, OR-J01-S27 to S30, OR-J04-S76, OR-J07-S01 to S03, OR-J07-S05, OR-J32-S01 to S04. It runs with the console disabled unless a scenario asks (OR-J01-S29), and with the second factor off unless one asks (OR-J01-S28).
 - **CLI.** The built binary (`OPENRAILS_CRITICAL_CLI_BINARY`, `hostCLI`) runs
   OR-J04-S41, OR-J22-S04, OR-J31-S03, OR-J31-S10, OR-J32-S05, OR-J38-S21 and
-  OR-J38-S72, and the archive tests' `billing prepare-target`.
+  OR-J38-S72, OR-J06-S84, OR-J06-S85, and the archive tests' `billing prepare-target`.
 - **Image smoke** (`smoke-image` in `.github/workflows/docker-publish.yaml`): CVE scan,
   arm64 build, `version`, `migrate pg`, then `run-server` from environment only until
   `/health/ready` passes and `/admin/` serves the console.
 - **Chart.** `scripts/check.sh chart` lints and renders it with `values.yaml` and
   `ci/full-values.yaml`.
-- Gaps: no test runs `run-server` with a merchant manifest or overlays, or
+- Gaps: no test runs `run-server` with a merchant manifest, or
   `hostconfig.Load` beyond the smoke's environment; no browser test drives the
-  console (the smoke only fetches `/admin/`), and its `config.json` and
-  `/admin/merchants` have no scenario; `server/ci/paymentpage` is run by no script or
+  console (the smoke only fetches `/admin/`), and `/admin/merchants` has no scenario; `server/ci/paymentpage` is run by no script or
   workflow.

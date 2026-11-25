@@ -14,9 +14,7 @@ This system reverses charges: a staff refund OpenRails sends to the provider, a 
 - **Refund intent**: a `provider_intents` row of type `nmi_refund` or
   `stripe_refund` carrying `intents.RefundPayload`, keyed by
   `intents.RefundIdempotencyKey`.
-- **Refundable** (`PaymentService.ValidateRefund`): a succeeded charge with
-  `money_movement = 'rail'`, not a usage order's payment (`ledger_transfer_id`),
-  whose non-failed reversals plus this amount stay within it.
+- **Refundable** (`PaymentService.ValidateRefund`): a succeeded charge with `money_movement = 'rail'` whose non-failed reversals plus this amount stay within it. A usage order's payment (`ledger_transfer_id`) is refundable and can be charged back: a refund leaves its owed settled, a chargeback owes it again (`owed.SyncUsageReversals`, [books](books.md)).
 - **Credit line**: the order line that bought a credit lot; reversals return its money first ([credits](credits.md)).
 - **External payment**: a `payments` row with `channel = 'manual'`.
 - **Dispute**: a `disputes` row per provider case (`disputes.Service.Record`):
@@ -95,7 +93,7 @@ System refunds use the same reservation and intents with `OriginSystem`
   subscription stays canceled, and a one-off purchase's access is not restored;
   it is only logged for review.
 - A Stripe early fraud warning (`handleEarlyFraudWarning`) is recorded once, from whichever event reports it, and stays actionable only while every event says so. An actionable one received while `fraud_warning_refund` is `refund` is `pending` and queues `openrails.dispute_response`, which refunds its charge in full (`intents.QueueFraudWarningRefund`, `fraud_warning`, sent to Stripe as `fraudulent`), ends what it paid for and blocks its card, unless an open dispute (or an unbooked chargeback) decides the charge, checked under the report's lock. A charge no refund can reach (nothing left, no money moved at the rail, a usage order's settlement, credits bought and spent, no provider target) is `nothing_to_refund` and still ended. A report received while the merchant recorded reports only stays recorded when the setting changes.
-- `openrails.dispute_response` also answers each chargeback: it blocks the card. Both then cancel at period end the customer's other provider-billed subscriptions on the card. Each step runs in one transaction as an autonomous `dispute_response` command (`destructive.Admissions.AdmitAutonomous`; the block is `block_payment_method`), keyed on its case and step, under a `full` write posture, the merchant's own emergency stop and an allowance of its own (`dispute:<merchant>`, apart from the merchant's other autonomous work); a case a reconcile pull found waits for the merchant to be armed or a provider's notice of it. The refund, the end and the block are protective and do not wait for the deployment's destructive switch; the period-end cancels are destructive and do. A failed wake is retried with backoff, and an unreadable posture is retried as an error, not waited on. A held response raises `life.disputes.response_waiting` (high, alerting once) and ends; a change of the switch, a merchant's destructive policy or write posture, the book identity or a cleared hold notifies `openrails_dispute_responses`, and `disputes.Service.Run` queues every waiting response again, as on every start.
+- `openrails.dispute_response` also answers each chargeback: it blocks the card. Both then cancel at period end the customer's other provider-billed subscriptions on the card. Each step runs in one transaction as an autonomous `dispute_response` command (`destructive.Admissions.AdmitAutonomous`; the block is `block_payment_method`), keyed on its case and step, under a `full` write posture and an allowance of its own (`dispute:<merchant>`, apart from the merchant's other autonomous work); a case a reconcile pull found waits for the merchant to be armed or a provider's notice of it. The refund, the end and the block are protective and do not wait for the merchant's destructive arming; the period-end cancels are destructive and do. A failed wake is retried with backoff, and an unreadable posture is retried as an error, not waited on. A held response raises `life.disputes.response_waiting` (high, alerting once) and ends; a change of the merchant's writes or destructive arming, the book identity or a cleared hold notifies `openrails_dispute_responses`, and `disputes.Service.Run` queues every waiting response again, as on every start.
 
 ### General ledger
 
@@ -241,7 +239,7 @@ Checks:
   (`cardguard.ContainsPAN`).
 
 ### 9. Destructive-action safeguards
-Every staff refund is a `destructive.Refund` command, admitted before anything is reserved and finished with its outcome; a replay spends nothing again. The intent records `OriginAdmin` and the staff subject, which `finalize` names on revoked access. System refunds are autonomous maintenance and spend no staff allowance; a dispute response spends its own allowance and waits behind a hold, the merchant's emergency stop and a write posture below `full`, and its period-end cancels behind the kill switch.
+Every staff refund is a `destructive.Refund` command, admitted before anything is reserved and finished with its outcome; a replay spends nothing again. The intent records `OriginAdmin` and the staff subject, which `finalize` names on revoked access. System refunds are autonomous maintenance and spend no staff allowance; a dispute response spends its own allowance and waits behind a hold and a write posture below `full`, and its period-end cancels behind the merchant's destructive arming.
 
 Checks:
 - `executeAdminRefund` refuses when `DestructiveAdmissions` is nil;

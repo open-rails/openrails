@@ -3,10 +3,10 @@ package billing
 import (
 	"reflect"
 	"testing"
-	"time"
 )
 
-// A zero setting takes its default; a set one, and an empty RateLimits, stay.
+// A zero setting takes its default; a set one stays, and a bucket set to 0
+// stays unlimited.
 func TestWithDefaults(t *testing.T) {
 	want := DefaultConfig()
 	want.Database.RiverSchema = "billing_river"
@@ -14,18 +14,17 @@ func TestWithDefaults(t *testing.T) {
 		t.Fatalf("zero config: %+v, want %+v", got, want)
 	}
 	got := Config{
-		Database:             DatabaseConfig{Schema: " Shop "},
-		RateLimits:           RateLimitsConfig{},
-		Vault:                VaultConfig{KVMount: "secret"},
-		WebhookSecretOverlap: time.Hour,
+		Database:   DatabaseConfig{Schema: " Shop "},
+		RateLimits: RateLimitsConfig{Payment: &RateLimit{}, Webhook: &RateLimit{RequestsPerMinute: 5}},
+		Vault:      VaultConfig{KVMount: "secret"},
 	}.WithDefaults()
-	if got.Database.Schema != "shop" || got.Database.RiverSchema != "shop_river" || got.Database.LeaseConns != 4 {
+	if got.Database.Schema != "shop" || got.Database.RiverSchema != "shop_river" {
 		t.Errorf("database: %+v", got.Database)
 	}
-	if got.RateLimits == nil || len(got.RateLimits) != 0 {
-		t.Errorf("an empty RateLimits limits nothing: %v", got.RateLimits)
+	if got.RateLimits.Payment.RequestsPerMinute != 0 || got.RateLimits.Webhook.RequestsPerMinute != 5 || got.RateLimits.Purchase.RequestsPerMinute != 10 {
+		t.Errorf("rate limits: payment %+v, webhook %+v, purchase %+v", got.RateLimits.Payment, got.RateLimits.Webhook, got.RateLimits.Purchase)
 	}
-	if got.Vault != (VaultConfig{KVMount: "secret", ScopePrefix: "openrails", TransitMount: "transit"}) || got.WebhookSecretOverlap != time.Hour {
-		t.Errorf("vault %+v, overlap %s", got.Vault, got.WebhookSecretOverlap)
+	if got.Vault != (VaultConfig{KVMount: "secret", ScopePrefix: "openrails", TransitMount: "transit"}) {
+		t.Errorf("vault %+v", got.Vault)
 	}
 }

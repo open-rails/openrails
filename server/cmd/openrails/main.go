@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/logx"
+	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
 	"github.com/open-rails/openrails/server/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/server/internal/controlplane"
@@ -128,7 +129,7 @@ func newRootCmd() *cobra.Command {
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, newMigrateStatusCmd())
 	// Drop cobra's auto-generated `completion` subcommand.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newDumpCatalogCmd(), newCatalogCmd(), newPruneCmd(), newProposalsCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd(), newSandboxCmd(), newNMICmd(), newSolanaPayCmd(), newBookCmd(), newMerchantCmd(), newMerchantsCmd(), newWorkersCmd(), newProviderRefreshCmd(), newAdminLockoutsCmd(), newDestructiveHoldsCmd(), newUsageCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newDumpCatalogCmd(), newCatalogCmd(), newPruneCmd(), newProposalsCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd(), newNMICmd(), newSolanaPayCmd(), newBookCmd(), newMerchantCmd(), newMerchantsCmd(), newWorkersCmd(), newProviderRefreshCmd(), newAdminLockoutsCmd(), newDestructiveHoldsCmd(), newUsageCmd())
 	rootCmd.AddCommand(versionCmd)
 	return rootCmd
 }
@@ -149,7 +150,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// listening, which is what "not ready" means to a probe.
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	srv, graph, cp, closeDeps, err := openServer(ctx)
+	srv, graph, cp, closeDeps, err := openServer(ctx, manifestPath)
 	if err != nil {
 		if ctx.Err() != nil {
 			slog.Default().InfoContext(ctx, "Shutdown requested while booting; exiting", logx.Err(err))
@@ -172,8 +173,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Provision the manifest's merchants; without Vault the manifest is their
 	// configuration. The conventional file is optional; an explicit manifest
 	// path must exist.
-	listener := hostconfig.FromContext(cmd.Context())
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, listener.MerchantManifestOverlays); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath); err != nil {
 		return closeOnError(err)
 	}
 	// HTTP never serves webhook and async billing APIs when the workers
@@ -200,7 +200,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	defer stop()
 	// The same server as run-server, without a listener: AuthKit's jobs run
 	// in the same fleet.
-	srv, graph, cp, closeDeps, err := openServer(ctx)
+	srv, graph, cp, closeDeps, err := openServer(ctx, manifestPath)
 	if err != nil {
 		if ctx.Err() != nil {
 			slog.Default().InfoContext(ctx, "Shutdown requested while booting; exiting", logx.Err(err))
@@ -216,7 +216,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 			slog.Default().ErrorContext(ctx, "Application shutdown encountered issues", logx.Err(err))
 		}
 	}()
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, hostconfig.FromContext(cmd.Context()).MerchantManifestOverlays); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath); err != nil {
 		return err
 	}
 	// Background workers only (no HTTP server); fail fast if River cannot start.
@@ -235,9 +235,6 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 	if host == nil {
 		return errors.New("standalone config is required")
 	}
-	if err := controlplane.RequireDefaultTenant(host.Server.Auth); err != nil {
-		return err
-	}
 	database, err := openCLIDB(ctx)
 	if err != nil {
 		return fmt.Errorf("standalone migration pool: %w", err)
@@ -252,13 +249,16 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 			return err
 		}
 		defer conn.Close()
-		if err := eventstore.Migrate(ctx, conn, config.ClickHouseDatabase(&host.Server.Engine), slog.Default()); err != nil {
+		chdb := config.ClickHouseDatabase(&host.Server.Engine)
+		if err := eventstore.Migrate(ctx, conn, chdb, eventstore.Options{Logger: slog.Default(), Serialize: migrate.ClickHouseLock(database.Pool(), chdb)}); err != nil {
 			return err
 		}
 	}
 	// The control plane owns the AuthKit/River schema selection. Preserve its
 	// configuration without building its roles, HTTP handler or job workers.
-	authDatabase := host.Server.Auth.Database
-	authDatabase.RiverSchema = config.RiverSchemaName(&host.Server.Engine)
-	return authkit.Migrate(ctx, database.Pool(), authDatabase, authkit.MigrationOptions{LegacyTenantID: host.Server.Auth.DefaultTenantID})
+	auth, err := controlplane.AuthKit(&host.Server.Engine, controlplane.Options{KeysPath: host.Server.Auth.Keys.Path})
+	if err != nil {
+		return err
+	}
+	return authkit.Migrate(ctx, database.Pool(), auth.Database, authkit.MigrationOptions{Tenancy: auth.Tenancy, Logger: slog.Default()})
 }

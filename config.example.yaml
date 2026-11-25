@@ -10,48 +10,37 @@
 
 # Whether money is real is each PSP's declared environment (live | test |
 # sandbox) in the merchant configuration, never this file's. How much OpenRails
-# writes to a merchant's providers is the merchant's write posture
-# (`openrails merchant hold` / `openrails merchant arm`).
+# writes to a merchant's providers, and whether the charges it initiates wait,
+# are the merchant's controls (`openrails merchant controls`).
 
-# Independent of reader progress; 2160h = 90 days. Env: EVENT_RETENTION.
-event_retention: 2160h
-
-host: 0.0.0.0
-port: 3053
-# private_port: 9090 # the operator's /metrics, apart from the public port; unset serves none
+port: 3053 # every interface
+# The metrics listener: the operator's Prometheus GET /metrics (dependency
+# up/down, abuse-state fallbacks, per-job-kind health), on its own port so it
+# is never public. Unset serves none; the Helm chart sets 9090. Not the
+# merchant dashboard's business metrics, which are the /v1/metrics API on port.
+# metrics_port: 9090
 # On SIGTERM readiness fails at once, serving continues for 5s, then in-flight
 # requests and workers finish within 20s.
-public_billing_base_url: http://localhost:3053 # default http://localhost:<port>
+public_url: http://localhost:3053 # required: where browsers and PSPs reach this server
 
 logger:
-  level: info       # debug | info | warn | error
-  format: json      # json | text
+  level: info       # debug | info | warn | error; text on a terminal, JSON otherwise
 
-# The database: its connection and OpenRails' schemas. One role: the server
-# migrates as it at boot and owns what it creates. Merchant isolation is
-# per-query merchant predicates, not login flags.
+# The database: its connection and OpenRails' schema. One role: the server
+# migrates as it at boot, replicas taking turns on a lock, and owns what it
+# creates. Merchant isolation is per-query merchant predicates, not login
+# flags. A lease pool of 4 connections comes on top of the main pool.
 database:
-  # With no connection key set: Compose's Postgres (env DATABASE_URL). Or the
-  # parts below, all four of host, port, name and username.
+  # Env DATABASE_URL. Unset, libpq's PGHOST, PGPORT, PGDATABASE, PGUSER,
+  # PGPASSWORD (or PGPASSFILE), PGSSLMODE and PGSSLROOTCERT name the database,
+  # verify-full off this machine; with neither, Compose's Postgres.
   url: postgres://app:app_password@localhost:5434/openrails_db?sslmode=disable
-  # host: db.example.com
-  # port: "5432"
-  # name: openrails
-  # username: openrails
-  # password: ""
-  # sslmode: verify-full # default; require for a loopback host or Unix socket
-  # sslrootcert: /etc/openrails/db-ca.pem # the CAs that verify the database; unset, the system roots
-  # sql_trace: false # log every query at debug level
-  lease_conns: 4
-  schema: billing # every OpenRails table lives here (env DATABASE_SCHEMA)
-  # river_schema: billing_river # OpenRails' River jobs; default the schema plus '_river'
+  schema: billing # every OpenRails table lives here, River's jobs in billing_river (env DATABASE_SCHEMA)
 
 # The event store usage needs (ClickHouse's native protocol). Without it
 # usage, limits and admissions answer event_store_required.
 # clickhouse:
-#   addr: localhost:9000 # default none: usage is off
-#   database: openrails  # created or upgraded at boot
-#   username: default    # password from CLICKHOUSE_PASSWORD
+#   url: clickhouse://default:password@localhost:9000/openrails # a secret (CLICKHOUSE_URL); the path is the database, created or upgraded at boot
 
 # Rate limits, lockouts, captcha challenges and card-testing declines, shared
 # by every instance.
@@ -59,57 +48,20 @@ database:
 # While a declared Redis does not answer, each process keeps its own. Default
 # none.
 redis:
-  addr: localhost:6380 # or url: rediss://user:password@cache.example:6380/0
-  password: ""
-  db: 0
-  # username: openrails # ACL user
-  # tls: true           # verify against the system roots, or ca_cert
-  # ca_cert: |          # PEM CA bundle; implies TLS (env REDIS_CA_CERT)
+  url: redis://localhost:6380/0 # or rediss://user:password@cache.example:6380/0 (env REDIS_URL, a secret)
+  # ca_cert: |          # PEM CA bundle for rediss:// (env REDIS_CA_CERT)
   #   -----BEGIN CERTIFICATE-----
 
-# The server's AuthKit: its own configuration, by AuthKit's keys
-# (github.com/open-rails/authkit). It decides who every request is: the
-# server's own accounts and API keys, and the access tokens trusted issuers
-# mint for auth.resource.id. Env AUTH_<KEY> sets auth.<key> (AUTH_TOKEN_ISSUER,
-# AUTH_SIGN_IN_DPOP).
-auth:
-  # Generate once for this deployment; keep it across restarts and migration.
-  # This platform/operator directory is independent of merchant ownership.
-  # Default: this one for a loopback issuer; a deployed issuer names its own.
-  default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11
-  token:
-    issuer: http://localhost:3053 # default public_billing_base_url; JWKS is served under this authority
-    refresh_token_duration: 720h
-  keys:
-    allow_ephemeral_dev_keys: true # not a default: a local signing key; else keys.path or AUTHKIT_ACTIVE_PRIVATE_KEY_PEM
-  # AuthKit's client IP follows the top-level trusted_proxies and
-  # cloudflare_proxies: the socket peer when both are empty.
-  database:
-    schema: profiles # the server's AuthKit tables
-  # Accept the RFC 9068 access tokens trusted issuers mint for this
-  # deployment: their users call the API directly. Each merchant's trusted
-  # issuers are AuthKit remote applications in its group.
-  # resource:
-  #   id: https://openrails.example.com # the tokens' aud
-  # sign_in:
-  #   dpop: optional # optional | required: how this instance issues tokens to its own users
+# The server's AuthKit decides who every request is: its own staff accounts
+# and API keys, and the access tokens trusted issuers mint for it. OpenRails
+# derives its configuration: issuer and resource are public_url, its tables
+# live in <database.schema>_auth, and its client IP follows trusted_proxies.
+# Staff join by invitation, need a passkey or an authenticator app, and stay
+# signed in for 30 days.
+# auth:
+#   keys:
+#     path: /vault/auth # keys.json and totp.key (env AUTH_KEYS_PATH); default /vault/auth, or generated development keys for a loopback issuer
 
-# The rename policy for merchant names (shown defaults); usernames follow
-# auth.username.
-naming:
-  enabled: true
-  rename_interval: 72h
-  former_names:
-    mode: finite # finite | forever | immediate; omit duration for the latter two
-    duration: 2160h # 90 days
-
-# Sign-in to OpenRails' own accounts (password, passwordless, registration).
-# Off, the default: people sign in at a trusted issuer, and the console with it
-# (admin_console.issuers). Turn it on when you have no identity provider.
-# Invited enrollment needs a verification sender, such as email_smtp. For
-# existing or bootstrapped accounts only, set auth.registration.native_user_mode
-# to closed (AUTH_REGISTRATION_NATIVE_USER_MODE=closed).
-# local_sign_in: true
 
 # Declaring vault connects to it (VAULT_* env settings declare it too). Name a
 # vault.kv_mount and Vault holds merchant configuration. Platform credentials
@@ -131,8 +83,7 @@ naming:
 # Platform card credentials use the same Vault connection and scope_prefix.
 # Omit this kv_mount to reuse vault.kv_mount. Set only this one to keep merchant
 # configuration in files. The credential document is platform_vault/<tenant_id>.
-# card_vault:
-#   kind: basis_theory
+# card_vault: # a Basis Theory tenant
 #   tenant_id: ""
 #   kv_mount: billing-secrets
 
@@ -157,75 +108,35 @@ naming:
 #   password: ""
 #   from: "Billing <noreply@example.com>"
 
+# Policy (rate_limits) is set here only, never in the environment. Shown
+# are the defaults.
+
+# Requests per minute per client, by bucket; 0 leaves a bucket unlimited.
 rate_limits:
-  subscribe:
-    requests_per_minute: 20
   purchase:
-    requests_per_minute: 10
-  webhook:
-    requests_per_minute: 1200
+    requests_per_minute: 10   # buying: checkout and paying an order
   payment:
-    requests_per_minute: 40
+    requests_per_minute: 40   # a customer's payment-method routes
+  subscribe:
+    requests_per_minute: 20   # a customer's subscription changes
+  webhook:
+    requests_per_minute: 1200 # provider callbacks
 
-# Combined customer card-removal and subscription-cancellation protection.
-# Distinct affected customers across all actors/apps; no per-minute window.
-user_action_rate_limit:
-  minimum_customers_per_hour: 5
-  paid_customers_per_hourly_customer: 400
-  minimum_customers_per_day: 10
-  paid_customers_per_daily_customer: 100
+# Customers' own card removals and cancellations, and staff destructive
+# actions, have fixed limits (docs/standalone.md#abuse-limits and
+# #destructive-holds).
 
-# Staff refunds, revokes, cancels and other held destructive actions per
-# rolling hour/day (docs/standalone.md#destructive-holds). Shown are the defaults.
-# destructive_action_limits:
-#   actor_per_hour: 5
-#   actor_per_day: 15
-#   merchant_per_hour: 15
-#   merchant_per_day: 25
-#   deployment_per_hour: 50
-#   deployment_per_day: 100
+# Return URLs (pay URLs, hosted payments, the billing portal) may name only
+# the billing origin, the merchant's issuer's or its checkout.embed_origins.
 
-# Exact origins purchase success/cancel and billing-portal return URLs may
-# name. Empty allows only the origin of public_billing_base_url.
-# return_origins:
-#   - https://shop.example.com
-
-# How long a rotated-out webhook signing secret keeps verifying (max 168h).
-# webhook_secret_overlap: 24h
-
-# CIDRs whose X-Forwarded-For is trusted. Empty (default) trusts
-# NOTHING — rate limiting, abuse tracking, webhook IPAddress recording, and the
-# CCBill IP allowlist all use the raw socket peer. Set this to your load
-# balancer's/reverse proxy's address range when deploying behind one.
+# CIDRs of your own proxies, whose X-Forwarded-For is trusted. Empty (default)
+# trusts none of yours — rate limiting, abuse tracking, webhook IPAddress
+# recording, and the CCBill IP allowlist use the raw socket peer. Set this to
+# your load balancer's/reverse proxy's address range when deploying behind one.
+# Cloudflare's published ranges are built in: trusted like these, and the only
+# peers whose CF-Connecting-IP and CF-IPCountry are taken.
 # trusted_proxies:
 #   - 10.0.0.0/8
-
-# Cloudflare egress ranges, ONLY where Cloudflare fronts this origin: trusted for
-# X-Forwarded-For like trusted_proxies, and the only peers AuthKit accepts
-# CF-Connecting-IP from. Lock the origin down to Cloudflare ingress when set.
-# cloudflare_proxies:
-#   - 173.245.48.0/20
-
-# Loopback-only provider gateway for sandbox qualification: every store-armed
-# NMI client (purchase sales, invoice collection, payment-method updates and
-# their verify reads) talks to nmi_gateway_url; Stripe requests use
-# stripe_api_url through the same guarded transport, Solana RPC reads
-# and submissions use solana_rpc_url, and CCBill DataLink uses
-# ccbill_datalink_url. Store
-# credentials are sent there, so the host must be a loopback IP literal
-# (127.0.0.0/8 or ::1; no hostnames, no userinfo) and the posture sandbox;
-# anything else refuses to boot. Process config only, never a merchant setting.
-# ccbill_webhook_sources are EXTRA CCBill webhook source CIDRs, on top of
-# CCBill's own documented ranges. CCBill signs nothing, so this list is
-# authentication: entries are honored only for a webhook naming a sandbox
-# CCBill account. `/0` is refused.
-# provider_sandbox:
-#   nmi_gateway_url: http://127.0.0.1:9091
-#   stripe_api_url: http://127.0.0.1:9092
-#   solana_rpc_url: http://127.0.0.1:9093
-#   ccbill_datalink_url: http://127.0.0.1:9094
-#   ccbill_webhook_sources:
-#     - 127.0.0.1/32
 
 captcha:
   provider: turnstile   # turnstile | recaptcha-v3 | hcaptcha
@@ -233,60 +144,24 @@ captcha:
   secret_key: ""
 
 
-# Route groups beyond the public, customer and webhook routes, each off until
-# turned on here. Each route checks its permission: the merchant: name
-# (merchant:<resource>:<action>) in the merchant's own group, or the root:
-# name on root; programmatic (/v1/app, with SCIM
-# provisioning) takes a merchant's application credential, never a person,
-# holding merchant:entitlements:read, merchant:catalog:read,
-# merchant:usage:manage, merchant:events:read or merchant:orders:manage for
-# each route.
-route_groups:
-  admin: true            # customer support: customers, subscriptions, payments, refunds, invoices
-  catalog: true          # products, prices, meters, price migrations
-  merchant_config: true  # PSPs, settings, billing import and export
-  metrics: true          # business metrics, read-only
-  programmatic: true     # your backend's calls and SCIM user provisioning
+# Every route group is served. Each route checks its permission, the
+# merchant:<resource>:<action> name in the merchant's own group or the root:
+# name on root; /v1/app (with SCIM provisioning) takes a merchant's
+# application credential, never a person.
 
 # The standalone staff console defaults to /admin. Set disabled to true for
-# an API-only server; local_sign_in and route_groups stay independent. Release builds
-# include its assets; `task build` embeds web/console/dist after
-# `task admin-build`. A source build without assets serves build instructions
-# with status 503. Configure app issuers or local_sign_in for staff sign-in.
+# an API-only server. Release builds include its assets; `task build` embeds
+# web/console/dist after `task admin-build`. A source build without assets
+# serves build instructions with status 503. Staff sign in with the server's
+# own accounts, at root's trusted issuers, or at their merchant's, found by
+# its name, as the public client openrails-console.
 admin_console:
   disabled: false
-  issuers: {} # add one sign-in choice per merchant
-  # issuers:
-  #   example-merchant: # merchant id or name; root for operators
-  #     url: https://example.com/auth
-  #     client_id: billing-console # public PKCE client; redirect URI https://billing.example.com/admin/callback
-  #     name: Example app
-  #     scope: openid profile email offline_access openrails:merchant
 
-# The checkout origin: an order's pay URL (/pay/<order>#<secret>) is on it,
-# where the customer pays. It must be an origin of its own (not
-# public_billing_base_url's, the console's or AuthKit's); the server serves
+# The checkout origin, needed only to serve OpenRails' own hosted pay page:
+# an order's pay URL (/pay/<order>#<secret>) is on it, where the customer
+# pays. Leave it unset with the embedded checkout or your own card form; pay
+# URLs then answer pay_url_unavailable. It must be an origin of its own (not
+# public_url's, the console's or AuthKit's); the server serves
 # it by Host.
 # checkout_origin: https://pay.example.com
-
-# Server-side LLM for the catalog copilot. Without api_key its endpoint is
-# not mounted. Metrics and dashboards do not use an LLM.
-# llm:
-#   provider: anthropic      # anthropic (default) | openai
-#   model: ""                # default per provider (anthropic: claude-haiku-4-5-20251001,
-#                            # openai: gpt-5.4-nano — cheapest capable; schema does the heavy lifting)
-#   api_key: ""              # SECRET — set env LLM_API_KEY or a mounted secret file
-#   base_url: ""             # optional endpoint override (env LLM_BASE_URL) — with provider=openai
-#                            # this serves any OpenAI-compatible backend, base INCLUDES /v1
-#                            # (e.g. https://api.groq.com/openai/v1, https://models.example/v1)
-#   catalog_copilot_enabled: false   # consent: /console/catalog/ask sends aggregate
-#                            # catalog/subscriber-count data to the LLM provider; env
-#                            # LLM_CATALOG_COPILOT_ENABLED
-#   catalog_drafting_enabled: false  # arms the draft_price_change/draft_catalog_diff
-#                            # proposal tools; notice-window enforcement remains server-side
-#                            # and this gate requires separate deployment consent; env
-#                            # LLM_CATALOG_DRAFTING_ENABLED
-
-# Opt in only for hosts that sell metered usage on credit.
-# Merchants configure usage_billing in their own document.
-usage_billing_enabled: false

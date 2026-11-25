@@ -46,7 +46,7 @@ func TestPaymentMethodContracts(t *testing.T) {
 				http.Error(out, "fixture answers nothing", http.StatusServiceUnavailable)
 			}))
 			t.Cleanup(hyperswitch.Close)
-			w.cfg.HyperSwitch = billing.HyperSwitchConfig{AllowLoopbackHTTP: true, APIBaseURL: hyperswitch.URL, SDKURL: hyperswitch.URL + "/sdk"}
+			w.cfg.HyperSwitch = billing.HyperSwitchConfig{APIBaseURL: hyperswitch.URL, SDKURL: hyperswitch.URL + "/sdk"}
 			merchant := cfgMerchant(w.cfg, "alpha")
 			merchant.Custodians = billing.Custodians{"hs": {Kind: billing.CardVaultHyperSwitch, Environment: billing.EnvironmentTest, AccountID: "merchant_critical",
 				Settings: map[string]any{"public_api_key": "pk_snd_critical", "profile_id": "pro_critical"}, Secrets: map[string]string{"api_key": "snd_critical_private"}}}
@@ -72,7 +72,7 @@ func TestPaymentMethodContracts(t *testing.T) {
 		// customer for the window.
 		for i := range 6 {
 			token := journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "0002", Exp: "1235", Decline: "200"})
-			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: ids["nmi"], Token: token})
+			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: ids["nmi"], Token: token, BillingDetails: billedTo("US", "10001")})
 			require.Equal(t, http.StatusPaymentRequired, status, "decline %d: %s", i, raw)
 			require.Contains(t, string(raw), `"code":"card_declined"`)
 		}
@@ -176,7 +176,7 @@ func TestPaymentMethodContracts(t *testing.T) {
 		psps, err := nmi.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
 		require.Len(t, psps.Items, 1)
-		status, raw = nmi.request(t, http.MethodPost, "/v1/me/payment-methods", nmi.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Last4: "4242", Exp: "1235"})})
+		status, raw = nmi.request(t, http.MethodPost, "/v1/me/payment-methods", nmi.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var old billing.PaymentMethod
 		require.NoError(t, json.Unmarshal(raw, &old))

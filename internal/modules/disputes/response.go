@@ -252,19 +252,15 @@ func (s *Service) admitted(ctx context.Context, command destructive.Command, g g
 	if s.Admissions == nil || s.Postures == nil || s.Lifecycle == nil {
 		return &WaitError{Reason: "responses are not wired"}
 	}
-	policy, err := s.DB.Gen(ctx).GetDestructivePolicy(ctx, command.MerchantID)
-	if err != nil {
-		return fmt.Errorf("read the destructive policy: %w", err)
-	}
-	// Only the deployment-wide switch is a protective step's to pass; the
-	// merchant's own emergency stop holds every step.
-	switch {
-	case !policy.MerchantEnabled:
-		return &WaitError{Reason: "the merchant's destructive actions are stopped"}
-	case g.pulled && policy.EnforceArmedAt == nil:
-		return &WaitError{Reason: "a case a pull found waits for the merchant to be armed for enforcing pulls"}
-	case g.destructive && !policy.SwitchEnabled:
-		return &WaitError{Reason: "the destructive switch is off: canceling the customer's other subscriptions on the card waits for it"}
+	// A protective step runs whatever the merchant's arming; a destructive
+	// one, or one for a case a pull found, waits for it.
+	if g.destructive || g.pulled {
+		if v := destructive.New(s.DB).Check(ctx, command.MerchantID); !v.Allowed {
+			if g.pulled {
+				return &WaitError{Reason: "a case a pull found waits for the merchant's destructive actions to be armed"}
+			}
+			return &WaitError{Reason: "the merchant's destructive actions are not armed: canceling the customer's other subscriptions on the card waits for them"}
+		}
 	}
 	posture, err := s.Postures.Read(ctx, command.MerchantID)
 	if err != nil {

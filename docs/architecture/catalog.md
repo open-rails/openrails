@@ -12,7 +12,6 @@ What a merchant sells: products, prices, meters, rate cards and usage limits, an
   never written. Its **binding** (`price_psp_bindings`) names the object.
 - **Manager**: who last set a field, `apply` (a document) or `edit`
   (`catalog_field_owners`).
-- **Catalog assistant**: a model that answers questions and drafts changes.
 - **Price migration** (`price_migrations`, id `pmig_`): moves a price's subscribers to another recurring price, possibly of another product; each subscriber's **move** is a `scheduled_changes` row.
 
 ## How it works
@@ -73,12 +72,6 @@ on-chain plan (`publishSolanaPlan`) whose id derives from price, mint and
 treasury (`solanaPlanID`); `verifySolanaCatalogReference` reads it back. Under a
 `limited` or `readonly` merchant write posture only an existing plan is attached.
 
-**Catalog assistant** (`internal/modules/copilot`). `Service.Ask` runs a capped
-tool loop (`askMaxToolCalls` 6, `askMaxTokens` 2048) over read-only tools
-(`list_catalog`, `get_price`, `price_history`, `list_reprice_batches`); drafting
-adds `draft_price_change` and `draft_catalog_diff`, which return the requests a
-person would send. The model sees aggregate catalog data and subscriber counts.
-
 `internal/catalogrules` validates charge models and rates usage in integer micros ([usage billing](usage-billing.md)); `StripeCatalogService` (webhook endpoints) is [payment providers](payment-providers.md).
 
 Tables: `products`, `product_entitlements`, `prices`, `price_keys`, `price_psp_bindings`, `catalog_meters`, `catalog_rate_cards`, `catalog_limits`, `catalog_product_limits`, `catalog_field_owners`, `catalog_applications`, `catalog_restore_receipts`; read-only here, `provider_catalog_objects`.
@@ -114,7 +107,7 @@ A price migration (`PriceMigrationService`, `internal/modules/subscriptions/pric
 - A move to another product grants that product's access from the next renewal; a Stripe move swaps it as it is adopted.
 - While an accepted renewal owns the terms, a move can be neither scheduled nor canceled (`RefuseOwnedRebillTerms`, `rebill_terms_committed`), so that renewal bills what it admitted. Each resolution drops the move's waiting push and settles its migration if it was the last (`resolved`).
 
-**Retiring prices and products.** Archiving stops sales and keeps subscribers; a migration moves them. A price or product a migration, a move or a PSP import's price pick refers to is never deleted (`PricesHoldReferences`, `ProductHoldsReferences`; OR-J38-S77): `DeleteProduct` answers `409 product_in_use` and `prune: true` archives it. The catalog assistant drafts only same-product migrations (`cross_product` refusal).
+**Retiring prices and products.** Archiving stops sales and keeps subscribers; a migration moves them. A price or product a migration, a move or a PSP import's price pick refers to is never deleted (`PricesHoldReferences`, `ProductHoldsReferences`; OR-J38-S77): `DeleteProduct` answers `409 product_in_use` and `prune: true` archives it.
 
 Tables: `price_migrations`; moves are `scheduled_changes` ([subscriptions](subscriptions.md)).
 
@@ -124,16 +117,10 @@ Tables: `price_migrations`; moves are `scheduled_changes` ([subscriptions](subsc
   included), meter and limit methods and `ApplyCatalog`;
   `CatalogApplicationReceipt.String`, `catalog.ReadFile`, `billing.BuyerPrices`.
   Reads are cached per handle (`ReadCatalog`, `ReadMeters`).
-- HTTP: `POST /v1/catalog/apply`, `/v1/catalog/products`, `/v1/catalog/prices`,
-  `POST /v1/catalog/provider-prices`, `/v1/catalog/meters`,
-  `/v1/catalog/limits`, console-only `POST /v1/console/catalog/ask`; reads need
-  `merchant:catalog:read`, writes `merchant:catalog:manage` (or `root:` twins).
-  No public route reads the catalog.
+- HTTP: `POST /v1/catalog/apply`, `/v1/catalog/products`, `/v1/catalog/prices`, `POST /v1/catalog/provider-prices`, `/v1/catalog/meters`, `/v1/catalog/limits`; reads need `merchant:catalog:read`, writes `merchant:catalog:manage` (or `root:` twins). No public route reads the catalog.
 - Price migrations: `PreviewPriceMigration`, `CreatePriceMigration`, `ListPriceMigrations`, `GetPriceMigration`, `CancelPriceMigration` on `POST /v1/catalog/price-migrations/preview`, `POST /v1/catalog/price-migrations`, `GET /v1/catalog/price-migrations`, `GET /v1/catalog/price-migrations/{id}`, `POST /v1/catalog/price-migrations/{id}/cancel`, with the catalog permissions (preview is a read); events `subscription_reprice_scheduled`, `subscription_plan_change_scheduled` ([events](../client.md#events)); configuration `reprice_notice_window_days`.
 - CLI: `openrails catalog apply FILE --merchant NAME [--force-conflicts]`,
   `openrails catalog export|import`, `openrails dump-merchant-catalog`.
-- Configuration: `llm.api_key`, `llm.catalog_copilot_enabled`,
-  `llm.catalog_drafting_enabled`.
 
 ## Guarantees
 
@@ -232,13 +219,9 @@ Checks:
 
 ### 8. Abuse protection
 
-Catalog routes are staff routes, outside the customer limits
-([limits](../standalone.md#abuse-limits)). Bodies are capped at 1 MiB
-(`middleware.DefaultMaxBodyBytes`), documents at 2000 items. The assistant
-spends model tokens: the `catalog-ask` bucket (10 a minute) and a capped loop.
+Catalog routes are staff routes, outside the customer limits ([limits](../standalone.md#abuse-limits)). Bodies are capped at 1 MiB (`middleware.DefaultMaxBodyBytes`), documents at 2000 items.
 
 Checks:
-- `ClassifyBucket` maps `POST /v1/console/catalog/ask` to `catalog-ask`.
 - `Application.Validate` and `GuardJSON` enforce the document bounds.
 
 ### 9. Destructive-action safeguards
@@ -282,7 +265,6 @@ are published only as setup (`CreatePrice` in `TestSolanaPlanChanges`).
 
 Gaps:
 - Nothing covers `prune: true`, entitlement replacements or a warned document.
-- Nothing tests the catalog assistant; of its drafting tools only the default effective date is tested (`TestDefaultEffectiveDateIsTheFirstWholeUTCDayPastTheWindow`).
 - No scenario shows a catalog edit spending a unit or held by an incident.
 - No scenario crashes between a Solana plan publish and the commit, or asserts
   the re-publish guard or the `limited`/`readonly` attach.

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"hash/crc32"
 	"log/slog"
 	"net/http"
@@ -119,7 +120,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 		t.Run("staff", func(t *testing.T) {
 			// The merchant's budget is 50 an hour; an actor's stays 5.
 			b := newNMIBook(t, func(w *world) {
-				w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{MerchantPerHour: 50, MerchantPerDay: 100}
+				w.limits = func(l *destructive.Limits) { l.MerchantPerHour, l.MerchantPerDay = 50, 100 }
 			})
 			armDestructive(t, b.a, true)
 			asOf := b.started.Add(10 * 24 * time.Hour)
@@ -186,7 +187,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, findings.Items, 1)
 		require.NotNil(t, findings.Items[0].RecommendedAction)
-		require.Contains(t, *findings.Items[0].RecommendedAction, "Turn the destructive-action switch on", "the action names what lets it end")
+		require.Contains(t, *findings.Items[0].RecommendedAction, "Arm the merchant's destructive actions", "the action names what lets it end")
 		require.Empty(t, b.stops(t))
 
 		// With it on, the cancel is the book's action and so is its stop.
@@ -438,7 +439,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 		require.Len(t, psps.Items, 1)
 		save := func() billing.PaymentMethod {
 			t.Helper()
-			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 			require.Equal(t, http.StatusCreated, status, string(raw))
 			var method billing.PaymentMethod
 			require.NoError(t, json.Unmarshal(raw, &method))
@@ -508,7 +509,7 @@ func (b *nmiBook) saveCard(t *testing.T) billing.PaymentMethod {
 	require.NoError(t, err)
 	require.Len(t, psps.Items, 1)
 	status, raw := b.a.request(t, http.MethodPost, "/v1/me/payment-methods", b.a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID,
-		Token: b.nmi.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+		Token: b.nmi.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 	require.Equal(t, http.StatusCreated, status, string(raw))
 	var method billing.PaymentMethod
 	require.NoError(t, json.Unmarshal(raw, &method))

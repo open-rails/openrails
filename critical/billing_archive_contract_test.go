@@ -259,7 +259,8 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, target.engine.Close(t.Context()))
 		cfg := target.cfg
 		cfg.Merchants = slices.Clone(target.cfg.Merchants)
-		setCfgMerchant(&cfg, "restored-source", billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{DisplayName: "Restored", PSPs: billing.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: billing.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_critical"}.PSPConfig()}, MerchantSettings: billing.MerchantSettings{CardVault: "stripe"}}})
+		// The restored merchant keeps its issuer: its return URLs' origin.
+		setCfgMerchant(&cfg, "restored-source", billing.MerchantDeclaration{Issuer: alphaSite, MerchantDocument: billing.MerchantDocument{DisplayName: "Restored", PSPs: billing.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: billing.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_critical"}.PSPConfig()}, MerchantSettings: billing.MerchantSettings{CardVault: "stripe"}}})
 		deps := target.deps
 		page := declareCheckoutPage(t, &cfg, &deps)
 		target.engine, err = openrails.New(t.Context(), cfg, deps)
@@ -268,7 +269,7 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, err)
 		serveCheckoutPage(t, page, target.engine)
 		customer := billing.CustomerID(uuid.MustParse(source.alice.ID))
-		request := billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines, PayURL: &billing.OrderPayURLParams{SuccessURL: "https://critical.invalid/done"}}
+		request := billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines, PayURL: &billing.OrderPayURLParams{SuccessURL: alphaSite + "/done"}}
 		_, err = client.CreateOrder(t.Context(), "destination-order", request)
 		var held *billing.StatusError
 		require.ErrorAs(t, err, &held)
@@ -276,7 +277,7 @@ func TestBillingArchive(t *testing.T) {
 		require.Len(t, provider.effects(t), 1)
 		// Final source writers really stop before the operator authorizes the copy.
 		require.NoError(t, source.engine.Close(context.Background()))
-		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
+		hostCLI(t, target, "merchant", "writes", "full", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator", "--reason", "the source is stopped")
 		order, err := client.CreateOrder(t.Context(), "destination-after-arm", request)
 		require.NoError(t, err)
 		address, err := url.Parse(*order.PayURL)
@@ -295,37 +296,30 @@ func TestBillingArchive(t *testing.T) {
 		customer := billing.CustomerID(uuid.MustParse(source.alice.ID))
 		_, err := source.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "held-work"}})
 		require.NoError(t, err)
-		admitted, err := source.alpha.Admit(t.Context(), []billing.AdmitParams{{RequestID: "unfinished", CustomerID: customer, Currency: "USD", Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, EstimatedAmount: 600, ExpiresAt: ptr(source.clock.Now().Add(time.Hour))}})
-		require.NoError(t, err)
-		require.Len(t, admitted, 1)
-		require.True(t, admitted[0].Allowed())
+		// A live gate has a request in flight.
+		lease := newLease()
+		syncLease(t, source.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: []billing.InFlight{{CustomerID: customer, Limit: "balance", Unit: "USD", Amount: 600}}})
 		var partial bytes.Buffer
 		err = source.alpha.ExportBillingArchive(t.Context(), &partial)
 		require.Error(t, err)
 		require.Empty(t, partial.Bytes())
 		balance(t, source.alpha, customer, 400, 600, 1000)
-		hold, err := source.alpha.GetAdmission(t.Context(), "unfinished")
-		require.NoError(t, err)
-		require.Equal(t, ptr(billing.AdmissionOpen), hold.State)
 		status, raw := source.request(t, "POST", "/v1/me/orders", source.aliceToken, saleInput(t, source, provider), map[string]string{"Idempotency-Key": "after-failed-export"})
 		require.Equal(t, 201, status, string(raw))
 		require.Len(t, provider.effects(t), 1)
-		released, err := source.alpha.ReleaseAdmissions(t.Context(), []string{"unfinished"})
-		require.NoError(t, err)
-		require.Len(t, released, 1)
-		require.NoError(t, released[0].Err())
+		syncLease(t, source.alpha, billing.SyncLeasesParams{LeaseID: lease, Close: true})
 		balance(t, source.alpha, customer, 1000, 0, 1000)
 		require.NotEmpty(t, archiveBytes(t, source.alpha))
 	})
 	t.Run("OR-J31-S06/nmi-receipts-naming-their-card-move-with-the-book", func(t *testing.T) {
-		source, provider, customer := usageBillingWorld(t, true, false)
+		source, provider, customer := usageBillingWorld(t, false)
 		// A sale and a usage collection, each holding the receipt that names the card NMI reported.
 		product, err := source.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "archived-download", DisplayName: "Download", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"download:owned"}})
 		require.NoError(t, err)
 		price, err := source.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "archived-download", UnitAmount: 9_990_000, Currency: "USD"})
 		require.NoError(t, err)
 		sale := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
-			Payment: &billing.OrderPaymentParams{Token: provider.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"})}}
+			Payment: &billing.OrderPaymentParams{Token: provider.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"}), BillingDetails: billedTo("US", "10001")}}
 		status, raw := source.request(t, http.MethodPost, "/v1/me/orders", source.aliceToken, sale, map[string]string{"Idempotency-Key": "archived-nmi-sale"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var paid billing.Order
@@ -378,7 +372,7 @@ func TestBillingArchive(t *testing.T) {
 		source, provider := newPaymentWorld(t)
 		provider.core.SendWebhooksTo(source.server.URL+"/v1/webhooks/stripe/acct_e2e", "whsec_critical_fixture")
 		sale := saleInput(t, source, provider)
-		hosted := billing.CreateMyOrderParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}}
+		hosted := billing.CreateMyOrderParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.OrderPaymentParams{ReturnURL: alphaSite + "/paid"}}
 		status, raw := source.request(t, http.MethodPost, "/v1/me/orders", source.aliceToken, hosted, map[string]string{"Idempotency-Key": "archived-hosted"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var order billing.Order
@@ -419,7 +413,7 @@ func TestBillingArchive(t *testing.T) {
 		archive := archiveBytes(t, s.alpha)
 		target, client := archiveTarget(t, s.world, func(w *world) {
 			w.clock.Advance(s.clock.Now().Sub(w.clock.Now()))
-			w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{SolanaRPCURL: s.wire.server.URL}
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{SolanaRPCURL: s.wire.server.URL}
 			w.cfg.Solana = billing.SolanaConfig{Crankers: []billing.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: s.cranker.PrivateKey.String()}}}
 		})
 		s.node.SetClock(target.clock.Now)
@@ -429,7 +423,8 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, target.engine.Close(t.Context()))
 		cfg := target.cfg
 		cfg.Merchants = slices.Clone(target.cfg.Merchants)
-		setCfgMerchant(&cfg, "restored-source", billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{DisplayName: "Restored", PSPs: billing.PSPs{"solana": openrails.SolanaPSP{Environment: billing.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}}})
+		// The restored merchant keeps its issuer: its return URLs' origin.
+		setCfgMerchant(&cfg, "restored-source", billing.MerchantDeclaration{Issuer: alphaSite, MerchantDocument: billing.MerchantDocument{DisplayName: "Restored", PSPs: billing.PSPs{"solana": openrails.SolanaPSP{Environment: billing.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}}})
 		target.engine, err = openrails.New(t.Context(), cfg, target.deps)
 		require.NoError(t, err)
 		client, err = target.engine.Merchant(s.alpha.MerchantID())
@@ -450,11 +445,11 @@ func TestBillingArchive(t *testing.T) {
 		require.Eventually(t, func() bool {
 			var reason string
 			err := target.pool.QueryRow(t.Context(), "SELECT last_failure_reason FROM "+intents+" WHERE intent_type = 'solana_pull' AND status = 'pending' AND next_attempt_at = $1", retryAt).Scan(&reason)
-			return err == nil && strings.Contains(reason, "readonly (restored)")
+			return err == nil && strings.Contains(reason, "readonly (billing restore)")
 		}, 20*time.Second, 20*time.Millisecond, "the due pull is parked while the restored merchant is read-only")
 		require.NoError(t, fleet.Stop(t.Context()))
 		require.Equal(t, sends, s.wire.sends(), "a restored pull sends nothing before the operator arms")
-		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
+		hostCLI(t, target, "merchant", "writes", "full", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator", "--reason", "the source is stopped")
 		advanceTo(target, retryAt)
 		wakeOperations(t, fleet)
 		require.NoError(t, fleet.Start(t.Context()))

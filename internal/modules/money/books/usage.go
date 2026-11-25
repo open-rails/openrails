@@ -7,13 +7,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// AccrueUsage posts usage a customer owes beyond its balance as revenue
+// AccrueUsage posts what a customer owes beyond its balance as revenue
 // earned and receivable, DR usage_receivable / CR usage_revenue
-// (usage_accrued), at the usage posting's coordinate, dated as its owed is.
-// Owed in a merchant's own unit (#1379 refuses it) has no money and posts
-// nothing. Credit repays it at face (RepayFromCredit); its collection,
-// waiver and allowance are #1380 B5's. Its one caller is the usage posting
-// (money.postPeriod); owed that running charges leave is B5's.
+// (usage_accrued), at the owed accrual's coordinate, dated as its owed item
+// is: every owed accrual posts it (a usage posting, a running charge, failed
+// usage past its grace, arrears). Owed in a merchant's own unit has no money
+// and posts nothing. receivable.go covers the rest of its life.
 func (b *Books) AccrueUsage(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, at time.Time, order *uuid.UUID) error {
 	if amount <= 0 || CheckCurrency(currency) != nil {
 		return nil

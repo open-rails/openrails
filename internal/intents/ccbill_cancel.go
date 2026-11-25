@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -19,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Only explicit HTTP/authentication refusals permit bounded clean retries.
@@ -95,7 +95,7 @@ func (h *CCBillCancelHandler) CheckRelevance(ctx context.Context, intent gen.Bil
 }
 
 func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
-	client, err := ccbillDataLinkForMerchant(ctx, h.Log, writeposture.View{DB: h.DB}.Posture(ctx, intent.MerchantID).ReadOnly(), h.Rails, h.DataLinkBaseURL)
+	client, err := ccbillDataLinkForMerchant(ctx, h.Log, controls.View{DB: h.DB}.Posture(ctx, intent.MerchantID).ReadOnly(), h.Rails, h.DataLinkBaseURL)
 	if err != nil {
 		return parkedBeforeEffect("ccbill rail not armable (fail closed): " + err.Error())
 	}

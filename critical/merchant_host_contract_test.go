@@ -234,7 +234,7 @@ func TestMerchantHost(t *testing.T) {
 		enableLifecycleMaintenance(t, a)
 		overlay := map[string]any{
 			"vault":      map[string]any{"address": a.deps.Vault.Address(), "token": a.deps.Vault.Token(), "kv_mount": a.cfg.Vault.KVMount},
-			"clickhouse": map[string]string{"addr": os.Getenv("OPENRAILS_CRITICAL_CLICKHOUSE_ADDR"), "database": a.schema},
+			"clickhouse": map[string]string{"url": "clickhouse://" + os.Getenv("OPENRAILS_CRITICAL_CLICKHOUSE_ADDR") + "/" + a.schema},
 		}
 		purge := func(out any, args ...string) error {
 			stdout, err := hostCLICommand(t, a.world, overlay, append([]string{"merchant", "purge", "--merchant", "alpha", "--by", "critical operator"}, args...)...).Output()

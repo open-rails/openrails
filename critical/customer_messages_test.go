@@ -247,7 +247,7 @@ func TestCustomerMessages(t *testing.T) {
 		})
 		t.Run("a-usage-orders-collection-stopped-after-failed-payments", func(t *testing.T) {
 			mail := &alertMailbox{}
-			a, p, customer := usageBillingWorld(t, true, false, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
+			a, p, customer := usageBillingWorld(t, false, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
 			p.core.SetDecline("4242", "252")
 			oneUsage(t, a.alpha, usageInput(customer, "stolen-card-usage", 3))
 			a.clock.Advance(time.Hour)
@@ -1056,7 +1056,7 @@ func (m *stalledMailbox) CheckHealth(context.Context) error { return nil }
 // scenario.
 func promptFleet(t *testing.T, w *world) *river.Client[pgx.Tx] {
 	t.Helper()
-	fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},
+	fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema + "_river", Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},
 		RetryPolicy: retryAtOnce{}, FetchCooldown: 5 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond}, w.engine.RiverJobs())
 	require.NoError(t, err)
 	fleet.PeriodicJobs().Clear()

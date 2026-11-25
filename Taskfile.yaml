@@ -155,4 +155,3 @@ tasks:
       - rm -f {{.BIN_DIR}}/{{.BINARY_NAME}}
       - rmdir {{.BIN_DIR}} 2>/dev/null || true
       - rm -f coverage.out coverage.html
-      - go clean -cache

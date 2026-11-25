@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/destructive"
 	"math"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/destructive"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -65,9 +66,6 @@ var ErrInsufficientCredits = billing.ErrInsufficientCredits
 
 type MoneyService struct {
 	destructiveAdmissions *destructive.Admissions
-	// EngineAdmissionHold is fixed during runtime wiring; accepted work still reconciles.
-	EngineAdmissionHold   bool
-	UsageBillingEnabled   bool
 	hyperSwitchDeployment string
 	usageRecoveryResolver railresolve.NMIClientResolver
 	db                    *db.DB
@@ -169,125 +167,6 @@ type AdmissionCapacity struct {
 	// their own arrears account in the same lookup. The credit line caps debt,
 	// so the line still available is CreditLimit - this.
 	OutstandingOwed int64
-}
-
-// WithLockedAdmissionCapacity holds the merchant policy read lock, then the payer
-// money lock. The callback receives the same transaction for admission writes.
-func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer identity.CustomerID, currency string, fn func(context.Context, *db.DB, AdmissionCapacity) error) error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("money service not initialized")
-	}
-	if payer.IsZero() {
-		return fmt.Errorf("payer required")
-	}
-	if fn == nil {
-		return fmt.Errorf("admission capacity callback required")
-	}
-	cur := normalizeCurrency(currency)
-	if err := moneyutil.ValidateBalanceCurrency(cur); err != nil {
-		return err
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	tenantID := tid.UUID()
-	s.db.EnsurePartitions(ctx, s.now())
-	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		if _, err := q.ReadMerchantSettingsLock(ctx, tenantID); err != nil {
-			return err
-		}
-		capacity, err := s.WithDatabase(s.db.NewWithPgxTx(tx)).AdmissionCapacityTx(ctx, q, payer, cur)
-		if err != nil {
-			return err
-		}
-		return fn(ctx, s.db.NewWithPgxTx(tx), capacity)
-	})
-}
-
-// AdmissionCapacityTx takes the payer's money lock in the caller's
-// transaction and reads its admission capacity: lapsed credit is expired
-// first, so admission never spends it.
-func (s *MoneyService) AdmissionCapacityTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, currency string) (AdmissionCapacity, error) {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return AdmissionCapacity{}, err
-	}
-	tenantID, payerID, cur := tid.UUID(), payer.UUID(), normalizeCurrency(currency)
-	if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
-		return AdmissionCapacity{}, err
-	}
-	if _, err := s.lockBalance(ctx, q, payer, payerID.String(), cur); err != nil {
-		return AdmissionCapacity{}, err
-	}
-	if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
-		return AdmissionCapacity{}, err
-	}
-	now := s.now()
-	if _, err := s.creditLots(q, tenantID).ExpireLapsedBy(ctx, payerID, cur, now); err != nil {
-		return AdmissionCapacity{}, err
-	}
-	row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
-		MerchantID:     tenantID,
-		CustomerID:     payerID,
-		Currency:       cur,
-		AsOf:           now,
-		HeldSince:      limits.HeldSince(now),
-		LeaseLiveSince: limits.LeaseLiveSince(now),
-	})
-	if err != nil {
-		return AdmissionCapacity{}, err
-	}
-	capacity, err := s.withUnposted(ctx, q, tenantID, payerID, cur, admissionCapacityFromRow(row))
-	if err != nil {
-		return AdmissionCapacity{}, err
-	}
-	return s.usageAdmissionCapacity(ctx, q, payer, cur, capacity)
-}
-
-// GetAdmissionCapacity reads the admit hot-path capacity in one point lookup:
-// customer_units counters, optional money_settings, and the payer's arrears
-// account. Arrears debt never shows as a negative balance, so the credit line
-// must be checked against OutstandingOwed.
-func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.CustomerID, currency string) (AdmissionCapacity, error) {
-	if s == nil || s.db == nil {
-		return AdmissionCapacity{}, fmt.Errorf("money service not initialized")
-	}
-	cur := normalizeCurrency(currency)
-	if err := moneyutil.ValidateBalanceCurrency(cur); err != nil {
-		return AdmissionCapacity{}, err
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return AdmissionCapacity{}, err
-	}
-	tenantID := tid.UUID()
-	payerID := payer.UUID()
-	q := s.db.Gen(ctx)
-	if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
-		return AdmissionCapacity{}, err
-	}
-	if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
-		return AdmissionCapacity{}, err
-	}
-	now := s.now()
-	row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
-		MerchantID:     tenantID,
-		CustomerID:     payerID,
-		Currency:       cur,
-		AsOf:           now,
-		HeldSince:      limits.HeldSince(now),
-		LeaseLiveSince: limits.LeaseLiveSince(now),
-	})
-	if err != nil {
-		return AdmissionCapacity{}, err
-	}
-	capacity, err := s.withUnposted(ctx, q, tenantID, payerID, cur, admissionCapacityFromRow(row))
-	if err != nil {
-		return AdmissionCapacity{}, err
-	}
-	return s.usageAdmissionCapacity(ctx, q, payer, cur, capacity)
 }
 
 func admissionCapacityFromRow(row gen.GetAdmissionCapacityRow) AdmissionCapacity {
@@ -765,7 +644,7 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 func (s *MoneyService) heldAmount(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string, now time.Time) (held, accrued int64, err error) {
 	row, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now,
-		HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now), AccruedAsOf: s.accruedAsOf(),
+		LeaseLiveSince: limits.LeaseLiveSince(now), AccruedAsOf: s.accruedAsOf(),
 	})
 	if err != nil {
 		return 0, 0, err

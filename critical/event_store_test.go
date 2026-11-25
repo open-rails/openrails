@@ -5,11 +5,15 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
@@ -61,6 +65,7 @@ func TestEventStore(t *testing.T) {
 		t.Run("usage-orders", noStoreUsageOrders)
 	})
 	t.Run("OR-J24-S40/new-migrates-clickhouse-idempotently-and-refuses-another-store", storeMigrationsAndIdentity)
+	t.Run("OR-J24-S66/two-engines-migrating-one-fresh-clickhouse-database-together-both-start", concurrentStoreMigrations)
 	t.Run("OR-J24-S41/public-config-reports-whether-usage-is-served", func(t *testing.T) {
 		require.True(t, usageFlag(t, newAuthorityWorld(t)))
 		require.False(t, usageFlag(t, newAuthorityWorld(t, withoutEventStore)))
@@ -98,11 +103,6 @@ func noStoreRefusals(t *testing.T) {
 	requireNoStore(t, err)
 	_, err = a.alphaRemote.SyncLeases(ctx, billing.SyncLeasesParams{LeaseID: billing.LeaseID(uuid.Must(uuid.NewV7()))})
 	requireNoStore(t, err)
-	admit := billing.AdmitParams{RequestID: "no-store", CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EstimatedAmount: 100, ExpiresAt: ptr(a.clock.Now().Add(time.Hour))}
-	_, err = a.alpha.Admit(ctx, []billing.AdmitParams{admit})
-	requireNoStore(t, err)
-	_, err = a.alphaRemote.CaptureAdmissions(ctx, []billing.CaptureAdmissionParams{{RequestID: "no-store", Amount: ptr(int64(100))}})
-	requireNoStore(t, err)
 	_, err = a.alpha.ListCustomerLimits(ctx, billing.CustomerLimitListParams{CustomerID: customer})
 	requireNoStore(t, err)
 	_, err = a.alphaRemote.AdjustCustomerLimit(ctx, customer, billing.AdjustCustomerLimitParams{Limit: "daily", Amount: 1, SourceID: "no-store"})
@@ -114,14 +114,6 @@ func noStoreRefusals(t *testing.T) {
 		require.Equal(t, http.StatusConflict, status, string(raw))
 		require.Contains(t, string(raw), `"code":"event_store_required"`)
 	}
-
-	// A host transaction's admissions are refused alike.
-	tx, err := a.pool.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback(context.Background()) }()
-	_, err = a.local.AdmitTx(ctx, tx, []billing.AdmitParams{admit})
-	require.ErrorIs(t, err, billing.ErrEventStoreRequired)
-	require.NoError(t, tx.Rollback(ctx))
 
 	// A metrics query naming usage is refused; one that does not answers.
 	week := &billing.MetricsRange{From: a.clock.Now().Add(-7 * 24 * time.Hour).Format(time.RFC3339), To: a.clock.Now().Add(time.Second).Format(time.RFC3339)}
@@ -203,7 +195,7 @@ func noStorePurchases(t *testing.T) {
 // A running charge leaves owed what the balance does not cover, and a usage
 // order bills it: neither needs the event store.
 func noStoreUsageOrders(t *testing.T) {
-	a, p, customer := usageBillingAccount(t, true, false, withoutEventStore)
+	a, p, customer := usageBillingAccount(t, false, withoutEventStore)
 	ctx := t.Context()
 	charge := billing.StartRunningChargeParams{Reference: "owed", CustomerID: customer, Currency: "USD", RatePerHour: 10_000_000}
 	_, err := a.alpha.StartRunningCharge(ctx, charge)
@@ -257,24 +249,18 @@ func storeMigrationsAndIdentity(t *testing.T) {
 		"usage_history_events_mv", "usage_minutes", "usage_minutes_mv", "usage_quantities", "usage_quantities_mv"}
 	require.Equal(t, installed, tables())
 
-	// A restart, a checking start and an explicit migration change nothing.
+	// A restart and an explicit migration change nothing.
 	require.NoError(t, reopen(w.cfg, w.deps))
-	skipping := w.cfg
-	skipping.Database.SkipMigrations = true
-	require.NoError(t, reopen(skipping, w.deps))
-	require.NoError(t, openrails.MigrateClickHouse(ctx, conn, w.cfg.ClickHouse))
+	require.NoError(t, openrails.MigrateClickHouse(ctx, w.pool, conn, w.cfg.ClickHouse))
 	require.Equal(t, installed, tables())
 	var applied uint64
 	require.NoError(t, conn.QueryRow(ctx, "SELECT count() FROM `"+w.schema+"`.schema_migrations FINAL").Scan(&applied))
 	require.EqualValues(t, 1, applied)
 
-	// An emptied ClickHouse is not the store this database's usage is in. A
-	// checking start finds it unmigrated; once migrated it is another store.
+	// An emptied ClickHouse is not the store this database's usage is in:
+	// once migrated it is another store.
 	require.NoError(t, conn.Exec(ctx, "DROP DATABASE `"+w.schema+"` SYNC"))
-	err := reopen(skipping, w.deps)
-	require.ErrorIs(t, err, billing.ErrMigrationsRequired)
-	require.NoError(t, openrails.MigrateClickHouse(ctx, conn, w.cfg.ClickHouse))
-	err = openrailsNewErr(ctx, w.cfg, w.deps)
+	err := openrailsNewErr(ctx, w.cfg, w.deps)
 	require.ErrorContains(t, err, "empty or different ClickHouse")
 
 	// Without ClickHouse the database starts: usage is off.
@@ -296,4 +282,53 @@ func openrailsNewErr(ctx context.Context, cfg openrails.Config, deps openrails.D
 		_ = engine.Close(context.Background())
 	}
 	return err
+}
+
+// concurrentStoreMigrations starts two engines together on a fresh schema and
+// a fresh ClickHouse database, as replicas of a new deployment do: they take
+// turns migrating, so each migration is recorded once and both serve usage.
+func concurrentStoreMigrations(t *testing.T) {
+	w := newWorld(t)
+	ctx := t.Context()
+	fresh := "critical_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	cfg := w.cfg
+	cfg.Database.Schema, cfg.Database.RiverSchema, cfg.ClickHouse.Database = fresh, fresh, fresh
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = w.deps.ClickHouse.Exec(cleanup, "DROP DATABASE IF EXISTS `"+fresh+"` SYNC")
+		_, _ = w.pool.Exec(cleanup, "DROP SCHEMA IF EXISTS "+pgx.Identifier{fresh}.Sanitize()+" CASCADE")
+	})
+	var engines [2]*openrails.Engine
+	var errs [2]error
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range engines {
+		wg.Go(func() {
+			<-start
+			engines[i], errs[i] = openrails.New(ctx, cfg, w.deps)
+		})
+	}
+	close(start)
+	wg.Wait()
+	for i, engine := range engines {
+		require.NoError(t, errs[i], "engine %d", i)
+		t.Cleanup(func() { require.NoError(t, engine.Close(context.Background())) })
+	}
+	var recorded, stores uint64
+	require.NoError(t, w.deps.ClickHouse.QueryRow(ctx, "SELECT count() FROM `"+fresh+"`.schema_migrations").Scan(&recorded))
+	require.EqualValues(t, 1, recorded, "the one migration ran and was recorded once")
+	require.NoError(t, w.deps.ClickHouse.QueryRow(ctx, "SELECT count() FROM `"+fresh+"`.store").Scan(&stores))
+	require.EqualValues(t, 1, stores, "one store identity")
+	first, err := declaredMerchant(engines[0], "alpha")
+	require.NoError(t, err)
+	usageMeter(t, first, 100)
+	for i, engine := range engines {
+		client, err := declaredMerchant(engine, "alpha")
+		require.NoError(t, err)
+		customer := billing.CustomerID(uuid.New())
+		fund(t, client, customer, "funded", 1000)
+		settleUsage(t, client, newLease(), numbered(1, usageInput(customer, fmt.Sprintf("after-the-race-%d", i), 1))...)
+		balance(t, client, customer, 900, 100, 1000)
+	}
 }

@@ -30,7 +30,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit"
-	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -104,9 +103,8 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	defer h.stripe.Close()
 	srv, err := server.New(ctx, server.Config{
 		Engine: openrails.Config{
-			PublicBillingBaseURL: api, RateLimits: billing.RateLimitsConfig{},
-			CheckoutOrigin:  payment,
-			ProviderSandbox: billing.ProviderSandboxConfig{NMIGatewayURL: h.nmi.URL(), StripeAPIURL: h.stripe.URL()},
+			PublicURL: api, RateLimits: billing.RateLimitsConfig{Purchase: &billing.RateLimit{}, Payment: &billing.RateLimit{}, Subscribe: &billing.RateLimit{}, Webhook: &billing.RateLimit{}},
+			CheckoutOrigin: payment,
 			// Cloudflare's always-passes test keys: the page loads the widget,
 			// which the browser suite stands in for.
 			Captcha: billing.CaptchaAccount{Provider: "turnstile", SiteKey: "1x00000000000000000000AA", SecretKey: "1x0000000000000000000000000000000AA"},
@@ -116,15 +114,10 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 					"stripe": openrails.StripePSP{Environment: billing.EnvironmentTest, AccountID: "acct_e2e", SecretKey: "sk_test_acct_e2e", WebhookSigningSecret: "whsec_e2e", PublishableKey: "pk_test_e2e"}.PSPConfig(),
 				}}}},
 		},
-		Auth: authkit.Config{
-			DefaultTenantID: iam.TenantID(uuid.MustParse("baf3907f-2a73-4e8c-8221-82e9c930e8ed")),
-			Token:           authkit.TokenConfig{Issuer: api},
-			Keys:            authkit.KeysConfig{Path: keys, AllowEphemeralDevKeys: true},
-			Registration:    authkit.RegistrationConfig{AllowMissingSenders: true},
-			HTTP:            &authkit.HTTPConfig{DirectPeerIP: true},
-		},
-		RouteGroups: openrails.RouteGroups{Admin: true, Programmatic: true},
-	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Clock: h.clock, CheckoutAssets: os.DirFS(assets)}})
+		Auth:    server.AuthConfig{Keys: server.AuthKeys{Path: keys}}, // a loopback issuer's development keys
+		AuthKit: func(c *authkit.Config) { c.Registration.AllowMissingSenders = true },
+	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Clock: h.clock, CheckoutAssets: os.DirFS(assets),
+		ProviderEndpoints: openrails.ProviderEndpoints{NMIGatewayURL: h.nmi.URL(), StripeAPIURL: h.stripe.URL()}}})
 	if err != nil {
 		return err
 	}

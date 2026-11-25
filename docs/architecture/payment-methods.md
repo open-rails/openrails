@@ -101,8 +101,7 @@ Tables owned: `payment_methods`, `payment_method_versions`, `mandates`,
   `DELETE /v1/admin/customers/{customer_id}/payment-methods/{id}`,
   `GET /v1/merchant/custodians`, `PUT /v1/merchant/custodians/{key}`.
 - **Configuration**: `card_vault`, `charge_psps`, a PSP's `custodian` and
-  `card_entry`, the deployment's `card_vault` (`kind`, `tenant_id`, `kv_mount`),
-  `user_action_rate_limit`.
+  `card_entry`, the deployment's `card_vault` (`tenant_id`, `kv_mount`).
 - **Docs**: [custody](../client.md#merchant-configuration-and-psps), [agreements](../client.md#payments-and-refunds), [limits](../standalone.md#abuse-limits).
 
 ## Guarantees
@@ -203,7 +202,7 @@ signed-in customer's (`validatePaymentMethodDeleteAuthority`).
 Checks:
 - OR-J12-S07: under a `readonly` write posture a removal sends nothing.
 - OR-J12-S06: removal is refused while a subscription uses the card.
-- `requestedPaymentMethodDelete` (`internal/intents/payment_method_delete_authority.go`) is the only path past the maintenance kill switch.
+- `requestedPaymentMethodDelete` (`internal/intents/payment_method_delete_authority.go`) is the only path past the merchant's destructive arming.
 
 ## Tests
 

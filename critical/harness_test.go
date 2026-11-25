@@ -5,6 +5,8 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/open-rails/openrails/internal/destructive"
+	embedded "github.com/open-rails/openrails/internal/engine"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -40,6 +42,25 @@ type world struct {
 	// posture is the declared merchants' write posture once the engine is
 	// up: readonly unless a scenario sets full (fullWrites) or limited.
 	posture string
+	// limits changes the destructive-action limits of every engine the world
+	// starts, so a scenario trips or clears a hold in a few actions.
+	limits func(*destructive.Limits)
+}
+
+// criticalSchema is a fresh schema name short enough for its River schema,
+// <schema>_river, to be a valid one too.
+func criticalSchema() string {
+	return "critical_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:30]
+}
+
+// applyLimits sets the world's destructive-action limits on its engine.
+func (w *world) applyLimits() {
+	if w.limits == nil {
+		return
+	}
+	l := destructive.DefaultLimits
+	w.limits(&l)
+	embedded.Graph(w.engine).Runtime.DestructiveAdmissions.SetLimits(l)
 }
 
 func newWorld(t *testing.T, configure ...func(*world)) *world {
@@ -52,17 +73,16 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 	pool, err := pgxpool.NewWithConfig(t.Context(), pc)
 	require.NoError(t, err)
 	require.NoError(t, pool.Ping(t.Context()))
-	w := &world{pool: pool, schema: "critical_" + strings.ReplaceAll(uuid.NewString(), "-", ""), clock: clockwork.NewFakeClockAt(time.Now().UTC()), posture: "readonly"}
+	w := &world{pool: pool, schema: criticalSchema(), clock: clockwork.NewFakeClockAt(time.Now().UTC()), posture: "readonly"}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_, err := pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{w.schema}.Sanitize()+" CASCADE")
+		_, err := pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{w.schema}.Sanitize()+", "+pgx.Identifier{w.schema + "_river"}.Sanitize()+" CASCADE")
 		require.NoError(t, err)
 		pool.Close()
 	})
 	w.cfg = openrails.Config{
-		Database:      billing.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
-		ReturnOrigins: []string{"https://critical.invalid"},
+		Database: billing.DatabaseConfig{Schema: w.schema},
 		Merchants: []billing.MerchantDeclaration{
 			{MerchantDocument: billing.MerchantDocument{Slug: "alpha", DisplayName: "Alpha"}},
 			{MerchantDocument: billing.MerchantDocument{Slug: "beta", DisplayName: "Beta"}},
@@ -75,6 +95,7 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 	}
 	w.engine, err = openrails.New(t.Context(), w.cfg, w.deps)
 	require.NoError(t, err)
+	w.applyLimits()
 	t.Cleanup(func() { require.NoError(t, w.engine.Close(context.Background())) })
 	w.alpha, err = declaredMerchant(w.engine, "alpha")
 	require.NoError(t, err)
@@ -83,29 +104,44 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 	w.local, err = w.engine.LocalMerchant(w.alpha.MerchantID())
 	require.NoError(t, err)
 	if w.posture != "full" {
-		var declared []billing.MerchantID
-		for _, m := range w.cfg.Merchants {
-			// A declaration refused (a slug declared twice) has no merchant.
-			if id, err := w.engine.DeclaredMerchant(m.Slug); err == nil {
-				declared = append(declared, id)
-			}
-		}
-		setWritePosture(t, w, w.posture, declared...)
+		setWritePosture(t, w, w.posture, declaredMerchants(w)...)
 	}
 	return w
+}
+
+// declaredMerchants is the world's declared merchants. A declaration refused
+// (a slug declared twice) has no merchant.
+func declaredMerchants(w *world) []billing.MerchantID {
+	var declared []billing.MerchantID
+	for _, m := range w.cfg.Merchants {
+		if id, err := w.engine.DeclaredMerchant(m.Slug); err == nil {
+			declared = append(declared, id)
+		}
+	}
+	return declared
 }
 
 // fullWrites leaves the declared merchants' write posture full.
 func fullWrites(w *world) { w.posture = "full" }
 
-// setWritePosture stores the merchants' write posture as an operator's
-// `openrails merchant hold` would.
+// setWritePosture stores the merchants' writes as an operator's
+// `openrails merchant writes` would.
 func setWritePosture(t *testing.T, w *world, mode string, merchants ...billing.MerchantID) {
 	t.Helper()
+	setControl(t, w, "writes", mode, merchants...)
+}
+
+// setControl stores one of the merchants' controls (writes, rebills_held or
+// destructive_armed) as fixture setup, outside the history an operator's
+// change records.
+func setControl(t *testing.T, w *world, column string, value any, merchants ...billing.MerchantID) {
+	t.Helper()
+	require.Contains(t, []string{"writes", "rebills_held", "destructive_armed"}, column)
+	table := pgx.Identifier{w.schema, "merchant_controls"}.Sanitize()
 	for _, id := range merchants {
-		_, err := w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "merchant_write_posture"}.Sanitize()+
-			" (merchant_id, mode, reason, set_by) VALUES ($1, $2, 'operator', 'critical fixture operator')"+
-			" ON CONFLICT (merchant_id) DO UPDATE SET mode = EXCLUDED.mode, set_at = now()", id.UUID(), mode)
+		_, err := w.pool.Exec(t.Context(), "INSERT INTO "+table+" (merchant_id, writes, rebills_held, destructive_armed) VALUES ($1, 'full', false, false) ON CONFLICT (merchant_id) DO NOTHING", id.UUID())
+		require.NoError(t, err)
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+table+" SET "+column+" = $2 WHERE merchant_id = $1", id.UUID(), value)
 		require.NoError(t, err)
 	}
 }
@@ -173,6 +209,19 @@ func (w loopbackWire) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// billedTo is a new card's billing details as its form collects them: the
+// country, and the postal code where it asks for one.
+func billedTo(country, postal string) *billing.BillingDetails {
+	details := &billing.BillingDetails{Name: ptr("Alice Buyer"), Address: &billing.BillingAddress{}}
+	if country != "" {
+		details.Address.Country = ptr(country)
+	}
+	if postal != "" {
+		details.Address.PostalCode = ptr(postal)
+	}
+	return details
+}
 
 // cfgMerchant is a copy of cfg's declaration of slug; the bare slug when it
 // declares none.

@@ -307,7 +307,7 @@ const permissionAreas: Record<string, string> = {
   "entitlements:read":
     "Read customer entitlements through the application API.",
   "usage:read":
-    "Read usage, admissions, and running charges through the application API.",
+    "Read usage, limits, and running charges through the application API.",
   "usage:manage": "Admit and charge usage through the application API.",
   "events:read":
     "Read retained billing events through the application API.",

@@ -618,13 +618,7 @@ func TestBooks(t *testing.T) {
 			used, plain := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
 			_, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: used, Currency: "USD", Amount: 1000, Source: "critical", SourceID: fmt.Sprintf("fund-%d", round)}})
 			require.NoError(t, err)
-			request := fmt.Sprintf("use-%d", round)
-			admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, used, request, 400)})
-			require.NoError(t, err)
-			require.True(t, admitted[0].Allowed())
-			spent, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture(request, 400)})
-			require.NoError(t, err)
-			require.NoError(t, spent[0].Err())
+			spend(t, w.alpha, used, fmt.Sprintf("use-%d", round), 400)
 			w.clock.Advance(time.Second)
 			var errs [2]error
 			var group sync.WaitGroup
@@ -979,7 +973,7 @@ func TestBooksMigration(t *testing.T) {
 		pool, err := pgxpool.New(t.Context(), dsn)
 		require.NoError(t, err)
 		t.Cleanup(pool.Close)
-		schema := "critical_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		schema := criticalSchema()
 		// Every migration before the books', whatever their numbers.
 		names, err := fs.Glob(postgresmigrations.FS, "*.up.sql")
 		require.NoError(t, err)
@@ -1024,7 +1018,7 @@ func TestBooksMigration(t *testing.T) {
 		// The engine starts on it and migrates it to the books.
 		w := newWorld(t, func(w *world) {
 			w.schema = schema
-			w.cfg.Database = billing.DatabaseConfig{Schema: schema, RiverSchema: schema}
+			w.cfg.Database = billing.DatabaseConfig{Schema: schema}
 		})
 		require.Equal(t, mid, w.alpha.MerchantID().UUID())
 		balance(t, w.alpha, billing.CustomerID(customer), 600, 0, 600)

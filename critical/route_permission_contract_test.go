@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"regexp"
 	"slices"
@@ -223,11 +222,10 @@ func (p *catalogProbe) probe(t *testing.T) (int, []string) {
 
 func TestRoutePermissions(t *testing.T) {
 	t.Run("OR-J01-S20/every-route-refuses-a-credential-without-its-permission", func(t *testing.T) {
-		// A file-configured merchant without an LLM mounts every gated route
-		// but these; a new one this world leaves out is named here.
+		// A file-configured merchant mounts every gated route but these; a new
+		// one this world leaves out is named here.
 		checked, unmounted := newCatalogProbe(t).probe(t)
 		require.ElementsMatch(t, []string{
-			"POST /v1/console/catalog/ask",
 			"PUT /v1/merchant/custodians/{key}",
 			"POST /v1/merchant/psps",
 			"PATCH /v1/merchant/psps/{id}",
@@ -238,24 +236,19 @@ func TestRoutePermissions(t *testing.T) {
 		}, unmounted)
 		require.Greater(t, checked, 100, "the catalog's gated routes are mounted and probed")
 
-		// With Vault-held configuration and an LLM, every gated route mounts:
-		// the configuration edits and the catalog assistant are probed too.
+		// With Vault-held configuration every gated route mounts: the
+		// configuration edits are probed too.
 		addr, token := os.Getenv("OPENRAILS_CRITICAL_VAULT_ADDR"), os.Getenv("OPENRAILS_CRITICAL_VAULT_TOKEN")
 		require.NotEmpty(t, addr, "the configuration edits need real Vault")
 		require.NotEmpty(t, token)
 		t.Setenv(vaulttest.AddrEnv, addr)
 		t.Setenv(vaulttest.TokenEnv, token)
 		vault := vaulttest.New(t)
-		llm := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "stub model", http.StatusServiceUnavailable)
-		}))
-		t.Cleanup(llm.Close)
 		all, none := newCatalogProbe(t, func(w *world) {
 			w.cfg.Vault = vault.Config()
 			w.deps.Vault = vault.Client()
-			w.cfg.LLM = billing.LLMConfig{APIKey: "stub", BaseURL: llm.URL, CatalogCopilotEnabled: true}
 		}).probe(t)
-		require.Empty(t, none, "every gated route mounts with Vault and an LLM")
+		require.Empty(t, none, "every gated route mounts with Vault")
 		require.Equal(t, checked+len(unmounted), all)
 		t.Logf("probed %d and %d mounted routes of the catalog", checked, all)
 	})
@@ -520,7 +513,7 @@ func TestDirectoryAuthority(t *testing.T) {
 		a, _ := newPaymentWorld(t, func(w *world) {
 			w.deps.UserInfo = nil
 			w.deps.Email = mail
-			w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ErasurePerHour: 1}
+			w.limits = func(l *destructive.Limits) { l.ErasurePerHour = 1 }
 		})
 		startFleet(t, a.world)
 		token, err := a.alphaRemote.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "directory"})
@@ -578,7 +571,7 @@ func TestDirectoryAuthority(t *testing.T) {
 			operator = c.Roles.Root.Role("hold-operator", mustPermission(t, string(billing.RootConfigManage)), mustPermission(t, string(billing.RootAdminRateLimitsUnlock)))
 		}, func(w *world) {
 			w.deps.UserInfo = nil
-			w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ErasurePerHour: 2, ActorPerHour: 2, MerchantPerHour: 2}
+			w.limits = func(l *destructive.Limits) { l.ErasurePerHour, l.ActorPerHour, l.MerchantPerHour = 2, 2, 2 }
 		})
 		fleet := quietFleet(t, a.world)
 		token, err := a.alphaRemote.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "directory"})

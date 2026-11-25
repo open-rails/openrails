@@ -27,7 +27,7 @@ func TestManualProviderRefresh(t *testing.T) {
 	t.Run("OR-J38-S72/operator-refresh-replaces-legacy-work-and-retries", func(t *testing.T) {
 		a, p, _ := nmiMembership(t)
 		ctx := t.Context()
-		queue, err := river.NewClient(riverpgxv5.New(a.pool), &river.Config{Schema: a.schema, SkipUnknownJobCheck: true})
+		queue, err := river.NewClient(riverpgxv5.New(a.pool), &river.Config{Schema: a.schema + "_river", SkipUnknownJobCheck: true})
 		require.NoError(t, err)
 		legacyScheduler := priorRefreshJob("openrails.provider_refresh")
 		legacyMerchant := priorRefreshJob("openrails.provider_refresh_merchant")
@@ -41,7 +41,7 @@ func TestManualProviderRefresh(t *testing.T) {
 		scheduled := seed(legacyScheduler, &river.InsertOpts{Queue: openrails.QueueBilling, ScheduledAt: later})
 		available := seed(legacyMerchant, &river.InsertOpts{Queue: "provider_refresh"})
 		history := seed(legacyMerchant, &river.InsertOpts{Queue: openrails.QueueBilling})
-		jobsTable := pgx.Identifier{a.schema, "river_job"}.Sanitize()
+		jobsTable := pgx.Identifier{a.schema + "_river", "river_job"}.Sanitize()
 		_, err = a.pool.Exec(ctx, "UPDATE "+jobsTable+" SET state = 'completed', finalized_at = now() WHERE id = $1", history)
 		require.NoError(t, err)
 		unrelated := seed("openrails.cleanup_expired_data", &river.InsertOpts{Queue: openrails.QueueBilling, ScheduledAt: later})
@@ -69,7 +69,7 @@ func TestManualProviderRefresh(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(hostCLI(t, a.world, "provider-refresh", "--merchant", "alpha")), &out))
 			require.Positive(t, out.JobID)
 			require.Equal(t, a.alpha.MerchantID(), out.MerchantID)
-			require.Equal(t, a.schema, out.RiverSchema)
+			require.Equal(t, a.schema+"_river", out.RiverSchema)
 			require.Equal(t, "provider_refresh", out.Queue)
 			return out
 		}

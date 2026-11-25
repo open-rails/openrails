@@ -17,23 +17,14 @@ const (
 	// UsageClockSkew is how far ahead of the server clock usage may be dated.
 	UsageClockSkew = 5 * time.Minute
 
-	// AdmissionMaxWindow is the longest spend window a policy may declare.
-	AdmissionMaxWindow = 31 * Day
-	// AdmissionMaxHold is the longest a hold row may live past its creation.
-	AdmissionMaxHold = 30 * Day
-	// Admissions is how long a hold is kept, the replay horizon: the longest
-	// spend window that may still count it, plus 30 days.
-	Admissions = AdmissionMaxWindow + 30*Day
-
-	// PartitionsAheadMonths is how many months past the current one always
-	// have a partition.
-	PartitionsAheadMonths = 2
+	// MaxSpendWindow is the longest spend window a policy may declare.
+	MaxSpendWindow = 31 * Day
 )
 
 // Row periods. Where a table refuses ad-hoc deletes, its trigger in the
 // baseline declares the same number of days.
 const (
-	// EventLog is the default retained event lifetime, independent of readers.
+	// EventLog is the event log's lifetime, independent of readers.
 	EventLog = 90 * Day
 	// SubscriptionTransitions keeps a subscription status change 25 months.
 	SubscriptionTransitions = 761 * Day
@@ -47,8 +38,9 @@ const (
 	// reaching a provider 90 days past its expiry.
 	ExpiredOrderAttempts = 90 * Day
 	// UnpaidOrders keeps an unpaid closed order that never started a payment
-	// attempt 90 days past its close.
-	UnpaidOrders = 90 * Day
+	// attempt 397 days past its close: the checkout funnel compares a month
+	// with the same month a year before.
+	UnpaidOrders = 397 * Day
 	// MetricCounters keeps a daily webhook-health count 13 months: a month is
 	// compared with a year before.
 	MetricCounters = 397 * Day
@@ -60,9 +52,9 @@ const (
 	LimitWindows = 61 * Day
 	// Leases keeps a gate's lease 61 days past its last sync, so its late
 	// reports and replays still resolve.
-	Leases = Admissions
+	Leases = 61 * Day
 	// LimitAdjustments keeps a limit adjustment's replay record 61 days.
-	LimitAdjustments = Admissions
+	LimitAdjustments = 61 * Day
 	// Carts keeps a cart 30 days past its last change.
 	Carts = 30 * Day
 	// ResolvedFindings keeps a resolved reconciliation finding 12 months past
@@ -85,48 +77,6 @@ func Days(period time.Duration) int32 {
 		return math.MaxInt32
 	}
 	return int32(days)
-}
-
-// MonthlyPartitions is a table partitioned by month on Key. A partition is
-// dropped once its whole range is at or before DropBefore(now). Partitions are
-// created from the month a row may still be written into (WriteBack ago)
-// through PartitionsAheadMonths past the current month; older months exist
-// because they were once current.
-type MonthlyPartitions struct {
-	Table      string
-	Key        string
-	WriteBack  time.Duration
-	DropBefore func(now time.Time) time.Time
-}
-
-// Partitioned lists the partitioned tables. Hold parts have no foreign key
-// to their hold (a referenced partition cannot be dropped); readers join the
-// hold, and a month of parts drops before its month of holds.
-var Partitioned = []MonthlyPartitions{
-	{Table: "limit_hold_parts", Key: "hold_created_at", DropBefore: AdmissionsDropBefore},
-	{Table: "limit_holds", Key: "created_at", DropBefore: AdmissionsDropBefore},
-}
-
-// MonthStart is the first instant of t's UTC month.
-func MonthStart(t time.Time) time.Time {
-	t = t.UTC()
-	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
-}
-
-// AdmissionsDropBefore is the oldest hold still kept.
-func AdmissionsDropBefore(now time.Time) time.Time { return now.UTC().Add(-Admissions) }
-
-// Range is the span of months a row may be written into at now, plus the
-// months ahead.
-func (p MonthlyPartitions) Range(now time.Time) (from, through time.Time) {
-	return MonthStart(now.Add(-p.WriteBack)), MonthStart(now).AddDate(0, PartitionsAheadMonths, 0)
-}
-
-// RetainedRange is the span of every month still kept at now: what a restore
-// of archived rows may need.
-func (p MonthlyPartitions) RetainedRange(now time.Time) (from, through time.Time) {
-	_, through = p.Range(now)
-	return MonthStart(p.DropBefore(now)), through
 }
 
 // OutboxIntentTypes are the provider intents that only carried an instruction

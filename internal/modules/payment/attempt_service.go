@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -30,7 +31,6 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const (
@@ -85,12 +85,19 @@ type OrderAttemptService struct {
 	// checkoutOrigin is the payment page's origin, "" without one: its
 	// pages are return URLs too.
 	checkoutOrigin func() string
-	Log            *slog.Logger
+	// returnOrigins are the origins a merchant's return URLs may name.
+	returnOrigins func(context.Context, billing.MerchantID) ([]string, error)
+	Log           *slog.Logger
 }
 
 // SetCheckoutOrigin wires the payment page's origin, set once it is served.
 func (s *OrderAttemptService) SetCheckoutOrigin(origin func() string) {
 	s.checkoutOrigin = origin
+}
+
+// SetReturnOrigins wires the origins a merchant's return URLs may name.
+func (s *OrderAttemptService) SetReturnOrigins(origins func(context.Context, billing.MerchantID) ([]string, error)) {
+	s.returnOrigins = origins
 }
 
 // SetPSPPosture wires the verdict purchase consults before offering a PSP.
@@ -171,7 +178,7 @@ func (s *OrderAttemptService) requireProviderWrites(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if posture := (writeposture.View{DB: s.db}).Posture(ctx, mid.UUID()); posture.ReadOnly() {
+	if posture := (controls.View{DB: s.db}).Posture(ctx, mid.UUID()); posture.ReadOnly() {
 		return ProviderWritesDisabled(posture.Reason)
 	}
 	return nil
@@ -266,17 +273,17 @@ func (s *OrderAttemptService) solanaSignerAvailable(ctx context.Context) error {
 }
 
 // getAPIBaseURL returns the API base URL for building Solana Pay URLs.
-// Uses config.PublicBillingBaseURL which should be set to the full base URL where billing routes are mounted.
+// Uses config.PublicURL which should be set to the full base URL where billing routes are mounted.
 //
 // Standalone: "https://api.mysite.com" → routes at /v1/*
 // Embedded:   "https://api.mysite.com/billing" → routes at /billing/v1/*
 //
-// Generated URLs follow the pattern: PublicBillingBaseURL + "/v1/order-attempts/:id/solana-pay"
+// Generated URLs follow the pattern: PublicURL + "/v1/order-attempts/:id/solana-pay"
 func (s *OrderAttemptService) getAPIBaseURL() string {
 	if s.config == nil {
 		return ""
 	}
-	apiURL := strings.TrimSpace(s.config.PublicBillingBaseURL)
+	apiURL := strings.TrimSpace(s.config.PublicURL)
 	if apiURL == "" {
 		return ""
 	}

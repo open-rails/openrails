@@ -93,14 +93,13 @@ func Graph(client any) *app.App {
 	return nil
 }
 
-// New builds the engine. It first creates or upgrades OpenRails' tables, this
-// month's partitions and River's tables (Migrate's work); the control plane's
-// AuthKit migrates itself as it is built.
-// Database.SkipMigrations validates existing schemas instead of
-// applying startup schema, partition or River changes. ctx bounds the
+// New builds the engine. It first creates or upgrades OpenRails' tables and
+// River's tables (Migrate's work); the control plane's
+// AuthKit migrates itself as it is built. ctx bounds the
 // database; nothing else does. Only the database (Deps.Postgres is required),
 // an unknown provider write mode, an invalid River schema and the
-// money-safety refusal (a test seam beside a live PSP) fail construction.
+// money-safety refusals (a test seam beside a live PSP, a provider endpoint
+// that is not loopback) fail construction.
 // Anything else that cannot be served is refused alone and reported (Ready,
 // Probes' openrails_configuration): an optional setting, a declared merchant,
 // one of its documents, the checkout origin. PSP posture and Redis recover in
@@ -233,6 +232,9 @@ func validate(cfg *billing.Config, deps Deps) ([]billing.MerchantDeclaration, []
 	if err := validRiverSchema(config.RiverSchemaName(cfg)); err != nil {
 		return nil, nil, err
 	}
+	if err := deps.ProviderEndpoints.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("openrails: Deps.ProviderEndpoints: %w", err)
+	}
 	if live := declaredLive(declarations); live != "" {
 		if fakes := fakeProviders(cfg, deps); len(fakes) > 0 {
 			return nil, nil, fmt.Errorf("openrails: %s is a test seam and is refused beside a live PSP (%s)", strings.Join(fakes, ", "), live)
@@ -268,6 +270,7 @@ func seams(deps Deps) []string {
 			out = append(out, name)
 		}
 	}
+	out = append(out, deps.ProviderEndpoints.Fakes()...)
 	slices.Sort(out)
 	return out
 }

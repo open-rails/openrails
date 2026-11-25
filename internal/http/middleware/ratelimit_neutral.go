@@ -254,7 +254,7 @@ func evaluateCaptchaVerify(logger *slog.Logger, r *http.Request, deps RateLimitD
 // socket peer. state is the process's abuse state; nil counts in memory of
 // this middleware's own.
 func RateLimitHTTP(logger *slog.Logger, limits billing.RateLimitsConfig, captchaCfg billing.CaptchaAccount, state *abusestate.Store, challengeStore *captcha.ChallengeStore, resolver *iputil.TrustedProxies) HTTPMiddleware {
-	if len(limits) == 0 {
+	if unlimited(limits) {
 		return func(next http.Handler) http.Handler { return next }
 	}
 	if state == nil {
@@ -434,25 +434,40 @@ func bucketKeys(subjectKeys []string, buckets []string) []string {
 	return keys
 }
 
+// resolveRateLimitPolicy is the limit of req's bucket, nil when it is not
+// limited.
 func resolveRateLimitPolicy(cfg billing.RateLimitsConfig, req *http.Request) (*billing.RateLimit, string) {
-	if len(cfg) == 0 || req == nil {
+	if req == nil {
 		return nil, ""
 	}
 	bucket := ClassifyBucket(strings.ToLower(policyRequestPath(req)), req.Method)
+	var limit *billing.RateLimit
 	switch bucket {
 	case "webhook":
-		return cfg["webhook"], bucket
+		limit = cfg.Webhook
 	case "subscriptions":
-		return cfg["subscribe"], bucket
+		limit = cfg.Subscribe
 	case "purchase":
-		return cfg["purchase"], bucket
+		limit = cfg.Purchase
 	case "payment-methods":
-		return cfg["payment"], bucket
-	case "catalog-ask":
-		return cfg[bucket], bucket
+		limit = cfg.Payment
 	}
 	// Generic per-address ceilings belong to the proxy in front of OpenRails.
-	return nil, bucket
+	if limit == nil || limit.RequestsPerMinute <= 0 {
+		return nil, bucket
+	}
+	return limit, bucket
+}
+
+// unlimited reports limits that limit no bucket: a host fronting billing
+// with its own limiter.
+func unlimited(limits billing.RateLimitsConfig) bool {
+	for _, limit := range config.RateLimitBuckets(&limits) {
+		if *limit != nil && (*limit).RequestsPerMinute > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // ClassifyBucket maps a route catalog path and method to a rate-limit
@@ -460,8 +475,6 @@ func resolveRateLimitPolicy(cfg billing.RateLimitsConfig, req *http.Request) (*b
 func ClassifyBucket(path, method string) string {
 	method = strings.ToUpper(method)
 	switch {
-	case method == http.MethodPost && path == "/v1/console/catalog/ask":
-		return "catalog-ask"
 	case strings.HasPrefix(path, "/v1/webhooks"):
 		return "webhook"
 	case strings.HasPrefix(path, "/v1/me/payment-methods"):
@@ -495,7 +508,7 @@ func isPurchasePath(path string) bool {
 // the address. A captcha the address limiter verified on this request is not
 // asked for again. Nil where the runtime enforces no captcha.
 func CardAttackCaptcha(rt *app.Runtime) router.Middleware {
-	if rt == nil || rt.Config == nil || len(rt.Config.RateLimits) == 0 || rt.CaptchaStore == nil || rt.AbuseState == nil || !config.CaptchaEnabled(rt.Config.Captcha) {
+	if rt == nil || rt.Config == nil || unlimited(rt.Config.RateLimits) || rt.CaptchaStore == nil || rt.AbuseState == nil || !config.CaptchaEnabled(rt.Config.Captcha) {
 		return nil
 	}
 	return cardAttackCaptcha(RateLimitDeps{
@@ -535,9 +548,6 @@ func effectiveLimit(limit *billing.RateLimit) int {
 	if limit == nil {
 		return 0
 	}
-	if limit.RequestsPerMinute <= 0 {
-		return 60
-	}
 	return limit.RequestsPerMinute
 }
 
@@ -555,7 +565,7 @@ func PayURLRateLimit(rt *app.Runtime, bucket string, perMinute int, key func(*re
 	return func(next router.Handler) router.Handler {
 		return func(r *request.Request) {
 			order := key(r)
-			if rt == nil || rt.Config == nil || len(rt.Config.RateLimits) == 0 || order == "" || limitSubject(r, rt, "cks:"+order, bucket, perMinute) {
+			if rt == nil || rt.Config == nil || unlimited(rt.Config.RateLimits) || order == "" || limitSubject(r, rt, "cks:"+order, bucket, perMinute) {
 				next(r)
 			}
 		}

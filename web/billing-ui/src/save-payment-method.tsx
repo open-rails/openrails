@@ -13,12 +13,13 @@ import {
 import { useMessages } from "./i18n/context"
 import {
   billingDetailsOf,
+  billingSchema,
   emptyNMIBilling,
   initialCountry,
-  nmiBillingSchema,
 } from "./lib/billing"
 import { useCardEntry } from "./lib/card-entry"
 import { cardSetupDriver, type PspConfig } from "./psp"
+import { useBillingFields } from "./react/config"
 import { useBillingContext } from "./react/context"
 import {
   TokenizedCardForm,
@@ -150,6 +151,8 @@ function NativeCardSetup({
     [uid]
   )
   const card = useCardEntry()
+  const fields = useBillingFields()
+  const schema = React.useMemo(() => billingSchema(fields), [fields])
   const [billing, setBilling] = React.useState(() => ({
     ...emptyNMIBilling,
     country: initialCountry(defaultCountry),
@@ -160,7 +163,7 @@ function NativeCardSetup({
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (busy) return
-    const parsed = nmiBillingSchema.safeParse(billing)
+    const parsed = schema.safeParse(billing)
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Check the billing details")
       return
@@ -196,6 +199,7 @@ function NativeCardSetup({
         idPrefix={`orck-save-${uid}`}
         value={billing}
         onChange={setBilling}
+        fields={fields}
         disabled={busy}
       >
         <NativeCardFields ids={ids} card={card} disabled={busy} />
@@ -208,7 +212,7 @@ function NativeCardSetup({
       <PayButton
         label={submitLabel ?? m.t("paymentMethods.save")}
         processing={busy}
-        disabled={!card.valid || !nmiBillingSchema.safeParse(billing).success}
+        disabled={!card.valid || !schema.safeParse(billing).success}
       />
       <TrustLine />
     </form>

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/lifecycle"
@@ -16,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // EffectOptions is the caller's context for a transition's effects.
@@ -224,7 +224,7 @@ func (s *SubscriptionLifecycleService) CheckCancellationWritePosture(ctx context
 	if sub.Rail != models.RailNMI && sub.Rail != models.RailStripe {
 		return nil
 	}
-	if p := (writeposture.View{DB: d}).Posture(ctx, sub.MerchantID); p.ReadOnly() {
+	if p := (controls.View{DB: d}).Posture(ctx, sub.MerchantID); p.ReadOnly() {
 		return fmt.Errorf("%w: %s holds local cancellation", ErrCancellationWriteDisabled, p.Reason)
 	}
 	return nil

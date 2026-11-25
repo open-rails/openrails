@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -167,8 +169,8 @@ type ConvergeRollbackResult struct {
 	// ProvenDomainsReset is how many reconciliation_state rows lost their
 	// fully_reconciled flag (the confirmed-absence gate is now closed again).
 	ProvenDomainsReset int64 `json:"proven_domains_reset"`
-	// EnforcementDisarmed records that the merchant's first-enforce arming was
-	// cleared, so the next pull runs advisory.
+	// EnforcementDisarmed records that the merchant's destructive actions were
+	// disarmed, so the next pull runs advisory.
 	EnforcementDisarmed bool `json:"enforcement_disarmed"`
 	// Recomputed records that the derive plane re-ran and rebuilt the
 	// invalidated grant effects. False means access for the restored
@@ -237,9 +239,9 @@ func RollbackApprovalRun(ctx context.Context, database *db.DB, runID uuid.UUID, 
 	// Outside the transaction on purpose: the stop must be visible to the intent
 	// runner's own connection IMMEDIATELY, not at our commit.
 	reason := fmt.Sprintf("reversing destructive run %s", runID)
-	if err := database.Gen(ctx).DisarmMerchantEnforcement(ctx, gen.DisarmMerchantEnforcementParams{
-		MerchantID: mid, UpdatedBy: &actor, Reason: &reason,
-	}); err != nil {
+	disarmed := false
+	now := time.Now().UTC()
+	if _, _, err := controls.Apply(ctx, database, billing.MerchantID(mid), controls.Change{DestructiveArmed: &disarmed}, actor, reason, now); err != nil {
 		return res, fmt.Errorf("quiesce merchant before reversal: %w", err)
 	}
 	res.EnforcementDisarmed = true

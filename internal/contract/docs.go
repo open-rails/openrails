@@ -84,9 +84,6 @@ func (m *model) routesMD() []byte {
 				replies = append(replies, fmt.Sprintf("%d %s", reply.Status, m.bodyDoc(reply.Body)))
 			}
 			var notes []string
-			if r.ConsoleOnly {
-				notes = append(notes, "console only")
-			}
 			if r.When != routes.Always {
 				notes = append(notes, "when `"+string(r.When)+"`")
 			}

@@ -1,0 +1,29 @@
+# config.yaml for the browser tests (../compose.e2e.yaml): every purchase
+# comes from one browser, so the customer buckets are unlimited.
+
+port: 3053
+public_url: http://localhost:3053 # where browsers and PSPs reach this server
+
+database:
+  url: postgres://openrails:openrails@postgres:5432/openrails?sslmode=disable
+redis: # optional for one server; replicas share rate limits and spent proofs through it
+  url: redis://redis:6379
+
+# The server's own AuthKit: its issuer and resource are
+# public_url, and its keys (keys.json, totp.key) live here. It
+# accepts the tokens of the app merchant.yaml declares the merchant's trusted
+# issuer; on a loopback URL that app's keys may be on localhost.
+auth:
+  keys:
+    path: /vault/auth
+
+# Receipts and payment notices, sent from the merchant's from_email.
+email_smtp:
+  host: mailpit
+  port: 1025
+  from: "OnlyDemo Billing <billing@onlydemo.example>"
+
+rate_limits:
+  purchase: {requests_per_minute: 0}
+  payment: {requests_per_minute: 0}
+  subscribe: {requests_per_minute: 0}

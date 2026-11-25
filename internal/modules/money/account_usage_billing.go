@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/money/owed"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -32,6 +33,9 @@ const UsageOrdersInterval = 5 * time.Minute
 var usageOutstanding = []rivertype.JobState{
 	rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
 }
+
+// reopenedOwedSource is the line source of owed a chargeback reopened.
+const reopenedOwedSource = owed.ReopenedSource
 
 // UsageOrderArgs is one usage pass over every merchant: it bills the due
 // accounts, then queues the due collections. Bill or Collect continues a pass
@@ -65,11 +69,14 @@ func (UsageOrderArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: "billing", MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: usageOutstanding}}
 }
 
+// usageBillingConfig is the merchant's usage_billing terms and its terms in
+// currency: none without terms, or on a handle with no merchant
+// configuration bound.
 func (s *MoneyService) usageBillingConfig(ctx context.Context, currency string) (*billing.UsageBillingSettings, *billing.UsageBillingCurrency, error) {
-	if !s.UsageBillingEnabled {
+	cfg, _, err := merchantconfig.NewStore(s.db).Get(ctx)
+	if errors.Is(err, merchantconfig.ErrNoSettings) {
 		return nil, nil, nil
 	}
-	cfg, _, err := merchantconfig.NewStore(s.db).Get(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -143,6 +150,17 @@ func usageMinimumInvoice(row gen.BillingMoneySetting, cfg *billing.UsageBillingC
 	return cfg.MinimumInvoiceAmount
 }
 
+// enrollUsageBilling gives the customer's account in currency its bill date
+// when the merchant's usage_billing terms cover the currency.
+func (s *MoneyService) enrollUsageBilling(ctx context.Context, q *gen.Queries, customer uuid.UUID, currency string) error {
+	cfg, cur, err := s.usageBillingConfig(ctx, currency)
+	if err != nil || cur == nil {
+		return err
+	}
+	_, err = s.ensureUsageBillingAccount(ctx, q, customer, currency, cfg)
+	return err
+}
+
 // queueUsageBilling runs inside the accrual transaction. The due record is the
 // source of work; the coalesced River job only wakes its processor.
 func (s *MoneyService) queueUsageBilling(ctx context.Context, q *gen.Queries, customer uuid.UUID, currency string) error {
@@ -196,14 +214,14 @@ func (s *MoneyService) requestUsageBilling(ctx context.Context, q *gen.Queries, 
 // with enough unbilled to bill, or that has unbilled charges and no bill
 // date.
 func (s *MoneyService) MarkUsageAccountsDue(ctx context.Context) error {
-	if !s.UsageBillingEnabled {
-		return nil
-	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
 	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
+	if errors.Is(err, merchantconfig.ErrNoSettings) {
+		return nil
+	}
 	if err != nil || settings.Config.UsageBilling == nil {
 		return err
 	}
@@ -258,6 +276,18 @@ func (s *MoneyService) BillDueUsageAccount(ctx context.Context, customer uuid.UU
 		if cur == nil {
 			// A currency without usage billing is not checked again until its
 			// terms are; previously accepted payment operations still recover.
+			// Owed a chargeback reopened needs no terms: it is billed.
+			if reopened, err := q.HasPendingReopenedOwed(ctx, gen.HasPendingReopenedOwedParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency}); err != nil {
+				return err
+			} else if reopened {
+				owed, err := s.moneyLedger(q, mid.UUID()).OutstandingOwed(ctx, customer, currency)
+				if err != nil {
+					return err
+				}
+				if billed, err = s.billPendingUsage(ctx, s.db.NewWithPgxTx(tx), customer, currency, owed, usageTerms{}, now); err != nil {
+					return err
+				}
+			}
 			return q.CompleteUsageBillingCheck(ctx, gen.CompleteUsageBillingCheckParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, Now: now})
 		}
 		row, err := s.ensureUsageBillingAccount(ctx, q, customer, currency, cfg)
@@ -324,15 +354,18 @@ func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer 
 		return false, err
 	}
 	var pending int64
+	reopened := false
 	for _, source := range sources {
 		pending += source.Amount
+		// Owed a chargeback reopened is billed at once, whatever the minimum.
+		reopened = reopened || source.Source == reopenedOwedSource && source.Amount > 0
 	}
 	claimed, err := q.SumOwedOrderClaims(ctx, gen.SumOwedOrderClaimsParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
 	if err != nil {
 		return false, err
 	}
 	amount := min(pending, max(owed-claimed, 0))
-	if amount <= 0 || amount < terms.minimum {
+	if amount <= 0 || amount < terms.minimum && !reopened {
 		return false, nil
 	}
 	order, err := s.finalizeUsageTx(ctx, d, identity.CustomerID(customer), currency, from, cutoff, now)
@@ -343,11 +376,8 @@ func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer 
 }
 
 func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Queries, payer identity.CustomerID, currency string, capacity AdmissionCapacity) (AdmissionCapacity, error) {
-	// Automatic usage collection is opt-in. Existing manual credit policies
-	// keep their independent admission contract when it is not configured.
-	if !s.UsageBillingEnabled {
-		return capacity, nil
-	}
+	// Usage billing is the merchant's usage_billing terms: without them a
+	// credit policy keeps its own capacity.
 	cfg, cur, err := s.usageBillingConfig(ctx, currency)
 	if err != nil {
 		return capacity, err
@@ -386,7 +416,7 @@ func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Querie
 		capacity.BillingMode = BillingModePrepaid
 		return capacity, nil
 	}
-	method, err := s.collectionMethodFor(ctx, q, mid.UUID(), payer.UUID(), currency, usageCollectionEnqueue{initiator: charge.InitiatorMerchant})
+	method, err := s.collectionMethodFor(ctx, q, mid.UUID(), payer.UUID(), currency, usageCollectionEnqueue{initiator: charge.InitiatorMerchant, read: true})
 	if errors.Is(err, ErrDefaultPaymentMethodInvalid) || errors.Is(err, ErrDefaultPaymentMethodRequired) || errors.Is(err, charge.ErrAgreementRequired) {
 		method = nil
 		err = nil

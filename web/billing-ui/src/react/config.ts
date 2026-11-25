@@ -7,7 +7,11 @@ import type {
   CustomerConfig,
   PublicConfig,
 } from "../client/types"
-import { useBillingContext } from "./context"
+import {
+  DEFAULT_BILLING_FIELDS,
+  type BillingFields,
+} from "../lib/billing-fields"
+import { useBillingContext, useOptionalBillingContext } from "./context"
 
 export interface ConfigState<T = PublicConfig> {
   config: T | null
@@ -153,4 +157,29 @@ export function useCurrencyScales(): CurrencyScales {
     )
     return { ...served, ...units, ...client.currencies }
   }, [config, customer, client])
+}
+
+const noStore = {
+  subscribe: () => () => undefined,
+  snapshot: () => null,
+}
+
+/**
+ * The billing fields a card form asks for: `given`, else the merchant's
+ * (`GET /me/config`'s `payment.billing_fields`) inside a `BillingProvider`,
+ * else the defaults.
+ */
+export function useBillingFields(given?: BillingFields): BillingFields {
+  const store = useOptionalBillingContext()?.customerConfig
+  const snapshot = useSyncExternalStore(
+    store?.subscribe ?? noStore.subscribe,
+    store?.snapshot ?? noStore.snapshot,
+    store?.snapshot ?? noStore.snapshot
+  )
+  useEffect(() => {
+    if (!given) store?.ensure()
+  }, [store, given])
+  return (
+    given ?? snapshot?.config?.payment.billing_fields ?? DEFAULT_BILLING_FIELDS
+  )
 }

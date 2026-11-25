@@ -23,7 +23,7 @@ npm with provenance. Guides: [frontend](../client.md#orders-and-checkout),
 **Customer client.** `createBillingClient({ baseUrl, fetch | getToken })` gives one method per customer route and public config. Responses are parsed by zod schemas (`src/client/types.ts`) typed against `generated/wire.ts`; an amount must be an int64 string (`isAmount`). Only a GET is retried: once, on a network error, a 502, 503 or 504, or a 429 naming its wait, within `RETRY_BUDGET_MS` (2 s). A write is sent again only after `401 credential_expired`, which the gate answers before the route runs. `tokenSource` keeps the token in memory, fetches the next one `skew` seconds (60) before expiry once for every waiting call, and drives that single resend. Payments and card saves carry the caller's `Idempotency-Key`. Failures become `BillingError` with the server's registry code or a local one (`network_error`, …).
 
 **Customer components.** `BuyButton`, `ProductList`, `OrderPayment`,
-`EmbeddedPayment` and `Cart` buy through orders; `AccountBilling` shows
+`EmbeddedPayment` and `Cart` buy through orders (`BuyButton`, `ProductList` and `Cart` pass the host's `attribution` to the order, and requests carry the provider's `locale` as `Accept-Language`); `AccountBilling` shows
 subscriptions, payment methods and history and runs cancel, resume, plan and card
 changes. Card data is tokenized in the PSP's own fields (Collect.js, Stripe
 Elements, Basis Theory) and never enters the host page. `OrderPayment` pays with
@@ -61,10 +61,7 @@ when the customer entry pulls in admin modules or styles.
 
 - npm: `@openrails/billing-ui@X.Y.Z`, the entries above; peers React 19,
   optional TanStack Query 5 and `@openrails/auth-ui`.
-- HTTP used: `/v1/me/*`, `GET /v1/config`, `GET /v1/me/config`,
-  `GET /v1/admin/access`, the staff groups' routes, `POST /v1/metrics/query`,
-  `GET /v1/metrics/dashboard`, `PUT /v1/merchant/dashboard`,
-  `POST /v1/console/catalog/ask`.
+- HTTP used: `/v1/me/*`, `GET /v1/config`, `GET /v1/me/config`, `GET /v1/admin/access`, the staff groups' routes, `POST /v1/metrics/query`, `GET /v1/metrics/dashboard`, `PUT /v1/merchant/dashboard`.
 - Go: `Engine.PublicConfig` and `Engine.CustomerConfig` let a server-rendered page
   pass config into `BillingProvider`.
 

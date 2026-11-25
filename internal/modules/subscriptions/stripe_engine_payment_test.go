@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/stripemock"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 func enginePayment(merchant, psp uuid.UUID) StripeEnginePaymentParams {
@@ -29,7 +29,7 @@ func TestADisarmedEnginePaymentIsNotDispatched(t *testing.T) {
 	merchant, psp := uuid.New(), uuid.New()
 	key := "sk_test_acct_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	service := NewAccountStripeService(&billing.Config{}, merchant, psp, "acct_engine", key)
-	service.StripeClients = stripeapi.NewWiredFactory(stripe, writeposture.Fixed(writeposture.Full))
+	service.StripeClients = stripeapi.NewWiredFactory(stripe, controls.Fixed(controls.Full))
 	_, err := service.CreateEnginePayment(t.Context(), enginePayment(merchant, psp))
 	require.ErrorIs(t, err, charge.ErrNotDispatched)
 	require.Empty(t, stripe.Submitted("/v1/payment_intents"))
@@ -44,7 +44,7 @@ func TestAnEnginePaymentWithARevokedKeyIsNotDispatched(t *testing.T) {
 	name := strings.ReplaceAll(uuid.NewString(), "-", "")
 	key := "sk_test_acct_" + name
 	service := NewAccountStripeService(&billing.Config{}, merchant, psp, "acct_"+name, key)
-	service.StripeClients = stripeapi.NewWiredFactory(stripe, writeposture.Fixed(writeposture.Full))
+	service.StripeClients = stripeapi.NewWiredFactory(stripe, controls.Fixed(controls.Full))
 	service.StripeClients.RegisterPosture("engine/"+name, merchant, psp, "acct_"+name, key)
 	stripe.Intercept(func(r *http.Request) bool { return r.URL.Path == "/v1/payment_intents" }, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusUnauthorized, Header: http.Header{}, Request: r, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"Invalid API Key provided"}}`))}, nil

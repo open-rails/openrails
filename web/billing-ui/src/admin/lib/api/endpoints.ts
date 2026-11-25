@@ -486,17 +486,6 @@ export function createEndpoints(client: AdminClient) {
       { signal }
     )
 
-  // getProductByKey reads the product a key names, with its current prices:
-  // a products list filtered by key.
-  const getProductByKey = async (productKey: string) => {
-    const page = await api<ListPage<Product>>("/catalog/products", {
-      query: { keys: productKey },
-    })
-    const product = page.data[0]
-    if (!product) throw new Error(`No product ${productKey}`)
-    return product
-  }
-
   // updatePrice archives or restores a price, or changes its PSP links
   // (a PSP set to null is unlinked).
   const updatePrice = (id: string, body: UpdatePriceParams) =>
@@ -748,7 +737,6 @@ export function createEndpoints(client: AdminClient) {
     listPrices,
     createPrice,
     getPrice,
-    getProductByKey,
     updatePrice,
     getPriceHistory,
     previewPriceMigration,

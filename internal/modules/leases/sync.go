@@ -1,13 +1,12 @@
 // Package leases syncs gates' leases: in one transaction per sync it settles
-// their usage in order, keeps their in-flight reports and releases the
-// request holds they give back; once it committed it answers views of the
-// customers they serve.
+// their usage in order and keeps their in-flight reports; once it committed
+// it answers views of the customers they serve.
 //
 // A sync takes no customer's lock. Its transaction locks its own lease row
 // and shares the merchant's catalog fence; its intake is append-only (events
 // into the event store, then the lease's numbering and receipts, an unposted
-// mark held by key share), and its in-flight report and releases write only
-// its own rows. Only a window that must open or a failed item's charge takes
+// mark held by key share), and its in-flight report writes only its own
+// rows. Only a window that must open or a failed item's charge takes
 // that customer's lock (money.PrepareUsageTx). Views are read after the
 // commit, in batches, in one snapshot (views.go).
 package leases
@@ -67,12 +66,6 @@ const (
 	// lockBudget is how long a sync's statement may wait for a lock: a
 	// posting holding an unposted mark, or a customer whose window opens.
 	lockBudget = workBudget - 500*time.Millisecond
-	// A sync settles a prefix of its new usage, the items of at most
-	// maxSettleCustomers customers, in one intake (one event store insert).
-	// The rest come again.
-	maxSettleCustomers = 100
-	// recentWindow is how far back a view's Recent reads spend.
-	recentWindow = time.Minute
 )
 
 // Syncer syncs leases of the context's merchant.
@@ -141,8 +134,6 @@ func validate(p billing.SyncLeasesParams) error {
 		return invalid("in_flight", "a sync carries at most %d in-flight lines", billing.MaxSyncInFlight)
 	case len(p.Views) > billing.MaxSyncViews:
 		return invalid("views", "a sync asks for at most %d views", billing.MaxSyncViews)
-	case len(p.Releases) > billing.MaxSyncReleases:
-		return invalid("releases", "a sync carries at most %d releases", billing.MaxSyncReleases)
 	}
 	for i, f := range p.InFlight {
 		switch {
@@ -154,11 +145,6 @@ func validate(p billing.SyncLeasesParams) error {
 			return invalid(fmt.Sprintf("in_flight[%d].unit", i), "unit must be a unit or currency code")
 		case f.Amount < 0:
 			return invalid(fmt.Sprintf("in_flight[%d].amount", i), "amount must be nonnegative")
-		}
-	}
-	for i, r := range p.Releases {
-		if strings.TrimSpace(r) == "" {
-			return invalid(fmt.Sprintf("releases[%d]", i), "a release names a request id")
 		}
 	}
 	for i, u := range p.Usage {
@@ -200,7 +186,6 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 			return nil, err
 		}
 	}
-	s.DB.EnsurePartitions(ctx, s.Now().UTC())
 	var out *billing.SyncLeasesResult
 	var run *syncRun
 	began := time.Now()
@@ -288,31 +273,21 @@ type syncRun struct {
 	lease  gen.BillingLease
 	result *billing.SyncLeasesResult
 	prefix prefix
-	// holds are the lease's open request holds the sync releases.
-	holds []gen.ListLeaseOpenHoldsRow
-	// settled is what this sync's usage settled into each customer's limits.
-	settled map[settledKey]int64
 	// spend caches the billing policy of each item's attributes.
 	spend map[string]*admission.SpendPolicy
 	// changed are the balances its usage moved.
 	changed []money.UsageAccount
+	// viewable are the currencies and units the views may be asked in.
+	viewable map[string]bool
 }
 
-// settledKey names one customer's limit: balance's key carries its currency.
-type settledKey struct {
-	customer uuid.UUID
-	limit    string
-}
-
-func balanceKey(currency string) string { return catalog.BalanceLimit + "\x00" + currency }
-
-// prefix is the run of new usage items one sync may settle: from first, the
-// items whose numbers follow on (end exclusive), naming at most
-// maxSettleCustomers customers. gap is an item at end that skips a number.
+// prefix is the run of new usage items a sync settles, in one intake (one
+// event store insert): from first, the items whose numbers follow on (end
+// exclusive). gap is an item at end that skips a number. A gate reports
+// none of them in flight, so all of them settle together.
 type prefix struct {
 	first, end int
 	gap        bool
-	customers  []billing.CustomerID
 }
 
 // usagePrefix finds the sync's prefix of new usage: items at or below the
@@ -323,7 +298,6 @@ func (r *syncRun) usagePrefix() prefix {
 	for p.first < len(r.p.Usage) && r.p.Usage[p.first].N <= through {
 		p.first++
 	}
-	seen := map[billing.CustomerID]bool{}
 	last := through
 	p.end = p.first
 	for i := p.first; i < len(r.p.Usage); i++ {
@@ -331,13 +305,6 @@ func (r *syncRun) usagePrefix() prefix {
 		if u.N != last+1 {
 			p.gap = true
 			break
-		}
-		if !u.CustomerID.IsZero() && !seen[u.CustomerID] {
-			if len(seen) == maxSettleCustomers {
-				break
-			}
-			seen[u.CustomerID] = true
-			p.customers = append(p.customers, u.CustomerID)
 		}
 		last = u.N
 		p.end = i + 1
@@ -353,21 +320,13 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 		return nil, err
 	}
 	r.prefix = r.usagePrefix()
-	r.settled, r.spend = map[settledKey]int64{}, map[string]*admission.SpendPolicy{}
+	r.spend = map[string]*admission.SpendPolicy{}
 	r.result = &billing.SyncLeasesResult{Views: []billing.View{}, LimitSets: make([]*billing.LimitSet, len(r.p.Views)), RefusedViews: []billing.ViewRefusal{}, Pricing: []billing.ViewPricing{},
 		Usage: billing.LeaseUsageResult{Refused: []billing.LeaseUsageRefusal{}}}
-	if err := r.findReleases(); err != nil {
-		return nil, err
-	}
 	// Usage settles first, always.
 	through, receipts, err := r.settle()
 	if err != nil {
 		return nil, err
-	}
-	for _, h := range r.holds {
-		if _, err := r.q.ReleaseRequestHold(r.ctx, gen.ReleaseRequestHoldParams{MerchantID: r.merchant, ID: h.ID, CreatedAt: h.CreatedAt, AsOf: r.now}); err != nil {
-			return nil, err
-		}
 	}
 	closedAt := r.lease.ClosedAt
 	if r.p.Close || closedAt != nil {
@@ -445,21 +404,6 @@ func (r *syncRun) lockLease() error {
 		return nil
 	}
 	return r.q.RenewLease(r.ctx, gen.RenewLeaseParams{Now: r.now, MerchantID: r.merchant, ID: id})
-}
-
-// findReleases reads the lease's open request holds the sync releases: the
-// ones it names, or every one when it closes.
-func (r *syncRun) findReleases() error {
-	if len(r.p.Releases) == 0 && !r.p.Close {
-		return nil
-	}
-	var ids []string
-	if !r.p.Close {
-		ids = r.p.Releases
-	}
-	holds, err := r.q.ListLeaseOpenHolds(r.ctx, gen.ListLeaseOpenHoldsParams{MerchantID: r.merchant, LeaseID: r.lease.ID, HeldSince: limits.HeldSince(r.now), RequestIds: ids})
-	r.holds = holds
-	return err
 }
 
 // report replaces the lease's in-flight report, writing only the lines that
@@ -573,13 +517,7 @@ func (r *syncRun) settle() (int64, []receipt, error) {
 		var index []int
 		for i := end; i < stop; i++ {
 			u := r.p.Usage[i]
-			var item money.UsageItem
-			var err error
-			if u.RequestID != nil {
-				item, err = r.capture(u)
-			} else {
-				item, err = r.usageItem(u)
-			}
+			item, err := r.usageItem(u)
 			if err != nil {
 				if _, coded := asCoded(err); !coded {
 					return 0, nil, err
@@ -603,9 +541,7 @@ func (r *syncRun) settle() (int64, []receipt, error) {
 						return 0, nil, res.Err
 					}
 					refuseNew(i, prefixParam(res.Err, fmt.Sprintf("usage[%d]", i)))
-					continue
 				}
-				r.count(items[j], res.Units)
 			}
 		}
 		end = stop
@@ -639,23 +575,6 @@ func (r *syncRun) settle() (int64, []receipt, error) {
 	rc.Digest = settlementDigest(digests[first:end])
 	receipts = append(receipts, rc)
 	return last, receipts, nil
-}
-
-// count adds what one settled item took from each limit to the sync's
-// settled totals. A capture's hold already held its estimate: it moves
-// balance by the difference.
-func (r *syncRun) count(item money.UsageItem, units map[string]int64) {
-	customer := item.Customer.UUID()
-	for key, n := range units {
-		if key == catalog.BalanceLimit {
-			key = balanceKey(money.NormalizeCurrency(item.Currency))
-			if item.Capture != nil {
-				n = satAdd(n, -item.Capture.Row.EstimatedAmount)
-			}
-		}
-		k := settledKey{customer, key}
-		r.settled[k] = satAdd(r.settled[k], n)
-	}
 }
 
 // encodeReceipts keeps the newest receipts within maxReceipts and
@@ -765,27 +684,6 @@ func (r *syncRun) usageItem(u billing.LeaseUsage) (money.UsageItem, error) {
 func isolated(err error) bool {
 	var pg *pgconn.PgError
 	return !errors.As(err, &pg) && !errors.Is(err, eventstore.ErrUnavailable) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, pgx.ErrTxClosed)
-}
-
-// capture is an item that captures one of the lease's request holds: priced
-// by its pinned cards, counted in its windows.
-func (r *syncRun) capture(u billing.LeaseUsage) (money.UsageItem, error) {
-	if err := r.checkItem(u); err != nil {
-		return money.UsageItem{}, err
-	}
-	requestID := strings.TrimSpace(*u.RequestID)
-	row, err := r.q.GetRequestHold(r.ctx, gen.GetRequestHoldParams{MerchantID: r.merchant, RequestID: requestID, CreatedSince: limits.HeldSince(r.now)})
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && (row.LeaseID == nil || *row.LeaseID != r.lease.ID || row.CustomerID != u.CustomerID.UUID()) {
-		return money.UsageItem{}, apperr.New(http.StatusNotFound, billing.CodeAdmissionNotFound, "no request hold of the lease and customer has this request id").WithParam("request_id")
-	}
-	if err != nil {
-		return money.UsageItem{}, err
-	}
-	if row, err = r.q.LockHold(r.ctx, gen.LockHoldParams{MerchantID: r.merchant, ID: row.ID, CreatedAt: row.CreatedAt}); err != nil {
-		return money.UsageItem{}, err
-	}
-	return r.money.CaptureItem(r.ctx, r.q, row, billing.CaptureUsage{EventType: u.EventType, Resource: deref(u.Resource), Metadata: u.Metadata,
-		Source: u.Source, SourceID: u.SourceID, Dimensions: u.Dimensions}, u.Amount)
 }
 
 // Details is an item or view refusal on the wire.

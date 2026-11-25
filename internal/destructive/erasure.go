@@ -47,9 +47,6 @@ func (a *Admissions) erasureTransaction(ctx context.Context, mid uuid.UUID, f fu
 	if a == nil || a.db == nil || a.project == nil {
 		return errors.New("destructive admission and incident projector must be configured")
 	}
-	if a.policyErr != nil {
-		return a.policyErr
-	}
 	return a.db.DataPool().CommittedMerchantTx(ctx, billing.MerchantID(mid), func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if err := q.LockErasureAdmissions(ctx, mid); err != nil {
@@ -174,7 +171,8 @@ func (a *Admissions) erasureBudget(ctx context.Context, q *gen.Queries, mid uuid
 	if err != nil {
 		return erasureBudget{}, err
 	}
-	hourLimit, dayLimit := a.policy.ErasurePerHour, a.policy.ErasurePerDay
+	p := a.limitsNow()
+	hourLimit, dayLimit := p.ErasurePerHour, p.ErasurePerDay
 	// Within its floors a scope reads no directory. Past one it counts only
 	// the provisioned contacts that would lift the exceeded window by one,
 	// an index-only read (customer_contacts_provisioned_idx) that stops there.

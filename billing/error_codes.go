@@ -69,9 +69,6 @@ const (
 	// Payments recorded outside OpenRails.
 	CodePaymentExceedsDue     ErrorCode = "payment_exceeds_due"
 	CodeOrderHasRecurringLine ErrorCode = "order_has_recurring_line"
-	// CodeModelUnavailable: the language model behind an ask or generate
-	// route did not answer.
-	CodeModelUnavailable ErrorCode = "model_unavailable"
 )
 
 // Refusals of buying a product again while a canceled subscription to it is
@@ -110,9 +107,6 @@ const (
 	// horizon and no lease of the merchant has it: it was forgotten, and its
 	// items cannot be settled again safely.
 	CodeLeaseNotFound ErrorCode = "lease_not_found"
-	// CodeLeaseNotHeld: an admission names a lease that is closed or that
-	// never synced, so it cannot own the hold.
-	CodeLeaseNotHeld ErrorCode = "lease_not_held"
 	// CodeUsageOutOfOrder: a usage item skips a number the lease has not
 	// settled.
 	CodeUsageOutOfOrder ErrorCode = "usage_out_of_order"
@@ -221,14 +215,11 @@ const (
 	CodeSolanaRPCUnavailable     ErrorCode = "solana_rpc_unavailable"
 )
 
-// Credit, admission and customer codes.
+// Credit and customer codes.
 const (
 	CodeCreditGrantNotFound            ErrorCode = "credit_grant_not_found"
 	CodeCreditGrantHeld                ErrorCode = "credit_grant_held"
 	CodeCreditGrantUnavailable         ErrorCode = "credit_grant_unavailable"
-	CodeAdmissionNotFound              ErrorCode = "admission_not_found"
-	CodeAdmissionCaptured              ErrorCode = "admission_captured"
-	CodeHoldNotFound                   ErrorCode = "hold_not_found"
 	CodeCurrencyUnsupported            ErrorCode = "currency_unsupported"
 	CodeMerchantUnitUnsupported        ErrorCode = "merchant_unit_unsupported"
 	CodeRunningChargeNotFound          ErrorCode = "running_charge_not_found"
@@ -329,7 +320,6 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeInsufficientCredits, 402, card, "The customer's credit balance does not cover the operation."},
 	{CodeInsufficientFunds, 402, card, "The payment instrument lacks funds."},
 	{CodeDatabaseBusy, 503, fault, "No database connection is available; retry shortly."},
-	{CodeModelUnavailable, 502, fault, "The language model did not answer; retry, or ask a narrower question."},
 
 	// Request shape and transport.
 	{CodeUnknownField, 400, invalid, "The JSON body names a field the route does not accept; param is the field."},
@@ -386,6 +376,7 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeProviderOutcomeUnknown, 409, fault, "The provider did not confirm the outcome; read the resource before retrying."},
 	{CodeCardNotSaved, 409, fault, "The card was not saved; enter it again."},
 	{CodeCardAttemptsBlocked, 429, limit, "Too many declined card attempts; try again later."},
+	{CodeBillingDetailsRequired, 400, invalid, "A billing detail the merchant's checkout.billing_fields require of a new card is missing; param names it."},
 	{CodeCustodianCaptureUnavailable, 503, fault, "The card custodian cannot capture cards right now."},
 	{CodeCustomerPaymentUnsupported, 400, invalid, "Customer-present payment is unsupported for this rail or method."},
 	{CodeInvalidPaymentMethod, 400, invalid, "The payment method is not eligible for this operation."},
@@ -463,9 +454,6 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeCreditGrantNotFound, 404, invalid, "The credit grant does not exist."},
 	{CodeCreditGrantHeld, 409, invalid, "Active holds need the grant's remaining credit."},
 	{CodeCreditGrantUnavailable, 409, invalid, "The credit grant expired, ended or has no remaining credit."},
-	{CodeAdmissionNotFound, 404, invalid, "No admission was made under this request id."},
-	{CodeAdmissionCaptured, 409, invalid, "The admission was captured; it can no longer be released."},
-	{CodeHoldNotFound, 404, invalid, "The admission holds nothing open: it was captured, released or lapsed."},
 	{CodeCurrencyUnsupported, 400, invalid, "The currency is not in OpenRails' registry."},
 	{CodeMerchantUnitUnsupported, 400, invalid, "The currency is one of the merchant's own units, which the operation does not take: it takes a currency from OpenRails' registry."},
 	{CodeRunningChargeNotFound, 404, invalid, "No running charge was started under this reference."},
@@ -495,13 +483,12 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeRateCardProductNotFound, 404, invalid, "The rate card names a product that does not exist."},
 	{CodeUsageRateCardInvalid, 400, invalid, "The usage rate card is invalid."},
 	{CodeUsageMeterInvalid, 400, invalid, "The meter definition is invalid."},
-	{CodeEventStoreRequired, 409, invalid, "The deployment has no event store (ClickHouse): usage reporting, admissions, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off."},
+	{CodeEventStoreRequired, 409, invalid, "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off."},
 	{CodeUsageNotPriced, 422, invalid, "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field."},
 	{CodeMeterInUse, 409, invalid, "The meter is referenced and cannot change this way."},
 	{CodeMeterRateCardConflict, 409, invalid, "The meter and its rate card disagree."},
 	{CodeLimitNotFound, 404, invalid, "The catalog declares no limit under this key."},
 	{CodeLeaseNotFound, 404, invalid, "No lease of the merchant has this id, which is older than the replay horizon; start a new lease."},
-	{CodeLeaseNotHeld, 409, invalid, "The admission names a lease that is closed or never synced, so it cannot own the hold."},
 	{CodeUsageOutOfOrder, 409, invalid, "A usage item skips a number the lease has not settled; send the items in order."},
 	{CodePurchaseReviewResolved, 409, invalid, "The purchase review was already resolved."},
 

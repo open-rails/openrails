@@ -4,10 +4,12 @@ import { CardBillingFields } from "./billing-fields"
 import { CardFields } from "./card-fields"
 import { PayButton, TrustLine } from "./pay-button"
 import {
+  billingSchema,
   emptyNMIBilling,
   initialCountry,
-  nmiBillingSchema,
+  type BillingFields,
 } from "../lib/billing"
+import { useBillingFields } from "../react/config"
 import type { TokenizedCardData } from "../tokenized-card-form"
 
 // Only the vendor's iframe handles PAN/CVC. An unconfirmed payment retains
@@ -19,14 +21,18 @@ export function PlatformCardForm({
   onTokenized,
   purpose = "payment",
   defaultCountry,
+  billingFields,
 }: {
   purpose?: "payment" | "setup"
   defaultCountry?: string
+  billingFields?: BillingFields
   publicKey: string
   submitLabel: string
   disabled: boolean
   onTokenized: (card: TokenizedCardData) => Promise<boolean>
 }) {
+  const fields = useBillingFields(billingFields)
+  const schema = React.useMemo(() => billingSchema(fields), [fields])
   const uid = React.useId().replace(/[^a-zA-Z0-9-]/g, "")
   const ids = React.useMemo(
     () => ({
@@ -101,7 +107,7 @@ export function PlatformCardForm({
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (disabled || submitting.current || submitted || !tokenize.current) return
-    const parsed = nmiBillingSchema.safeParse(billing)
+    const parsed = schema.safeParse(billing)
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Check the billing details")
       return
@@ -150,6 +156,7 @@ export function PlatformCardForm({
         idPrefix={`bt-${uid}`}
         value={billing}
         onChange={setBilling}
+        fields={fields}
         disabled={disabled || busy || retry || submitted}
       >
         <CardFields ids={ids} preview={false} />
@@ -162,7 +169,7 @@ export function PlatformCardForm({
       <PayButton
         label={retry ? retryLabel : submitLabel}
         processing={busy}
-        disabled={disabled || submitted || !ready || !nmiBillingSchema.safeParse(billing).success}
+        disabled={disabled || submitted || !ready || !schema.safeParse(billing).success}
       />
       <TrustLine />
     </form>

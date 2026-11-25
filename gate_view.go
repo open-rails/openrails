@@ -17,10 +17,6 @@ const (
 	// answered it was sent; past it, its customer's requests are decided one
 	// at a time until a sync answers again.
 	viewFresh = 2 * limits.SyncInterval
-	// marginIntervals is how many sync intervals of what others add to a
-	// limit the near-zero margin covers: as long as an admission may stay
-	// unseen by this gate.
-	marginIntervals = 4
 	// viewKeep is how long a view no request uses is kept.
 	viewKeep = 10 * time.Minute
 	// maxGateViews bounds the views a gate keeps; past it the least recently
@@ -41,9 +37,8 @@ type viewKey struct {
 type custView struct {
 	key viewKey
 
-	mu     sync.Mutex
-	lines  map[string]*lineState
-	pinned []pinnedTake
+	mu    sync.Mutex
+	lines map[string]*lineState
 	// probing is a stale view deciding its one request until a sync answers.
 	probing bool
 	used    time.Time
@@ -63,29 +58,22 @@ type lineState struct {
 	// next the window after it, once the gate decided in it, or a session the
 	// gate opened.
 	cur, next *span
-	// others are what others added to the limit in each of the last
-	// marginIntervals intervals; seen is a previous answer of the same window.
-	others []int64
-	seen   bool
-	prev   int64
 }
 
 // span is one window of a line and what the gate has in it: open tickets'
-// takes, captured usage not yet settled, and server-decided requests the
-// view does not show yet. base and avail bound offline spending: what the
-// gate had in it when the view was answered, and what was left for every
-// gate's new requests (below zero when nothing was), of which each gate
-// spends its share.
+// takes and captured usage not yet settled. base and avail bound offline
+// spending: what the gate had in it when the view was answered, and what
+// was left for every gate's new requests (below zero when nothing was), of
+// which each gate spends its share.
 type span struct {
 	start, end   *time.Time
 	remaining    int64
 	open, unsent int64
-	pinned       int64
 	base, avail  int64
 	local        bool
 }
 
-func (s *span) inFlight() int64 { return s.open + s.unsent + s.pinned }
+func (s *span) inFlight() int64 { return s.open + s.unsent }
 
 // take is what a decision took from one window of one limit; limit and
 // unit name it without the view's lock.
@@ -98,14 +86,6 @@ type take struct {
 
 func takeOf(l *lineState, s *span, cost int64) take {
 	return take{line: l, span: s, cost: cost, limit: l.key, unit: l.line.Unit}
-}
-
-// pinnedTake is a server-decided request's take, counted until a view from
-// a sync built after it answers.
-type pinnedTake struct {
-	span  *span
-	cost  int64
-	build int64
 }
 
 func newCustView(k viewKey) *custView {
@@ -210,32 +190,11 @@ func (l *lineState) share(s *span, set billing.LimitSet, now time.Time, gates in
 	return max(pool, 0) / int64(max(gates, 1))
 }
 
-// margin is what others may add to the limit before this gate sees it:
-// until two answers of one window show it, a money line's recent spend.
-func (l *lineState) margin(cost int64) int64 {
-	var most int64
-	for _, o := range l.others {
-		most = max(most, o)
-	}
-	if len(l.others) == 0 && l.money && l.line.Recent > 0 {
-		most = max(most, l.line.Recent*int64(limits.SyncInterval)/int64(time.Minute))
-	}
-	return max(cost, satMul(most, marginIntervals))
-}
-
-func satMul(a, n int64) int64 {
-	if a > maxGateAmount/n {
-		return maxGateAmount
-	}
-	return a * n
-}
-
 // verdict is what a view decides of a request.
 type verdict uint8
 
 const (
 	verdictLocal verdict = iota
-	verdictNear
 	verdictRefuse
 	verdictCold
 	verdictWait
@@ -260,10 +219,11 @@ type decision struct {
 }
 
 // decide takes a request's costs from every limit its set claims, or from
-// none. Each limit is refused if the request does not fit it at all, near
-// if less than the margin would remain, and local otherwise; the first
-// refusal in the set's order wins and any near sends the request to the
-// server. Offline, a limit fits only within the gate's share of it, of a
+// none, against the view less what the gate has in flight: a limit refuses
+// a request that does not fit it, and the first refusal in the set's order
+// wins. Nothing is decided on the server, so what other gates admit unseen
+// may take a limit past its line, by about what they admit in four sync
+// intervals. Offline, a limit fits only within the gate's share of it, of a
 // view answered about when the outage began. A stale view decides one
 // request (probe) and holds the rest for a sync.
 func (v *custView) decide(set billing.LimitSet, costs []int64, now time.Time, down outage) decision {
@@ -315,21 +275,8 @@ func (v *custView) decide(set billing.LimitSet, costs []int64, now time.Time, do
 			}
 			continue
 		}
-		if out.verdict == verdictLocal && satAdd(r, -c) < l.margin(c) {
-			out.verdict = verdictNear
-		}
 	}
-	switch out.verdict {
-	case verdictNear:
-		// Pinned at once, so the gate's other requests see it while the
-		// server decides.
-		out.takes = takes
-		for _, t := range takes {
-			t.span.pinned = satAdd(t.span.pinned, t.cost)
-		}
-		return out
-	case verdictLocal:
-	default:
+	if out.verdict != verdictLocal {
 		return out
 	}
 	if stale && !offline {
@@ -340,15 +287,6 @@ func (v *custView) decide(set billing.LimitSet, costs []int64, now time.Time, do
 		t.span.open = satAdd(t.span.open, t.cost)
 	}
 	return out
-}
-
-// unpin gives back a server-decided request's takes the server refused.
-func (v *custView) unpin(takes []take) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	for _, t := range takes {
-		t.span.pinned = satAdd(t.span.pinned, -t.cost)
-	}
 }
 
 // refusalOf is the refusal a limit answers: balance's deny code, a spend
@@ -388,32 +326,11 @@ func ceilSeconds(d time.Duration) int64 {
 	return s
 }
 
-// pin keeps a server-admitted request's takes, already pinned, until a view
-// from a sync built after it answers.
-func (v *custView) pin(takes []take, build int64) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	for _, t := range takes {
-		v.pinned = append(v.pinned, pinnedTake{span: t.span, cost: t.cost, build: build})
-	}
-}
-
 // apply takes in a sync's answer for the view: its view, sent at sent by the
-// gate's clock as sync number build, among gates live leases. A line keeps
-// its window (and what the gate has in it) while the answer names the same
-// one; a tile or session the gate already moved into becomes the answered
-// window. What others added since the last answer of the same window feeds
-// the margin.
-func (v *custView) apply(view billing.View, sent time.Time, build int64, gates int) {
-	kept := v.pinned[:0]
-	for _, p := range v.pinned {
-		if p.build < build {
-			p.span.pinned = satAdd(p.span.pinned, -p.cost)
-			continue
-		}
-		kept = append(kept, p)
-	}
-	v.pinned = kept
+// gate's clock. A line keeps its window (and what the gate has in it) while
+// the answer names the same one; a tile or session the gate already moved
+// into becomes the answered window.
+func (v *custView) apply(view billing.View, sent time.Time) {
 	v.probing = false
 	if v.used.IsZero() {
 		v.used = sent
@@ -425,16 +342,6 @@ func (v *custView) apply(view billing.View, sent time.Time, build int64, gates i
 			v.lines[nl.Limit] = l
 		}
 		same := l.cur != nil && sameTime(l.cur.start, nl.WindowStartsAt)
-		if l.seen && same {
-			delta := l.prev - nl.Remaining - nl.Settled
-			if nl.Limit == catalog.BalanceLimit {
-				delta -= drained(nl.DrainPerHour, sent.Sub(l.asOf))
-			}
-			l.others = append(l.others, max(delta, 0))
-			if len(l.others) > marginIntervals {
-				l.others = l.others[1:]
-			}
-		}
 		var cur *span
 		switch {
 		case same:
@@ -449,7 +356,7 @@ func (v *custView) apply(view billing.View, sent time.Time, build int64, gates i
 			// A session the gate opened that no settlement has opened yet.
 			l.next.remaining = nl.Remaining
 		}
-		l.cur, l.line, l.asOf, l.prev, l.seen = cur, nl, sent, nl.Remaining, true
+		l.cur, l.line, l.asOf = cur, nl, sent
 		for _, s := range []*span{cur, l.next} {
 			if s != nil {
 				s.base, s.avail = s.inFlight(), l.room(s, sent, 0, nil)
@@ -479,7 +386,7 @@ func (v *custView) display() []billing.CustomerLimit {
 		remaining, held := l.line.Remaining, l.line.Held
 		if s, ok := l.spanAt(now); ok {
 			remaining = satAdd(s.remaining, -s.inFlight())
-			held = satAdd(held, s.open+s.pinned)
+			held = satAdd(held, s.open)
 		}
 		resets := l.line.WindowEndsAt
 		if resets == nil {

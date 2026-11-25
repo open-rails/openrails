@@ -112,11 +112,13 @@ func (c *Client) MarkOrderUncollectible(ctx context.Context, id billing.OrderID)
 // was set differently by an edit: that object is skipped and listed in the
 // receipt's Conflicts, the rest applies, and the document is not recorded as
 // applied, so applying it again retries the skipped objects. params.Force
-// overwrites those fields instead. A document that applied whole is
-// remembered by its canonical content hash: applying it again returns the
-// original receipt even after later catalog edits. It is an operator action,
-// never a side effect of starting: run it from a command (openrails catalog
-// apply, or the host's own) or the console.
+// overwrites those fields instead. The receipt lists deleted objects in
+// Changes with Deleted true, empty Fields and their last Revision before
+// deletion. A document that applied whole is remembered by its canonical
+// content hash: applying it again returns the original receipt even after
+// later catalog edits. It is an operator action, never a side effect of
+// starting: run it from a command (openrails catalog apply, or the host's
+// own) or the console.
 func (c *Client) ApplyCatalog(ctx context.Context, application *catalog.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
 	var out billing.CatalogApplicationReceipt
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/catalog/apply", body: application, query: params}, &out); err != nil {
@@ -578,71 +580,6 @@ func (c *Client) GetBalance(ctx context.Context, customerID billing.CustomerID, 
 	return &out, nil
 }
 
-// GetAdmission reads an admitted request and its current hold state without
-// replaying admission. Denied or no-longer-retained requests are not found.
-func (c *Client) GetAdmission(ctx context.Context, requestID string) (*billing.Admission, error) {
-	var out billing.Admission
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/app/admissions/{request_id}", args: []string{requestID}}, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ListAdmissions reads a page of retained admitted requests, newest first.
-func (c *Client) ListAdmissions(ctx context.Context, params billing.AdmissionListParams) (*billing.ListPage[billing.Admission], error) {
-	var out billing.ListPage[billing.Admission]
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/app/admissions", query: params}, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// Admit decides admissions, one verdict per request in order. A refused
-// request is a verdict, not an error.
-func (c *Client) Admit(ctx context.Context, items []billing.AdmitParams) ([]billing.AdmissionVerdict, error) {
-	var out billing.AdmitBatchResult
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/admissions", body: billing.AdmitBatchParams{Items: items}}, &out); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}
-
-// CaptureAdmissions settles 1 to billing.MaxAdmissionBatchItems admitted
-// requests, one result per item in order: each is captured or refused on its
-// own. A capture that names its usage is priced by the admission's pinned
-// rate cards; above the hold the rest is owed. An exact retry answers the
-// first receipt; changed terms are billing.ErrIdempotencyKeyReused.
-func (c *Client) CaptureAdmissions(ctx context.Context, items []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error) {
-	var out billing.CaptureBatchResult
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/admissions/capture", body: billing.CaptureAdmissionBatchParams{Items: items}}, &out); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}
-
-// ReleaseAdmissions frees the holds of 1 to billing.MaxAdmissionBatchItems
-// admissions whose work failed, one result per request id in order: each is
-// released or refused on its own. Releasing a released admission answers it.
-func (c *Client) ReleaseAdmissions(ctx context.Context, requestIDs []string) ([]billing.AdmissionResult, error) {
-	var out billing.AdmissionBatchResult
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/admissions/release", body: billing.ReleaseAdmissionBatchParams{RequestIDs: requestIDs}}, &out); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}
-
-// ExtendAdmissions moves 1 to billing.MaxAdmissionBatchItems open holds'
-// deadlines later, one result per item in order. An item refused with
-// hold_not_found was captured, released or lapsed. New work needs a new
-// request ID; replaying the old request never reopens its hold.
-func (c *Client) ExtendAdmissions(ctx context.Context, items []billing.ExtendAdmissionParams) ([]billing.AdmissionResult, error) {
-	var out billing.AdmissionBatchResult
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/admissions/extend", body: billing.ExtendAdmissionBatchParams{Items: items}}, &out); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}
-
 // StartRunningCharge starts charging a customer at a rate per hour, or
 // answers the charge params.Reference already names. A changed term is
 // billing.ErrIdempotencyKeyReused; a MinimumAmount the customer's capacity
@@ -729,16 +666,15 @@ func (c *Client) ListCustomerLimits(ctx context.Context, params billing.Customer
 
 // SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate).
 // A sync carries the lease's usage, numbered within the lease, what its gate
-// has had in flight across a sync, the request holds of the lease it
-// releases and the customers whose views it asks for; it answers how far the
-// usage settled (a resend is matched by lease and number), each view (where
-// the customer stands on its limits, reserving nothing), the limit set of
-// each invoker's attributes, the pricing a gate costs requests with, and how
-// many of the merchant's leases are live. The first sync under a new LeaseID
-// creates the lease; a lease answers resends for 61 days after its last
-// sync. Settled usage posts to the ledger at each month's end in the
-// merchant's accounting zone and before any other movement of the customer's
-// balance.
+// has had in flight across a sync and the customers whose views it asks for;
+// it settles all the usage it carries and answers how far the usage settled
+// (a resend is matched by lease and number), each view (where the customer
+// stands on its limits, reserving nothing), the limit set of each invoker's
+// attributes, the pricing a gate costs requests with, and how many of the
+// merchant's leases are live. The first sync under a new LeaseID creates the
+// lease; a lease answers resends for 61 days after its last sync. Settled
+// usage posts to the ledger at each month's end in the merchant's accounting
+// zone and before any other movement of the customer's balance.
 func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams) (*billing.SyncLeasesResult, error) {
 	var out billing.SyncLeasesResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/leases/sync", body: params}, &out); err != nil {
@@ -970,10 +906,10 @@ func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing
 }
 
 // ListChanges lists the merchant's configuration history, newest first: each
-// change to a product, price, meter or limit and to the merchant, messages,
-// PSP and custodian documents, with who made it and how. A credential reads
-// "changed", never its value. ObjectType and ObjectID narrow it to one
-// object, Since and Until to a time range.
+// change to a product, price, meter or limit, to the merchant, messages, PSP
+// and custodian documents and to its operator controls, with who made it and
+// how. A credential reads "changed", never its value. ObjectType and
+// ObjectID narrow it to one object, Since and Until to a time range.
 func (c *Client) ListChanges(ctx context.Context, params billing.LogListParams) (*billing.ListPage[billing.LogEntry], error) {
 	var out billing.ListPage[billing.LogEntry]
 	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/merchant/changes", query: params}, &out); err != nil {

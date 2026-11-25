@@ -15,11 +15,11 @@ import (
 
 	"github.com/open-rails/authkit/userinfo"
 
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/migrate"
-	"github.com/open-rails/openrails/internal/writeposture"
 
 	"context"
 	"fmt"
@@ -29,7 +29,6 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 
-	"github.com/ccoveille/go-safecast/v2"
 	redis "github.com/redis/go-redis/v9"
 
 	"github.com/jonboulle/clockwork"
@@ -49,7 +48,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
@@ -82,6 +80,9 @@ const (
 	// riverPSPImportQueueMaxWorkers bounds the PSP pulls one fleet runs at
 	// once: after an upgrade every PSP of every merchant pulls.
 	riverPSPImportQueueMaxWorkers = 2
+	// leaseConns sizes the separate pool that renews leases, copied from
+	// Deps.Postgres's configuration: count it in max_connections.
+	leaseConns = 4
 )
 
 type runtimeOverrides struct {
@@ -91,6 +92,7 @@ type runtimeOverrides struct {
 	BasisTheoryTransport http.RoundTripper
 	NMITransport         http.RoundTripper
 	FXTransport          http.RoundTripper
+	ProviderEndpoints    config.ProviderEndpoints
 	DB                   *db.DB
 	Redis                redis.UniversalClient
 	Clock                clockwork.Clock
@@ -158,35 +160,25 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if overrides == nil {
+		overrides = &runtimeOverrides{}
+	}
 	logger := overrides.Logger
 	// Create clock early so it can be passed to services.
 	clock := runtimeClock(overrides)
 
 	var (
-		database    *db.DB
 		redisClient redis.UniversalClient
 		err         error
 	)
-	leaseConns, err := safecast.Convert[int32](cfg.Database.LeaseConns)
-	if err != nil {
-		return nil, fmt.Errorf("database.lease_conns %d exceeds the pool connection range: %w", cfg.Database.LeaseConns, err)
-	}
-	var chain fs.FS
-	if overrides != nil {
-		database, chain = overrides.DB, overrides.Migrations
-	}
+	database, chain := overrides.DB, overrides.Migrations
 	if database == nil {
 		return nil, fmt.Errorf("the database is required")
 	}
 	// OpenRails' and River's tables, before anything else touches the database.
 	migrationPool, releaseMigrationPool, err := database.MigrationPool(ctx)
 	if err == nil {
-		opts := migrate.Options{Schema: config.SchemaName(cfg), RiverSchema: config.RiverSchemaName(cfg), Chain: chain, Logger: logger}
-		if cfg.Database.SkipMigrations {
-			err = migrate.Validate(ctx, migrationPool, opts)
-		} else {
-			err = migrate.Apply(ctx, migrationPool, opts)
-		}
+		err = migrate.Apply(ctx, migrationPool, migrate.Options{Schema: config.SchemaName(cfg), RiverSchema: config.RiverSchemaName(cfg), Chain: chain, Logger: logger})
 		releaseMigrationPool()
 	}
 	if err != nil {
@@ -198,8 +190,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 			return nil, err
 		}
 		database.SetEventStore(events)
-	} else if err := refuseUnpostedUsage(ctx, database); err != nil {
-		return nil, err
 	}
 	if overrides != nil && overrides.Notifications != nil {
 		if overrides.Notifications.Sink == nil || overrides.Notifications.Recipient == nil {
@@ -223,18 +213,22 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		return runtimeRef.Merchants
 	}
 	railConfigs := railresolve.NewMerchantsSource(cfg, merchantsFn)
+	var endpoints config.ProviderEndpoints
+	if overrides != nil {
+		endpoints = overrides.ProviderEndpoints
+	}
 	var stripeTransport http.RoundTripper
-	if api := config.SandboxStripeAPIURL(cfg); api != "" {
+	if api := endpoints.StripeAPIURL; api != "" {
 		stripeTransport = stripeapi.HostRewriteTransport(api)
 	}
 	if overrides != nil && overrides.StripeTransport != nil {
 		stripeTransport = overrides.StripeTransport
 	}
 	// Every provider write waits on its merchant's write posture.
-	postures := writeposture.View{DB: database}
+	postures := controls.View{DB: database}
 	stripeClients := stripeapi.NewFactory(stripeTransport, postures)
 	// #1055: the ONE PSP-scoped NMI client factory every consumer shares.
-	nmiClients := &railresolve.NMIFactory{Config: cfg, Postures: postures, Log: logger}
+	nmiClients := &railresolve.NMIFactory{Gateway: endpoints.NMIGatewayURL, Postures: postures, Log: logger}
 	if overrides != nil {
 		nmiClients.Transport = overrides.NMITransport
 	}
@@ -255,7 +249,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	// request-plane transaction builds).
 	solanaRPCResolver := &solanamodule.MerchantRPCBuilder{
 		MerchantsFn: merchantsFn,
-		Endpoint:    config.SandboxSolanaRPCURL(cfg),
+		Endpoint:    endpoints.SolanaRPCURL,
 		Postures:    postures,
 		Log:         logger,
 	}
@@ -335,8 +329,10 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		RedisClient:   redisClient,
 		Config:        cfg,
 		Clock:         clock,
-		// #746: one proxy-aware client-IP resolver, built once from config;
-		// empty yields a resolver that trusts nothing.
+
+		ProviderEndpoints: endpoints,
+		// #746: one proxy-aware client-IP resolver, built once from config
+		// and Cloudflare's ranges.
 		TrustedProxies: iputil.ParseTrustedProxies(cfg.TrustedProxies),
 		RailConfigs:    railConfigs,
 
@@ -375,7 +371,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		MoneyService:        serviceInstances.MoneyService,
 		MetricsService:      serviceInstances.MetricsService,
 		DashboardService:    serviceInstances.DashboardService,
-		CopilotService:      serviceInstances.CopilotService,
 		AlertService:        alertService,
 		WebhookHealth:       &webhookhealth.Recorder{DB: database, Clock: clock, Log: logger},
 		MoneyCharger:        moneyCharger,
@@ -396,10 +391,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	runtime.Disputes.Lifecycle = runtime.SubscriptionLifecycleService
 	// Redirect PSPs and bank challenges come back to the payment page itself.
 	serviceInstances.OrderAttemptService.SetCheckoutOrigin(runtime.CheckoutOrigin)
+	serviceInstances.OrderAttemptService.SetReturnOrigins(runtime.ReturnOrigins)
 	runtime.AdminSubscriptionService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
-	runtime.AdminSubscriptionService.SetRequestedCancellationLimiter(func(ctx context.Context, sub *models.Subscription) error {
-		return destructive.NewUserActionLimiter(runtime.DB, runtime.Config.UserActionRateLimit).Reserve(ctx, destructive.CancelSubscription, fmt.Sprintf("cancel:%s:%d", sub.ID, sub.LifecycleRev), sub.CustomerID)
-	})
 	runtime.PriceMigrationService.WithDestructiveAdmissions(runtime.DestructiveAdmissions).WithPushes(intents.PriceMigrationPushes{})
 	runtime.MoneyService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.ProductAccessService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
@@ -410,8 +403,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	runtime.CollectionResolver = collectionResolver
 	runtime.MoneyService.SetUsageRecoveryResolver(collectionResolver)
 	moneyCharger.SetAdapterResolver(collectionResolver)
-	// A declared loopback NMI gateway (config.ProviderSandbox) reaches every
-	// NMI client through the shared factory.
+	// A loopback NMI gateway (Deps.ProviderEndpoints) reaches every NMI
+	// client through the shared factory.
 	runtime.NMIClients = nmiClients
 	if serviceInstances.PurchaseService != nil {
 		serviceInstances.PurchaseService.NMIClients = nmiClients
@@ -528,7 +521,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	if runtime.RailPaymentMethodService != nil {
 		runtime.RailPaymentMethodService.DeleteIntents = &intents.PaymentMethodDeleteThrough{Runner: intentRunner,
 			BeforeUserDelete: func(ctx context.Context, pm *models.PaymentMethod) error {
-				return destructive.NewUserActionLimiter(runtime.DB, runtime.Config.UserActionRateLimit).Reserve(ctx, destructive.DeletePaymentMethod, "method-delete:"+pm.ID.String(), pm.CustomerID)
+				return destructive.NewUserActionLimiter(runtime.DB).Reserve(ctx, destructive.DeletePaymentMethod, "method-delete:"+pm.ID.String(), pm.CustomerID)
 			},
 		}
 		runtime.RailPaymentMethodService.CardVaults = &intents.CardVaultThrough{Runner: intentRunner}
@@ -600,7 +593,6 @@ type servicesInstances struct {
 	MoneyService        *money.MoneyService
 	MetricsService      *metrics.Service
 	DashboardService    *dashboard.Service
-	CopilotService      *copilot.Service
 	RailCustomerService *payments.RailCustomerService
 }
 
@@ -614,8 +606,6 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 	entitlementService := entitlements.NewEntitlementService(database, clock)
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
-	moneyService.EngineAdmissionHold = cfg.EngineAdmissionHold
-	moneyService.UsageBillingEnabled = cfg.UsageBillingEnabled
 	var hyperSwitchErr error
 	if cfg.HyperSwitch != (billing.HyperSwitchConfig{}) {
 		if err := moneyService.SetHyperSwitchDeployment(cfg.HyperSwitch.APIBaseURL); err != nil {
@@ -623,18 +613,6 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 		}
 	}
 	metricsService := metrics.NewService(database)
-	// The catalog copilot needs an LLM key and explicit consent to send
-	// catalog data to the provider.
-	var catalogLLM copilot.LLM
-	if config.LLMConfigured(cfg.LLM) {
-		llmBaseURL := strings.TrimSpace(cfg.LLM.BaseURL)
-		switch config.LLMProvider(cfg.LLM) {
-		case config.LLMProviderOpenAI:
-			catalogLLM = copilot.NewOpenAILLM(cfg.LLM.APIKey, config.LLMModel(cfg.LLM), llmBaseURL)
-		default: // anthropic — unknown providers refuse boot in config.Validate
-			catalogLLM = copilot.NewAnthropicLLM(cfg.LLM.APIKey, config.LLMModel(cfg.LLM), llmBaseURL)
-		}
-	}
 	dashboardService := dashboard.NewService(database)
 	railCustomerService := payments.NewRailCustomerService(database)
 	// FX for Solana token quotes and policy-currency admission: live rates
@@ -671,19 +649,6 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 	priceMigrationService := subscriptions.NewPriceMigrationService(database, priceService, subscriptionService, merchantconfig.NewStore(database),
 		&subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver), clock)
 
-	// Catalog Q&A and drafting are independently opt-in. Draft tools only
-	// propose changes; the price-migration API enforces notice windows.
-	copilotService := copilot.NewService(copilot.Deps{
-		Products: productService,
-		Prices:   priceService,
-		Subs:     subscriptionService,
-		Reprices: priceMigrationService,
-		LLM:      catalogLLM,
-		Enabled:  cfg.LLM.CatalogCopilotEnabled,
-		Drafting: cfg.LLM.CatalogDraftingEnabled,
-		Clock:    clock,
-	})
-
 	railPMService := paymentmethods.NewRailPaymentMethodService(paymentMethodService, subscriptionService, database, cfg, clock)
 	subscriptionService.RailPaymentMethodService = railPMService
 	idempotencyService, err := idempotency.NewStore(database.Log, database, leaseDB, payment.IdempotencyTTL, payment.IdempotencyLease)
@@ -695,7 +660,7 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 		return nil, err
 	}
 
-	postures := writeposture.View{DB: database}
+	postures := controls.View{DB: database}
 	userSubscriptionService := subscriptions.NewUserSubscriptionService(database.Log,
 		subscriptionService,
 		productService,
@@ -812,7 +777,6 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 		MoneyService:                 moneyService,
 		MetricsService:               metricsService,
 		DashboardService:             dashboardService,
-		CopilotService:               copilotService,
 		RailCustomerService:          railCustomerService,
 	}, nil
 }

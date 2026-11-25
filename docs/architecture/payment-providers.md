@@ -13,7 +13,7 @@ provider and what the provider's answer proves.
 - **PSP**: one merchant account on a rail, a `psps` row; its identity is `(rail, live, account_id)`.
 - **Operation** (intent): one `provider_intents` row: frozen terms, an idempotency key, a status and a lease.
 - **Unknown**: `unknown_needs_verify`, an operation that may have reached the provider; only provider evidence settles it.
-- **Write posture**: `full`, `limited` (no system-origin writes) or `readonly`.
+- **Merchant controls**: `writes` (`full`, `limited`: no system-origin writes, or `readonly`), the rebill brake on system-origin charges, and destructive arming (`internal/controls`).
 - **Provider posture**: a PSP credential's proven environment; any other verdict disarms it.
 - **Wake job**: a debounced River job that reads one provider object after a callback.
 - **Finding**: a `reconciliation_findings` row; a `pull.*` finding carries a proposed change (a proposal); the queue is [findings and alerts](findings.md).
@@ -30,11 +30,7 @@ Each write type is a `Handler` (`Execute`, `Verify`, `CheckRelevance`,
    inline) records the row: frozen `payload`, its PSP (`psp_id`, a composite key
    to `psps` with `rail`), origin, and an `idempotency_key` unique per merchant.
    Its `openrails.provider_operation` wake commits in the same transaction.
-2. The `Runner` claims it (`in_flight`, a lease, `attempts` bumped as a fencing
-   token) and checks the handler, `CheckRelevance`, `GateExecution`, the
-   destructive switch and the `VolumeBreaker`. A refusal parks it, refunding the
-   attempt, for `ParkRetryInterval` (5 minutes); one no longer relevant is
-   superseded, and a collection held by write posture goes unknown and is read back.
+2. The `Runner` claims it (`in_flight`, a lease, `attempts` bumped as a fencing token) and checks the handler, `CheckRelevance`, `GateExecution`, the merchant's destructive arming and the `VolumeBreaker`; a charge also checks `RebillHold`. A refusal parks it, refunding the attempt, for `ParkRetryInterval` (5 minutes); one that must wait (`WaitUntil`) stays pending until then with no attempt and no `operation_log` entry; one no longer relevant is superseded, and a collection held by write posture goes unknown and is read back.
 3. A destructive type's breaker admission sets `provider_intents.sent_attempt` under its lock, for the claim's own attempt only; a park clears it. The `attempting` entry goes to `operation_log` ([history](history.md)) ahead, on its own statement, and `Execute` runs; its result is written ahead too, and a hold commits with the intent's transition. An entry over the log's bounds keeps the start of its reason and evidence and says `truncated`. A charge first calls `Store.RequireClaim` on its own connection: the claim must still hold a lease beyond `ProviderCallHold` (30 s).
 4. The outcome is written on a detached context (`LedgerWriteContext`):
    `succeeded`, `failed_retryable` (provably not executed), `unknown_needs_verify`,
@@ -78,7 +74,7 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   nonce, so an NMI replay is answered by the event's `event_id` alone. A thin
   Stripe event is read back first. CCBill signs nothing: its source address
   (`webhookauth.CCBillIPAllowed`) and the payload's account authenticate it.
-- A rotated secret verifies for `webhook_secret_overlap` (default 24 h);
+- A rotated secret verifies for 24 hours;
   `retire_webhook_overlap` ends it at once. A delivery is claimed in
   `idempotency_keys` and recorded in `webhook_events`, in the handler's
   transaction where possible (`MarkWebhookProcessedInTx`).
@@ -118,11 +114,8 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
 
 ### Posture
 
-- **Write posture** (`writeposture.View`): the merchant's
-  `merchant_write_posture` (`full` without a row); `readonly` in a database whose
-  book was never armed (`openrails book arm`). Each wire choke (the Stripe
-  transport, the NMI, CCBill, Basis Theory, HyperSwitch and Solana clients)
-  reads the posture of the merchant it writes for. `GateExecution` runs user, admin and provider
+- **Write posture** (`controls.View`): the merchant's `merchant_controls.writes` (`full` without a row); `readonly` in a database whose book was never armed (`openrails book arm`), and when the controls cannot be read. Each wire choke (the Stripe transport, the NMI, CCBill, Basis Theory, HyperSwitch and Solana clients), provider operations, Solana plan publishing, Stripe webhook registration and usage collection read the posture of the merchant they write for through it; nothing else reads the table.
+- **Rebill brake** (`controls.View.RebillHold`, `intents.RebillHold`): while `rebills_held`, a system-origin charge (engine renewal or retry, NMI recurring recovery, scheduled usage collection, Solana renewal pull) is not selected by the due pass, is refused at admission (`controls.ErrRebillsHeld`) and parks unsent at execution. A user-origin charge, the customer's own, never waits. `GateExecution` runs user, admin and provider
   origins under `limited`, system origin only under `full`, nothing under
   `readonly`. The transports refuse writes again in `readonly`
   (`ErrProviderReadOnly` in `stripeapi` and the NMI client).
@@ -143,9 +136,9 @@ Other tables: `provider_bills`, `provider_charge_attributions`, `webhook_health`
 - **HTTP**: one `/v1/merchant` route per method above (under `psps`, `findings`,
   `proposals`, `parked-subscriptions`) and `POST /v1/webhooks/{rail}/{account_id}`.
 - **CLI**: `openrails intents resolve`, `openrails provider-refresh`,
-  `openrails book arm`, `openrails merchant hold`, `openrails undo-run`,
+  `openrails book arm`, `openrails merchant controls|writes|rebills|destructive`, `openrails undo-run`,
   `openrails solana-pay resolve`.
-- **Configuration**: `webhook_secret_overlap`, `provider_sandbox.ccbill_webhook_sources`, `solana.crankers`, each PSP's `environment`; probes `openrails_psp_posture`, `openrails_solana_crankers`. Docs: [rails](../client.md#merchant-configuration-and-psps), [PSP environments](../client.md#merchant-configuration-and-psps).
+- **Configuration**: `solana.crankers`, each PSP's `environment`; test seam `Deps.ProviderEndpoints` (`CCBillWebhookSources`); probes `openrails_psp_posture`, `openrails_solana_crankers`. Docs: [rails](../client.md#merchant-configuration-and-psps), [PSP environments](../client.md#merchant-configuration-and-psps).
 
 ## Guarantees
 
@@ -246,7 +239,7 @@ Checks:
 
 ### 8. Abuse protection
 
-Webhooks share the `webhook` rate-limit bucket (1200 a minute) and per-rail body caps (CCBill 16 KiB, NMI 64 KiB, Stripe 256 KiB) before parsing. Unsigned, mis-signed and stale deliveries are refused and counted in `webhook_health_daily`. CCBill is accepted from its published ranges, or from `provider_sandbox.ccbill_webhook_sources` only for an account proven non-live. Customer declines from charge operations feed the card-testing ledger (`Runner.recordOrderCardDecline`).
+Webhooks share the `webhook` rate-limit bucket (1200 a minute) and per-rail body caps (CCBill 16 KiB, NMI 64 KiB, Stripe 256 KiB) before parsing. Unsigned, mis-signed and stale deliveries are refused and counted in `webhook_health_daily`. CCBill is accepted from its published ranges, or from `Deps.ProviderEndpoints.CCBillWebhookSources`, a test seam, only for an account proven non-live. Customer declines from charge operations feed the card-testing ledger (`Runner.recordOrderCardDecline`).
 
 Checks:
 - `readLimitedWebhookBody` wraps every body in `http.MaxBytesReader` and answers 413.
@@ -256,18 +249,19 @@ Checks:
 ### 9. Destructive-action safeguards
 
 Destructive types (`IsDestructiveIntentType`: NMI subscription deletes, CCBill
-cancels, card deletes) pass the kill switch (`destructive.Gate`; it starts off,
-so nothing destructive runs until an operator turns it on), the producer
+cancels, card deletes) pass the merchant's destructive arming (`destructive.Gate`
+on `merchant_controls.destructive_armed`; it starts disarmed, so nothing
+destructive runs and pulls stay advisory until an operator arms it), the producer
 `RateCeiling` (`PerActorHourlyCeiling` 5; per merchant `PerMerchantHourlyCeiling`
 15 for user and admin origins, `PerMerchantSystemHourlyCeiling` 50 for system)
 and the `VolumeBreaker`; a held one parks unsent. Every convergence cancel
-passes `GateCancelPass` (the switch, then the cancel budget); a held cancel
+passes `GateCancelPass` (the arming, then the cancel budget); a held cancel
 leaves the row `unverified` with access. Operations record `actor`, `subject`
 and `credential`; uncertainty never triggers a compensating cancel or refund.
 
 Checks:
 - `Runner.executeOne` checks `AllowDestructive` and `Breaker.Check` before `Execute`.
-- OR-J34-S06, S30: a held webhook cancel keeps access; the switch turned off mid-pull holds its retractions.
+- OR-J34-S06, S30: a held webhook cancel keeps access; disarming mid-pull holds its retractions.
 - `PlanUndoRun` refuses `NeverRollbackableTables` (including `operation_log` and `webhook_events`); OR-J38-S71 spends the actor allowance once per subscription.
 
 ## Tests

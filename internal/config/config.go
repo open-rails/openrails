@@ -3,10 +3,12 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -18,50 +20,57 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
-// ErrProviderSandboxGateway is the coded refusal for a provider_sandbox
-// gateway declaration whose destination is not a literal loopback address.
-var ErrProviderSandboxGateway = errors.New("provider_sandbox gateway refused")
+// ErrLoopbackEndpoint refuses a fake provider endpoint whose destination is
+// not a literal loopback address.
+var ErrLoopbackEndpoint = errors.New("provider endpoint refused")
 
-// SandboxNMIGatewayURL is the loopback NMI gateway declared for this sandbox
-// run, or "" for the real sandbox endpoints.
-func SandboxNMIGatewayURL(cfg *billing.Config) string {
-	if cfg == nil {
-		return ""
-	}
-	return strings.TrimSpace(cfg.ProviderSandbox.NMIGatewayURL)
+// ProviderEndpoints are loopback fakes non-live PSPs' provider clients reach
+// instead of the providers: Deps.ProviderEndpoints, a test seam set in Go.
+type ProviderEndpoints struct {
+	NMIGatewayURL     string
+	StripeAPIURL      string
+	SolanaRPCURL      string
+	CCBillDataLinkURL string
+	// CCBillWebhookSources are extra CCBill webhook source CIDRs, honored
+	// only for a webhook naming a CCBill account that moves no money.
+	CCBillWebhookSources []string
 }
 
-// SandboxStripeAPIURL is the configured loopback API, or empty for Stripe.
-func SandboxStripeAPIURL(cfg *billing.Config) string {
-	if cfg == nil {
-		return ""
+// Validate refuses an endpoint that is not a literal loopback URL and a
+// source that is not a CIDR or matches every address.
+func (e ProviderEndpoints) Validate() error {
+	gateways := e.gateways()
+	for _, name := range slices.Sorted(maps.Keys(gateways)) {
+		if err := ValidateLoopbackGatewayURL(gateways[name]); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
 	}
-	return strings.TrimSpace(cfg.ProviderSandbox.StripeAPIURL)
+	for _, raw := range e.CCBillWebhookSources {
+		if err := validateSourceCIDR(raw); err != nil {
+			return fmt.Errorf("CCBillWebhookSources: %w", err)
+		}
+	}
+	return nil
 }
 
-// SandboxSolanaRPCURL is the configured loopback Solana RPC, or empty.
-func SandboxSolanaRPCURL(cfg *billing.Config) string {
-	if cfg == nil {
-		return ""
+// Fakes names the endpoints set, each a fake provider no live PSP may sit
+// beside.
+func (e ProviderEndpoints) Fakes() []string {
+	out := slices.Sorted(maps.Keys(e.gateways()))
+	for i, name := range out {
+		out[i] = "Deps.ProviderEndpoints." + name
 	}
-	return strings.TrimSpace(cfg.ProviderSandbox.SolanaRPCURL)
+	return out
 }
 
-// SandboxCCBillDataLinkURL is the configured loopback DataLink, or empty.
-func SandboxCCBillDataLinkURL(cfg *billing.Config) string {
-	if cfg == nil {
-		return ""
+func (e ProviderEndpoints) gateways() map[string]string {
+	out := map[string]string{}
+	for name, raw := range map[string]string{"NMIGatewayURL": e.NMIGatewayURL, "StripeAPIURL": e.StripeAPIURL, "SolanaRPCURL": e.SolanaRPCURL, "CCBillDataLinkURL": e.CCBillDataLinkURL} {
+		if raw != "" {
+			out[name] = raw
+		}
 	}
-	return strings.TrimSpace(cfg.ProviderSandbox.CCBillDataLinkURL)
-}
-
-// SandboxCCBillWebhookSources are the extra CCBill webhook source CIDRs
-// declared for sandbox accounts.
-func SandboxCCBillWebhookSources(cfg *billing.Config) []string {
-	if cfg == nil {
-		return nil
-	}
-	return cfg.ProviderSandbox.CCBillWebhookSources
+	return out
 }
 
 // ValidateLoopbackGatewayURL accepts only a literal loopback destination: an
@@ -70,17 +79,17 @@ func SandboxCCBillWebhookSources(cfg *billing.Config) []string {
 func ValidateLoopbackGatewayURL(raw string) error {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return fmt.Errorf("%w: %q is not an absolute http(s) URL", ErrProviderSandboxGateway, raw)
+		return fmt.Errorf("%w: %q is not an absolute http(s) URL", ErrLoopbackEndpoint, raw)
 	}
 	if u.User != nil {
-		return fmt.Errorf("%w: %q carries userinfo", ErrProviderSandboxGateway, raw)
+		return fmt.Errorf("%w: %q carries userinfo", ErrLoopbackEndpoint, raw)
 	}
 	ip := net.ParseIP(u.Hostname())
 	if ip == nil {
-		return fmt.Errorf("%w: host %q must be a loopback IP literal, not a hostname", ErrProviderSandboxGateway, u.Hostname())
+		return fmt.Errorf("%w: host %q must be a loopback IP literal, not a hostname", ErrLoopbackEndpoint, u.Hostname())
 	}
 	if !ip.IsLoopback() {
-		return fmt.Errorf("%w: host %q is not a loopback address", ErrProviderSandboxGateway, u.Hostname())
+		return fmt.Errorf("%w: host %q is not a loopback address", ErrLoopbackEndpoint, u.Hostname())
 	}
 	return nil
 }
@@ -108,59 +117,6 @@ func ValidateMountPath(name, p string) error {
 		return fmt.Errorf("invalid %s %q: want an absolute path like /billing — no trailing slash, no . or .. segments, only letters, digits and . _ ~ -", name, p)
 	}
 	return nil
-}
-
-// LLM provider names (#741/#761). The provider selects the API dialect;
-// unknown values refuse to boot.
-const (
-	LLMProviderAnthropic = "anthropic"
-	LLMProviderOpenAI    = "openai"
-)
-
-// Per-provider default models when llm.model is unset.
-// Catalog tool definitions and corrective validation keep requests constrained.
-const (
-	LLMDefaultModelAnthropic = "claude-haiku-4-5-20251001"
-	// gpt-5.4-nano is the cheapest current-generation tool-capable OpenAI
-	// model ($0.20/M in, $1.25/M out as of 2026-07). gpt-4.1-nano is nominally
-	// cheaper but the 4.1 family is mid-retirement — a default must not 404.
-	LLMDefaultModelOpenAI = "gpt-5.4-nano"
-)
-
-// LLMConfigured reports whether a model backend is configured (fail-closed on a
-// missing key).
-func LLMConfigured(c billing.LLMConfig) bool { return strings.TrimSpace(c.APIKey) != "" }
-
-// LLMCatalogCopilotConfigured reports whether catalog Q&A (#779 Phase 1) can
-// run: a key AND the explicit catalog_copilot_enabled consent.
-func LLMCatalogCopilotConfigured(c billing.LLMConfig) bool {
-	return LLMConfigured(c) && c.CatalogCopilotEnabled
-}
-
-// LLMCatalogDraftingConfigured reports whether the #779 Phase 2 draft_* tools
-// are armed: catalog Q&A configured and explicit catalog_drafting_enabled
-// consent.
-func LLMCatalogDraftingConfigured(c billing.LLMConfig) bool {
-	return LLMCatalogCopilotConfigured(c) && c.CatalogDraftingEnabled
-}
-
-// LLMProvider returns the effective provider name.
-func LLMProvider(c billing.LLMConfig) string {
-	if strings.TrimSpace(c.Provider) == "" {
-		return LLMProviderAnthropic
-	}
-	return strings.ToLower(strings.TrimSpace(c.Provider))
-}
-
-// LLMModel returns the effective model id (per-provider default).
-func LLMModel(c billing.LLMConfig) string {
-	if strings.TrimSpace(c.Model) != "" {
-		return strings.TrimSpace(c.Model)
-	}
-	if LLMProvider(c) == LLMProviderOpenAI {
-		return LLMDefaultModelOpenAI
-	}
-	return LLMDefaultModelAnthropic
 }
 
 // ClickHouseDatabase is the event store's database: ClickHouse.Database, or
@@ -515,39 +471,10 @@ func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 	return nil
 }
 
-// NormalizeUserActionRateLimit fills c's zero fields from the defaults and
-// refuses a limit that is not positive.
-func NormalizeUserActionRateLimit(c billing.UserActionRateLimitConfig) (billing.UserActionRateLimitConfig, error) {
-	c = billing.Config{UserActionRateLimit: c}.WithDefaults().UserActionRateLimit
-	if c.MinimumCustomersPerHour < 1 || c.PaidCustomersPerHourlyCustomer < 1 || c.MinimumCustomersPerDay < 1 || c.PaidCustomersPerDailyCustomer < 1 {
-		return c, fmt.Errorf("user_action_rate_limit fields must be positive")
-	}
-	return c, nil
+// RateLimitBuckets are c's buckets by key: a pointer to each bucket's limit.
+func RateLimitBuckets(c *billing.RateLimitsConfig) map[string]**billing.RateLimit {
+	return map[string]**billing.RateLimit{"purchase": &c.Purchase, "payment": &c.Payment, "subscribe": &c.Subscribe, "webhook": &c.Webhook}
 }
-
-// NormalizeDestructiveActionLimits fills c's zero fields from the defaults and
-// refuses limits that could never apply: a negative one, an hour above its
-// day, an actor above its merchant, or a merchant above the deployment.
-func NormalizeDestructiveActionLimits(c billing.DestructiveActionLimitsConfig) (billing.DestructiveActionLimitsConfig, error) {
-	c = billing.Config{DestructiveActionLimits: c}.WithDefaults().DestructiveActionLimits
-	for _, v := range []int64{c.ActorPerHour, c.ActorPerDay, c.MerchantPerHour, c.MerchantPerDay, c.DeploymentPerHour, c.DeploymentPerDay, c.ErasurePerHour, c.ErasurePerDay} {
-		if v < 0 {
-			return c, fmt.Errorf("destructive_action_limits fields must be positive")
-		}
-	}
-	switch {
-	case c.ActorPerHour > c.ActorPerDay || c.MerchantPerHour > c.MerchantPerDay || c.DeploymentPerHour > c.DeploymentPerDay || c.ErasurePerHour > c.ErasurePerDay:
-		return c, fmt.Errorf("destructive_action_limits: an hourly limit cannot exceed its daily limit")
-	case c.ActorPerHour > c.MerchantPerHour || c.ActorPerDay > c.MerchantPerDay:
-		return c, fmt.Errorf("destructive_action_limits: an actor limit cannot exceed the merchant limit")
-	case c.MerchantPerHour > c.DeploymentPerHour || c.MerchantPerDay > c.DeploymentPerDay:
-		return c, fmt.Errorf("destructive_action_limits: a merchant limit cannot exceed the deployment limit")
-	}
-	return c, nil
-}
-
-// RateLimitBuckets are the buckets billing.RateLimitsConfig may name.
-var RateLimitBuckets = []string{"purchase", "payment", "subscribe", "webhook", "catalog-ask"}
 
 const (
 	CaptchaProviderTurnstile   = "turnstile"
@@ -610,13 +537,6 @@ func CaptchaChallengeBuckets() []string {
 // optional setting is Degrade's: it is turned off with a reason, never
 // refused.
 func Validate(cfg *billing.Config) error {
-	if _, err := NormalizeUserActionRateLimit(cfg.UserActionRateLimit); err != nil {
-		return err
-	}
-	if _, err := NormalizeDestructiveActionLimits(cfg.DestructiveActionLimits); err != nil {
-		return err
-	}
-
 	if err := ValidateDatabase(cfg.Database); err != nil {
 		return fmt.Errorf("database config validation failed: %w", err)
 	}
@@ -627,26 +547,6 @@ func Validate(cfg *billing.Config) error {
 func ValidateClickHouse(c billing.ClickHouseConfig) error {
 	if d := ClickHouseDatabase(&billing.Config{ClickHouse: c}); !schemaIdentRe.MatchString(d) {
 		return fmt.Errorf("clickhouse database %q is not a valid identifier (letters, digits, underscore only; must start with a letter or underscore)", d)
-	}
-	return nil
-}
-
-// validateLLM refuses an unknown provider (#741/#761: one vendor's dialect
-// pointed at another's key) and a model endpoint over plaintext HTTP.
-func validateLLM(llm billing.LLMConfig) error {
-	switch LLMProvider(llm) {
-	case LLMProviderAnthropic, LLMProviderOpenAI:
-	default:
-		return fmt.Errorf("invalid llm.provider %q: must be %q or %q", llm.Provider, LLMProviderAnthropic, LLMProviderOpenAI)
-	}
-	if base := strings.TrimSpace(llm.BaseURL); base != "" {
-		u, err := url.Parse(base)
-		if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-			return fmt.Errorf("invalid llm.base_url %q: must be an absolute http(s) URL", base)
-		}
-		if u.Scheme != "https" {
-			return fmt.Errorf("llm.base_url %q must use https", base)
-		}
 	}
 	return nil
 }
@@ -786,14 +686,25 @@ func ValidatePublicURL(raw string, allowLoopback, originOnly bool) error {
 	return nil
 }
 
-// ValidateDatabase refuses a schema that is not a safe identifier and a
-// negative lease pool.
+// MaxRiverSchema is the longest River schema: a Postgres name is at most 63
+// bytes (NAMEDATALEN 64) and River's names in it, such as the
+// <schema>.river_leadership channel, add 17.
+const MaxRiverSchema = 63 - len(".river_leadership")
+
+// ValidateDatabase refuses a schema that is not a safe identifier, and one
+// whose derived River schema, the schema plus _river, is too long for River.
 func ValidateDatabase(d billing.DatabaseConfig) error {
-	if d.LeaseConns < 0 {
-		return fmt.Errorf("database.lease_conns %d is negative", d.LeaseConns)
-	}
 	// The schema is interpolated into SQL and must be a safe identifier (#165).
-	return validateSchema(d.Schema)
+	if err := validateSchema(d.Schema); err != nil {
+		return err
+	}
+	if strings.TrimSpace(d.RiverSchema) == "" {
+		river := RiverSchemaName(&billing.Config{Database: d})
+		if len(river) > MaxRiverSchema {
+			return fmt.Errorf("database.schema %q is too long: its River schema %q is %d characters, and River's is at most %d (Postgres names are 63 bytes, less River's .river_leadership); use at most %d", d.Schema, river, len(river), MaxRiverSchema, MaxRiverSchema-len("_river"))
+		}
+	}
+	return nil
 }
 
 // defaults are the engine's defaults, for settings read without New.
