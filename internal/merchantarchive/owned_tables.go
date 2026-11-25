@@ -19,7 +19,6 @@ var ownedTables = []string{
 	"catalog_meters",
 	"catalog_product_limits",
 	"catalog_rate_cards",
-	"catalog_restore_receipts",
 	"change_log",
 	"credit_grant_events",
 	"credit_grants",

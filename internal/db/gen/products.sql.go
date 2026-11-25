@@ -358,6 +358,15 @@ UPDATE billing.products SET
     revision = CASE WHEN $14::boolean THEN revision + 1 ELSE revision END,
     updated_at = now()
 WHERE products.merchant_id = $15::uuid AND id = $16::uuid AND deleted_at IS NULL
+  AND ($14::boolean
+    OR display_name IS DISTINCT FROM COALESCE($1::text, display_name)
+    OR ($2::boolean AND description IS DISTINCT FROM NULLIF($3::text, ''))
+    OR ($4::boolean AND credit_grant IS DISTINCT FROM $5::jsonb)
+    OR ($6::boolean AND tier_group IS DISTINCT FROM NULLIF($7::text, ''))
+    OR tier_rank IS DISTINCT FROM COALESCE($8::int, tier_rank)
+    OR ($9::boolean AND ownership IS DISTINCT FROM $10::text)
+    OR ($11::boolean AND required_entitlements IS DISTINCT FROM $12::text[])
+    OR archived IS DISTINCT FROM COALESCE($13::boolean, archived))
 RETURNING id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership, deleted_at, required_entitlements
 `
 

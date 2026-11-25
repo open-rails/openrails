@@ -2,7 +2,6 @@ package webhooks
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -155,7 +154,6 @@ func (s *NMIConvergeService) convergeUnheld(ctx context.Context, rail, reference
 	var stated *providerobjects.Object
 	if remote.Plan != nil {
 		if obj := providerobjects.NMIPlan(*remote.Plan); obj.Ref != "" {
-			obj.Evidence, _ = json.Marshal(map[string]any{"source": "nmi_subscription_plan", "subscription": reference, "plan": remote.Plan})
 			plan, stated = obj.Ref, &obj
 		}
 	}

@@ -13,7 +13,7 @@ import (
 )
 
 const getProviderCatalogObject = `-- name: GetProviderCatalogObject :one
-SELECT o.merchant_id, o.psp_id, o.kind, o.ref, o.product_ref, o.name, o.active, o.deleted_at, o.amount, o.currency, o.billing_interval_hours, o.billing_interval_months, o.evidence, o.observed_at, o.observed_via, o.created_at, o.updated_at, (NOT o.active OR o.deleted_at IS NOT NULL OR COALESCE(NOT product.active OR product.deleted_at IS NOT NULL, false))::boolean AS retired
+SELECT o.merchant_id, o.psp_id, o.kind, o.ref, o.product_ref, o.name, o.active, o.deleted_at, o.amount, o.currency, o.billing_interval_hours, o.billing_interval_months, o.observed_at, o.observed_via, o.created_at, o.updated_at, (NOT o.active OR o.deleted_at IS NOT NULL OR COALESCE(NOT product.active OR product.deleted_at IS NOT NULL, false))::boolean AS retired
 FROM billing.provider_catalog_objects o
 LEFT JOIN billing.provider_catalog_objects product ON product.merchant_id = o.merchant_id AND product.psp_id = o.psp_id
     AND product.kind = 'product' AND product.ref = o.product_ref
@@ -40,7 +40,6 @@ type GetProviderCatalogObjectRow struct {
 	Currency              *string
 	BillingIntervalHours  *int32
 	BillingIntervalMonths *int32
-	Evidence              []byte
 	ObservedAt            time.Time
 	ObservedVia           string
 	CreatedAt             time.Time
@@ -70,7 +69,6 @@ func (q *Queries) GetProviderCatalogObject(ctx context.Context, arg GetProviderC
 		&i.Currency,
 		&i.BillingIntervalHours,
 		&i.BillingIntervalMonths,
-		&i.Evidence,
 		&i.ObservedAt,
 		&i.ObservedVia,
 		&i.CreatedAt,
@@ -369,16 +367,16 @@ func (q *Queries) MarkProviderCatalogObjectsAbsent(ctx context.Context, arg Mark
 
 const upsertProviderCatalogObjects = `-- name: UpsertProviderCatalogObjects :exec
 INSERT INTO billing.provider_catalog_objects (merchant_id, psp_id, kind, ref, product_ref, name, active, deleted_at, amount, currency,
-    billing_interval_hours, billing_interval_months, evidence, observed_at, observed_via)
+    billing_interval_hours, billing_interval_months, observed_at, observed_via)
 SELECT $1::uuid, $2::uuid, o.kind, o.ref, NULLIF(o.product_ref, ''), NULLIF(o.name, ''), o.active,
     NULLIF(o.deleted_at, '0001-01-01 00:00:00+00'::timestamptz), NULLIF(o.amount, ''), NULLIF(o.currency, ''),
-    NULLIF(o.hours, 0), NULLIF(o.months, 0), o.evidence, $3::timestamptz, $4::text
+    NULLIF(o.hours, 0), NULLIF(o.months, 0), $3::timestamptz, $4::text
 FROM unnest($5::text[], $6::text[], $7::text[], $8::text[], $9::boolean[],
-    $10::timestamptz[], $11::text[], $12::text[], $13::int[], $14::int[],
-    $15::jsonb[]) AS o(kind, ref, product_ref, name, active, deleted_at, amount, currency, hours, months, evidence)
+    $10::timestamptz[], $11::text[], $12::text[], $13::int[], $14::int[])
+    AS o(kind, ref, product_ref, name, active, deleted_at, amount, currency, hours, months)
 ON CONFLICT (merchant_id, psp_id, kind, ref) DO UPDATE SET product_ref = EXCLUDED.product_ref, name = EXCLUDED.name, active = EXCLUDED.active,
     deleted_at = EXCLUDED.deleted_at, amount = EXCLUDED.amount, currency = EXCLUDED.currency, billing_interval_hours = EXCLUDED.billing_interval_hours,
-    billing_interval_months = EXCLUDED.billing_interval_months, evidence = EXCLUDED.evidence, observed_at = EXCLUDED.observed_at,
+    billing_interval_months = EXCLUDED.billing_interval_months, observed_at = EXCLUDED.observed_at,
     observed_via = EXCLUDED.observed_via, updated_at = now()
 WHERE billing.provider_catalog_objects.observed_at <= EXCLUDED.observed_at
 `
@@ -398,7 +396,6 @@ type UpsertProviderCatalogObjectsParams struct {
 	Currencies  []string
 	Hours       []int32
 	Months      []int32
-	Evidence    [][]byte
 }
 
 // What the provider says now; an older observation never replaces a newer one.
@@ -419,7 +416,6 @@ func (q *Queries) UpsertProviderCatalogObjects(ctx context.Context, arg UpsertPr
 		arg.Currencies,
 		arg.Hours,
 		arg.Months,
-		arg.Evidence,
 	)
 	return err
 }

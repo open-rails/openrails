@@ -172,12 +172,12 @@ func (q *Queries) ListConfigurationChangeLog(ctx context.Context, merchantID uui
 }
 
 const listPriceKeyMoves = `-- name: ListPriceKeyMoves :many
-SELECT c.id, c.occurred_at, p.id AS price_id, (c.changes->>'archived')::boolean AS archived
+SELECT c.id, c.occurred_at, p.id AS price_id, (COALESCE(c.changes->'move', c.changes)->>'archived')::boolean AS archived
 FROM billing.products product
 JOIN billing.change_log c ON c.merchant_id = product.merchant_id AND c.object_type = 'price'
-    AND c.object_id = product.key || ':' || $1::text AND c.action = 'move'
+    AND c.object_id = product.key || ':' || $1::text AND (c.action = 'move' OR c.changes ? 'move')
 JOIN billing.prices p ON p.merchant_id = c.merchant_id AND p.product_id = product.id AND p.key = $1::text
-    AND p.public_id = c.changes->>'price_id'
+    AND p.public_id = COALESCE(c.changes->'move', c.changes)->>'price_id'
 WHERE product.merchant_id = $2::uuid AND product.id = $3::uuid AND p.deleted_at IS NULL
   AND ($4::timestamptz IS NULL OR (c.occurred_at, c.id) < ($4::timestamptz, $5::uuid))
 ORDER BY c.occurred_at DESC, c.id DESC
@@ -201,7 +201,8 @@ type ListPriceKeyMovesRow struct {
 }
 
 // A price key's moves, newest first: from occurred_at the key named the
-// price, or, archived, nothing. A deleted price's moves are left out.
+// price, or, archived, nothing, standalone or within a fields payload.
+// A deleted price's moves are left out.
 func (q *Queries) ListPriceKeyMoves(ctx context.Context, arg ListPriceKeyMovesParams) ([]ListPriceKeyMovesRow, error) {
 	rows, err := q.db.Query(ctx, listPriceKeyMoves,
 		arg.Key,

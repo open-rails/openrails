@@ -32,13 +32,14 @@ SELECT pg_advisory_xact_lock(hashtextextended('openrails.change_log:' || sqlc.ar
 
 -- name: ListPriceKeyMoves :many
 -- A price key's moves, newest first: from occurred_at the key named the
--- price, or, archived, nothing. A deleted price's moves are left out.
-SELECT c.id, c.occurred_at, p.id AS price_id, (c.changes->>'archived')::boolean AS archived
+-- price, or, archived, nothing, standalone or within a fields payload.
+-- A deleted price's moves are left out.
+SELECT c.id, c.occurred_at, p.id AS price_id, (COALESCE(c.changes->'move', c.changes)->>'archived')::boolean AS archived
 FROM billing.products product
 JOIN billing.change_log c ON c.merchant_id = product.merchant_id AND c.object_type = 'price'
-    AND c.object_id = product.key || ':' || sqlc.arg(key)::text AND c.action = 'move'
+    AND c.object_id = product.key || ':' || sqlc.arg(key)::text AND (c.action = 'move' OR c.changes ? 'move')
 JOIN billing.prices p ON p.merchant_id = c.merchant_id AND p.product_id = product.id AND p.key = sqlc.arg(key)::text
-    AND p.public_id = c.changes->>'price_id'
+    AND p.public_id = COALESCE(c.changes->'move', c.changes)->>'price_id'
 WHERE product.merchant_id = sqlc.arg(merchant_id)::uuid AND product.id = sqlc.arg(product_id)::uuid AND p.deleted_at IS NULL
   AND (sqlc.narg(after_at)::timestamptz IS NULL OR (c.occurred_at, c.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY c.occurred_at DESC, c.id DESC
