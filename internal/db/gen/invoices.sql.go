@@ -425,115 +425,6 @@ func (q *Queries) GetCheckoutCustomer(ctx context.Context, arg GetCheckoutCustom
 	return i, err
 }
 
-const getOpenInvoiceByLines = `-- name: GetOpenInvoiceByLines :one
-SELECT id, expires_at FROM billing.invoices
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-  AND lines_digest = $3::bytea AND status = 'open'
-`
-
-type GetOpenInvoiceByLinesParams struct {
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	LinesDigest []byte
-}
-
-type GetOpenInvoiceByLinesRow struct {
-	ID        uuid.UUID
-	ExpiresAt *time.Time
-}
-
-// The customer's open invoice of these lines, expired or not.
-func (q *Queries) GetOpenInvoiceByLines(ctx context.Context, arg GetOpenInvoiceByLinesParams) (GetOpenInvoiceByLinesRow, error) {
-	row := q.db.QueryRow(ctx, getOpenInvoiceByLines, arg.MerchantID, arg.CustomerID, arg.LinesDigest)
-	var i GetOpenInvoiceByLinesRow
-	err := row.Scan(&i.ID, &i.ExpiresAt)
-	return i, err
-}
-
-const getOpenRenewalInvoice = `-- name: GetOpenRenewalInvoice :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded, customer_type, purchase_number, opened_at, submitted_at, billing_country, card_country, ip_country, language, attribution_source, attribution_medium, attribution_campaign, attribution_term, attribution_content, attribution_referrer, attribution_affiliate, checkout_invoice_id FROM billing.invoices
-WHERE merchant_id = $1::uuid AND origin = 'subscription' AND collection_owner = 'engine' AND subscription_bill_kind = 'renewal'
-  AND subscription_id = $2::uuid AND status IN ('open', 'processing')
-ORDER BY period_starts_at DESC
-LIMIT 1
-`
-
-type GetOpenRenewalInvoiceParams struct {
-	MerchantID     uuid.UUID
-	SubscriptionID uuid.UUID
-}
-
-// The subscription's unpaid renewal, if any.
-func (q *Queries) GetOpenRenewalInvoice(ctx context.Context, arg GetOpenRenewalInvoiceParams) (BillingInvoice, error) {
-	row := q.db.QueryRow(ctx, getOpenRenewalInvoice, arg.MerchantID, arg.SubscriptionID)
-	var i BillingInvoice
-	err := row.Scan(
-		&i.MerchantID,
-		&i.ID,
-		&i.CustomerID,
-		&i.Origin,
-		&i.Status,
-		&i.Currency,
-		&i.Total,
-		&i.Number,
-		&i.IdempotencyKey,
-		&i.RequestDigest,
-		&i.PaymentMethodID,
-		&i.PspID,
-		&i.AttemptID,
-		&i.PaymentID,
-		&i.LastPaymentError,
-		&i.ExpiresAt,
-		&i.CompletedAt,
-		&i.CanceledAt,
-		&i.ExpiredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PaymentStatus,
-		&i.PayUrlSecretHash,
-		&i.PayUrlExpiresAt,
-		&i.SuccessUrl,
-		&i.CancelUrl,
-		&i.SavedPaymentMethods,
-		&i.SubscriptionID,
-		&i.PeriodStartsAt,
-		&i.PeriodEndsAt,
-		&i.DueAt,
-		&i.VoidedAt,
-		&i.AmountPaid,
-		&i.UncollectibleAt,
-		&i.CollectionMethod,
-		&i.PoNumber,
-		&i.Memo,
-		&i.Tax,
-		&i.BillingContacts,
-		&i.CollectionFailureCount,
-		&i.CollectionFailedAt,
-		&i.NextCollectionAttemptAt,
-		&i.CollectionOwner,
-		&i.SubscriptionBillKind,
-		&i.LinesDigest,
-		&i.Embedded,
-		&i.CustomerType,
-		&i.PurchaseNumber,
-		&i.OpenedAt,
-		&i.SubmittedAt,
-		&i.BillingCountry,
-		&i.CardCountry,
-		&i.IpCountry,
-		&i.Language,
-		&i.AttributionSource,
-		&i.AttributionMedium,
-		&i.AttributionCampaign,
-		&i.AttributionTerm,
-		&i.AttributionContent,
-		&i.AttributionReferrer,
-		&i.AttributionAffiliate,
-		&i.CheckoutInvoiceID,
-	)
-	return i, err
-}
-
 const getInvoice = `-- name: GetInvoice :one
 SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded, customer_type, purchase_number, opened_at, submitted_at, billing_country, card_country, ip_country, language, attribution_source, attribution_medium, attribution_campaign, attribution_term, attribution_content, attribution_referrer, attribution_affiliate, checkout_invoice_id FROM billing.invoices
 WHERE merchant_id = $1::uuid AND id = $2::uuid
@@ -822,6 +713,115 @@ func (q *Queries) GetInvoiceLineBySubscription(ctx context.Context, arg GetInvoi
 	return i, err
 }
 
+const getOpenInvoiceByLines = `-- name: GetOpenInvoiceByLines :one
+SELECT id, expires_at FROM billing.invoices
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND lines_digest = $3::bytea AND status = 'open'
+`
+
+type GetOpenInvoiceByLinesParams struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	LinesDigest []byte
+}
+
+type GetOpenInvoiceByLinesRow struct {
+	ID        uuid.UUID
+	ExpiresAt *time.Time
+}
+
+// The customer's open invoice of these lines, expired or not.
+func (q *Queries) GetOpenInvoiceByLines(ctx context.Context, arg GetOpenInvoiceByLinesParams) (GetOpenInvoiceByLinesRow, error) {
+	row := q.db.QueryRow(ctx, getOpenInvoiceByLines, arg.MerchantID, arg.CustomerID, arg.LinesDigest)
+	var i GetOpenInvoiceByLinesRow
+	err := row.Scan(&i.ID, &i.ExpiresAt)
+	return i, err
+}
+
+const getOpenRenewalInvoice = `-- name: GetOpenRenewalInvoice :one
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded, customer_type, purchase_number, opened_at, submitted_at, billing_country, card_country, ip_country, language, attribution_source, attribution_medium, attribution_campaign, attribution_term, attribution_content, attribution_referrer, attribution_affiliate, checkout_invoice_id FROM billing.invoices
+WHERE merchant_id = $1::uuid AND origin = 'subscription' AND collection_owner = 'engine' AND subscription_bill_kind = 'renewal'
+  AND subscription_id = $2::uuid AND status IN ('open', 'processing')
+ORDER BY period_starts_at DESC
+LIMIT 1
+`
+
+type GetOpenRenewalInvoiceParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// The subscription's unpaid renewal, if any.
+func (q *Queries) GetOpenRenewalInvoice(ctx context.Context, arg GetOpenRenewalInvoiceParams) (BillingInvoice, error) {
+	row := q.db.QueryRow(ctx, getOpenRenewalInvoice, arg.MerchantID, arg.SubscriptionID)
+	var i BillingInvoice
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.CustomerID,
+		&i.Origin,
+		&i.Status,
+		&i.Currency,
+		&i.Total,
+		&i.Number,
+		&i.IdempotencyKey,
+		&i.RequestDigest,
+		&i.PaymentMethodID,
+		&i.PspID,
+		&i.AttemptID,
+		&i.PaymentID,
+		&i.LastPaymentError,
+		&i.ExpiresAt,
+		&i.CompletedAt,
+		&i.CanceledAt,
+		&i.ExpiredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PaymentStatus,
+		&i.PayUrlSecretHash,
+		&i.PayUrlExpiresAt,
+		&i.SuccessUrl,
+		&i.CancelUrl,
+		&i.SavedPaymentMethods,
+		&i.SubscriptionID,
+		&i.PeriodStartsAt,
+		&i.PeriodEndsAt,
+		&i.DueAt,
+		&i.VoidedAt,
+		&i.AmountPaid,
+		&i.UncollectibleAt,
+		&i.CollectionMethod,
+		&i.PoNumber,
+		&i.Memo,
+		&i.Tax,
+		&i.BillingContacts,
+		&i.CollectionFailureCount,
+		&i.CollectionFailedAt,
+		&i.NextCollectionAttemptAt,
+		&i.CollectionOwner,
+		&i.SubscriptionBillKind,
+		&i.LinesDigest,
+		&i.Embedded,
+		&i.CustomerType,
+		&i.PurchaseNumber,
+		&i.OpenedAt,
+		&i.SubmittedAt,
+		&i.BillingCountry,
+		&i.CardCountry,
+		&i.IpCountry,
+		&i.Language,
+		&i.AttributionSource,
+		&i.AttributionMedium,
+		&i.AttributionCampaign,
+		&i.AttributionTerm,
+		&i.AttributionContent,
+		&i.AttributionReferrer,
+		&i.AttributionAffiliate,
+		&i.CheckoutInvoiceID,
+	)
+	return i, err
+}
+
 const getOwnershipClaim = `-- name: GetOwnershipClaim :one
 SELECT merchant_id, customer_id, claim_key, invoice_id, holder_type, holder_id, created_at, updated_at FROM billing.ownership_claims
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
@@ -1029,76 +1029,6 @@ func (q *Queries) ListExpiredInvoices(ctx context.Context, arg ListExpiredInvoic
 	for rows.Next() {
 		var i ListExpiredInvoicesRow
 		if err := rows.Scan(&i.ID, &i.ExpiresAt); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listLiveOwnership = `-- name: ListLiveOwnership :many
-SELECT 'subscription'::text AS holder_type, s.id AS holder_id, s.product_id, s.tier_group,
-       s.status, s.current_period_ends_at
-FROM billing.subscriptions s
-WHERE s.merchant_id = $1::uuid AND s.customer_id = $2::uuid
-  AND s.deleted_at IS NULL
-  AND (s.product_id = ANY($3::uuid[]) OR s.tier_group = ANY($4::text[]))
-  AND (s.status <> 'canceled' OR s.current_period_ends_at > $5::timestamptz OR s.deletion_scheduled_at IS NOT NULL)
-UNION ALL
-SELECT 'product_access'::text, a.id, a.product_id, NULL::text, 'active'::text, a.ends_at
-FROM billing.product_access a
-WHERE a.merchant_id = $1::uuid AND a.customer_id = $2::uuid
-  AND a.product_id = ANY($3::uuid[])
-  AND a.source_type IN ('purchase', 'grant') AND a.ends_at IS NULL AND a.revoked_at IS NULL AND a.deleted_at IS NULL
-  AND a.starts_at <= $5::timestamptz
-`
-
-type ListLiveOwnershipParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	ProductIds []uuid.UUID
-	TierGroups []string
-	Now        time.Time
-}
-
-type ListLiveOwnershipRow struct {
-	HolderType          string
-	HolderID            uuid.UUID
-	ProductID           uuid.UUID
-	TierGroup           *string
-	Status              string
-	CurrentPeriodEndsAt *time.Time
-}
-
-// What a customer holds of the given products or tier groups: live
-// subscriptions (a canceled one while still paid through or while its
-// provider schedule may still bill), and product access that never ends.
-func (q *Queries) ListLiveOwnership(ctx context.Context, arg ListLiveOwnershipParams) ([]ListLiveOwnershipRow, error) {
-	rows, err := q.db.Query(ctx, listLiveOwnership,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.ProductIds,
-		arg.TierGroups,
-		arg.Now,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListLiveOwnershipRow
-	for rows.Next() {
-		var i ListLiveOwnershipRow
-		if err := rows.Scan(
-			&i.HolderType,
-			&i.HolderID,
-			&i.ProductID,
-			&i.TierGroup,
-			&i.Status,
-			&i.CurrentPeriodEndsAt,
-		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1421,6 +1351,76 @@ func (q *Queries) ListInvoicesPage(ctx context.Context, arg ListInvoicesPagePara
 			&i.AttributionReferrer,
 			&i.AttributionAffiliate,
 			&i.CheckoutInvoiceID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLiveOwnership = `-- name: ListLiveOwnership :many
+SELECT 'subscription'::text AS holder_type, s.id AS holder_id, s.product_id, s.tier_group,
+       s.status, s.current_period_ends_at
+FROM billing.subscriptions s
+WHERE s.merchant_id = $1::uuid AND s.customer_id = $2::uuid
+  AND s.deleted_at IS NULL
+  AND (s.product_id = ANY($3::uuid[]) OR s.tier_group = ANY($4::text[]))
+  AND (s.status <> 'canceled' OR s.current_period_ends_at > $5::timestamptz OR s.deletion_scheduled_at IS NOT NULL)
+UNION ALL
+SELECT 'product_access'::text, a.id, a.product_id, NULL::text, 'active'::text, a.ends_at
+FROM billing.product_access a
+WHERE a.merchant_id = $1::uuid AND a.customer_id = $2::uuid
+  AND a.product_id = ANY($3::uuid[])
+  AND a.source_type IN ('purchase', 'grant') AND a.ends_at IS NULL AND a.revoked_at IS NULL AND a.deleted_at IS NULL
+  AND a.starts_at <= $5::timestamptz
+`
+
+type ListLiveOwnershipParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ProductIds []uuid.UUID
+	TierGroups []string
+	Now        time.Time
+}
+
+type ListLiveOwnershipRow struct {
+	HolderType          string
+	HolderID            uuid.UUID
+	ProductID           uuid.UUID
+	TierGroup           *string
+	Status              string
+	CurrentPeriodEndsAt *time.Time
+}
+
+// What a customer holds of the given products or tier groups: live
+// subscriptions (a canceled one while still paid through or while its
+// provider schedule may still bill), and product access that never ends.
+func (q *Queries) ListLiveOwnership(ctx context.Context, arg ListLiveOwnershipParams) ([]ListLiveOwnershipRow, error) {
+	rows, err := q.db.Query(ctx, listLiveOwnership,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.ProductIds,
+		arg.TierGroups,
+		arg.Now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLiveOwnershipRow
+	for rows.Next() {
+		var i ListLiveOwnershipRow
+		if err := rows.Scan(
+			&i.HolderType,
+			&i.HolderID,
+			&i.ProductID,
+			&i.TierGroup,
+			&i.Status,
+			&i.CurrentPeriodEndsAt,
 		); err != nil {
 			return nil, err
 		}

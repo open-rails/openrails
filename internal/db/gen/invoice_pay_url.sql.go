@@ -192,45 +192,6 @@ func (q *Queries) SaveInvoicePayURLReceipt(ctx context.Context, arg SaveInvoiceP
 	return err
 }
 
-const setMyInvoicePayURL = `-- name: SetMyInvoicePayURL :execrows
-UPDATE billing.invoices
-SET pay_url_secret_hash = $1::bytea,
-    pay_url_expires_at = expires_at,
-    success_url = NULL,
-    cancel_url = NULL,
-    saved_payment_methods = true,
-    embedded = true,
-    updated_at = $2::timestamptz
-WHERE merchant_id = $3::uuid AND id = $4::uuid AND customer_id = $5::uuid
-  AND origin = 'customer' AND status = 'open' AND collection_owner = 'engine'
-  AND expires_at > $2::timestamptz
-`
-
-type SetMyInvoicePayURLParams struct {
-	SecretHash []byte
-	Now        time.Time
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-}
-
-// A customer's own open invoice takes its embedded pay URL, in place of the
-// one it had: the last secret stops working. It lasts as long as the invoice
-// and returns nowhere.
-func (q *Queries) SetMyInvoicePayURL(ctx context.Context, arg SetMyInvoicePayURLParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setMyInvoicePayURL,
-		arg.SecretHash,
-		arg.Now,
-		arg.MerchantID,
-		arg.ID,
-		arg.CustomerID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const setInvoicePayURL = `-- name: SetInvoicePayURL :execrows
 UPDATE billing.invoices
 SET pay_url_secret_hash = $1::bytea,
@@ -268,6 +229,45 @@ func (q *Queries) SetInvoicePayURL(ctx context.Context, arg SetInvoicePayURLPara
 		arg.Now,
 		arg.MerchantID,
 		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setMyInvoicePayURL = `-- name: SetMyInvoicePayURL :execrows
+UPDATE billing.invoices
+SET pay_url_secret_hash = $1::bytea,
+    pay_url_expires_at = expires_at,
+    success_url = NULL,
+    cancel_url = NULL,
+    saved_payment_methods = true,
+    embedded = true,
+    updated_at = $2::timestamptz
+WHERE merchant_id = $3::uuid AND id = $4::uuid AND customer_id = $5::uuid
+  AND origin = 'customer' AND status = 'open' AND collection_owner = 'engine'
+  AND expires_at > $2::timestamptz
+`
+
+type SetMyInvoicePayURLParams struct {
+	SecretHash []byte
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// A customer's own open invoice takes its embedded pay URL, in place of the
+// one it had: the last secret stops working. It lasts as long as the invoice
+// and returns nowhere.
+func (q *Queries) SetMyInvoicePayURL(ctx context.Context, arg SetMyInvoicePayURLParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setMyInvoicePayURL,
+		arg.SecretHash,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+		arg.CustomerID,
 	)
 	if err != nil {
 		return 0, err

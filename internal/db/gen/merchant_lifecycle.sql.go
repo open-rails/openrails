@@ -44,6 +44,17 @@ func (q *Queries) CountMerchantRowsFraudReports(ctx context.Context, merchantID 
 	return count, err
 }
 
+const countMerchantRowsInvoiceAttempts = `-- name: CountMerchantRowsInvoiceAttempts :one
+SELECT count(*) FROM billing.invoice_attempts WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsInvoiceAttempts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsInvoiceAttempts, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countMerchantRowsMandates = `-- name: CountMerchantRowsMandates :one
 
 SELECT count(*) FROM billing.mandates WHERE merchant_id = $1
@@ -97,17 +108,6 @@ SELECT count(*) FROM billing.operation_log WHERE merchant_id = $1
 
 func (q *Queries) CountMerchantRowsOperationLog(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMerchantRowsOperationLog, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countMerchantRowsInvoiceAttempts = `-- name: CountMerchantRowsInvoiceAttempts :one
-SELECT count(*) FROM billing.invoice_attempts WHERE merchant_id = $1
-`
-
-func (q *Queries) CountMerchantRowsInvoiceAttempts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsInvoiceAttempts, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -283,6 +283,15 @@ func (q *Queries) PurgeMerchantRowsFraudReports(ctx context.Context, merchantID 
 	return err
 }
 
+const purgeMerchantRowsInvoiceAttempts = `-- name: PurgeMerchantRowsInvoiceAttempts :exec
+DELETE FROM billing.invoice_attempts WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsInvoiceAttempts(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsInvoiceAttempts, merchantID)
+	return err
+}
+
 const purgeMerchantRowsMandates = `-- name: PurgeMerchantRowsMandates :exec
 DELETE FROM billing.mandates WHERE merchant_id = $1
 `
@@ -325,15 +334,6 @@ DELETE FROM billing.operation_log WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsOperationLog(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsOperationLog, merchantID)
-	return err
-}
-
-const purgeMerchantRowsInvoiceAttempts = `-- name: PurgeMerchantRowsInvoiceAttempts :exec
-DELETE FROM billing.invoice_attempts WHERE merchant_id = $1
-`
-
-func (q *Queries) PurgeMerchantRowsInvoiceAttempts(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsInvoiceAttempts, merchantID)
 	return err
 }
 

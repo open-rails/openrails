@@ -714,6 +714,109 @@ func (q *Queries) ListDueUsageCollections(ctx context.Context, arg ListDueUsageC
 	return items, nil
 }
 
+const listInvoiceCollectionsForArchive = `-- name: ListInvoiceCollectionsForArchive :many
+SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, i.destructive_action_id, i.sent_attempt, a.id AS payment_id, a.customer_id AS payment_customer_id, a.invoice_id AS payment_invoice_id,
+    a.psp_id AS payment_psp_id, a.rail AS payment_rail, a.transaction_id AS payment_transaction_id, a.amount AS payment_amount,
+    a.currency AS payment_currency, a.status AS payment_status, l.amount AS ledger_amount,
+    COALESCE(l.merchant_id = a.merchant_id AND l.customer_id = a.customer_id
+        AND l.invoice_id = a.invoice_id AND l.currency = a.currency
+        AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
+        AND l.operation = 'invoice_payment' AND l.transfer_type = 'owed_payment', false)::boolean AS ledger_matches
+FROM billing.provider_intents i
+LEFT JOIN billing.payments a ON a.merchant_id = i.merchant_id AND a.id = (i.payload->>'payment_id')::uuid
+LEFT JOIN billing.ledger_transfers l ON l.merchant_id = a.merchant_id AND l.id = a.ledger_transfer_id
+WHERE i.merchant_id = $1::uuid AND i.intent_type = 'order_collection'
+  AND ($2::uuid IS NULL OR i.id > $2::uuid)
+ORDER BY i.id
+LIMIT $3::int
+`
+
+type ListInvoiceCollectionsForArchiveParams struct {
+	MerchantID uuid.UUID
+	AfterID    *uuid.UUID
+	PageSize   int32
+}
+
+type ListInvoiceCollectionsForArchiveRow struct {
+	BillingProviderIntent BillingProviderIntent
+	PaymentID             *uuid.UUID
+	PaymentCustomerID     *uuid.UUID
+	PaymentInvoiceID      *uuid.UUID
+	PaymentPspID          *uuid.UUID
+	PaymentRail           *string
+	PaymentTransactionID  *string
+	PaymentAmount         *int64
+	PaymentCurrency       *string
+	PaymentStatus         *string
+	LedgerAmount          *int64
+	LedgerMatches         bool
+}
+
+// Every terminal invoice collection with the payment its payload names, if
+// any, and that payment's ledger transfer: the archive checks each pair
+// before exporting or restoring it.
+func (q *Queries) ListInvoiceCollectionsForArchive(ctx context.Context, arg ListInvoiceCollectionsForArchiveParams) ([]ListInvoiceCollectionsForArchiveRow, error) {
+	rows, err := q.db.Query(ctx, listInvoiceCollectionsForArchive, arg.MerchantID, arg.AfterID, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInvoiceCollectionsForArchiveRow
+	for rows.Next() {
+		var i ListInvoiceCollectionsForArchiveRow
+		if err := rows.Scan(
+			&i.BillingProviderIntent.ID,
+			&i.BillingProviderIntent.MerchantID,
+			&i.BillingProviderIntent.Rail,
+			&i.BillingProviderIntent.IntentType,
+			&i.BillingProviderIntent.SubscriptionID,
+			&i.BillingProviderIntent.PaymentID,
+			&i.BillingProviderIntent.PriceID,
+			&i.BillingProviderIntent.Payload,
+			&i.BillingProviderIntent.IdempotencyKey,
+			&i.BillingProviderIntent.Status,
+			&i.BillingProviderIntent.Attempts,
+			&i.BillingProviderIntent.NextAttemptAt,
+			&i.BillingProviderIntent.LeaseExpiresAt,
+			&i.BillingProviderIntent.Origin,
+			&i.BillingProviderIntent.OriginReason,
+			&i.BillingProviderIntent.Actor,
+			&i.BillingProviderIntent.LastFailureReason,
+			&i.BillingProviderIntent.ExpiresAt,
+			&i.BillingProviderIntent.ResultEvidence,
+			&i.BillingProviderIntent.CreatedAt,
+			&i.BillingProviderIntent.ExecutedAt,
+			&i.BillingProviderIntent.UpdatedAt,
+			&i.BillingProviderIntent.PspID,
+			&i.BillingProviderIntent.DestructiveRunID,
+			&i.BillingProviderIntent.DestructiveRunClass,
+			&i.BillingProviderIntent.CustodianID,
+			&i.BillingProviderIntent.Subject,
+			&i.BillingProviderIntent.Credential,
+			&i.BillingProviderIntent.DestructiveActionID,
+			&i.BillingProviderIntent.SentAttempt,
+			&i.PaymentID,
+			&i.PaymentCustomerID,
+			&i.PaymentInvoiceID,
+			&i.PaymentPspID,
+			&i.PaymentRail,
+			&i.PaymentTransactionID,
+			&i.PaymentAmount,
+			&i.PaymentCurrency,
+			&i.PaymentStatus,
+			&i.LedgerAmount,
+			&i.LedgerMatches,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenUsageInvoicesOfCurrency = `-- name: ListOpenUsageInvoicesOfCurrency :many
 SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded, customer_type, purchase_number, opened_at, submitted_at, billing_country, card_country, ip_country, language, attribution_source, attribution_medium, attribution_campaign, attribution_term, attribution_content, attribution_referrer, attribution_affiliate, checkout_invoice_id FROM billing.invoices
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND currency = $3::text
@@ -808,109 +911,6 @@ func (q *Queries) ListOpenUsageInvoicesOfCurrency(ctx context.Context, arg ListO
 			&i.AttributionReferrer,
 			&i.AttributionAffiliate,
 			&i.CheckoutInvoiceID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listInvoiceCollectionsForArchive = `-- name: ListInvoiceCollectionsForArchive :many
-SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, i.destructive_action_id, i.sent_attempt, a.id AS payment_id, a.customer_id AS payment_customer_id, a.invoice_id AS payment_invoice_id,
-    a.psp_id AS payment_psp_id, a.rail AS payment_rail, a.transaction_id AS payment_transaction_id, a.amount AS payment_amount,
-    a.currency AS payment_currency, a.status AS payment_status, l.amount AS ledger_amount,
-    COALESCE(l.merchant_id = a.merchant_id AND l.customer_id = a.customer_id
-        AND l.invoice_id = a.invoice_id AND l.currency = a.currency
-        AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
-        AND l.operation = 'invoice_payment' AND l.transfer_type = 'owed_payment', false)::boolean AS ledger_matches
-FROM billing.provider_intents i
-LEFT JOIN billing.payments a ON a.merchant_id = i.merchant_id AND a.id = (i.payload->>'payment_id')::uuid
-LEFT JOIN billing.ledger_transfers l ON l.merchant_id = a.merchant_id AND l.id = a.ledger_transfer_id
-WHERE i.merchant_id = $1::uuid AND i.intent_type = 'order_collection'
-  AND ($2::uuid IS NULL OR i.id > $2::uuid)
-ORDER BY i.id
-LIMIT $3::int
-`
-
-type ListInvoiceCollectionsForArchiveParams struct {
-	MerchantID uuid.UUID
-	AfterID    *uuid.UUID
-	PageSize   int32
-}
-
-type ListInvoiceCollectionsForArchiveRow struct {
-	BillingProviderIntent BillingProviderIntent
-	PaymentID             *uuid.UUID
-	PaymentCustomerID     *uuid.UUID
-	PaymentInvoiceID      *uuid.UUID
-	PaymentPspID          *uuid.UUID
-	PaymentRail           *string
-	PaymentTransactionID  *string
-	PaymentAmount         *int64
-	PaymentCurrency       *string
-	PaymentStatus         *string
-	LedgerAmount          *int64
-	LedgerMatches         bool
-}
-
-// Every terminal invoice collection with the payment its payload names, if
-// any, and that payment's ledger transfer: the archive checks each pair
-// before exporting or restoring it.
-func (q *Queries) ListInvoiceCollectionsForArchive(ctx context.Context, arg ListInvoiceCollectionsForArchiveParams) ([]ListInvoiceCollectionsForArchiveRow, error) {
-	rows, err := q.db.Query(ctx, listInvoiceCollectionsForArchive, arg.MerchantID, arg.AfterID, arg.PageSize)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListInvoiceCollectionsForArchiveRow
-	for rows.Next() {
-		var i ListInvoiceCollectionsForArchiveRow
-		if err := rows.Scan(
-			&i.BillingProviderIntent.ID,
-			&i.BillingProviderIntent.MerchantID,
-			&i.BillingProviderIntent.Rail,
-			&i.BillingProviderIntent.IntentType,
-			&i.BillingProviderIntent.SubscriptionID,
-			&i.BillingProviderIntent.PaymentID,
-			&i.BillingProviderIntent.PriceID,
-			&i.BillingProviderIntent.Payload,
-			&i.BillingProviderIntent.IdempotencyKey,
-			&i.BillingProviderIntent.Status,
-			&i.BillingProviderIntent.Attempts,
-			&i.BillingProviderIntent.NextAttemptAt,
-			&i.BillingProviderIntent.LeaseExpiresAt,
-			&i.BillingProviderIntent.Origin,
-			&i.BillingProviderIntent.OriginReason,
-			&i.BillingProviderIntent.Actor,
-			&i.BillingProviderIntent.LastFailureReason,
-			&i.BillingProviderIntent.ExpiresAt,
-			&i.BillingProviderIntent.ResultEvidence,
-			&i.BillingProviderIntent.CreatedAt,
-			&i.BillingProviderIntent.ExecutedAt,
-			&i.BillingProviderIntent.UpdatedAt,
-			&i.BillingProviderIntent.PspID,
-			&i.BillingProviderIntent.DestructiveRunID,
-			&i.BillingProviderIntent.DestructiveRunClass,
-			&i.BillingProviderIntent.CustodianID,
-			&i.BillingProviderIntent.Subject,
-			&i.BillingProviderIntent.Credential,
-			&i.BillingProviderIntent.DestructiveActionID,
-			&i.BillingProviderIntent.SentAttempt,
-			&i.PaymentID,
-			&i.PaymentCustomerID,
-			&i.PaymentInvoiceID,
-			&i.PaymentPspID,
-			&i.PaymentRail,
-			&i.PaymentTransactionID,
-			&i.PaymentAmount,
-			&i.PaymentCurrency,
-			&i.PaymentStatus,
-			&i.LedgerAmount,
-			&i.LedgerMatches,
 		); err != nil {
 			return nil, err
 		}

@@ -694,6 +694,162 @@ type BillingIdempotencyKey struct {
 	UpdatedAt      time.Time
 }
 
+// One payable (in_ id): frozen lines and total in one currency, paid by at most one live invoice attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from invoice_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the invoice. Retention: unpaid canceled and expired invoices that never started a payment attempt are deleted 397 days after they closed; every other invoice is permanent.
+type BillingInvoice struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	// customer (the customer's own purchase), merchant (an unpaid invoice the merchant created for them), subscription (a renewal of an engine-owned subscription) or usage (owed charges billed in arrears for a period).
+	Origin string
+	// open (takes payment, or awaits the customer's action on it), processing (the provider has its payment), complete (paid and fulfilled), canceled or expired (a purchase closed unpaid), void (a renewal its subscription's end left unowed, or a usage invoice the merchant voided), uncollectible (a usage invoice the merchant wrote off; collecting it reopens it).
+	Status   string
+	Currency string
+	Total    int64
+	// The invoice number, taken from invoice_number_seq when the invoice completes; unique per merchant, not consecutive.
+	Number         *int64
+	IdempotencyKey *string
+	RequestDigest  []byte
+	// The card the latest attempt charged; a card the attempt saved from the customer's token stays as evidence after it is removed.
+	PaymentMethodID *uuid.UUID
+	PspID           *uuid.UUID
+	// The invoice attempt last started for the invoice.
+	AttemptID        *uuid.UUID
+	PaymentID        *uuid.UUID
+	LastPaymentError []byte
+	// When an unpaid purchase expires; a renewal has none.
+	ExpiresAt   *time.Time
+	CompletedAt *time.Time
+	CanceledAt  *time.Time
+	ExpiredAt   *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	// The payment's own status: requires_payment_method (none yet, or the last declined: last_payment_error), requires_action, processing or succeeded. A closed invoice paid late is succeeded with its payment refunded.
+	PaymentStatus string
+	// sha256 of the pay URL's secret; the secret is never stored. Set once on a merchant invoice; on a customer's own invoice, again each time the customer asks for its pay URL, which ends the last.
+	PayUrlSecretHash []byte
+	// When the pay URL stops working; no later than the invoice's own expiry.
+	PayUrlExpiresAt *time.Time
+	// Where a merchant invoice's pay URL returns once paid. NULL on a customer's own embedded pay URL, which returns nowhere: the frame tells its page.
+	SuccessUrl          *string
+	CancelUrl           *string
+	SavedPaymentMethods *bool
+	SubscriptionID      *uuid.UUID
+	PeriodStartsAt      *time.Time
+	PeriodEndsAt        *time.Time
+	// When a renewal is owed: its period's start. An open invoice past it is overdue.
+	DueAt    *time.Time
+	VoidedAt *time.Time
+	// A usage invoice's paid part: its payments, remittances and the funded balance that repaid it. Complete once it is the total.
+	AmountPaid      *int64
+	UncollectibleAt *time.Time
+	// A usage invoice's collection: charge_automatically (charged to the currency's collection card) or send_invoice (the customer remits).
+	CollectionMethod       *string
+	PoNumber               *string
+	Memo                   *string
+	Tax                    []byte
+	BillingContacts        []byte
+	CollectionFailureCount *int32
+	// A usage invoice's first declined collection, which its retry schedule counts from.
+	CollectionFailedAt *time.Time
+	// When a usage invoice's next scheduled charge runs: its due date when it opens, then the retry schedule's; NULL while none is scheduled (stopped until the customer designates a card).
+	NextCollectionAttemptAt *time.Time
+	// Frozen collection authority: engine, NMI schedule with existing OpenRails dunning, or provider billing. A provider bill is never a generic local charge command.
+	CollectionOwner string
+	// Initial observed enrollment, renewal, or a separate adjustment bill. Provider bills use scoped provider identity rather than period timestamps as document identity.
+	SubscriptionBillKind *string
+	// sha256 of a customer invoice's lines (prices, quantities, amounts), which POST /v1/me/invoices finds its open invoice by. NULL on a cart's invoice and every other origin.
+	LinesDigest []byte
+	// The merchant's page frames the pay URL, only on its registered origins (settings payment_page.embed_origins); otherwise the customer is sent to it.
+	Embedded *bool
+	// Set on a checkout when it was created: reactivated when the customer had MRR with the merchant and has none now, new on a first purchase without MRR history, returning otherwise.
+	CustomerType *string
+	// Set on a checkout (an invoice OpenRails started for its customer to pay): 1 + the customer's paid purchases when it was created. Two checkouts open at once can share one. NULL on every other invoice and on checkouts created before it was recorded.
+	PurchaseNumber *int32
+	// When the customer first read the open checkout in person (the payment form loaded), or created it with its payment.
+	OpenedAt *time.Time
+	// When the customer first asked to pay the checkout, whatever the answer.
+	SubmittedAt *time.Time
+	// ISO 3166-1 alpha-2 country of the billing address the latest pay request gave, or of the saved card it charged.
+	BillingCountry *string
+	// ISO 3166-1 alpha-2 issuing country of the card; not recorded yet.
+	CardCountry *string
+	// ISO 3166-1 alpha-2 country a Cloudflare proxy reported for the customer's first request in person. The address itself is never stored.
+	IpCountry *string
+	// The language the customer's first request in person preferred (Accept-Language), as language[-region].
+	Language            *string
+	AttributionSource   *string
+	AttributionMedium   *string
+	AttributionCampaign *string
+	AttributionTerm     *string
+	AttributionContent  *string
+	// The host of the referrer the merchant reported; never its path or query.
+	AttributionReferrer  *string
+	AttributionAffiliate *string
+	// On a subscription's bill: the checkout that bought the subscription, whose facts its money is reported under.
+	CheckoutInvoiceID *uuid.UUID
+}
+
+// An invoice payment attempt: provider execution and any customer action are tied to the invoice. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.
+type BillingInvoiceAttempt struct {
+	ID             uuid.UUID
+	Rail           string
+	Status         string
+	Amount         *int64
+	Currency       *string
+	ExpiresAt      *time.Time
+	Reference      *string
+	TransactionID  *string
+	PaymentID      *uuid.UUID
+	SubscriptionID *uuid.UUID
+	RailFields     []byte
+	RailState      []byte
+	Metadata       []byte
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	// PSP selected for this attempt. Required.
+	PspID uuid.UUID
+	// Soft delete: set, the row is invisible to every live read. Only `openrails prune` sets it, and `openrails undo-run` clears it.
+	DeletedAt           *time.Time
+	DestructiveRunID    *uuid.UUID
+	DestructiveRunClass *string
+	// The invoice this payment attempt pays.
+	InvoiceID *uuid.UUID
+}
+
+// One line of an invoice, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their invoice.
+type BillingInvoiceLine struct {
+	MerchantID  uuid.UUID
+	ID          uuid.UUID
+	InvoiceID   uuid.UUID
+	CustomerID  uuid.UUID
+	Position    int32
+	PriceID     *uuid.UUID
+	ProductID   *uuid.UUID
+	Description string
+	Quantity    *int32
+	UnitAmount  int64
+	Amount      int64
+	Ownership   *string
+	// product:<id> or tier_group:<group>: the ownership a unique line claims while its invoice is live.
+	ClaimKey             *string
+	BillingIntervalHours *int32
+	AccessDurationHours  *int32
+	CreditGrant          []byte
+	SubscriptionID       *uuid.UUID
+	ProductAccessID      *uuid.UUID
+	CreatedAt            time.Time
+	// A usage line's accrual source (e.g. metered:<meter>); NULL on a priced line.
+	Source *string
+	// The finalized provider amount is authoritative, including exact seat rounding and explicit signed provider adjustments; quantity and unit amount remain the accepted snapshot.
+	ProviderAmount bool
+	// Frozen access choice accepted on a provider bill: use its verified service-period end, otherwise the explicit hourly duration.
+	ProviderAccessDefault bool
+	// Accepted calendar-month cadence. NULL preserves historical fixed-hour and one-time lines. The initial completed invoice fixes the UTC calendar anchor.
+	BillingIntervalMonths *int32
+}
+
 // One gate's lease, or a batch job's usage stream: its numbered usage and its in-flight report. It is live while it is not closed and synced within the lease lifetime; a later sync makes it live again. Retention: rows are deleted 61 days after last_sync_at.
 type BillingLease struct {
 	MerchantID uuid.UUID
@@ -1303,162 +1459,6 @@ type BillingOperationLog struct {
 	CustodianID *uuid.UUID
 	// The subscription the operation acted on, for a subscription's history.
 	SubscriptionID *uuid.UUID
-}
-
-// One payable (in_ id): frozen lines and total in one currency, paid by at most one live invoice attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from invoice_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the invoice. Retention: unpaid canceled and expired invoices that never started a payment attempt are deleted 397 days after they closed; every other invoice is permanent.
-type BillingInvoice struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-	// customer (the customer's own purchase), merchant (an unpaid invoice the merchant created for them), subscription (a renewal of an engine-owned subscription) or usage (owed charges billed in arrears for a period).
-	Origin string
-	// open (takes payment, or awaits the customer's action on it), processing (the provider has its payment), complete (paid and fulfilled), canceled or expired (a purchase closed unpaid), void (a renewal its subscription's end left unowed, or a usage invoice the merchant voided), uncollectible (a usage invoice the merchant wrote off; collecting it reopens it).
-	Status   string
-	Currency string
-	Total    int64
-	// The invoice number, taken from invoice_number_seq when the invoice completes; unique per merchant, not consecutive.
-	Number         *int64
-	IdempotencyKey *string
-	RequestDigest  []byte
-	// The card the latest attempt charged; a card the attempt saved from the customer's token stays as evidence after it is removed.
-	PaymentMethodID *uuid.UUID
-	PspID           *uuid.UUID
-	// The invoice attempt last started for the invoice.
-	AttemptID        *uuid.UUID
-	PaymentID        *uuid.UUID
-	LastPaymentError []byte
-	// When an unpaid purchase expires; a renewal has none.
-	ExpiresAt   *time.Time
-	CompletedAt *time.Time
-	CanceledAt  *time.Time
-	ExpiredAt   *time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	// The payment's own status: requires_payment_method (none yet, or the last declined: last_payment_error), requires_action, processing or succeeded. A closed invoice paid late is succeeded with its payment refunded.
-	PaymentStatus string
-	// sha256 of the pay URL's secret; the secret is never stored. Set once on a merchant invoice; on a customer's own invoice, again each time the customer asks for its pay URL, which ends the last.
-	PayUrlSecretHash []byte
-	// When the pay URL stops working; no later than the invoice's own expiry.
-	PayUrlExpiresAt *time.Time
-	// Where a merchant invoice's pay URL returns once paid. NULL on a customer's own embedded pay URL, which returns nowhere: the frame tells its page.
-	SuccessUrl          *string
-	CancelUrl           *string
-	SavedPaymentMethods *bool
-	SubscriptionID      *uuid.UUID
-	PeriodStartsAt      *time.Time
-	PeriodEndsAt        *time.Time
-	// When a renewal is owed: its period's start. An open invoice past it is overdue.
-	DueAt    *time.Time
-	VoidedAt *time.Time
-	// A usage invoice's paid part: its payments, remittances and the funded balance that repaid it. Complete once it is the total.
-	AmountPaid      *int64
-	UncollectibleAt *time.Time
-	// A usage invoice's collection: charge_automatically (charged to the currency's collection card) or send_invoice (the customer remits).
-	CollectionMethod       *string
-	PoNumber               *string
-	Memo                   *string
-	Tax                    []byte
-	BillingContacts        []byte
-	CollectionFailureCount *int32
-	// A usage invoice's first declined collection, which its retry schedule counts from.
-	CollectionFailedAt *time.Time
-	// When a usage invoice's next scheduled charge runs: its due date when it opens, then the retry schedule's; NULL while none is scheduled (stopped until the customer designates a card).
-	NextCollectionAttemptAt *time.Time
-	// Frozen collection authority: engine, NMI schedule with existing OpenRails dunning, or provider billing. A provider bill is never a generic local charge command.
-	CollectionOwner string
-	// Initial observed enrollment, renewal, or a separate adjustment bill. Provider bills use scoped provider identity rather than period timestamps as document identity.
-	SubscriptionBillKind *string
-	// sha256 of a customer invoice's lines (prices, quantities, amounts), which POST /v1/me/invoices finds its open invoice by. NULL on a cart's invoice and every other origin.
-	LinesDigest []byte
-	// The merchant's page frames the pay URL, only on its registered origins (settings payment_page.embed_origins); otherwise the customer is sent to it.
-	Embedded *bool
-	// Set on a checkout when it was created: reactivated when the customer had MRR with the merchant and has none now, new on a first purchase without MRR history, returning otherwise.
-	CustomerType *string
-	// Set on a checkout (an invoice OpenRails started for its customer to pay): 1 + the customer's paid purchases when it was created. Two checkouts open at once can share one. NULL on every other invoice and on checkouts created before it was recorded.
-	PurchaseNumber *int32
-	// When the customer first read the open checkout in person (the payment form loaded), or created it with its payment.
-	OpenedAt *time.Time
-	// When the customer first asked to pay the checkout, whatever the answer.
-	SubmittedAt *time.Time
-	// ISO 3166-1 alpha-2 country of the billing address the latest pay request gave, or of the saved card it charged.
-	BillingCountry *string
-	// ISO 3166-1 alpha-2 issuing country of the card; not recorded yet.
-	CardCountry *string
-	// ISO 3166-1 alpha-2 country a Cloudflare proxy reported for the customer's first request in person. The address itself is never stored.
-	IpCountry *string
-	// The language the customer's first request in person preferred (Accept-Language), as language[-region].
-	Language            *string
-	AttributionSource   *string
-	AttributionMedium   *string
-	AttributionCampaign *string
-	AttributionTerm     *string
-	AttributionContent  *string
-	// The host of the referrer the merchant reported; never its path or query.
-	AttributionReferrer  *string
-	AttributionAffiliate *string
-	// On a subscription's bill: the checkout that bought the subscription, whose facts its money is reported under.
-	CheckoutInvoiceID *uuid.UUID
-}
-
-// An invoice payment attempt: provider execution and any customer action are tied to the invoice. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.
-type BillingInvoiceAttempt struct {
-	ID             uuid.UUID
-	Rail           string
-	Status         string
-	Amount         *int64
-	Currency       *string
-	ExpiresAt      *time.Time
-	Reference      *string
-	TransactionID  *string
-	PaymentID      *uuid.UUID
-	SubscriptionID *uuid.UUID
-	RailFields     []byte
-	RailState      []byte
-	Metadata       []byte
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	// PSP selected for this attempt. Required.
-	PspID uuid.UUID
-	// Soft delete: set, the row is invisible to every live read. Only `openrails prune` sets it, and `openrails undo-run` clears it.
-	DeletedAt           *time.Time
-	DestructiveRunID    *uuid.UUID
-	DestructiveRunClass *string
-	// The invoice this payment attempt pays.
-	InvoiceID *uuid.UUID
-}
-
-// One line of an invoice, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their invoice.
-type BillingInvoiceLine struct {
-	MerchantID  uuid.UUID
-	ID          uuid.UUID
-	InvoiceID   uuid.UUID
-	CustomerID  uuid.UUID
-	Position    int32
-	PriceID     *uuid.UUID
-	ProductID   *uuid.UUID
-	Description string
-	Quantity    *int32
-	UnitAmount  int64
-	Amount      int64
-	Ownership   *string
-	// product:<id> or tier_group:<group>: the ownership a unique line claims while its invoice is live.
-	ClaimKey             *string
-	BillingIntervalHours *int32
-	AccessDurationHours  *int32
-	CreditGrant          []byte
-	SubscriptionID       *uuid.UUID
-	ProductAccessID      *uuid.UUID
-	CreatedAt            time.Time
-	// A usage line's accrual source (e.g. metered:<meter>); NULL on a priced line.
-	Source *string
-	// The finalized provider amount is authoritative, including exact seat rounding and explicit signed provider adjustments; quantity and unit amount remain the accepted snapshot.
-	ProviderAmount bool
-	// Frozen access choice accepted on a provider bill: use its verified service-period end, otherwise the explicit hourly duration.
-	ProviderAccessDefault bool
-	// Accepted calendar-month cadence. NULL preserves historical fixed-hour and one-time lines. The initial completed invoice fixes the UTC calendar anchor.
-	BillingIntervalMonths *int32
 }
 
 // Owed charges awaiting their usage invoice: an accrual is born pending and gates arrears exposure; finalization moves it onto an invoice (invoice_id, status billed), so it bills once. Retention: permanent, never pruned.
