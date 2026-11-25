@@ -211,7 +211,6 @@ Does not apply: the engine is read-only, and the dashboard's only write replaces
 - OR-J53-S07 checks that a card merchant's chargeback ratio tile and the VAMP and ECM charts carry the programs' levels from `disputerules.ProgramLines` with the months each is in force, and that one chargeback under VAMP's minimum count reaches no level whatever its ratio.
 - OR-J42-S30 plans every MRR measure by itself, by each of its dimensions, by two, and filtered by currency and by product, over time and not, in UTC and New York, with sequential scans off (`metrics.Statements`): no relation is scanned whole, every scan's index condition names the merchant, and a rollup kept by time is read by its time.
 - OR-J42-S32 settles MRR leaving a product, a currency and a customer (at once and at a period's end through the billing pass), the product totals and distinct customers falling to none.
-- OR-J31-S17 upgrades a database holding a cancel of every kind through the reporting rollups, adopting one cancel decision of each.
 - OR-J42-S33 ends a counted customer's subscription with a full refund that revokes access: the refund and its replay finalize, and the distinct customers fall once.
 - OR-J14-S70 (`rebills` missed), OR-J17-S01 (`mrr`, `scheduled_mrr`), OR-J23-S16 (`limits_reached`) and OR-J42-S11 to S15 (`mrr_at_risk`, `at_risk_recovery_rate`) query through the Go client over real PostgreSQL.
 - OR-J38-S85 shows credits sold in the merchant's own units at each unit's scale with its name.
