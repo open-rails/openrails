@@ -21,12 +21,12 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 	"github.com/open-rails/openrails/server/internal/operator"
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
@@ -88,7 +88,7 @@ func newBillingExportCmd() *cobra.Command {
 			}
 			ctx, stop := opts.context(cmd.Context())
 			defer stop()
-			cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+			cfg := hostconfig.Engine(cmd.Context())
 			var bytes int64
 			err = writeBillingArchive(out, overwrite, func(w io.Writer) error {
 				client, close, err := openBillingArchiveClient(ctx, cfg, opts, mid, false)
@@ -143,7 +143,7 @@ func newBillingImportCmd() *cobra.Command {
 			defer f.Close()
 			ctx, stop := opts.context(cmd.Context())
 			defer stop()
-			cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+			cfg := hostconfig.Engine(cmd.Context())
 			client, close, err := openBillingArchiveClient(ctx, cfg, opts, mid, true)
 			if err != nil {
 				return err
@@ -196,7 +196,7 @@ func parseBillingArchiveMerchant(value string) (billing.MerchantID, error) {
 
 // A local import queues the wakes of the operations it restores: queueJobs
 // binds a River producer.
-func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts billingArchiveOptions, mid billing.MerchantID, queueJobs bool) (*openrails.Client, func(), error) {
+func openBillingArchiveClient(ctx context.Context, cfg *billing.Config, opts billingArchiveOptions, mid billing.MerchantID, queueJobs bool) (*openrails.Client, func(), error) {
 	if strings.TrimSpace(opts.url) != "" {
 		return remoteMerchant(ctx, opts.url, opts.tokenFile, mid)
 	}
@@ -417,20 +417,4 @@ func validateBillingPrepareTarget(unbound bool, slug, ownerID string) error {
 		return fmt.Errorf("provide --owner-user-id, or use --unbound-merchants")
 	}
 	return nil
-}
-
-// Export/import and host-local provisioning need only a database pool.
-// Hosted provisioning still validates the full AuthKit runtime configuration.
-func isDatabaseOnlyBillingCommand(cmd *cobra.Command) bool {
-	if cmd.Parent() == nil || cmd.Parent().Name() != "billing" {
-		return false
-	}
-	switch cmd.Name() {
-	case "export", "import":
-		return true
-	case "prepare-target":
-		unbound, _ := cmd.Flags().GetBool("unbound-merchants")
-		return unbound
-	}
-	return false
 }

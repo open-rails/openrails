@@ -253,7 +253,7 @@ func TestRoutePermissions(t *testing.T) {
 		all, none := newCatalogProbe(t, func(w *world) {
 			w.cfg.Vault = vault.Config()
 			w.deps.Vault = vault.Client()
-			w.cfg.LLM = &openrails.LLMConfig{APIKey: "stub", BaseURL: llm.URL, CatalogCopilotEnabled: true}
+			w.cfg.LLM = billing.LLMConfig{APIKey: "stub", BaseURL: llm.URL, CatalogCopilotEnabled: true}
 		}).probe(t)
 		require.Empty(t, none, "every gated route mounts with Vault and an LLM")
 		require.Equal(t, checked+len(unmounted), all)
@@ -520,7 +520,7 @@ func TestDirectoryAuthority(t *testing.T) {
 		a, _ := newPaymentWorld(t, func(w *world) {
 			w.deps.UserInfo = nil
 			w.deps.Email = mail
-			w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{ErasurePerHour: 1}
+			w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ErasurePerHour: 1}
 		})
 		startFleet(t, a.world)
 		token, err := a.alphaRemote.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "directory"})
@@ -578,7 +578,7 @@ func TestDirectoryAuthority(t *testing.T) {
 			operator = c.Roles.Root.Role("hold-operator", mustPermission(t, string(billing.RootConfigManage)), mustPermission(t, string(billing.RootAdminRateLimitsUnlock)))
 		}, func(w *world) {
 			w.deps.UserInfo = nil
-			w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{ErasurePerHour: 2, ActorPerHour: 2, MerchantPerHour: 2}
+			w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ErasurePerHour: 2, ActorPerHour: 2, MerchantPerHour: 2}
 		})
 		fleet := quietFleet(t, a.world)
 		token, err := a.alphaRemote.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "directory"})

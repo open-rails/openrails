@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// flatten is every key with a value in v, by its koanf path.
+// flatten is every key with a value in v, by its yaml path.
 func flatten(prefix string, v reflect.Value, out map[string]string) {
 	for v.Kind() == reflect.Pointer {
 		if v.IsNil() {
@@ -25,13 +25,12 @@ func flatten(prefix string, v reflect.Value, out map[string]string) {
 		return
 	}
 	for i := 0; i < v.NumField(); i++ {
-		name, opts, _ := strings.Cut(v.Type().Field(i).Tag.Get("koanf"), ",")
+		name, opts, _ := strings.Cut(v.Type().Field(i).Tag.Get("yaml"), ",")
 		path := prefix
 		switch {
-		case opts == "squash":
+		case opts == "inline":
 		case name == "" || name == "-":
-			name = snake(v.Type().Field(i).Name)
-			fallthrough
+			continue
 		default:
 			path = strings.TrimPrefix(prefix+"."+name, ".")
 		}
@@ -40,18 +39,6 @@ func flatten(prefix string, v reflect.Value, out map[string]string) {
 		}
 		flatten(path, v.Field(i), out)
 	}
-}
-
-// snake is an untagged field's key: matchField reads it without underscores.
-func snake(field string) string {
-	var b strings.Builder
-	for i, r := range field {
-		if i > 0 && r >= 'A' && r <= 'Z' {
-			b.WriteByte('_')
-		}
-		b.WriteRune(r)
-	}
-	return strings.ToLower(b.String())
 }
 
 var (
@@ -100,19 +87,21 @@ func sameValue(want, doc string) bool {
 // configuration reference states.
 func TestTheReferenceStatesEveryDefault(t *testing.T) {
 	want := map[string]string{}
-	flatten("", reflect.ValueOf(defaults()), want)
-	f := defaults()
-	cfg, err := f.config()
+	d := defaults()
+	flatten("", reflect.ValueOf(d.Server), want)
+	flatten("", reflect.ValueOf(d), want)
+	configPath, _ := isolate(t)
+	cfg, err := Load(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want["public_billing_base_url"] = cfg.PublicBillingBaseURL
-	want["db.url"] = defaultDatabaseURL
-	want["naming.former_names.duration"] = f.Naming.FormerNames.Duration.String()
+	want["public_billing_base_url"] = cfg.Server.Engine.PublicBillingBaseURL
+	want["database.url"] = defaultDatabaseURL
+	want["naming.former_names.duration"] = cfg.Server.Naming.FormerNames.Duration.String()
 	want["auth.token.issuer"] = "public_billing_base_url"
-	want["auth.default_tenant_id"] = cfg.Auth.DefaultTenantID.String()
-	want["auth.token.refresh_token_duration"] = cfg.Auth.Token.RefreshTokenDuration.String()
-	want["auth.database.schema"] = cfg.Auth.Database.Schema
+	want["auth.default_tenant_id"] = cfg.Server.Auth.DefaultTenantID.String()
+	want["auth.token.refresh_token_duration"] = cfg.Server.Auth.Token.RefreshTokenDuration.String()
+	want["auth.database.schema"] = cfg.Server.Auth.Database.Schema
 	documented := standaloneDefaults(t)
 	for key, value := range want {
 		values, ok := documented[key]
@@ -140,12 +129,12 @@ func TestAnEmptyConfigurationLoadsTheDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	for got, want := range map[string]string{
-		cfg.DB.URL:                        defaultDatabaseURL,
-		cfg.PublicBillingBaseURL:          "http://localhost:3053",
-		cfg.Auth.Token.Issuer:             "http://localhost:3053",
-		cfg.Auth.DefaultTenantID.String(): localTenantID.String(),
-		cfg.Database.Schema:               "billing",
-		fmt.Sprint(cfg.Port):              "3053",
+		cfg.Database.URL:                         defaultDatabaseURL,
+		cfg.Server.Engine.PublicBillingBaseURL:   "http://localhost:3053",
+		cfg.Server.Auth.Token.Issuer:             "http://localhost:3053",
+		cfg.Server.Auth.DefaultTenantID.String(): localTenantID.String(),
+		cfg.Server.Engine.Database.Schema:        "billing",
+		fmt.Sprint(cfg.Server.Port):              "3053",
 	} {
 		if got != want {
 			t.Errorf("got %q, want %q", got, want)
@@ -165,7 +154,7 @@ func TestOnlyALoopbackIssuerTakesTheLocalTenant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Auth.Token.Issuer != "https://billing.example.com" || !cfg.Auth.DefaultTenantID.IsZero() {
-		t.Fatalf("issuer %q, tenant %s", cfg.Auth.Token.Issuer, cfg.Auth.DefaultTenantID)
+	if a := cfg.Server.Auth; a.Token.Issuer != "https://billing.example.com" || !a.DefaultTenantID.IsZero() {
+		t.Fatalf("issuer %q, tenant %s", a.Token.Issuer, a.DefaultTenantID)
 	}
 }

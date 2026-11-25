@@ -42,7 +42,7 @@ type Pins interface {
 
 // Cranker is one listed cranker.
 type Cranker struct {
-	// Name names it without its secret (config.SolanaCrankerConfig.Name).
+	// Name names it without its secret (billing.SolanaCrankerConfig.Name).
 	Name   string
 	Signer solanaint.Signer
 }
@@ -63,7 +63,7 @@ func NewCrankers(pins Pins, crankers ...Cranker) *Crankers {
 }
 
 // BuildCrankers builds the configured crankers; none when none is listed.
-func BuildCrankers(cfgs []config.SolanaCrankerConfig, transit solanaint.TransitClient, pins Pins) (*Crankers, error) {
+func BuildCrankers(cfgs []billing.SolanaCrankerConfig, transit solanaint.TransitClient, pins Pins) (*Crankers, error) {
 	crankers := make([]Cranker, 0, len(cfgs))
 	for i, cfg := range cfgs {
 		var signer solanaint.Signer

@@ -3,47 +3,24 @@ package config
 import (
 	"fmt"
 	"time"
+
+	"github.com/open-rails/openrails/billing"
 )
 
-// NamingConfig is the site naming policy for merchant names and usernames:
-// whether a name may change, how often, and how long a former name keeps
-// forwarding. Unset fields take the defaults: renames on, every 72 hours,
-// former names kept 90 days.
-type NamingConfig struct {
-	Enabled        *bool
-	RenameInterval *time.Duration
-	FormerNames    FormerNamesConfig
-}
-
-// FormerNamesConfig says how long a former name keeps forwarding. Duration
-// applies to FormerNamesFinite only.
-type FormerNamesConfig struct {
-	Mode     FormerNamesMode
-	Duration *time.Duration
-}
-
-// FormerNamesMode selects how long a former name keeps forwarding.
-type FormerNamesMode string
-
-const (
-	FormerNamesFinite    FormerNamesMode = "finite"
-	FormerNamesForever   FormerNamesMode = "forever"
-	FormerNamesImmediate FormerNamesMode = "immediate"
-)
-
-// NamingPolicy is a validated NamingConfig.
+// NamingPolicy is a validated billing.NamingConfig.
 type NamingPolicy struct {
 	Enabled        bool
 	RenameInterval time.Duration
-	FormerNames    FormerNamesMode
+	FormerNames    billing.FormerNamesMode
 	// FormerNameRetention is the alias lifetime under FormerNamesFinite.
 	FormerNameRetention time.Duration
 }
 
-// NormalizeNaming validates c and applies its defaults. A finite retention of
-// zero is immediate; the other modes take no duration.
-func NormalizeNaming(c NamingConfig) (NamingPolicy, error) {
-	p := NamingPolicy{Enabled: DefaultNamingEnabled, RenameInterval: DefaultRenameInterval, FormerNames: DefaultFormerNamesMode, FormerNameRetention: DefaultFormerNamesDuration}
+// NormalizeNaming validates c, whose defaults server.Config.WithDefaults has
+// filled. A
+// finite retention of zero is immediate; the other modes take no duration.
+func NormalizeNaming(c billing.NamingConfig) (NamingPolicy, error) {
+	p := NamingPolicy{FormerNames: c.FormerNames.Mode}
 	if c.Enabled != nil {
 		p.Enabled = *c.Enabled
 	}
@@ -53,11 +30,8 @@ func NormalizeNaming(c NamingConfig) (NamingPolicy, error) {
 	if p.RenameInterval < 0 {
 		return NamingPolicy{}, fmt.Errorf("naming.rename_interval must be nonnegative")
 	}
-	if c.FormerNames.Mode != "" {
-		p.FormerNames = c.FormerNames.Mode
-	}
 	switch p.FormerNames {
-	case FormerNamesFinite:
+	case billing.FormerNamesFinite:
 		if c.FormerNames.Duration != nil {
 			p.FormerNameRetention = *c.FormerNames.Duration
 		}
@@ -65,9 +39,9 @@ func NormalizeNaming(c NamingConfig) (NamingPolicy, error) {
 			return NamingPolicy{}, fmt.Errorf("naming.former_names.duration must be nonnegative")
 		}
 		if p.FormerNameRetention == 0 {
-			p.FormerNames = FormerNamesImmediate
+			p.FormerNames = billing.FormerNamesImmediate
 		}
-	case FormerNamesForever, FormerNamesImmediate:
+	case billing.FormerNamesForever, billing.FormerNamesImmediate:
 		if c.FormerNames.Duration != nil {
 			return NamingPolicy{}, fmt.Errorf("naming.former_names.duration requires finite retention")
 		}

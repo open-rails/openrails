@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 )
 
@@ -39,7 +40,7 @@ func (s *Service) now() time.Time {
 
 func (s *Service) overlapWindow() time.Duration {
 	if s == nil || s.webhookSecretOverlap <= 0 {
-		return config.DefaultWebhookSecretOverlap
+		return billing.DefaultConfig().WebhookSecretOverlap
 	}
 	return s.webhookSecretOverlap
 }

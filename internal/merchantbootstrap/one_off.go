@@ -11,7 +11,6 @@ import (
 	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -33,7 +32,7 @@ type Merchants struct {
 // OpenMerchants builds the merchant configuration a one-off process reads:
 // Vault, over client, when a KV mount is named, else an empty file source the
 // caller fills. The database handle reads settings through it.
-func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB, client *vaultapi.Client) (*Merchants, error) {
+func OpenMerchants(ctx context.Context, cfg *billing.Config, database *db.DB, client *vaultapi.Client) (*Merchants, error) {
 	conn, err := vaultconn.Open(ctx, database.Log, cfg, client)
 	if err != nil {
 		return nil, err
@@ -93,7 +92,7 @@ func oneOffSync(svc *merchants.Service) merchantdocs.SyncFunc {
 // through: Vault when a KV mount is named; else the merchant's entry in the
 // manifest on disk fills a file source. No manifest and none at the
 // conventional path leaves the merchant without configuration: nothing arms.
-func OneOffMerchants(ctx context.Context, cfg *config.Config, database *db.DB, client *vaultapi.Client, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlays []string) (*Merchants, error) {
+func OneOffMerchants(ctx context.Context, cfg *billing.Config, database *db.DB, client *vaultapi.Client, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlays []string) (*Merchants, error) {
 	opened, err := OpenMerchants(ctx, cfg, database, client)
 	if err != nil {
 		return nil, err

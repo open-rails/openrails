@@ -52,12 +52,12 @@ func (s *Service) Rename(ctx context.Context, id billing.MerchantID, name string
 		if err := q.RenameMerchant(ctx, gen.RenameMerchantParams{ID: id.UUID(), Slug: name}); err != nil {
 			return err
 		}
-		if policy.FormerNames == config.FormerNamesImmediate {
+		if policy.FormerNames == billing.FormerNamesImmediate {
 			return nil
 		}
 		return q.InsertMerchantSlugAlias(ctx, gen.InsertMerchantSlugAliasParams{
 			Slug: row.Slug, MerchantID: id.UUID(),
-			Forever:          policy.FormerNames == config.FormerNamesForever,
+			Forever:          policy.FormerNames == billing.FormerNamesForever,
 			RetentionSeconds: policy.FormerNameRetention.Seconds(),
 		})
 	})

@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/hosttools"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 // catalogApplyOptions selects the merchant; mutation intent, including any
@@ -50,7 +50,7 @@ func runCatalogApply(cmd *cobra.Command, file string, opts catalogApplyOptions) 
 	if file == "" {
 		return fmt.Errorf("catalog file is required")
 	}
-	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+	cfg := hostconfig.Engine(cmd.Context())
 	manifest, err := cliMerchantManifest(cmd.Context(), opts.merchantManifest)
 	if err != nil {
 		return err

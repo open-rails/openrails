@@ -104,12 +104,12 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	defer h.stripe.Close()
 	srv, err := server.New(ctx, server.Config{
 		Engine: openrails.Config{
-			PublicBillingBaseURL: api, RateLimits: openrails.RateLimitsConfig{},
+			PublicBillingBaseURL: api, RateLimits: billing.RateLimitsConfig{},
 			CheckoutOrigin:  payment,
-			ProviderSandbox: &openrails.ProviderSandboxConfig{NMIGatewayURL: h.nmi.URL(), StripeAPIURL: h.stripe.URL()},
+			ProviderSandbox: billing.ProviderSandboxConfig{NMIGatewayURL: h.nmi.URL(), StripeAPIURL: h.stripe.URL()},
 			// Cloudflare's always-passes test keys: the page loads the widget,
 			// which the browser suite stands in for.
-			Captcha: &openrails.CaptchaConfig{Provider: "turnstile", SiteKey: "1x00000000000000000000AA", SecretKey: "1x0000000000000000000000000000000AA"},
+			Captcha: billing.CaptchaAccount{Provider: "turnstile", SiteKey: "1x00000000000000000000AA", SecretKey: "1x0000000000000000000000000000000AA"},
 			Merchants: []billing.MerchantDeclaration{{MerchantDocument: billing.MerchantDocument{Slug: "shop", DisplayName: "Purchase Shop", // The shop's own site, the API origin, frames its embedded payment pages.
 				MerchantSettings: billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{api}}}, PSPs: map[string]billing.PSPConfig{
 					"nmi":    openrails.NMIPSP{Environment: billing.EnvironmentSandbox, GatewayID: "e2e", SecurityKey: "e2e", WebhookSigningSecret: "e2e", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
@@ -124,7 +124,6 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 			HTTP:            &authkit.HTTPConfig{DirectPeerIP: true},
 		},
 		RouteGroups: openrails.RouteGroups{Admin: true, Programmatic: true},
-		Addr:        addr,
 	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Clock: h.clock, CheckoutAssets: os.DirFS(assets)}})
 	if err != nil {
 		return err

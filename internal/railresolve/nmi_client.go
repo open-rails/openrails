@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -30,7 +29,7 @@ type NMIClientResolver interface {
 // time, from the armed rail state. Nothing is cached, so a rotated credential
 // takes effect on the next call. MerchantsFn is late-bound.
 type NMIArmer struct {
-	Config      *config.Config
+	Config      *billing.Config
 	DB          *db.DB
 	MerchantsFn func() *merchants.Service
 	// Factory, when set, is the runtime's shared NMI factory (it carries the

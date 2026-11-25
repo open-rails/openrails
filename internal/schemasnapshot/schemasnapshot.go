@@ -22,9 +22,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/migrate"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
+	"github.com/open-rails/openrails/internal/sqlschema"
 )
 
 const (
@@ -138,7 +138,7 @@ func Capture(ctx context.Context, dsn string) ([]byte, error) {
 		return nil, fmt.Errorf("schema snapshot: %w", err)
 	}
 	defer conn.Close(context.WithoutCancel(ctx))
-	list, err := dump(ctx, conn, config.DefaultSchema)
+	list, err := dump(ctx, conn, sqlschema.Authored)
 	if err != nil {
 		return nil, fmt.Errorf("schema snapshot: %w", err)
 	}

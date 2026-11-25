@@ -44,7 +44,7 @@ func cliPool(ctx context.Context) (*pgxpool.Pool, error) {
 		return cli.pool, nil
 	}
 	h := hostconfig.FromContext(ctx)
-	if h.Config == nil {
+	if h == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
 	connect, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -67,7 +67,7 @@ func cliVault(ctx context.Context) (*vaultapi.Client, error) {
 		return cli.vault, nil
 	}
 	h := hostconfig.FromContext(ctx)
-	if h.Vault == nil {
+	if h == nil || h.Vault == nil {
 		cli.vaulted = true
 		return nil, nil
 	}
@@ -88,7 +88,7 @@ func cliVault(ctx context.Context) (*vaultapi.Client, error) {
 // nil without a clickhouse section.
 func cliEventStore(ctx context.Context) (*eventstore.Store, error) {
 	h := hostconfig.FromContext(ctx)
-	if h.ClickHouse == nil {
+	if h == nil || h.ClickHouse == nil {
 		return nil, nil
 	}
 	conn, err := hostdeps.ClickHouse(h.ClickHouse)
@@ -98,7 +98,7 @@ func cliEventStore(ctx context.Context) (*eventstore.Store, error) {
 	cli.mu.Lock()
 	cli.closes = append(cli.closes, func() { _ = conn.Close() })
 	cli.mu.Unlock()
-	return eventstore.Open(ctx, conn, config.ClickHouseDatabase(h.Config), eventstore.Options{Validate: true, Logger: slog.Default()})
+	return eventstore.Open(ctx, conn, config.ClickHouseDatabase(&h.Server.Engine), eventstore.Options{Validate: true, Logger: slog.Default()})
 }
 
 // cliDeps is the command's pool and Vault client.
@@ -119,7 +119,7 @@ func cliDeps(ctx context.Context) (*pgxpool.Pool, *vaultapi.Client, error) {
 // role flags do not select a tenant.
 func openCLIDB(ctx context.Context) (*db.DB, error) {
 	h := hostconfig.FromContext(ctx)
-	if h.Config == nil {
+	if h == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
 	connect, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -128,7 +128,7 @@ func openCLIDB(ctx context.Context) (*db.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}
-	database, err := db.NewOwningPGXPool(slog.Default(), pool, config.SchemaName(h.Config))
+	database, err := db.NewOwningPGXPool(slog.Default(), pool, config.SchemaName(&h.Server.Engine))
 	if err != nil {
 		pool.Close()
 		return nil, err

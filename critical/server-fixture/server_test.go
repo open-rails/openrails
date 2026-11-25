@@ -161,7 +161,7 @@ func TestServerFixture(t *testing.T) {
 	resourceScopes := map[string][]string{"fixture:host": {}, billing.ScopeSelf: {"merchant:*"}}
 	renameInterval := 72 * time.Hour
 	srv, err := server.New(t.Context(), server.Config{
-		Engine: openrails.Config{Database: openrails.DatabaseConfig{Schema: cfg.Schema, RiverSchema: cfg.Schema}, PublicBillingBaseURL: httpServer.URL, RateLimits: openrails.RateLimitsConfig{}, CheckoutOrigin: cfg.CheckoutOrigin},
+		Engine: openrails.Config{Database: billing.DatabaseConfig{Schema: cfg.Schema, RiverSchema: cfg.Schema}, PublicBillingBaseURL: httpServer.URL, RateLimits: billing.RateLimitsConfig{}, CheckoutOrigin: cfg.CheckoutOrigin},
 		Auth: authkit.Config{
 			DefaultTenantID: iam.NewTenantID(), Database: authkit.DatabaseConfig{Schema: cfg.Schema + "_auth", RiverSchema: cfg.Schema},
 			Token: authkit.TokenConfig{Issuer: httpServer.URL, AllowPrivateNetworkJWKS: true}, Resource: authkit.ResourceConfig{ID: httpServer.URL, PublicURL: httpServer.URL, Scopes: resourceScopes},
@@ -170,8 +170,8 @@ func TestServerFixture(t *testing.T) {
 			Agreements: []authkit.AgreementConfig{{Key: "network-terms", Version: "critical-v1", URL: "https://critical.invalid/network-terms"}},
 			HTTP:       &authkit.HTTPConfig{DirectPeerIP: true},
 		},
-		Naming:      server.NamingConfig{RenameInterval: &renameInterval},
-		LocalSignIn: true, AdminConsole: &server.AdminConsole{Disabled: true}, RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true},
+		Naming:      billing.NamingConfig{RenameInterval: &renameInterval},
+		LocalSignIn: true, AdminConsole: server.AdminConsole{Disabled: true}, RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true},
 	}, server.Deps{CustomerAdmissionPolicy: customerPolicy, Engine: openrails.Deps{Postgres: pool, Redis: shared, Clock: clock, FXTransport: wire{fx, transport}, CheckoutAssets: hostPaymentAssets(cfg.PaymentAssets)}, Auth: authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}}})
 	require.NoError(t, err)
 	defer srv.Close(context.Background())

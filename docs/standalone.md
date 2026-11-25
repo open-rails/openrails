@@ -50,7 +50,7 @@ host: 0.0.0.0
 port: 3053
 public_billing_base_url: http://localhost:3053 # where browsers and PSPs reach this server
 
-db:
+database:
   url: postgres://openrails:openrails@postgres:5432/openrails?sslmode=disable
 redis: # optional for one server; replicas share rate limits and spent proofs through it
   addr: redis:6379
@@ -142,20 +142,22 @@ proxy. Boot refuses an unknown key and a retired one (naming its replacement).
 
 ## Configuration sources
 
-Each key of `config.yaml` can come from four places; the later wins:
+Each key of `config.yaml` can come from three places; the later wins:
 
 1. `config.yaml` (`--config`/`-c`, else `OPENRAILS_CONFIG`, else `config.yaml`
    in the working directory or `config/`).
 2. Mounted secret files: a file named like the key's environment variable under
    `/vault/secrets` (`VAULT_SECRETS_PATH` names another directory). Vault Agent,
    a Kubernetes Secret or CSI renders them.
-3. The environment: the key's path upper-cased and joined by `_` (`db.url` is
-   `DB_URL`, `email_smtp.password` is `EMAIL_SMTP_PASSWORD`). A list is
-   comma-separated or a JSON array; a section may be a JSON object. A `.env` in
-   the working directory is loaded too, and the server logs that it did.
-4. Flags: `--merchant-manifest` on `run-server` and `run-worker`.
+3. The environment: the key's path upper-cased and joined by `_`
+   (`database.url` is `DATABASE_URL`, `email_smtp.password` is
+   `EMAIL_SMTP_PASSWORD`). A list is comma-separated or a JSON array; a section
+   may be a JSON object. A `.env` in the working directory is loaded too, and
+   the server logs that it did.
 
-Exceptions to the mechanical name: `VAULT_ADDR` is `vault.address` and `VAULT_CACERT` is `vault.ca_cert`; `AUTHKIT_ACTIVE_KEY_ID`, `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` and `AUTHKIT_PUBLIC_KEYS` are `signing_key.*`; `AUTH_<PATH>` is `auth.<path>` by AuthKit's keys (`AUTH_TOKEN_ISSUER`); `NAMING_FORMER_NAMES_MODE` and `NAMING_FORMER_NAMES_DURATION` are `naming.former_names.*`. Inside a section a key matches its field name with or without underscores (`db.sql_trace`).
+Exceptions to the mechanical name: `VAULT_ADDR` is `vault.address` and `VAULT_CACERT` is `vault.ca_cert`; `AUTHKIT_ACTIVE_KEY_ID`, `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` and `AUTHKIT_PUBLIC_KEYS` are `signing_key.*`; `AUTH_<PATH>` is `auth.<path>` by AuthKit's keys (`AUTH_TOKEN_ISSUER`); `NAMING_FORMER_NAMES_MODE` and `NAMING_FORMER_NAMES_DURATION` are `naming.former_names.*`. A key is spelled exactly as here.
+
+The file is two Go types: `server.Config`, whose `Engine` is `openrails.Config` with its keys at the top level, and the keys only the binary reads (the connections it opens, `logger`, `signing_key`, `cloudflare_proxies`, `rate_limits_disabled`, `merchant_manifest_overlays`). A key neither reads refuses boot. Embedded, decode the same keys into `openrails.Config` (its `yaml` tags).
 
 Three inputs configure a deployment, each on its own lifecycle:
 
@@ -180,7 +182,7 @@ keys: `host`, `port`, `private_port`, `logger`, `engine_admission_hold`,
 `usage_billing_enabled`, `event_retention`, `webhook_secret_overlap`,
 `merchant_manifest_overlays`, `route_groups`, `public_billing_base_url`,
 `checkout_origin`, `return_origins`, `trusted_proxies`,
-`cloudflare_proxies`, `db`, `database`, `clickhouse`, `redis`,
+`cloudflare_proxies`, `database`, `clickhouse`, `redis`,
 `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`,
 `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`,
 `rate_limits_disabled`, `captcha`, `user_action_rate_limit`,
@@ -227,12 +229,12 @@ the deployment does not serve answers `404 route_not_found`.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `db.url` | `postgres://app:app_password@localhost:5434/openrails_db?sslmode=disable` when no `db` key is set | the connection string (`DB_URL`); overrides the parts below. The default is Compose's Postgres: a deploy that forgets its database fails to connect |
-| `db.host`, `db.port`, `db.database`, `db.username`, `db.password` | none | the parts, when `db.url` is unset; all four of host, port, database and username or boot refuses |
-| `db.sslmode` | `verify-full`; `require` for a loopback host or Unix socket | libpq's `sslmode` for the parts |
-| `db.sslrootcert` | the system roots | PEM file of the CAs that verify the database's certificate, for the parts |
-| `db.sql_trace` | `false` | log every query at debug level |
-| `db.lease_conns` | `4` | the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls); count it in `max_connections` |
+| `database.url` | `postgres://app:app_password@localhost:5434/openrails_db?sslmode=disable` when no connection key is set | the connection string (`DATABASE_URL`); overrides the parts below. The default is Compose's Postgres: a deploy that forgets its database fails to connect |
+| `database.host`, `database.port`, `database.name`, `database.username`, `database.password` | none | the parts, when `database.url` is unset; all four of host, port, name and username or boot refuses |
+| `database.sslmode` | `verify-full`; `require` for a loopback host or Unix socket | libpq's `sslmode` for the parts |
+| `database.sslrootcert` | the system roots | PEM file of the CAs that verify the database's certificate, for the parts |
+| `database.sql_trace` | `false` | log every query at debug level |
+| `database.lease_conns` | `4` | the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls); count it in `max_connections` |
 | `database.schema` | `billing` | every OpenRails table, function and type; a plain identifier |
 | `database.river_schema` | the schema plus `_river` | OpenRails' River jobs |
 | `database.skip_migrations` | `false` | only check the migration ledger at boot; run `openrails migrate up` yourself |
@@ -341,12 +343,12 @@ root owner needs a second factor, so boot refuses without a 16, 24 or 32-byte
 | `rate_limits.<bucket>.requests_per_minute` | see [abuse limits](#abuse-limits) | per-minute limits of the `purchase`, `subscribe`, `payment`, `webhook` and `catalog-ask` buckets; a bucket left out keeps its default, an unknown key is reported and ignored, 0 or less means 60 |
 | `rate_limits_disabled` | `false` | make the middleware a passthrough where your gateway limits instead; captcha is off too |
 | `captcha.provider`, `captcha.site_key`, `captcha.secret_key` | `turnstile` | both keys set turn captcha on; `turnstile`, `recaptcha-v3` or `hcaptcha` |
-| `user_action_rate_limit.minimum_customers_per_hour`, `.paid_customers_per_hourly_customer` | 5, 400 | the merchant-wide hourly budget for customer cancellations and card removals |
-| `user_action_rate_limit.minimum_customers_per_day`, `.paid_customers_per_daily_customer` | 10, 100 | the daily one |
-| `destructive_action_limits.actor_per_hour`, `.actor_per_day` | 5, 15 | staff destructive actions per actor ([destructive holds](#destructive-holds)) |
-| `destructive_action_limits.merchant_per_hour`, `.merchant_per_day` | 15, 25 | per merchant, floors that rise with active customers |
-| `destructive_action_limits.deployment_per_hour`, `.deployment_per_day` | 50, 100 | per deployment, likewise |
-| `destructive_action_limits.erasure_per_hour`, `.erasure_per_day` | 100, 1000 | contact erasures over OpenRails' own SCIM routes per merchant, floors that rise with its directory; past them an erasure waits ([client](client.md#customers)) |
+| `user_action_rate_limit.minimum_customers_per_hour`, `user_action_rate_limit.paid_customers_per_hourly_customer` | `5`, `400` | the merchant-wide hourly budget for customer cancellations and card removals |
+| `user_action_rate_limit.minimum_customers_per_day`, `user_action_rate_limit.paid_customers_per_daily_customer` | `10`, `100` | the daily one |
+| `destructive_action_limits.actor_per_hour`, `destructive_action_limits.actor_per_day` | `5`, `15` | staff destructive actions per actor ([destructive holds](#destructive-holds)) |
+| `destructive_action_limits.merchant_per_hour`, `destructive_action_limits.merchant_per_day` | `15`, `25` | per merchant, floors that rise with active customers |
+| `destructive_action_limits.deployment_per_hour`, `destructive_action_limits.deployment_per_day` | `50`, `100` | per deployment, likewise |
+| `destructive_action_limits.erasure_per_hour`, `destructive_action_limits.erasure_per_day` | `100`, `1000` | contact erasures over OpenRails' own SCIM routes per merchant, floors that rise with its directory; past them an erasure waits ([client](client.md#customers)) |
 
 The example file sets the shipped buckets explicitly:
 
@@ -435,7 +437,7 @@ mounted file or the environment, named like its key's variable.
 
 | Secret | Where it goes |
 |---|---|
-| database URL | `DB_URL` (with `sslmode=verify-full` across a network) |
+| database URL | `DATABASE_URL` (with `sslmode=verify-full` across a network) |
 | Redis | `REDIS_URL` or `REDIS_PASSWORD`, `REDIS_CA_CERT` |
 | ClickHouse | `CLICKHOUSE_PASSWORD` |
 | SMTP | `EMAIL_SMTP_PASSWORD` |
@@ -756,7 +758,7 @@ count, primary or sticky session.
 - **Caches:** catalog, merchants, write posture, the kill switch and access are
   read per request. Merchant configuration is cached per instance (see
   [Vault](#vault)). An FX rate published more than 48 hours ago is never quoted.
-- **Connections:** size PostgreSQL `max_connections` for every instance's two pools (the engine's and its AuthKit's, of the same size), its `db.lease_conns` lease pool, and one connection per instance for each listener: unverified subscriptions, Solana Pay, customer messages, dispute responses, MRR risk changes and, with Vault configuration, configuration edits. `LISTEN` needs a session, so a pooler in front of the database must run in session mode, not transaction mode. The billing pass and merchant pulls hold lease rows, not sessions.
+- **Connections:** size PostgreSQL `max_connections` for every instance's two pools (the engine's and its AuthKit's, of the same size), its `database.lease_conns` lease pool, and one connection per instance for each listener: unverified subscriptions, Solana Pay, customer messages, dispute responses, MRR risk changes and, with Vault configuration, configuration edits. `LISTEN` needs a session, so a pooler in front of the database must run in session mode, not transaction mode. The billing pass and merchant pulls hold lease rows, not sessions.
 
 A webhook takes effect once per provider event: a concurrent copy waits up to
 10 seconds, then answers 500 so the provider retries. An idempotent request runs
@@ -1233,7 +1235,7 @@ files:
           jwks_uri: https://id.example.com/.well-known/jwks.json
 secrets:
   env:
-    DB_URL: {name: openrails-db-app, key: uri}
+    DATABASE_URL: {name: openrails-db-app, key: uri}
   files: [openrails-secrets]         # EMAIL_SMTP_PASSWORD, REDIS_PASSWORD, …
   authKeys: openrails-auth-keys      # keys.json and totp.key
 ingress:
@@ -1276,7 +1278,7 @@ A change to `config` or `files` rolls the pods.
 gh attestation verify oci://docker.io/openrails/openrails:vX.Y.Z --repo open-rails/openrails
 ```
 
-**Secrets.** `secrets.env` takes CloudNativePG's app Secret directly (`DB_URL: {name: openrails-db-app, key: uri}`). With External Secrets Operator, name each target key after its variable; with the Vault Agent Injector render one file per variable into `/vault/secrets` with `podAnnotations` and leave `secrets.files` empty. For Vault-held merchant configuration declare `config.vault` with `auth_method: kubernetes`: the chart mounts the pod's ServiceAccount token; bind the role in `k8s_role` to the ServiceAccount the chart creates (`<release>-openrails`, the release name alone when it contains `openrails`, or `serviceAccount.name`).
+**Secrets.** `secrets.env` takes CloudNativePG's app Secret directly (`DATABASE_URL: {name: openrails-db-app, key: uri}`). With External Secrets Operator, name each target key after its variable; with the Vault Agent Injector render one file per variable into `/vault/secrets` with `podAnnotations` and leave `secrets.files` empty. For Vault-held merchant configuration declare `config.vault` with `auth_method: kubernetes`: the chart mounts the pod's ServiceAccount token; bind the role in `k8s_role` to the ServiceAccount the chart creates (`<release>-openrails`, the release name alone when it contains `openrails`, or `serviceAccount.name`).
 
 ```sh
 kubectl -n openrails create secret generic openrails-auth-keys --from-file=keys.json --from-file=totp.key
@@ -1286,7 +1288,7 @@ kubectl -n openrails create secret generic openrails-secrets --from-literal=EMAI
 **PostgreSQL** needs version 18 and one role owning its database: a
 CloudNativePG cluster (`imageName: ghcr.io/cloudnative-pg/postgresql:18`,
 `bootstrap.initdb: {database: openrails, owner: openrails}`) writes the
-`openrails-db-app` Secret whose `uri` key is `DB_URL`. **Redis** or Garnet has no
+`openrails-db-app` Secret whose `uri` key is `DATABASE_URL`. **Redis** or Garnet has no
 default; its credentials and CA go in `secrets.files` (`REDIS_PASSWORD`,
 `REDIS_CA_CERT`).
 

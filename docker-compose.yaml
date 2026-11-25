@@ -8,8 +8,8 @@ services:
     environment:
       POSTGRES_DB: openrails_db
       # One role: migrations create OpenRails' objects as it, the server runs as it.
-      POSTGRES_USER: "${DB_USERNAME:-app}"
-      POSTGRES_PASSWORD: "${DB_PASSWORD:-app_password}"
+      POSTGRES_USER: "${POSTGRES_USER:-app}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-app_password}"
     ports:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5434}:5432"
     volumes:
@@ -40,7 +40,7 @@ services:
       - local-openrails
     healthcheck:
       # Migrations run after readiness and create the configured billing schema.
-      test: ["CMD", "pg_isready", "-U", "${DB_USERNAME:-app}", "-d", "openrails_db", "-h", "localhost"]
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-app}", "-d", "openrails_db", "-h", "localhost"]
       interval: 5s
       timeout: 5s
       start_period: 90s
@@ -85,7 +85,7 @@ services:
       # Service wiring only; the loader supplies every other default
       # (docs/standalone.md, configuration reference).
       PUBLIC_BILLING_BASE_URL: "http://localhost:${PORT:-3053}"
-      DB_URL: "postgres://${DB_USERNAME:-app}:${DB_PASSWORD:-app_password}@postgres:5432/openrails_db?sslmode=disable"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app_password}@postgres:5432/openrails_db?sslmode=disable"
       REDIS_ADDR: "garnet:6379"
       # AuthKit writes development keys (keys.json, totp.key) to the volume,
       # so restarts keep sessions and authenticator enrollments.

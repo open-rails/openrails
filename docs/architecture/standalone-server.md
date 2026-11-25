@@ -39,12 +39,7 @@ The `server/` module (`github.com/open-rails/openrails/server`): the `openrails`
 
 ### Configuration
 
-`hostconfig.Load` (`server/internal/hostconfig`) layers defaults, `config.yaml`
-(`--config`, `OPENRAILS_CONFIG`), a logged `.env`, the environment (`DB_URL` is
-`db.url`), files under `VAULT_SECRETS_PATH` and flags (`WithOverride`). Unknown keys
-and retired names (`ENV`, `API_URL`, `MERCHANT_CONFIG_SOURCE`, …) refuse boot;
-`Validate` checks the result. One-off commands load less: `LoadForCommand`, `LoadDatabaseForCommand`,
-`LoadDirectoryForCommand`.
+`hostconfig.Load` (`server/internal/hostconfig`) layers `server.DefaultConfig()` (the engine's `billing.DefaultConfig()` with the server's own), `config.yaml` (`--config`, `OPENRAILS_CONFIG`), a logged `.env`, files under `VAULT_SECRETS_PATH` and the environment (`DATABASE_URL` is `database.url`). It decodes the one tree twice, into `server.Config` (the engine's keys inline) and the binary's own keys (connections, logger, signing key); a key neither reads, and a retired name (`ENV`, `API_URL`, `db`, …), refuses boot. Every command loads the same way. `server.New` takes `server.Config` as decoded and passes its `Engine` to `openrails.New`.
 
 ### Boot merchants
 
@@ -76,7 +71,7 @@ Without the default manifest the server boots control-plane only.
 
 ### HTTP
 
-`server/internal/http` builds one public handler: health and meta, the engine's route groups (`RouteGroups`, each off by default), `/v1/me`, `/v1/webhooks/{rail}/{account_id}`, AuthKit's routes, `/admin`, and the payment page on `Engine.CheckoutOrigin` by Host. Every native route passes `wrapHandler`: recovery, request log, security headers, CORS for browser-tier routes only (`BrowserTierRoutes`), `RequestLimitsHTTP`, explicit billing credentials (`billingauth.ExplicitCredentials`) and the engine's `RateLimitHTTP`. `PrivateHandler` serves `/metrics` on `PrivateAddr`.
+`server/internal/http` builds one public handler: health and meta, the engine's route groups (`RouteGroups`, each off by default), `/v1/me`, `/v1/webhooks/{rail}/{account_id}`, AuthKit's routes, `/admin`, and the payment page on `Engine.CheckoutOrigin` by Host. Every native route passes `wrapHandler`: recovery, request log, security headers, CORS for browser-tier routes only (`BrowserTierRoutes`), `RequestLimitsHTTP`, explicit billing credentials (`billingauth.ExplicitCredentials`) and the engine's `RateLimitHTTP`. `PrivateHandler` serves `/metrics` on `server.Config.PrivatePort`.
 
 `Server.Run` binds job producers (`InitRiver`) before listening on `:3053`, starts the
 workers, and on stop fails `/health/ready` (`Drain`) and keeps serving for
@@ -86,12 +81,7 @@ adds `RiverJobs` to its fleet.
 
 ### Console
 
-`registerAdminConsoleRoutes` serves the SPA and its `config.json` (AuthKit base,
-sign-in issuers, the token exchange for `ConsoleClientID`) under
-`hostconfig.ConsolePath`. `GET /admin/merchants` (`consoleMerchants`) is the selector's
-directory: it needs an explicit `Authorization` header and lists only merchants the
-credential's permissions reach. The SPA calls `/v1` with the staff token.
-`AdminConsole.Disabled` removes the subtree.
+`registerAdminConsoleRoutes` serves the SPA and its `config.json` (AuthKit base, sign-in issuers, the token exchange for `ConsoleClientID`) under `adminconsole.Path` (`/admin`). `GET /admin/merchants` (`consoleMerchants`) is the selector's directory: it needs an explicit `Authorization` header and lists only merchants the credential's permissions reach. The SPA calls `/v1` with the staff token. `AdminConsole.Disabled` removes the subtree.
 
 ### Binary, image and chart
 

@@ -200,7 +200,7 @@ func newSolanaWorld(t *testing.T, recurring bool, options ...solanaFixtureOption
 		w.clock.Advance(w.clock.Now().Truncate(time.Second).Sub(w.clock.Now()))
 		s.node.SetClock(w.clock.Now)
 		w.posture = "full"
-		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: s.wire.server.URL}
+		w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{SolanaRPCURL: s.wire.server.URL}
 		if option.fx != nil {
 			w.deps.FXTransport = option.fx
 		}
@@ -215,7 +215,7 @@ func newSolanaWorld(t *testing.T, recurring bool, options ...solanaFixtureOption
 		}
 		setCfgMerchant(&w.cfg, "alpha", m)
 		if recurring {
-			w.cfg.Solana = &openrails.SolanaConfig{Crankers: []openrails.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: s.cranker.PrivateKey.String()}}}
+			w.cfg.Solana = billing.SolanaConfig{Crankers: []billing.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: s.cranker.PrivateKey.String()}}}
 		}
 	})
 	s.server.Client().Timeout = 30 * time.Second

@@ -89,7 +89,7 @@ For individual rows, query `river_job` in the configured
 billing schema plus `_river`, so the default table is `billing_river.river_job`.
 Replace `billing_river` with your configured schema if it differs. The query
 shows recent retained rows across all components in the selected schema.
-[Schema configuration](../internal/config/config.go) · [River table usage](../internal/river/health.go)
+[Schema configuration](../billing/config.go) · [River table usage](../internal/river/health.go)
 
 ```sql
 SELECT id, kind, queue, state, scheduled_at, attempt

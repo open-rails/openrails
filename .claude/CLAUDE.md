@@ -61,6 +61,12 @@ through `host-four`; these are placeholders, not customer or repository names.
   `requestID(s)` or `idempotencyKey`. Types live in `billing`; the catalog document in `catalog`. Everything
   else is `internal/`. `Config` is plain data; anything that reaches outside the process
   is in `Deps`.
+- Settings are one type: `openrails.Config` is `billing.Config` (the API's one alias),
+  which internal packages use directly; its `yaml` tags are the standalone file's keys.
+  `billing.DefaultConfig()` is the one defaults table (`New` fills zero fields from it);
+  an optional section is a value, on once set. The binary's file decodes one tree into
+  `server.Config` (engine keys inline) and its own connection keys; a key neither reads
+  refuses boot. No mirror config types or converters.
 - The Go client is the admin API, generated into `client_gen.go` from the route catalog
   (`Name`, `Doc`, `Args`, `Query`, `Cache`): one `*Client` method per admin, catalog-edit and
   merchant-config route. `HandWritten` routes and the methods no route has live in
@@ -177,7 +183,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   plain strings: the keys of a product's `entitlements_spec`.
 
 ## Schema / DB
-- SQL is authored in `billing` (`config.DefaultSchema`) and runs there verbatim; any
+- SQL is authored in `billing` (`sqlschema.Authored`) and runs there verbatim; any
   other schema is reached by one token-aware rewriter (`internal/sqlschema`) that moves
   schema references only.
 - One hand-written baseline, `internal/migrate/postgres/0001_schema.up.sql`: tables in

@@ -11,7 +11,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/retry"
@@ -31,7 +30,7 @@ import (
 // Vault holding merchant configuration, it is served once Vault answers.
 // Posture is verified in the background. overlays are files in the manifest's
 // shape merged over it in order.
-func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, cp *controlplane.ControlPlane, path string, overlays []string) error {
+func ReconcileBootMerchantManifest(ctx context.Context, cfg *billing.Config, application *app.App, cp *controlplane.ControlPlane, path string, overlays []string) error {
 	rt := application.Runtime
 	if rt == nil {
 		return fmt.Errorf("merchant startup requires a runtime")
@@ -116,7 +115,7 @@ func (p *bootPass) settle() {
 // reconcileBootMerchantManifest applies the boot manifest, returning the
 // slugs it declares. refuse, when set, takes what a serving process serves
 // without (bootstrap.ReconcileOptions.Refuse).
-func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, cp *controlplane.ControlPlane, path string, overlayPaths []string, refuse func(string, error)) ([]string, error) {
+func reconcileBootMerchantManifest(ctx context.Context, cfg *billing.Config, application *app.App, cp *controlplane.ControlPlane, path string, overlayPaths []string, refuse func(string, error)) ([]string, error) {
 	explicit := strings.TrimSpace(path) != ""
 	if !explicit {
 		path = bootstrap.DefaultMerchantConfigManifestPath
