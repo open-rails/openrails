@@ -163,14 +163,6 @@ type BillingCatalogRateCard struct {
 	UpdatedAt   time.Time
 }
 
-// Local catalog snapshot restore receipts; one completed atomic restore per merchant. Identical artifact retries are no-ops even after later catalog edits. Excluded from exported snapshots. Retention: permanent, never pruned.
-type BillingCatalogRestoreReceipt struct {
-	MerchantID uuid.UUID
-	Digest     string
-	Rows       int64
-	RestoredAt time.Time
-}
-
 // Configuration history: each change to a catalog object (product, price, meter, limit) or a configuration document (merchant, messages, psp, custodian), who made it and how. A catalog entry commits with its change; a configuration entry is written when OpenRails writes the document, or when a load finds a change made outside it. Credentials are never recorded. Nothing on a billing path reads it. Retention: permanent, never pruned.
 type BillingChangeLog struct {
 	MerchantID uuid.UUID

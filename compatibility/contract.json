@@ -1722,9 +1722,6 @@
       "type Args struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tIntentID   uuid.UUID `json:\"intent_id\" river:\"unique\"`\n}"
     ],
     "internal/merchantarchive": [
-      "type CatalogDependencies struct {\n\tPSPs []CatalogPSPIdentity `json:\"psps\"`\n\n\tCustomers *[]string `json:\"customers,omitempty\"`\n}",
-      "type CatalogPSPIdentity struct {\n\tID          string `json:\"id\"`\n\tRail        string `json:\"rail\"`\n\tEnvironment string `json:\"environment\"`\n\tAccountID   string `json:\"account_id\"`\n}",
-      "type CatalogSnapshot struct {\n\tKind            string                                  `json:\"kind\"`\n\tSchemaVersion   int                                     `json:\"schema_version\"`\n\tMerchantID      string                                  `json:\"merchant_id\"`\n\tCatalogRevision int64                                   `json:\"catalog_revision,string\"`\n\tDependencies    CatalogDependencies                     `json:\"dependencies\"`\n\tTables          map[string][]map[string]json.RawMessage `json:\"tables\"`\n\tSHA256          string                                  `json:\"sha256,omitempty\"`\n}",
       "type Result struct {\n\tMerchantID string `json:\"merchant_id\"`\n\tDigest     string `json:\"digest\"`\n\tRows       int64  `json:\"rows\"`\n\tReplayed   bool   `json:\"replayed\"`\n}"
     ],
     "internal/merchantdocs": [
@@ -3594,21 +3591,6 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5",
       "wake": "github.com/open-rails/openrails/internal/intents/wake"
-    },
-    "internal/merchantarchive/catalog_snapshot_wire.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "bytes": "bytes",
-      "configdocument": "github.com/open-rails/openrails/internal/configdocument",
-      "contract": "github.com/open-rails/openrails/internal/merchantarchive/contract",
-      "fmt": "fmt",
-      "go-yaml": "github.com/goccy/go-yaml",
-      "hex": "encoding/hex",
-      "io": "io",
-      "json": "encoding/json",
-      "maps": "maps",
-      "sha256": "crypto/sha256",
-      "slices": "slices",
-      "uuid": "github.com/google/uuid"
     },
     "internal/merchantdocs/destructive.go": {
       "billing": "github.com/open-rails/openrails/billing",

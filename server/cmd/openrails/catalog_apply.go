@@ -20,6 +20,12 @@ type catalogApplyOptions struct {
 	forceConflicts   bool
 }
 
+func newCatalogCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "catalog", Short: "Apply catalog documents"}
+	cmd.AddCommand(newCatalogApplyCmd())
+	return cmd
+}
+
 // newCatalogApplyCmd executes the same atomic batch as the merchant Client
 // through trusted local operator authority, without starting an HTTP server.
 func newCatalogApplyCmd() *cobra.Command {

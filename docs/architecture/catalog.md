@@ -1,6 +1,6 @@
 # Catalog
 
-What a merchant sells: products, prices, meters, rate cards and usage limits, and how recurring subscribers move to other prices and products ([price migrations](#moving-subscribers-to-other-prices-and-products)). It changes by documents (`catalog.Application`) an operator applies and by edits from the console, the catalog routes and `Client` methods; starting OpenRails never applies one (`internal/engine/engine.go`). Guides: [catalog](../client.md#catalog), [catalog export](../client.md#catalog).
+What a merchant sells: products, prices, meters, rate cards and usage limits, and how recurring subscribers move to other prices and products ([price migrations](#moving-subscribers-to-other-prices-and-products)). It changes by documents (`catalog.Application`) an operator applies and by edits from the console, the catalog routes and `Client` methods; starting OpenRails never applies one (`internal/engine/engine.go`). Guides: [catalog](../client.md#catalog), [billing export](../standalone.md#backup-and-restore).
 
 ## Concepts
 
@@ -74,7 +74,7 @@ treasury (`solanaPlanID`); `verifySolanaCatalogReference` reads it back. Under a
 
 `internal/catalogrules` validates charge models and rates usage in integer micros ([usage billing](usage-billing.md)); `StripeCatalogService` (webhook endpoints) is [payment providers](payment-providers.md).
 
-Tables: `products`, `product_entitlements`, `prices`, `price_keys`, `price_psp_bindings`, `catalog_meters`, `catalog_rate_cards`, `catalog_limits`, `catalog_product_limits`, `catalog_field_owners`, `catalog_applications`, `catalog_restore_receipts`; read-only here, `provider_catalog_objects`.
+Tables: `products`, `product_entitlements`, `prices`, `price_keys`, `price_psp_bindings`, `catalog_meters`, `catalog_rate_cards`, `catalog_limits`, `catalog_product_limits`, `catalog_field_owners`, `catalog_applications`; read-only here, `provider_catalog_objects`.
 
 ### Moving subscribers to other prices and products
 
@@ -119,8 +119,8 @@ Tables: `price_migrations`; moves are `scheduled_changes` ([subscriptions](subsc
   Reads are cached per handle (`ReadCatalog`, `ReadMeters`).
 - HTTP: `POST /v1/catalog/apply`, `/v1/catalog/products`, `/v1/catalog/prices`, `POST /v1/catalog/provider-prices`, `/v1/catalog/meters`, `/v1/catalog/limits`; reads need `merchant:catalog:read`, writes `merchant:catalog:manage` (or `root:` twins). No public route reads the catalog.
 - Price migrations: `PreviewPriceMigration`, `CreatePriceMigration`, `ListPriceMigrations`, `GetPriceMigration`, `CancelPriceMigration` on `POST /v1/catalog/price-migrations/preview`, `POST /v1/catalog/price-migrations`, `GET /v1/catalog/price-migrations`, `GET /v1/catalog/price-migrations/{id}`, `POST /v1/catalog/price-migrations/{id}/cancel`, with the catalog permissions (preview is a read); events `subscription_reprice_scheduled`, `subscription_plan_change_scheduled` ([events](../client.md#events)); configuration `reprice_notice_window_days`.
-- CLI: `openrails catalog apply FILE --merchant NAME [--force-conflicts]`,
-  `openrails catalog export|import`, `openrails dump-merchant-catalog`.
+- CLI: `openrails catalog apply FILE --merchant NAME [--force-conflicts]`;
+  `openrails billing export|import` preserves the catalog in the billing archive.
 
 ## Guarantees
 
@@ -196,7 +196,7 @@ Checks:
 
 ### 6. Data lifecycle
 
-`products`, `product_entitlements`, `prices`, `catalog_applications`, `catalog_restore_receipts` and `price_migrations` are permanent, the rest state; none is partitioned. Products and prices soft-delete.
+`products`, `product_entitlements`, `prices`, `catalog_applications` and `price_migrations` are permanent, the rest state; none is partitioned. Products and prices soft-delete.
 
 `change_log`, the history of every catalog and configuration change, is permanent and append-only (`immutable_change_log`): no update or delete, a merchant purge keeps it, and the merchant archive moves it. It is not in the billing restore guard: a destination records its own configuration's history as soon as that configuration loads, and a restore adds the archive's entries to it, once per merchant (the restore receipt makes a replay a no-op).
 
