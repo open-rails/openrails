@@ -27,12 +27,12 @@
 // webhook_health_daily 13 months; periodic_leases after 30 days unscheduled.
 //
 // The event store's ClickHouse tables expire by their TTLs (EventStoreTTLs):
-// usage_events 80 days after occurred_at (its period's last posting reads it
-// up to 66 days on, plus two weeks), usage_quantities 100 days after the
-// period start, usage_minutes 2 days, usage_history 15-minute buckets for 35
-// days and a row a day until 25 months, limit_usage 61 days after its window
-// ends (a window without an end stays). What posted is in PostgreSQL,
-// permanently.
+// usage_events 90 days after occurred_at (the owner's choice; its period's
+// last posting reads it up to 66 days on), usage_quantities 100 days after
+// the period start, usage_minutes 2 days, limit_usage 61 days after its
+// window ends (a window without an end stays). usage_history, by UTC hour,
+// has no TTL: a customer's erasure clears its invokers there and a merchant
+// purge deletes its rows. What posted is in PostgreSQL, permanently.
 //
 // The cleanup job (openrails.cleanup_expired_data) deletes 1,000 rows per
 // statement and at most 50,000 per merchant per pass. subscription_status_transitions refuses other

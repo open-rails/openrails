@@ -2465,7 +2465,7 @@
       "TestEventStore/OR-J24-S66/two-engines-migrating-one-fresh-clickhouse-database-together-both-start"
     ],
     "OR-J24-S67": [
-      "TestUsageStore/OR-J24-S67/history-past-35-days-keeps-a-row-a-day-of-the-accounting-zone-and-reads-the-same"
+      "TestUsageStore/OR-J24-S67/history-is-utc-hours-grouped-into-the-zones-days-as-read-a-25-hour-day-a-zone-change-and-burn-included"
     ],
     "OR-J24-S68": [
       "TestUsageStore/OR-J24-S68/usage-metadata-past-1024-bytes-of-compact-json-is-refused-alone"

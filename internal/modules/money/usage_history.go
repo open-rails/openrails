@@ -19,20 +19,20 @@ import (
 	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
-// UsageHistoryRow is a 15-minute bucket of usage history with what it cost:
-// a charge row's share of its bucket's price, a failed event row what it
-// charged. Readers fold buckets into the days and months of their zone.
+// UsageHistoryRow is a bucket of usage history with what it cost: a charge
+// row's share of its bucket's price, a failed event row what it charged.
 type UsageHistoryRow struct {
 	eventstore.UsageBucket
 	Amount int64
 }
 
-// UsageHistory reads the usage history a filter selects and prices it from
-// the event store. A bucket's price of a meter cell is the price of its period
-// through the bucket less the price through the bucket before, so any days
-// the buckets fold into sum to what the period posts; it is shared across the
-// bucket's rows by quantity. A row priced under a card print not yet recorded
-// is left out.
+// UsageHistory reads the usage history a filter selects, by day of the
+// merchant's accounting zone (ClickHouse groups the hours as it reads, so a
+// zone change regroups all of it), and prices it from the event store. A
+// day's price of a meter cell is the price of its period through the day less
+// the price through the day before, so the days sum to what the period posts;
+// it is shared across the day's rows by quantity. A row priced under a card
+// print not yet recorded is left out.
 func (s *MoneyService) UsageHistory(ctx context.Context, f eventstore.HistoryFilter) ([]UsageHistoryRow, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -41,6 +41,9 @@ func (s *MoneyService) UsageHistory(ctx context.Context, f eventstore.HistoryFil
 	store := s.db.EventStore()
 	if store == nil {
 		return nil, eventstore.Required("usage history")
+	}
+	if f.Zone, err = s.accountingZone(ctx); err != nil {
+		return nil, err
 	}
 	return usageHistory(ctx, s.db.Gen(ctx), store, mid.UUID(), f)
 }
@@ -64,7 +67,7 @@ func usageHistory(ctx context.Context, q *gen.Queries, store *eventstore.Store, 
 	}
 	var prior []eventstore.UsageBucket
 	if periods != nil && periods.Before(f.From) {
-		if prior, err = store.UsageHistory(ctx, eventstore.HistoryFilter{CustomerID: f.CustomerID, Currency: f.Currency, From: periods.Truncate(eventstore.HistoryBucket), To: f.From, PeriodsFrom: periods}); err != nil {
+		if prior, err = store.UsageHistory(ctx, eventstore.HistoryFilter{CustomerID: f.CustomerID, Currency: f.Currency, From: periods.Truncate(eventstore.HistoryBucket), To: f.From, PeriodsFrom: periods, Zone: f.Zone}); err != nil {
 			return nil, err
 		}
 		for _, b := range prior {
@@ -246,9 +249,8 @@ func largestRemainder(amount int64, weights []int64) []int64 {
 }
 
 // UsageDays are the instants that bound the days of the merchant's
-// accounting zone overlapping [from, to): history read between them folds
-// into whole local days, since every zone's offset is a whole number of
-// buckets.
+// accounting zone overlapping [from, to): history read between them is the
+// hours that start in those days.
 func (s *MoneyService) UsageDays(ctx context.Context, from, to time.Time) (time.Time, time.Time, error) {
 	zone, err := s.accountingZone(ctx)
 	if err != nil {

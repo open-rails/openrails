@@ -26,7 +26,7 @@ import (
 // order usage arrived in changes nothing, so late usage and concurrent gates
 // price exactly and per-unit rounding happens once per total. A posting takes
 // the price less what earlier postings took, and history shares it across
-// 15-minute buckets the same way, so any zone's days sum to what posts.
+// days the same way, so the days sum to what posts.
 
 // printCard is a card print's terms and when it was first written.
 type printCard struct {

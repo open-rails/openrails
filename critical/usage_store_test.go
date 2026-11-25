@@ -516,66 +516,78 @@ products:
 		require.EqualValues(t, 2, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL"), "each merchant's item is its own event")
 	})
 
-	t.Run("OR-J24-S67/history-past-35-days-keeps-a-row-a-day-of-the-accounting-zone-and-reads-the-same", func(t *testing.T) {
-		kolkata, err := time.LoadLocation("Asia/Kolkata")
+	t.Run("OR-J24-S67/history-is-utc-hours-grouped-into-the-zones-days-as-read-a-25-hour-day-a-zone-change-and-burn-included", func(t *testing.T) {
+		newYork, err := time.LoadLocation("America/New_York")
 		require.NoError(t, err)
-		// A Kolkata day 40 days back by the store's clock: its history is past
-		// the age at which a day's buckets fold into one row.
-		back := time.Now().In(kolkata).AddDate(0, 0, -40)
-		day := time.Date(back.Year(), back.Month(), back.Day(), 0, 0, 0, 0, kolkata)
-		w := newWorld(t, func(w *world) {
-			m := cfgMerchant(w.cfg, "alpha")
-			m.Accounting = &billing.AccountingSettings{Timezone: "Asia/Kolkata"}
-			setCfgMerchant(&w.cfg, "alpha", m)
-			w.clock.Advance(day.Add(24*time.Hour + 20*time.Minute).Sub(w.clock.Now()))
-		})
-		usageMeter(t, w.alpha, 100)
-		customer, _ := fundedCustomer(t, w)
-		report := func(id, invoker string, units int64, at time.Duration) billing.LeaseUsage {
-			u := usageInput(customer, id, units)
-			u.Invoker, u.OccurredAt = invoker, day.Add(at)
-			return u
+		// The next New York day of 25 hours, when its clocks fall back.
+		day := calendarDayStart(time.Now().Add(24*time.Hour), newYork)
+		for day.AddDate(0, 0, 1).Sub(day) != 25*time.Hour {
+			day = day.AddDate(0, 0, 1)
 		}
-		// Three buckets of the day, from the customer and its key, and the next
-		// day's first minutes.
-		settleUsage(t, w.alpha, newLease(), numbered(1,
-			report("first", customer.String(), 1, 10*time.Minute),
-			report("morning", "key_a", 2, 9*time.Hour),
-			report("last", customer.String(), 3, 23*time.Hour+50*time.Minute),
-			report("next-day", "key_a", 4, 24*time.Hour+5*time.Minute))...)
-		days := func() map[string]int64 {
+		next := day.AddDate(0, 0, 1)
+		a, _ := newPSPWorld(t)
+		zone := func(name string) {
+			t.Helper()
+			_, err := a.alphaRemote.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
+				MerchantSettings: &billing.MerchantSettings{Accounting: &billing.AccountingSettings{Timezone: name}}})
+			require.NoError(t, err)
+		}
+		zone("America/New_York")
+		a.clock.Advance(next.Add(time.Hour).Sub(a.clock.Now()))
+		usageMeter(t, a.alpha, 100)
+		customer, _ := fundedCustomer(t, a.world)
+		// Its first and 25th hours, an hour between, and the next day's first.
+		at := []time.Time{day.Add(30 * time.Minute), day.Add(12 * time.Hour), next.Add(-30 * time.Minute), next.Add(30 * time.Minute)}
+		units := []int64{2, 3, 4, 1}
+		var items []billing.LeaseUsage
+		for i := range at {
+			u := usageInput(customer, fmt.Sprintf("hour-%d", i), units[i])
+			u.OccurredAt = at[i]
+			items = append(items, u)
+		}
+		settleUsage(t, a.alpha, newLease(), numbered(1, items...)...)
+		w := a.world
+		require.EqualValues(t, 4, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"), "one row an hour")
+		require.Zero(t, storeCount(t, w, "SELECT countIf(toMinute(bucket_at) != 0) FROM {db}.usage_history WHERE merchant_id = {m}"), "buckets are whole UTC hours")
+
+		// Read by day, an hour counts on the day of the zone it starts in.
+		days := func(in *time.Location) map[string]int64 {
 			t.Helper()
 			out := map[string]int64{}
-			q := billing.QueryMetricsParams{Measures: []string{"usage_units", "usage_charged"}, By: []string{"time", "invoker"}, Grain: "day",
-				Range: &billing.MetricsRange{From: day.Format(time.DateOnly), To: day.AddDate(0, 0, 2).Format(time.DateOnly)}}
-			for _, row := range metricTable(t, w.alpha, q) {
+			q := billing.QueryMetricsParams{Measures: []string{"usage_units", "usage_charged"}, By: []string{"time"}, Grain: "day",
+				Range: &billing.MetricsRange{From: day.In(in).AddDate(0, 0, -1).Format(time.DateOnly), To: next.In(in).AddDate(0, 0, 2).Format(time.DateOnly)}}
+			for _, row := range metricTable(t, a.alpha, q) {
 				for _, measure := range q.Measures {
 					if v := whole(t, row[measure]); v != 0 {
-						out[fmt.Sprint(row["time"], " ", row["invoker"], " ", measure)] = v
+						out[fmt.Sprint(row["time"], " ", measure)] = v
 					}
 				}
 			}
 			return out
 		}
-		first, second := day.UTC().Format(time.RFC3339), day.AddDate(0, 0, 1).UTC().Format(time.RFC3339)
-		want := map[string]int64{
-			first + " " + customer.String() + " usage_units": 2, first + " " + customer.String() + " usage_charged": 400,
-			first + " key_a usage_units": 1, first + " key_a usage_charged": 200,
-			second + " key_a usage_units": 1, second + " key_a usage_charged": 400,
+		want := func(in *time.Location) map[string]int64 {
+			out := map[string]int64{}
+			for i := range at {
+				key := calendarDayStart(at[i].Truncate(time.Hour), in).UTC().Format(time.RFC3339)
+				out[key+" usage_units"]++
+				out[key+" usage_charged"] += units[i] * 100
+			}
+			return out
 		}
-		require.Equal(t, want, days())
+		first, second := day.UTC().Format(time.RFC3339), next.UTC().Format(time.RFC3339)
+		require.Equal(t, map[string]int64{first + " usage_units": 3, first + " usage_charged": 900, second + " usage_units": 1, second + " usage_charged": 100},
+			days(newYork), "the 25-hour day holds its 25th hour")
+		require.Equal(t, want(newYork), days(newYork))
 
-		// The store folds what is past the age as it merges.
-		for _, stmt := range []string{"ALTER TABLE {db}.usage_history MATERIALIZE TTL SETTINGS mutations_sync = 2", "OPTIMIZE TABLE {db}.usage_history FINAL"} {
-			require.NoError(t, w.deps.ClickHouse.Exec(t.Context(), strings.ReplaceAll(stmt, "{db}", "`"+w.schema+"`")))
-		}
-		at := func(t time.Time) string { return "toDateTime('" + t.UTC().Format(time.DateTime) + "', 'UTC')" }
-		require.EqualValues(t, 6, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m}"),
-			"an event row and a charge row a day for each invoker")
-		require.EqualValues(t, 2, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND invoker = '"+customer.String()+
-			"' AND day_at = "+at(day)+" AND bucket_at = "+at(day)), "the customer's three buckets became one at the day's first")
-		require.EqualValues(t, 6, storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_history WHERE merchant_id = {m} AND day_at = "+at(day)), "the day's units")
-		require.Equal(t, want, days(), "the Kolkata days read the same")
+		// Burn reads the same days: the balance covers no more than a week of it.
+		risk := metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"customers_at_depletion_risk"},
+			Range: &billing.MetricsRange{From: day.Format(time.DateOnly), To: next.AddDate(0, 0, 1).Format(time.DateOnly)}})
+		require.EqualValues(t, 1, whole(t, only(t, risk)["customers_at_depletion_risk"]))
+
+		// A zone change regroups all of it.
+		zone("UTC")
+		require.Equal(t, want(time.UTC), days(time.UTC))
+		require.NotEqual(t, want(newYork), want(time.UTC), "New York's days and UTC's differ here")
 	})
 
 	t.Run("OR-J24-S68/usage-metadata-past-1024-bytes-of-compact-json-is-refused-alone", func(t *testing.T) {
@@ -597,4 +609,10 @@ products:
 		require.EqualValues(t, billing.MaxUsageMetadataBytes, storeCount(t, w, "SELECT toUInt64(max(length(metadata))) FROM {db}.usage_events FINAL WHERE merchant_id = {m}"))
 		balance(t, w.alpha, customer, 900, 100, 1000)
 	})
+}
+
+// calendarDayStart is the first instant of t's day in zone.
+func calendarDayStart(t time.Time, zone *time.Location) time.Time {
+	l := t.In(zone)
+	return time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, zone)
 }

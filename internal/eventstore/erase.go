@@ -40,7 +40,7 @@ func (s *Store) EraseCustomer(ctx context.Context, customer billing.CustomerID) 
 		func(rows interface{ Scan(...any) error }) error { return rows.Scan(&named) }); err != nil || !named {
 		return err
 	}
-	keys := "merchant_id, customer_id, day_at, bucket_at, currency, event_type, meter, cell, print, period_starts_at"
+	keys := "merchant_id, customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at"
 	if err := fail("erase usage history", s.conn.Exec(ctx, s.resolve(`INSERT INTO {database}.usage_history (`+keys+`, invoker, outcome, requests, quantity, stated, charged, forgiven)
 SELECT `+keys+`, fold.1, outcome, fold.2 * r, fold.2 * q, fold.2 * st, fold.2 * c, fold.2 * f
 FROM (SELECT `+keys+`, invoker, outcome, sum(requests) AS r, sum(quantity) AS q, sum(stated) AS st, sum(charged) AS c, sum(forgiven) AS f

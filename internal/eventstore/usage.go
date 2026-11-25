@@ -25,8 +25,7 @@ const (
 
 // UsageEvent is one settled usage item as intake takes it in; its merchant is
 // the context's. usage_events keeps what was reported, its identity, its
-// pricing and what a resend reads; Amount, DayAt and Limits only feed the
-// rollups.
+// pricing and what a resend reads; Amount and Limits only feed the rollups.
 type UsageEvent struct {
 	// EventID is the intake identity: LeaseEventID of (merchant, lease, n), or
 	// RequestEventID of the request id.
@@ -46,11 +45,8 @@ type UsageEvent struct {
 	AdmittedAt     time.Time
 	IngestedAt     time.Time
 	PeriodStartsAt time.Time
-	// DayAt starts the day of OccurredAt in the merchant's accounting zone:
-	// the day its usage history folds into once it is 35 days old.
-	DayAt      time.Time
-	Dimensions map[string]int64
-	Metadata   string
+	Dimensions     map[string]int64
+	Metadata       string
 	// Amount is the provisional price limits and the accrual-rate cap count.
 	Amount int64
 	// Stated is a host-stated amount; Charged and Forgiven split failed usage.
@@ -79,7 +75,7 @@ type UsageLimit struct {
 }
 
 const insertUsage = "INSERT INTO {database}.usage_intake (merchant_id, event_id, customer_id, currency, event_type, invoker, " +
-	"invoker_type, outcome, source, source_id, lease_id, n, occurred_at, admitted_at, ingested_at, period_starts_at, day_at, " +
+	"invoker_type, outcome, source, source_id, lease_id, n, occurred_at, admitted_at, ingested_at, period_starts_at, " +
 	"dimensions, metadata, amount, stated, charged, forgiven, `charges.meter`, `charges.cell`, `charges.print`, " +
 	"`charges.quantity`, `charges.stated`, `limits.key`, `limits.window_starts_at`, `limits.window_ends_at`, `limits.units`)"
 
@@ -116,7 +112,7 @@ func (s *Store) InsertUsage(ctx context.Context, events []UsageEvent) error {
 		}
 		if err := batch.Append(uuid.UUID(mid), e.EventID, uuid.UUID(e.CustomerID), e.Currency, e.EventType, e.Invoker,
 			e.InvokerType, string(e.Outcome), e.Source, e.SourceID, e.LeaseID, e.N, e.OccurredAt.UTC(), e.AdmittedAt.UTC(),
-			e.IngestedAt.UTC(), e.PeriodStartsAt.UTC(), e.DayAt.UTC(), dimensions, e.Metadata, e.Amount, e.Stated, e.Charged, e.Forgiven,
+			e.IngestedAt.UTC(), e.PeriodStartsAt.UTC(), dimensions, e.Metadata, e.Amount, e.Stated, e.Charged, e.Forgiven,
 			c.meter, c.cell, c.print, c.quantity, c.stated, l.key, l.startsAt, l.endsAt, l.units); err != nil {
 			return fmt.Errorf("eventstore: usage event %s: %w", e.EventID, err)
 		}

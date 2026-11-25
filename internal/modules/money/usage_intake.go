@@ -30,7 +30,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/internal/shared/calendarutil"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -145,8 +144,6 @@ type UsageIntake struct {
 	failed  []failedCharge
 	changed []UsageAccount
 	now     time.Time
-	// zone is the merchant's accounting zone, whose days history folds into.
-	zone *time.Location
 }
 
 // limitOpening is a session or first-use window a batch opens, or a granted
@@ -195,12 +192,8 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 	}
 	merchantID := mid.UUID()
 	now := instant(s.now())
-	zone, err := s.accountingZone(ctx)
-	if err != nil {
-		return nil, err
-	}
 	b := &UsageIntake{store: store, merchant: merchantID, items: items, Results: make([]UsageResult, len(items)),
-		events: make([]*eventstore.UsageEvent, len(items)), prints: map[string]ratingCard{}, opens: map[uuid.UUID][]limitOpening{}, opened: map[uuid.UUID]bool{}, now: now, zone: zone}
+		events: make([]*eventstore.UsageEvent, len(items)), prints: map[string]ratingCard{}, opens: map[uuid.UUID][]limitOpening{}, opened: map[uuid.UUID]bool{}, now: now}
 	from, to := now.Add(-retention.UsageIngestWindow), now.Add(retention.UsageClockSkew)
 	var eventTypes []string
 	currencies := s.UsageCurrencies()
@@ -844,7 +837,7 @@ func (b *UsageIntake) event(i int, it UsageItem, p pricedItem) *eventstore.Usage
 	e := &eventstore.UsageEvent{EventID: it.EventID, CustomerID: billing.CustomerID(it.Customer.UUID()), Currency: it.Currency, EventType: it.EventType,
 		Invoker: it.Invoker, InvokerType: invokerType, Outcome: outcome, Source: it.Source, SourceID: it.SourceID, LeaseID: it.LeaseID,
 		N: uint64(max(it.N, 0)), OccurredAt: it.OccurredAt, AdmittedAt: admitted, IngestedAt: b.now, PeriodStartsAt: period,
-		DayAt: calendarutil.DateStart(it.OccurredAt, b.zone).UTC(), Dimensions: it.Dimensions, Metadata: it.metadata, Amount: amount, Stated: it.Amount,
+		Dimensions: it.Dimensions, Metadata: it.metadata, Amount: amount, Stated: it.Amount,
 		Charged: charged, Forgiven: forgiven, Limits: p.limits}
 	for _, c := range p.charges {
 		e.Charges = append(e.Charges, eventstore.UsageCharge{Meter: c.meter, Cell: c.cell, Print: c.print, Quantity: c.quantity, Stated: c.stated})

@@ -8,11 +8,13 @@ import (
 
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
-// Usage measures read the event store's usage history, priced as a
-// customer's usage reports price it: each 15-minute bucket's share of its
-// period's price, so the days and months it folds into sum to what posts.
+// Usage measures read the event store's usage history by day of the
+// merchant's accounting zone, priced as a customer's usage reports price it:
+// each day's share of its period's price, so the days and the months they
+// fold into sum to what posts.
 // They compile to no SQL; their groups are folded here.
 
 func storeFamily(f Family) bool { return f == FamUsage || f == FamUsageCharged }
@@ -172,11 +174,17 @@ func (s *Service) depletionBurns(ctx context.Context, plan *Plan) ([]burn, error
 	if len(edges) == 0 {
 		return nil, nil
 	}
+	// The window is the edge's last seven days of the merchant's zone, which
+	// history is read by.
+	back := func(e time.Time) time.Time {
+		l := e.In(plan.zone())
+		return calendarutil.DayStart(l.Year(), l.Month(), l.Day()-depletionBurnDays, plan.zone()).UTC()
+	}
 	from, to := edges[0], edges[0]
 	for _, e := range edges {
 		from, to = earliest(from, e), latest(to, e)
 	}
-	rows, err := money.NewMoneyService(s.db).UsageHistory(ctx, eventstore.HistoryFilter{From: from.AddDate(0, 0, -depletionBurnDays), To: to})
+	rows, err := money.NewMoneyService(s.db).UsageHistory(ctx, eventstore.HistoryFilter{From: back(from), To: to})
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +197,7 @@ func (s *Service) depletionBurns(ctx context.Context, plan *Plan) ([]burn, error
 	var order []key
 	for _, e := range edges {
 		for _, r := range rows {
-			if r.BucketAt.Before(e.AddDate(0, 0, -depletionBurnDays)) || !r.BucketAt.Before(e) {
+			if r.BucketAt.Before(back(e)) || !r.BucketAt.Before(e) {
 				continue
 			}
 			k := key{e, r.CustomerID.UUID(), r.Currency}

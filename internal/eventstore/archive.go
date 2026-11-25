@@ -54,15 +54,15 @@ type rollup struct {
 }
 
 var rollups = []rollup{
-	{ArchiveHistory, []string{"customer_id", "day_at", "bucket_at", "currency", "event_type", "meter", "cell", "print", "period_starts_at", "invoker", "outcome",
+	{ArchiveHistory, []string{"customer_id", "bucket_at", "currency", "event_type", "meter", "cell", "print", "period_starts_at", "invoker", "outcome",
 		"requests", "quantity", "stated", "charged", "forgiven"},
-		[]kind{kindUUID, kindTime, kindTime, kindText, kindText, kindText, kindText, kindText, kindTime, kindText, kindText, kindInt, kindInt, kindInt, kindInt, kindInt},
-		`SELECT customer_id, day_at, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, toString(outcome),
+		[]kind{kindUUID, kindTime, kindText, kindText, kindText, kindText, kindText, kindTime, kindText, kindText, kindInt, kindInt, kindInt, kindInt, kindInt},
+		`SELECT customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, toString(outcome),
        sum(requests) AS r, sum(quantity) AS q, sum(stated) AS st, sum(charged) AS c, sum(forgiven) AS f
 FROM {database}.usage_history WHERE merchant_id = %s
-GROUP BY customer_id, day_at, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome
+GROUP BY customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome
 HAVING r != 0 OR q != 0 OR st != 0 OR c != 0 OR f != 0
-ORDER BY customer_id, day_at, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome`},
+ORDER BY customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome`},
 	{ArchiveLimits, []string{"customer_id", "limit_key", "window_starts_at", "window_ends_at", "units"},
 		[]kind{kindUUID, kindText, kindTime, kindNullTime, kindInt},
 		`SELECT customer_id, limit_key, window_starts_at, any(window_ends_at), sum(units) AS u

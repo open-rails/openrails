@@ -446,9 +446,10 @@ type AccountingSettings struct {
 	// Timezone is the IANA zone (Europe/Berlin) whose days and months the
 	// metrics, MRR reports and usage history group in, and at whose month
 	// ends usage posts; empty is UTC. Rollups are kept in UTC quarter hours,
-	// so a change regroups every day and month, past ones too; usage history
-	// keeps them 35 days, then a row a day of the zone it was taken in under.
-	// Posted books keep their effective instants and never change.
+	// and usage history in UTC hours, so a change regroups every day and
+	// month, past ones too; a zone whose offset is not whole hours has its
+	// usage days cut at the hour. Posted books keep their effective instants
+	// and never change.
 	Timezone string `json:"timezone,omitempty"`
 }
 

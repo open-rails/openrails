@@ -3826,7 +3826,7 @@
     {
       "id": "OR-J24-S67",
       "journey": "J24",
-      "name": "Usage history past 35 days keeps one row a day of the accounting zone per invoker and meter cell, at the day's first bucket, and the zone's days read the same"
+      "name": "Usage history is UTC hours grouped into the accounting zone's days as it is read: a 25-hour day holds its 25th hour, depletion burn reads the same days, and a zone change regroups all of it"
     },
     {
       "id": "OR-J24-S68",

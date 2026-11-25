@@ -96,9 +96,8 @@ func TestPostingDeltaTakesWhatIsLeft(t *testing.T) {
 
 // A bucket's amount is the price through the bucket less the price through
 // the bucket before, so the buckets of a period sum to what it posts, and so
-// do the days of any zone they fold into; a bucket's rows share it by
-// quantity.
-func TestHistoryBucketsFoldIntoAnyZonesDays(t *testing.T) {
+// do the days of a zone they fold into; a bucket's rows share it by quantity.
+func TestHistoryHoursFoldIntoZonesDays(t *testing.T) {
 	period := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	at := func(day, hour, minute int) time.Time { return time.Date(2026, 11, day, hour, minute, 0, 0, time.UTC) }
 	customer := billing.CustomerID{1}
@@ -108,7 +107,7 @@ func TestHistoryBucketsFoldIntoAnyZonesDays(t *testing.T) {
 	}
 	p := prints(graduated(10, 5, 100))
 	prior := []eventstore.UsageBucket{row(at(1, 6, 0), "x", 80)}
-	buckets := []eventstore.UsageBucket{row(at(1, 18, 15), "x", 10), row(at(1, 18, 30), "x", 10), row(at(1, 18, 30), "y", 20), row(at(2, 3, 0), "x", 40),
+	buckets := []eventstore.UsageBucket{row(at(1, 18, 0), "x", 10), row(at(1, 19, 0), "x", 10), row(at(1, 19, 0), "y", 20), row(at(2, 3, 0), "x", 40),
 		{CustomerID: customer, BucketAt: at(2, 3, 0), Currency: "USD", EventType: "work", PeriodStartsAt: period, Invoker: "x", Outcome: eventstore.UsageFailed, Requests: 1, Charged: 7}}
 	priced, err := p.priceHistory(buckets, prior)
 	require.NoError(t, err)
@@ -116,11 +115,11 @@ func TestHistoryBucketsFoldIntoAnyZonesDays(t *testing.T) {
 	for _, r := range priced {
 		byBucket[r.BucketAt.Format("02T15:04")+"/"+r.Invoker+"/"+string(r.Outcome)] += r.Amount
 	}
-	// Before the first bucket: 80 units, 800. 18:15 takes the period to 90
-	// units (900), 18:30 to 120 (1100), 03:00 to 160 (1300).
-	require.EqualValues(t, 100, byBucket["01T18:15/x/succeeded"])
-	require.EqualValues(t, 66, byBucket["01T18:30/x/succeeded"], "18:30's 200, shared 10:20")
-	require.EqualValues(t, 134, byBucket["01T18:30/y/succeeded"])
+	// Before the first bucket: 80 units, 800. 18:00 takes the period to 90
+	// units (900), 19:00 to 120 (1100), 03:00 to 160 (1300).
+	require.EqualValues(t, 100, byBucket["01T18:00/x/succeeded"])
+	require.EqualValues(t, 66, byBucket["01T19:00/x/succeeded"], "19:00's 200, shared 10:20")
+	require.EqualValues(t, 134, byBucket["01T19:00/y/succeeded"])
 	require.EqualValues(t, 200, byBucket["02T03:00/x/succeeded"], "40 units at the second tier")
 	require.EqualValues(t, 7, byBucket["02T03:00/x/failed"], "a failure is what it charged")
 
@@ -130,7 +129,8 @@ func TestHistoryBucketsFoldIntoAnyZonesDays(t *testing.T) {
 		zone *time.Location
 		days map[string]int64
 	}{
-		// 18:15 UTC is 23:45 in Kolkata, 18:30 UTC its next midnight.
+		// The 18:00 UTC hour starts at 23:30 in Kolkata, 19:00 UTC at 00:30
+		// the next day: Kolkata's days are cut at the hour.
 		{kolkata, map[string]int64{"01": 100, "02": 407}},
 		{time.UTC, map[string]int64{"01": 300, "02": 207}},
 	} {

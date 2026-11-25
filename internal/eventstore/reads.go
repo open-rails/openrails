@@ -294,15 +294,16 @@ WHERE merchant_id = %s AND customer_id = %s AND currency = %s AND minute >= toSt
 	return total, err
 }
 
-// HistoryBucket is the length of a usage history bucket: every zone's
-// offset is a multiple of it, so buckets fold into any zone's days.
-const HistoryBucket = 15 * time.Minute
+// HistoryBucket is the length of a usage history bucket: an hour in UTC.
+// A zone's days are the buckets that start in them, exact for every zone
+// whose offset is whole hours; one on a half or quarter hour has its days
+// cut at the hour.
+const HistoryBucket = time.Hour
 
-// UsageBucket is one row of usage history: a 15-minute UTC bucket's events of
-// one type, invoker and outcome (Meter ""), or what they took of one meter
-// cell under one card print in one pricing period. Past 35 days the buckets
-// of one day of the accounting zone the usage was taken in under are one row,
-// at the day's first bucket: they regroup into that zone's days only.
+// UsageBucket is one row of usage history: a bucket's events of one type,
+// invoker and outcome (Meter ""), or what they took of one meter cell under
+// one card print in one pricing period. BucketAt is the UTC hour, or read in
+// a zone the start of the zone's day.
 type UsageBucket struct {
 	CustomerID         billing.CustomerID
 	BucketAt           time.Time
@@ -319,21 +320,19 @@ type UsageBucket struct {
 
 // HistoryFilter selects usage history: one customer (all when zero), one
 // currency (all when empty), the buckets that start in [From, To), and with
-// PeriodsFrom only charge rows of periods that start then or later.
+// PeriodsFrom only charge rows of periods that start then or later. With a
+// Zone, ClickHouse groups the buckets into the zone's days, as they are
+// read: a zone change regroups all history.
 type HistoryFilter struct {
 	CustomerID  billing.CustomerID
 	Currency    string
 	From, To    time.Time
 	PeriodsFrom *time.Time
+	Zone        *time.Location
 }
 
-// historyDaySpan bounds a history row's day before its bucket: a local day
-// is at most 25 hours long.
-const historyDaySpan = 25 * time.Hour
-
 func (f HistoryFilter) where(mid string) string {
-	w := []string{"merchant_id = " + mid, "day_at > " + timeLiteral(f.From.Add(-historyDaySpan)), "day_at < " + timeLiteral(f.To),
-		"bucket_at >= " + timeLiteral(f.From), "bucket_at < " + timeLiteral(f.To)}
+	w := []string{"merchant_id = " + mid, "bucket_at >= " + timeLiteral(f.From), "bucket_at < " + timeLiteral(f.To)}
 	if !f.CustomerID.IsZero() {
 		w = append(w, "customer_id = "+uuidLiteral(uuid.UUID(f.CustomerID)))
 	}
@@ -346,16 +345,21 @@ func (f HistoryFilter) where(mid string) string {
 	return strings.Join(w, " AND ")
 }
 
-// UsageHistory are the history rows a filter selects, summed by key.
+// UsageHistory are the history rows a filter selects, summed by key: by
+// hour, or by the filter's zone's days.
 func (s *Store) UsageHistory(ctx context.Context, f HistoryFilter) ([]UsageBucket, error) {
 	mid, err := s.merchant(ctx)
 	if err != nil {
 		return nil, err
 	}
-	sql := `SELECT customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, toString(outcome),
+	bucket := "bucket_at"
+	if f.Zone != nil {
+		bucket = "toStartOfDay(bucket_at, " + stringLiteral(f.Zone.String()) + ")"
+	}
+	sql := `SELECT customer_id, ` + bucket + ` AS b, currency, event_type, meter, cell, print, period_starts_at, invoker, toString(outcome),
        toInt64(sum(requests)), sum(quantity), sum(stated), sum(charged), sum(forgiven)
 FROM {database}.usage_history WHERE ` + f.where(mid) + `
-GROUP BY customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome`
+GROUP BY customer_id, b, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome`
 	var out []UsageBucket
 	err = s.query(ctx, "read usage history", sql, func(rows interface{ Scan(...any) error }) error {
 		var b UsageBucket

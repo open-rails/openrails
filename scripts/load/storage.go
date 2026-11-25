@@ -17,10 +17,9 @@ import (
 )
 
 // StorageResult is what the event store keeps per usage event. Usage is taken
-// in through lease syncs on a clock that spreads it over days, into two
-// databases: one whose days end now, and one whose days end past the age at
-// which usage history coarsens. Each is measured from its active parts once
-// TTLs are applied and the parts merged.
+// in through lease syncs on a clock that spreads it over days ending now, and
+// measured from the database's active parts once TTLs are applied and the
+// parts merged.
 type StorageResult struct {
 	Shape  string          `json:"shape"`
 	Worlds []*StorageWorld `json:"worlds"`
@@ -61,17 +60,13 @@ type ColumnStorage struct {
 	Uncompressed uint64 `json:"uncompressed"`
 }
 
-// HistoryRows are usage history's rows as stored, and as many as one row per
+// HistoryRows are usage history's rows as stored, and as many as one row a
 // UTC day would be, with and without the invoker in the key.
 type HistoryRows struct {
 	Rows             uint64 `json:"rows"`
 	DayRows          uint64 `json:"day_rows"`
 	DayRowsNoInvoker uint64 `json:"day_rows_without_invoker"`
 }
-
-// storageAge is how far past now the aged database's days end: beyond the
-// age at which usage history folds into days.
-const storageAge = 36 * 24 * time.Hour
 
 func (e *env) runStorage(ctx context.Context) *StorageResult {
 	plan := e.plan
@@ -80,15 +75,7 @@ func (e *env) runStorage(ctx context.Context) *StorageResult {
 		plan.StorageCustomers, plan.StoragePerDay, plan.StorageDays, plan.StorageInvokers, plan.Units[0], plan.Units[1], plan.UnitPrice, plan.StorageReporters)}
 	end := time.Now().UTC().Add(-time.Hour).Truncate(time.Hour)
 	span := time.Duration(plan.StorageDays) * 24 * time.Hour
-	for _, s := range []struct {
-		name string
-		end  time.Time
-	}{{"recent", end}, {"aged", end.Add(-storageAge)}} {
-		if ctx.Err() != nil {
-			break
-		}
-		r.Worlds = append(r.Worlds, e.storageWorld(ctx, s.name, s.end.Add(-span), s.end))
-	}
+	r.Worlds = append(r.Worlds, e.storageWorld(ctx, "recent", end.Add(-span), end))
 	return r
 }
 

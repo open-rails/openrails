@@ -69,8 +69,8 @@ type Plan struct {
 
 	// The storage world's customers each report StoragePerDay events a day
 	// for StorageDays, from StorageInvokers invokers, through
-	// StorageReporters concurrent reporters; each of its two databases stops
-	// taking days in after StorageMinutes.
+	// StorageReporters concurrent reporters; it stops taking days in after
+	// StorageMinutes.
 	StorageCustomers int `json:"storage_customers"`
 	StoragePerDay    int `json:"storage_per_day"`
 	StorageDays      int `json:"storage_days"`

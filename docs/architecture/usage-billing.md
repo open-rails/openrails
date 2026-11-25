@@ -14,8 +14,8 @@ Usage billing decides what usage costs and bills it in arrears. Usage lives in t
   period). Intake inserts into `usage_intake`, which stores nothing; its views
   write the event and the rollups: limit windows (from the windows that count
   the item), period quantities, minutes (from its provisional amount) and
-  history (`usage_history`, 15-minute UTC buckets for 35 days, then a row a day
-  of the merchant's accounting zone).
+  history (`usage_history`, by UTC hour, grouped into the merchant's
+  accounting-zone days as it is read).
 - **Posting**: what the ledger took of a period's usage (`usage_postings`);
   `usage_unposted` names who has usage it has not taken.
 - **Usage order** (`origin: usage`): bills a period's owed usage.
@@ -101,7 +101,7 @@ movements (`postRunningChargesThrough`).
 - **Catalog**: `ListMeters`, `GetMeter`, `SetMeter`, or a catalog document.
 - **Staff**: `UpdateCustomer` (`usage_billing`); `WaiveOrderBalance`,
   `MarkOrderUncollectible`, `RecordExternalPayment`.
-- **Customer**: `GET /v1/me/usage` (priced per 15-minute UTC bucket, or per day past 35 days, and folded into the merchant's days, `UsageHistory`), `/v1/me/balance/transactions`.
+- **Customer**: `GET /v1/me/usage` (read by day of the merchant's accounting zone and priced per day, `UsageHistory`), `/v1/me/balance/transactions`.
 - **Metrics and events**: `usage_units` and `usage_charged` by `charge` (charged, forgiven) (`POST /v1/metrics/query`); `delinquency.*`; customer facts `order_due`, `order_overdue`, `order_collection_stopped`.
 - **Configuration**: merchant `usage_billing` (its terms turn usage billing on), `billing_period_boundary`
   ([usage billing](../client.md#usage-and-running-charges)).
@@ -126,9 +126,13 @@ Does not apply: usage comes from the merchant's backend, not a provider; a usage
 ### 3. Exact money
 Amounts are `int64` native units of their currency end to end. A period is
 priced on its total, so its postings sum to R of its quantity however the usage
-arrived, and history's 15-minute buckets, so any zone's days, sum to what posts;
-past 35 days a day's buckets of the accounting zone fold into one row, which
-reads the same in that zone (OR-J24-S67).
+arrived, and history is priced per day of the accounting zone the same way,
+so the days sum to what posts. History is kept by UTC hour; ClickHouse groups
+the hours into the zone's days as they are read (`toStartOfDay` in the zone),
+so a 23- or 25-hour day holds its hours and a zone change regroups all of it
+(OR-J24-S57, OR-J24-S67). A zone whose offset is not whole hours (Kolkata,
+Kathmandu) has its days cut at the hour: an hour counts on the day it starts
+in.
 Each item is one event (a UUIDv7 derived from
 merchant, lease and number at the lease's time, or from the request id), sorted by customer and event
 id; a resend inserts nothing, and postings read `FINAL`, so a duplicate copy never
@@ -172,10 +176,10 @@ Checks:
 Classes, in each table comment and `internal/retention/tables.go`: permanent
 `usage_postings`, `usage_card_prints` and `running_charges`; state
 `usage_unposted` and the meter and rate-card tables. The event store's tables
-expire by TTL (`retention.EventStoreTTLs`): raw events 80 days (a period's last
-posting reads them up to 66 days on), period quantities 100 days, minutes 2 days,
-history 15-minute buckets 35 days and a row a day until 25 months, limit windows
-61 days after they end. A merchant archive carries every table as the store holds
+expire by TTL (`retention.EventStoreTTLs`): raw events 90 days (the owner's
+choice; a period's last posting reads them up to 66 days on), period quantities
+100 days, minutes 2 days, limit windows 61 days after they end. Usage history has
+no TTL: it is kept, and a merchant purge deletes its rows. A merchant archive carries every table as the store holds
 it (OR-J24-S54). A SCIM deletion clears a customer's invoker and metadata there
 under its lock; a run stopped part way converges when run again (`EraseCustomer`,
 OR-J24-S53, OR-J24-S63). A merchant purge deletes the merchant's usage there in a

@@ -170,9 +170,9 @@ var Tables = map[string]Table{
 // EventStoreTTLs are how long the event store keeps each usage table, as its
 // migrations' TTLs state them.
 var EventStoreTTLs = map[string]string{
-	"usage_events":     "80 days after occurred_at",
+	"usage_events":     "90 days after occurred_at",
 	"limit_usage":      "61 days after the window ends; a window without an end is kept",
 	"usage_quantities": "100 days after the pricing period starts",
 	"usage_minutes":    "2 days after the minute",
-	"usage_history":    "15-minute buckets for 35 days, then one row a day until 25 months after it",
+	"usage_history":    "kept: no TTL; a merchant purge deletes its rows",
 }
