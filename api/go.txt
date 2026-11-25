@@ -4717,6 +4717,7 @@ pkg openrails/server, method (Config) Addr() string
 pkg openrails/server, method (Config) WithDefaults() Config
 pkg openrails/server, type AdminConsole struct
 pkg openrails/server, type AdminConsole struct, Disabled bool `yaml:"disabled"`
+pkg openrails/server, type AdminConsole struct, OwnAccountsOnly bool `yaml:"-"`
 pkg openrails/server, type AuthConfig struct
 pkg openrails/server, type AuthConfig struct, Keys AuthKeys `yaml:"keys"`
 pkg openrails/server, type AuthKeys struct

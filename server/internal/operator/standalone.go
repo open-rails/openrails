@@ -19,6 +19,7 @@ type Surface struct {
 	CustomerAdmissionPolicy func(context.Context, auth.Verified, config.CustomerBinding) error
 	RouteGroups             config.RouteGroups
 	ConsoleDisabled         bool
+	ConsoleOwnAccountsOnly  bool
 	ConsoleAssets           fs.FS
 	// Resource is AuthKit's resource identifier, the console's audience at a
 	// trusted issuer.
@@ -42,6 +43,7 @@ func StandaloneServer(a *app.App, cp *controlplane.ControlPlane, s Surface) (*se
 		ConsoleAssets:           s.ConsoleAssets,
 		RouteGroups:             s.RouteGroups,
 		ConsoleDisabled:         s.ConsoleDisabled,
+		ConsoleOwnAccountsOnly:  s.ConsoleOwnAccountsOnly,
 		CheckoutOrigin:          s.CheckoutOrigin,
 		CheckoutHandler:         s.CheckoutHandler,
 	})

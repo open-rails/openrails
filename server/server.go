@@ -59,6 +59,9 @@ type AdminConsole struct {
 	// The default keeps the console available; billing and auth APIs are
 	// separate.
 	Disabled bool `yaml:"disabled"`
+	// OwnAccountsOnly signs staff in with the server's own accounts alone,
+	// offering no trusted issuer: a hosted product's choice. Set in code.
+	OwnAccountsOnly bool `yaml:"-"`
 }
 
 // AuthConfig is Config.Auth: what a deployment states about the server's
@@ -348,7 +351,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		}
 	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
-		RouteGroups: config.RouteGroups(cfg.RouteGroups), ConsoleDisabled: !consoleEnabled, Resource: akCfg.Resource.ID,
+		RouteGroups: config.RouteGroups(cfg.RouteGroups), ConsoleDisabled: !consoleEnabled, ConsoleOwnAccountsOnly: cfg.AdminConsole.OwnAccountsOnly, Resource: akCfg.Resource.ID,
 		CustomerAdmissionPolicy: admission,
 		CheckoutOrigin:          checkout, CheckoutHandler: page, ConsoleAssets: consoleAssets,
 	}); err != nil {

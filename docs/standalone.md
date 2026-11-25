@@ -537,7 +537,7 @@ OpenRails builds AuthKit's configuration (`controlplane.AuthKit`) from settings 
 
 The server's own accounts are staff. They join by invitation, need a second factor (a passkey or an authenticator app, whose secrets `totp.key` encrypts) and stay signed in for 30 days; passwords follow AuthKit's default policy (at least 8 characters, common ones refused). Readiness fails while staff cannot enroll one: with no `totp.key` the log names the file to mount. The server fixes the merchant roles, the API-key prefix, the issued audience `openrails`, the scopes `openrails:merchant` and `openrails:self`, the console's client `openrails-console`, its HTTP mount and the refresh cookie.
 
-A hosted product built on `server` sets its own account policy (open registration with `MerchantCreation`, agreements, usernames, group OAuth clients, SMS, DPoP) in code, with `server.Config.AuthKit`: it adjusts the derived configuration before the fixed parts apply.
+A hosted product built on `server` sets its own account policy (open registration with `MerchantCreation`, agreements, usernames, group OAuth clients, SMS, DPoP) in code, with `server.Config.AuthKit`: it adjusts the derived configuration before the fixed parts apply. `AdminConsole.OwnAccountsOnly` keeps its console to its own accounts, with no trusted issuer's button.
 
 ### The account directory
 
