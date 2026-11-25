@@ -40,53 +40,38 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, meter catalogrules.
 			return fmt.Errorf("lock usage meter: %w", err)
 		}
 
-		var existing catalogrules.Meter
+		if err := CheckCatalogMeterLimitCounts(ctx, queries, tid.UUID(), meter); err != nil {
+			return err
+		}
 		row, err := queries.GetUsageMeterForUpdate(ctx, gen.GetUsageMeterForUpdateParams{
-			MerchantID: tid.UUID(),
-			MeterKey:   meter.Key,
+			MerchantID: tid.UUID(), MeterKey: meter.Key,
 		})
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-			if err := queries.InsertUsageMeter(ctx, gen.InsertUsageMeterParams{
-				MerchantID:    tid.UUID(),
-				MeterKey:      meter.Key,
-				EventType:     meter.EventType,
-				ValueProperty: meter.ValueProperty,
-				Aggregation:   string(meter.Aggregation),
-				Unit:          meter.Unit,
-				GroupBy:       groupByJSON,
-			}); err != nil {
-				return fmt.Errorf("insert usage meter: %w", err)
-			}
-			return nil
-		case err != nil:
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("load usage meter: %w", err)
 		}
-
-		existing = catalogrules.Meter{
-			Key:           row.Key,
-			EventType:     row.EventType,
-			ValueProperty: row.ValueProperty,
-			Aggregation:   catalog.Aggregation(row.Aggregation),
-			Unit:          row.Unit,
+		operation := "insert usage meter"
+		if err == nil {
+			operation = "update usage meter"
+			existing := catalogrules.Meter{Key: row.Key, EventType: row.EventType,
+				ValueProperty: row.ValueProperty, Aggregation: catalog.Aggregation(row.Aggregation), Unit: row.Unit}
+			if err := json.Unmarshal(row.GroupBy, &existing.GroupBy); err != nil {
+				return fmt.Errorf("decode usage meter group_by: %w", err)
+			}
+			if usageMeterSemanticsEqual(existing, meter) {
+				return nil
+			}
+			active, err := usageMeterHasActivity(ctx, tx, tid.UUID(), existing, meter)
+			if err != nil {
+				return err
+			}
+			if active {
+				return ErrMeterInUse
+			}
+			if err := validateUsageMeterRateCardContracts(ctx, queries, tid.UUID(), meter); err != nil {
+				return err
+			}
 		}
-		if err := json.Unmarshal(row.GroupBy, &existing.GroupBy); err != nil {
-			return fmt.Errorf("decode usage meter group_by: %w", err)
-		}
-		if usageMeterSemanticsEqual(existing, meter) {
-			return nil
-		}
-		hasActivity, err := usageMeterHasActivity(ctx, tx, tid.UUID(), existing, meter)
-		if err != nil {
-			return err
-		}
-		if hasActivity {
-			return ErrMeterInUse
-		}
-		if err := validateUsageMeterRateCardContracts(ctx, queries, tid.UUID(), meter); err != nil {
-			return err
-		}
-		if err := queries.UpdateUsageMeter(ctx, gen.UpdateUsageMeterParams{
+		if err := queries.UpsertUsageMeter(ctx, gen.UpsertUsageMeterParams{
 			MerchantID:    tid.UUID(),
 			MeterKey:      meter.Key,
 			EventType:     meter.EventType,
@@ -95,7 +80,7 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, meter catalogrules.
 			Unit:          meter.Unit,
 			GroupBy:       groupByJSON,
 		}); err != nil {
-			return fmt.Errorf("update usage meter: %w", err)
+			return fmt.Errorf("%s: %w", operation, err)
 		}
 		return nil
 	})
@@ -177,9 +162,9 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 		if err != nil {
 			return fmt.Errorf("encode rate card filter: %w", err)
 		}
-		if err := queries.UpsertDefaultUsageRateCard(ctx, gen.UpsertDefaultUsageRateCardParams{
+		if err := queries.UpsertUsageRateCard(ctx, gen.UpsertUsageRateCardParams{
 			MerchantID: tid.UUID(),
-			ProductID:  *in.ProductID,
+			ProductID:  in.ProductID,
 			MeterKey:   meterKey,
 			Filter:     filterJSON,
 			Allowance:  allowanceJSON,

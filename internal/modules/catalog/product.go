@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
@@ -359,6 +360,9 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 		RequiredEntitlements: required, SetRequiredEntitlements: params.SetRequiredEntitlements,
 		Archived: params.Archived, KeysChanged: change.Changed(),
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		row, err = s.db.Gen(ctx).GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
+	}
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == "products_live_subscription_tier_group" {
@@ -400,7 +404,7 @@ func (s *ProductService) setEntitlements(ctx context.Context, merchantID, produc
 	}
 	if len(change.Removed) > 0 {
 		if _, err := q.RemoveProductEntitlements(ctx, gen.RemoveProductEntitlementsParams{
-			MerchantID: merchantID, ProductID: productID, Entitlements: change.Removed, At: edit.At, Actor: edit.Actor,
+			MerchantID: merchantID, ProductID: productID, Entitlements: change.Removed, At: edit.At,
 		}); err != nil {
 			return change, err
 		}

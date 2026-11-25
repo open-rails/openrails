@@ -88,6 +88,9 @@ func (s *Service) catalogApplicationGate(ctx context.Context, digest [32]byte) (
 	if err := json.Unmarshal(previous.Result, &receipt); err != nil {
 		return 0, nil, err
 	}
+	receipt.ApplicationID = previous.ApplicationID
+	receipt.BaseRevision = previous.BaseRevision
+	receipt.AppliedRevision = previous.AppliedRevision
 	receipt.Replayed = true
 	receipt.EntitlementChanges = []billing.EntitlementChange{}
 	return revision, &receipt, nil

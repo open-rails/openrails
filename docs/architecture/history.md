@@ -12,6 +12,8 @@ Append-only history of what changed, who changed it and how, in one envelope: co
 
 **Writing.** `history.Record` writes entries in the caller's transaction, so an entry commits and rolls back with the change it records; the catalog's commit (`catalogHistory`) and configuration writes (`RecordConfigWrite`) use it. `history.WriteAhead` writes on the pool, each entry its own statement outside any business transaction: an operation's `attempting` entry is written before the provider call and is kept whatever follows; recovery only appends. Every entry names its actor and source, and an entry names an address if and only if it is in the operations history. A credential never enters the history: its field reads `"changed"` (`history.Changed`). An entry over the log's bounds keeps the start of its reason and evidence and says `truncated` (`Operation.Fit`).
 
+A price change that moves its key adds `move: {price_id, archived}` to its fields payload. A movement with no other price change has a standalone `move` entry with `version`, `revision`, `price_id` and `archived`. `ListPriceHistory` reads both payloads.
+
 **Reading.** `ListChanges` (`GET /v1/merchant/changes`, `history.List`) pages one merchant's configuration history newest first, by object and time (`billing.LogListParams`). `ListPriceHistory` (`GET /v1/catalog/prices/{id}/history`) reads a price key's moves (`billing.PriceKeyMovement`). `GetSubscriptionHistory` (`GET /v1/admin/subscriptions/{id}/history`) merges a subscription's transitions, payment attempts, billing changes and provider operations. `openrails intents-log --merchant M` reads the operations history by rail, operation, PSP and phase.
 
 ## Interfaces

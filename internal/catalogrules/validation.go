@@ -372,7 +372,11 @@ func validRateCurrency(value string) bool {
 // meter, or a usage price on a meter, which states no payment term. Meters
 // are checked to exist by the caller.
 func ValidateRateCard(where string, rc *catalog.RateCard) error {
-	rc.Meter = NormalizeKey(rc.Meter)
+	if rc.Meter != "" {
+		if err := syntax.ValidateApplicationKey(rc.Meter, "meter"); err != nil {
+			return fmt.Errorf("%s: %w", where, err)
+		}
+	}
 	rc.PaymentTerm = catalog.PaymentTerm(strings.ToLower(strings.TrimSpace(string(rc.PaymentTerm))))
 	switch rc.PaymentTerm {
 	case "", catalog.PaymentInAdvance, catalog.PaymentInArrears:
@@ -403,12 +407,14 @@ func ValidateRateCard(where string, rc *catalog.RateCard) error {
 	return ValidateUsageAllowance(where, rc.Price, rc.Allowance)
 }
 
-// ValidateLimitCount normalizes and validates a limit's count of a meter:
+// ValidateLimitCount validates a limit's count of an exact meter key:
 // weight and per default to 1. Meters are checked to exist by the caller.
 func ValidateLimitCount(where string, c *catalog.LimitCount) error {
-	c.Meter = NormalizeKey(c.Meter)
 	if c.Meter == "" {
 		return fmt.Errorf("%s: a limit's count requires a meter", where)
+	}
+	if err := syntax.ValidateApplicationKey(c.Meter, "meter"); err != nil {
+		return fmt.Errorf("%s: %w", where, err)
 	}
 	if c.Weight < 0 || c.Per < 0 {
 		return fmt.Errorf("%s: weight and per must be positive", where)

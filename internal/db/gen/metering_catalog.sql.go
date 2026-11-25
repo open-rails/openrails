@@ -221,43 +221,6 @@ func (q *Queries) GetUsageMeterWithCatalog(ctx context.Context, arg GetUsageMete
 	return i, err
 }
 
-const insertUsageMeter = `-- name: InsertUsageMeter :exec
-INSERT INTO billing.catalog_meters
-    (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
-VALUES (
-    $1,
-    $2,
-    NULLIF($3::text, ''),
-    NULLIF($4::text, ''),
-    $5::text,
-    NULLIF($6::text, ''),
-    $7::jsonb
-)
-`
-
-type InsertUsageMeterParams struct {
-	MerchantID    uuid.UUID
-	MeterKey      string
-	EventType     string
-	ValueProperty string
-	Aggregation   string
-	Unit          string
-	GroupBy       []byte
-}
-
-func (q *Queries) InsertUsageMeter(ctx context.Context, arg InsertUsageMeterParams) error {
-	_, err := q.db.Exec(ctx, insertUsageMeter,
-		arg.MerchantID,
-		arg.MeterKey,
-		arg.EventType,
-		arg.ValueProperty,
-		arg.Aggregation,
-		arg.Unit,
-		arg.GroupBy,
-	)
-	return err
-}
-
 const listUsageMetersWithCatalog = `-- name: ListUsageMetersWithCatalog :many
 SELECT meter.key,
        COALESCE(meter.event_type, '') AS event_type,
@@ -376,87 +339,100 @@ func (q *Queries) LockUsageRateCardProduct(ctx context.Context, lockKey string) 
 	return err
 }
 
-const updateUsageMeter = `-- name: UpdateUsageMeter :exec
-UPDATE billing.catalog_meters
-SET event_type = NULLIF($1::text, ''),
-    value_property = NULLIF($2::text, ''),
-    aggregation = $3::text,
-    unit = NULLIF($4::text, ''),
-    group_by = $5::jsonb,
-    updated_at = now()
-WHERE merchant_id = $6
-  AND key = $7
+const upsertUsageMeter = `-- name: UpsertUsageMeter :exec
+INSERT INTO billing.catalog_meters
+    (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
+VALUES (
+    $1, $2,
+    NULLIF($3::text, ''), NULLIF($4::text, ''),
+    NULLIF($5::text, ''), NULLIF($6::text, ''),
+    $7::jsonb
+)
+ON CONFLICT (merchant_id, key) DO UPDATE SET event_type = EXCLUDED.event_type,
+    value_property = EXCLUDED.value_property, aggregation = EXCLUDED.aggregation,
+    unit = EXCLUDED.unit, group_by = EXCLUDED.group_by, updated_at = now()
 `
 
-type UpdateUsageMeterParams struct {
+type UpsertUsageMeterParams struct {
+	MerchantID    uuid.UUID
+	MeterKey      string
 	EventType     string
 	ValueProperty string
 	Aggregation   string
 	Unit          string
 	GroupBy       []byte
-	MerchantID    uuid.UUID
-	MeterKey      string
 }
 
-func (q *Queries) UpdateUsageMeter(ctx context.Context, arg UpdateUsageMeterParams) error {
-	_, err := q.db.Exec(ctx, updateUsageMeter,
+func (q *Queries) UpsertUsageMeter(ctx context.Context, arg UpsertUsageMeterParams) error {
+	_, err := q.db.Exec(ctx, upsertUsageMeter,
+		arg.MerchantID,
+		arg.MeterKey,
 		arg.EventType,
 		arg.ValueProperty,
 		arg.Aggregation,
 		arg.Unit,
 		arg.GroupBy,
-		arg.MerchantID,
-		arg.MeterKey,
 	)
 	return err
 }
 
-const upsertDefaultUsageRateCard = `-- name: UpsertDefaultUsageRateCard :exec
+const upsertUsageRateCard = `-- name: UpsertUsageRateCard :exec
 INSERT INTO billing.catalog_rate_cards
-    (merchant_id, product_id, ordinal, meter_key, payment_term, filter, allowance, price)
+    (merchant_id, product_id, ordinal, meter_key, payment_term, filter, allowance, price, id, created_at)
 VALUES (
-    $1,
-    $2::uuid,
+    $1, $2::uuid,
     COALESCE(
+        NULLIF($3::bigint, 0),
         (SELECT ordinal FROM billing.catalog_rate_cards
          WHERE merchant_id = $1
            AND product_id = $2::uuid
-           AND meter_key = $3::text),
+           AND meter_key = $4::text),
         (SELECT MAX(ordinal) + 1 FROM billing.catalog_rate_cards
          WHERE merchant_id = $1
            AND product_id = $2::uuid),
         1
     ),
-    $3::text, NULL, $4::jsonb,
-    $5::jsonb, $6::jsonb
+    NULLIF($4::text, ''), NULLIF($5::text, ''),
+    $6::jsonb, $7::jsonb, $8::jsonb,
+    COALESCE($9::uuid,
+        (SELECT id FROM billing.catalog_rate_cards
+         WHERE merchant_id = $1
+           AND meter_key = $4::text
+           AND $3::bigint = 0),
+        uuidv7()),
+    COALESCE($10::timestamptz, now())
 )
-ON CONFLICT (merchant_id, meter_key)
-    WHERE meter_key IS NOT NULL
-DO UPDATE SET product_id = EXCLUDED.product_id,
-    ordinal = EXCLUDED.ordinal,
-    filter = EXCLUDED.filter,
-    allowance = EXCLUDED.allowance,
-    price = EXCLUDED.price,
-    updated_at = now()
+ON CONFLICT (merchant_id, id) DO UPDATE SET product_id = EXCLUDED.product_id,
+    ordinal = EXCLUDED.ordinal, meter_key = EXCLUDED.meter_key,
+    payment_term = EXCLUDED.payment_term, filter = EXCLUDED.filter,
+    allowance = EXCLUDED.allowance, price = EXCLUDED.price, updated_at = now()
 `
 
-type UpsertDefaultUsageRateCardParams struct {
-	MerchantID uuid.UUID
-	ProductID  uuid.UUID
-	MeterKey   string
-	Filter     []byte
-	Allowance  []byte
-	Price      []byte
+type UpsertUsageRateCardParams struct {
+	MerchantID  uuid.UUID
+	ProductID   *uuid.UUID
+	Ordinal     int64
+	MeterKey    string
+	PaymentTerm string
+	Filter      []byte
+	Allowance   []byte
+	Price       []byte
+	ID          *uuid.UUID
+	CreatedAt   *time.Time
 }
 
-func (q *Queries) UpsertDefaultUsageRateCard(ctx context.Context, arg UpsertDefaultUsageRateCardParams) error {
-	_, err := q.db.Exec(ctx, upsertDefaultUsageRateCard,
+func (q *Queries) UpsertUsageRateCard(ctx context.Context, arg UpsertUsageRateCardParams) error {
+	_, err := q.db.Exec(ctx, upsertUsageRateCard,
 		arg.MerchantID,
 		arg.ProductID,
+		arg.Ordinal,
 		arg.MeterKey,
+		arg.PaymentTerm,
 		arg.Filter,
 		arg.Allowance,
 		arg.Price,
+		arg.ID,
+		arg.CreatedAt,
 	)
 	return err
 }

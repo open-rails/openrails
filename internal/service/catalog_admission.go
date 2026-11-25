@@ -478,7 +478,7 @@ func createPricePlan(req billing.CreatePriceParams) catalogClassification {
 	}
 }
 
-func sidecarPlan(desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions) catalogClassification {
+func sidecarPlan(desired SyncCatalogSidecarsRequest) catalogClassification {
 	return func(ctx context.Context, s *Service, state catalogState) ([]catalogObject, error) {
 		if err := normalizeCatalogBilling(&desired); err != nil {
 			return nil, err
@@ -491,7 +491,7 @@ func sidecarPlan(desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions
 		if err != nil {
 			return nil, err
 		}
-		next := mergeCatalogBilling(current, desired, opts)
+		next := mergeCatalogBilling(current, desired)
 		targets := map[catalogObject]bool{}
 		beforeMeters := map[string]CatalogMeterSpec{}
 		afterMeters := map[string]CatalogMeterSpec{}

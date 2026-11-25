@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // CheckCatalogMeterChange holds the ordinary meter/activity locks through the
@@ -48,12 +51,26 @@ func CheckCatalogMeterChange(ctx context.Context, tx pgx.Tx, merchantID uuid.UUI
 
 // CheckCatalogRateCardContracts validates the resulting rate card against the
 // resulting meter, never the old card.
-func CheckCatalogRateCardContracts(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, meter catalogrules.Meter, filter map[string][]string, price catalog.RatePrice) error {
+func CheckCatalogRateCardContracts(meter catalogrules.Meter, filter map[string][]string, price catalog.RatePrice) error {
 	if err := catalogrules.ValidateMeterPrice("rate card", meter.Aggregation, price); err != nil {
 		return invalidUsageRateCard(err)
 	}
 	if err := catalogrules.ValidateDimensions("default usage rate card", meter.GroupBy, filter, &price); err != nil {
 		return meterRateCardConflict(err)
+	}
+	return nil
+}
+
+func CheckCatalogMeterLimitCounts(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, meter catalogrules.Meter) error {
+	if catalogrules.BillingSupported(meter.Aggregation) {
+		return nil
+	}
+	counted, err := q.ListCatalogLimitsUsingMeters(ctx, gen.ListCatalogLimitsUsingMetersParams{MerchantID: merchantID, MeterKeys: []string{meter.Key}})
+	if err != nil {
+		return err
+	}
+	if len(counted) > 0 {
+		return apperr.New(http.StatusConflict, billing.CodeMeterInUse, fmt.Sprintf("limit %q counts meter %q; its aggregation must remain sum or count", counted[0], meter.Key))
 	}
 	return nil
 }

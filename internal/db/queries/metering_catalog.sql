@@ -3,60 +3,52 @@
 -- name: LockUsageMeterKey :exec
 SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));
 
--- name: InsertUsageMeter :exec
+-- name: UpsertUsageMeter :exec
 INSERT INTO billing.catalog_meters
     (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
 VALUES (
-    sqlc.arg(merchant_id),
-    sqlc.arg(meter_key),
-    NULLIF(sqlc.arg(event_type)::text, ''),
-    NULLIF(sqlc.arg(value_property)::text, ''),
-    sqlc.arg(aggregation)::text,
-    NULLIF(sqlc.arg(unit)::text, ''),
+    sqlc.arg(merchant_id), sqlc.arg(meter_key),
+    NULLIF(sqlc.arg(event_type)::text, ''), NULLIF(sqlc.arg(value_property)::text, ''),
+    NULLIF(sqlc.arg(aggregation)::text, ''), NULLIF(sqlc.arg(unit)::text, ''),
     sqlc.arg(group_by)::jsonb
-);
-
--- name: UpdateUsageMeter :exec
-UPDATE billing.catalog_meters
-SET event_type = NULLIF(sqlc.arg(event_type)::text, ''),
-    value_property = NULLIF(sqlc.arg(value_property)::text, ''),
-    aggregation = sqlc.arg(aggregation)::text,
-    unit = NULLIF(sqlc.arg(unit)::text, ''),
-    group_by = sqlc.arg(group_by)::jsonb,
-    updated_at = now()
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND key = sqlc.arg(meter_key);
+)
+ON CONFLICT (merchant_id, key) DO UPDATE SET event_type = EXCLUDED.event_type,
+    value_property = EXCLUDED.value_property, aggregation = EXCLUDED.aggregation,
+    unit = EXCLUDED.unit, group_by = EXCLUDED.group_by, updated_at = now();
 
 -- name: LockUsageRateCardProduct :exec
 SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 1));
 
--- name: UpsertDefaultUsageRateCard :exec
+-- name: UpsertUsageRateCard :exec
 INSERT INTO billing.catalog_rate_cards
-    (merchant_id, product_id, ordinal, meter_key, payment_term, filter, allowance, price)
+    (merchant_id, product_id, ordinal, meter_key, payment_term, filter, allowance, price, id, created_at)
 VALUES (
-    sqlc.arg(merchant_id),
-    sqlc.arg(product_id)::uuid,
+    sqlc.arg(merchant_id), sqlc.narg(product_id)::uuid,
     COALESCE(
+        NULLIF(sqlc.arg(ordinal)::bigint, 0),
         (SELECT ordinal FROM billing.catalog_rate_cards
          WHERE merchant_id = sqlc.arg(merchant_id)
-           AND product_id = sqlc.arg(product_id)::uuid
+           AND product_id = sqlc.narg(product_id)::uuid
            AND meter_key = sqlc.arg(meter_key)::text),
         (SELECT MAX(ordinal) + 1 FROM billing.catalog_rate_cards
          WHERE merchant_id = sqlc.arg(merchant_id)
-           AND product_id = sqlc.arg(product_id)::uuid),
+           AND product_id = sqlc.narg(product_id)::uuid),
         1
     ),
-    sqlc.arg(meter_key)::text, NULL, sqlc.arg(filter)::jsonb,
-    sqlc.narg(allowance)::jsonb, sqlc.arg(price)::jsonb
+    NULLIF(sqlc.arg(meter_key)::text, ''), NULLIF(sqlc.arg(payment_term)::text, ''),
+    sqlc.arg(filter)::jsonb, sqlc.narg(allowance)::jsonb, sqlc.arg(price)::jsonb,
+    COALESCE(sqlc.narg(id)::uuid,
+        (SELECT id FROM billing.catalog_rate_cards
+         WHERE merchant_id = sqlc.arg(merchant_id)
+           AND meter_key = sqlc.arg(meter_key)::text
+           AND sqlc.arg(ordinal)::bigint = 0),
+        uuidv7()),
+    COALESCE(sqlc.narg(created_at)::timestamptz, now())
 )
-ON CONFLICT (merchant_id, meter_key)
-    WHERE meter_key IS NOT NULL
-DO UPDATE SET product_id = EXCLUDED.product_id,
-    ordinal = EXCLUDED.ordinal,
-    filter = EXCLUDED.filter,
-    allowance = EXCLUDED.allowance,
-    price = EXCLUDED.price,
-    updated_at = now();
+ON CONFLICT (merchant_id, id) DO UPDATE SET product_id = EXCLUDED.product_id,
+    ordinal = EXCLUDED.ordinal, meter_key = EXCLUDED.meter_key,
+    payment_term = EXCLUDED.payment_term, filter = EXCLUDED.filter,
+    allowance = EXCLUDED.allowance, price = EXCLUDED.price, updated_at = now();
 
 -- name: GetDefaultUsageRateCardStateForUpdate :one
 SELECT filter, allowance, price

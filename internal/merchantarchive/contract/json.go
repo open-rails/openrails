@@ -426,6 +426,7 @@ var jsonRules = map[string]jsonRule{
 	// configuration documents hold them, credentials only as "changed".
 	"change_log.changes": object(map[string]jsonRule{"version": integerValue, "revision": integerValue, "application_id": textValue,
 		"fields": historyFields,
+		"move":   object(map[string]jsonRule{"price_id": textValue, "archived": booleanValue}),
 		"keys":   array(textValue), "from": textValue, "to": textValue, "price_id": textValue, "archived": booleanValue}),
 	"catalog_applications.result": object(map[string]jsonRule{"application_id": textValue, "catalog_id": textValue, "base_revision": integerValue, "applied_revision": integerValue, "replayed": booleanValue, "products_changed": integerValue, "prices_changed": integerValue}),
 	// The model's legacy gateway_response column stores arbitrary subscription metadata.

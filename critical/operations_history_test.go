@@ -249,9 +249,11 @@ FROM `+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+` WHERE merchant_id 
 		current, err := a.alphaRemote.GetPrice(t.Context(), second.ID)
 		require.NoError(t, err)
 
+		entries := objectHistory(t, a.alphaRemote, billing.LogObjectPrice, "tiered:monthly")
+		require.Equal(t, []billing.LogAction{billing.LogActionMove, billing.LogActionMove, billing.LogActionUpdate, billing.LogActionCreate}, actions(entries), "one entry per price change, with standalone moves for product changes")
 		var moves []billing.LogEntry
-		for _, e := range objectHistory(t, a.alphaRemote, billing.LogObjectPrice, "tiered:monthly") {
-			if e.Action == billing.LogActionMove {
+		for _, e := range entries {
+			if e.Action == billing.LogActionMove || changeOf(t, e).Move != nil {
 				moves = append(moves, e)
 			}
 		}
@@ -266,7 +268,11 @@ FROM `+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+` WHERE merchant_id 
 			require.Equal(t, billing.LogSourceAPI, e.Source)
 			c := changeOf(t, e)
 			require.NotNil(t, c.Revision, "a move carries its key's revision")
-			got = append(got, move{c.PriceID, c.Archived, *c.Revision})
+			revision := *c.Revision
+			if c.Move != nil {
+				c = *c.Move
+			}
+			got = append(got, move{c.PriceID, c.Archived, revision})
 		}
 		require.Equal(t, []move{
 			{second.ID, false, current.Revision}, // the product unarchived: the key names its price again
@@ -293,6 +299,17 @@ FROM `+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+` WHERE merchant_id 
 		require.NoError(t, err)
 		require.Len(t, rest.Items, 1)
 		require.Equal(t, first.ID, rest.Items[0].Price.ID, "either version reads its key's whole history")
+
+		// Standalone movements already stored remain readable beside folded ones.
+		legacy, err := json.Marshal(map[string]any{"version": 1, "revision": first.Revision, "price_id": first.ID, "archived": false})
+		require.NoError(t, err)
+		_, err = a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "change_log"}.Sanitize()+" (merchant_id, occurred_at, actor, source, object_type, object_id, action, changes) VALUES ($1, $2, 'system', 'api', 'price', 'tiered:monthly', 'move', $3)", a.alpha.MerchantID().UUID(), moves[len(moves)-1].OccurredAt.Add(-time.Hour), legacy)
+		require.NoError(t, err)
+		mixed, err := a.alphaRemote.ListPriceHistory(t.Context(), second.ID, billing.PageRequest{})
+		require.NoError(t, err)
+		require.Len(t, mixed.Items, 5)
+		require.Equal(t, first.ID, mixed.Items[4].Price.ID)
+		require.False(t, mixed.Items[4].Archived)
 	})
 
 	t.Run("OR-J43-S11/the-breaker-marks-an-attempt-sent-before-its-provider-call", func(t *testing.T) {
@@ -404,18 +421,19 @@ FROM `+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+` WHERE merchant_id 
 			if e.Action == billing.LogActionArchive {
 				archives = append(archives, e)
 			}
-			if e.Action == billing.LogActionMove && changeOf(t, e).Archived {
+			if c := changeOf(t, e); c.Move != nil && c.Move.Archived {
 				retired = append(retired, e)
 			}
 		}
 		require.Len(t, archives, 1, "the archive is recorded once")
 		require.Len(t, retired, 1, "and the key's move to nothing once")
-		require.Equal(t, []billing.LogAction{billing.LogActionMove, billing.LogActionArchive}, actions(entries[:2]), "both are the migration's latest")
+		require.Equal(t, archives[0], retired[0], "the archive carries its move")
+		require.Equal(t, billing.LogActionArchive, entries[0].Action, "the archive is the migration's latest")
 		for _, e := range []billing.LogEntry{archives[0], retired[0]} {
 			require.True(t, strings.HasPrefix(string(e.Actor), "staff:"), "the migration's own actor: %s", e.Actor)
 			require.EqualValues(t, source.Revision, *changeOf(t, e).Revision)
 		}
-		require.Equal(t, source.ID, changeOf(t, retired[0]).PriceID)
+		require.Equal(t, source.ID, changeOf(t, retired[0]).Move.PriceID)
 	})
 
 	t.Run("OR-J43-S13/a-parked-or-stale-claim-never-counts-as-sent", func(t *testing.T) {

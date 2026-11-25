@@ -1,6 +1,6 @@
 # Catalog
 
-What a merchant sells: products, prices, meters, rate cards and usage limits, and how recurring subscribers move to other prices and products ([price migrations](#moving-subscribers-to-other-prices-and-products)). It changes by documents (`catalog.Application`) an operator applies and by edits from the console, the catalog routes and `Client` methods; starting OpenRails never applies one (`internal/engine/engine.go`). Guides: [catalog](../client.md#catalog), [catalog export](../client.md#catalog).
+What a merchant sells: products, prices, meters, rate cards and usage limits, and how recurring subscribers move to other prices and products ([price migrations](#moving-subscribers-to-other-prices-and-products)). It changes by documents (`catalog.Application`) an operator applies and by edits from the console, the catalog routes and `Client` methods; starting OpenRails never applies one (`internal/engine/engine.go`). Guides: [catalog](../client.md#catalog), [billing export](../standalone.md#backup-and-restore).
 
 ## Concepts
 
@@ -30,13 +30,15 @@ What a merchant sells: products, prices, meters, rate cards and usage limits, an
    (`errCatalogSnapshotMoved`), release the admission as no-effect and plan
    again, up to three times, then answer `409 catalog_revision_conflict`.
 
-**History.** The commit compares the catalog before and after (`readCatalogState`) and appends one `change_log` entry per changed object ([history](history.md)) (`catalogHistory`, `internal/service/catalog_history.go`) through `history.Record`, in the same transaction, so an entry commits and rolls back with its change. A product, price key, meter or limit gets `create`, `update`, `archive`, `unarchive` or `delete` with each changed field before and after; a product's keys get `key_add`, `key_remove` and `key_rename` entries of their own (a rename is what `replaceEntitlements` reported); a price key gets a `move` entry (`priceMove`) when it comes to name another of its versions, or none because the price, its product or both were archived or the price deleted; the entry carries the public id of the version it names, or of the one it stopped naming, and `ListPriceHistory` reads them. Every entry but a delete carries the object's revision after the change: a product's, which a price change never moves, or a price key's. The actor is the route gate's invoker (`staff:<id>`) or `system`; the source is `console` for a signed-in person, `api`, `catalog_apply` for a document (with its `application_id`) or `cli` for the operator's apply.
+**History.** The commit compares the catalog before and after (`readCatalogState`) and appends one `change_log` entry per changed object ([history](history.md)) (`catalogHistory`, `internal/service/catalog_history.go`) through `history.Record`, in the same transaction, so an entry commits and rolls back with its change. A product, price key, meter or limit gets `create`, `update`, `archive`, `unarchive` or `delete` with each changed field before and after; a product's keys get `key_add`, `key_remove` and `key_rename` entries of their own (a rename is what `replaceEntitlements` reported); a price key records a move (`priceMove`) when it comes to name another of its versions, or none because the price, its product or both were archived or the price deleted; its object's entry adds `move: {price_id, archived}` to the fields payload, carrying the public id of the version it names or stopped naming. A move without another price change keeps its standalone `move` entry, and `ListPriceHistory` reads both. Every entry but a delete carries the object's revision after the change: a product's, which a price change never moves, or a price key's. The actor is the route gate's invoker (`staff:<id>`) or `system`; the source is `console` for a signed-in person, `api`, `catalog_apply` for a document (with its `application_id`) or `cli` for the operator's apply.
 
-The `catalog_authored_*` triggers advance `merchants.catalog_revision` on every
-row written, unless `openrails.catalog_batch_merchant_id` names the merchant (a
-document, which advances it once with `AdvanceCatalogRevision`).
+The `catalog_authored_*` triggers advance `merchants.catalog_revision` once per
+transaction for the first row written (`openrails.catalog_revision_merchant_ids`
+remembers it), unless `openrails.catalog_batch_merchant_id` names the merchant (a
+document, which advances it once with `AdvanceCatalogRevision`). A write that
+changes nothing advances nothing.
 
-**Prices are versions.** `writeCatalogPrice` archives the key's current row and creates or revives the row whose id derives from the terms (`RevivePrice`); the key's move is a `move` entry in `change_log`, as is the move a product's archive makes; a price migration archives its sources with the catalog command, as an edit. `immutable_price_terms` lets only `archived`, `updated_at`, `deleted_at` and `sell_via` change, so an invoice keeps its terms. Product keys are valid-time rows in `product_entitlements`; a change emits `product.entitlements_changed`. `DeleteProduct` soft-deletes only what nothing refers to (`ProductHoldsReferences`, `PricesHoldReferences`), else `409 product_in_use`.
+**Prices are versions.** `writeCatalogPrice` archives the key's current row and creates or revives the row whose id derives from the terms (`RevivePrice`); the key's move is folded into its change's payload in `change_log`, while a product's archive makes a standalone `move` entry; a price migration archives its sources with the catalog command, as an edit. `immutable_price_terms` lets only `archived`, `updated_at`, `deleted_at` and `sell_via` change, so an invoice keeps its terms. Product keys are valid-time rows in `product_entitlements`; a change emits `product.entitlements_changed`. `DeleteProduct` soft-deletes only what nothing refers to (`ProductHoldsReferences`, `PricesHoldReferences`), else `409 product_in_use`.
 
 **Applying a document** (`internal/service/catalog_application.go`):
 
@@ -48,8 +50,8 @@ document, which advances it once with `AdvanceCatalogRevision`).
 3. Commit: plan against `catalog_field_owners` (`planCatalogApplication`), apply
    products, prices, meters, rate cards and limits, prune, take ownership of the
    named fields (`recordCatalogApply`). Only a document that skipped and warned
-   nothing is stored in `catalog_applications`; any other runs again when
-   re-applied. A skip also raises `life.catalog.conflicts`, which the next apply
+   nothing, and changed the catalog or its ownership, is stored in
+   `catalog_applications`; any other runs again when re-applied. A skip also raises `life.catalog.conflicts`, which the next apply
    that skips nothing resolves.
 
 An object is skipped whole when a field it names has a live value an edit set
@@ -74,7 +76,7 @@ treasury (`solanaPlanID`); `verifySolanaCatalogReference` reads it back. Under a
 
 `internal/catalogrules` validates charge models and rates usage in integer micros ([usage billing](usage-billing.md)); `StripeCatalogService` (webhook endpoints) is [payment providers](payment-providers.md).
 
-Tables: `products`, `product_entitlements`, `prices`, `price_keys`, `price_psp_bindings`, `catalog_meters`, `catalog_rate_cards`, `catalog_limits`, `catalog_product_limits`, `catalog_field_owners`, `catalog_applications`, `catalog_restore_receipts`; read-only here, `provider_catalog_objects`.
+Tables: `products`, `product_entitlements`, `prices`, `price_keys`, `price_psp_bindings`, `catalog_meters`, `catalog_rate_cards`, `catalog_limits`, `catalog_product_limits`, `catalog_field_owners`, `catalog_applications`; read-only here, `provider_catalog_objects`.
 
 ### Moving subscribers to other prices and products
 
@@ -119,8 +121,8 @@ Tables: `price_migrations`; moves are `scheduled_changes` ([subscriptions](subsc
   Reads are cached per handle (`ReadCatalog`, `ReadMeters`).
 - HTTP: `POST /v1/catalog/apply`, `/v1/catalog/products`, `/v1/catalog/prices`, `POST /v1/catalog/provider-prices`, `/v1/catalog/meters`, `/v1/catalog/limits`; reads need `merchant:catalog:read`, writes `merchant:catalog:manage` (or `root:` twins). No public route reads the catalog.
 - Price migrations: `PreviewPriceMigration`, `CreatePriceMigration`, `ListPriceMigrations`, `GetPriceMigration`, `CancelPriceMigration` on `POST /v1/catalog/price-migrations/preview`, `POST /v1/catalog/price-migrations`, `GET /v1/catalog/price-migrations`, `GET /v1/catalog/price-migrations/{id}`, `POST /v1/catalog/price-migrations/{id}/cancel`, with the catalog permissions (preview is a read); events `subscription_reprice_scheduled`, `subscription_plan_change_scheduled` ([events](../client.md#events)); configuration `reprice_notice_window_days`.
-- CLI: `openrails catalog apply FILE --merchant NAME [--force-conflicts]`,
-  `openrails catalog export|import`, `openrails dump-merchant-catalog`.
+- CLI: `openrails catalog apply FILE --merchant NAME [--force-conflicts]`;
+  `openrails billing export|import` preserves the catalog in the billing archive.
 
 ## Guarantees
 
@@ -196,7 +198,7 @@ Checks:
 
 ### 6. Data lifecycle
 
-`products`, `product_entitlements`, `prices`, `catalog_applications`, `catalog_restore_receipts` and `price_migrations` are permanent, the rest state; none is partitioned. Products and prices soft-delete.
+`products`, `product_entitlements`, `prices`, `catalog_applications` and `price_migrations` are permanent, the rest state; none is partitioned. Products and prices soft-delete.
 
 `change_log`, the history of every catalog and configuration change, is permanent and append-only (`immutable_change_log`): no update or delete, a merchant purge keeps it, and the merchant archive moves it. It is not in the billing restore guard: a destination records its own configuration's history as soon as that configuration loads, and a restore adds the archive's entries to it, once per merchant (the restore receipt makes a replay a no-op).
 

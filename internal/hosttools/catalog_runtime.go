@@ -26,20 +26,6 @@ import (
 )
 
 func catalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApplyOptions) (*app.Runtime, *service.Service, func(), error) {
-	if opts.App != nil {
-		if opts.App.Runtime == nil {
-			return nil, nil, nil, fmt.Errorf("catalog runtime is not initialized")
-		}
-		svc, err := service.New(logger, opts.App.Runtime)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		return opts.App.Runtime, svc, func() {}, nil
-	}
-	return newCatalogRuntime(ctx, logger, opts)
-}
-
-func newCatalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApplyOptions) (*app.Runtime, *service.Service, func(), error) {
 	cfg := opts.Config
 	if cfg == nil {
 		return nil, nil, nil, fmt.Errorf("catalog runtime configuration is required")
