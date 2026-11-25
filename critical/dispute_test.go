@@ -505,11 +505,14 @@ func disputeFraudWarning(t *testing.T) {
 		setPosture(t, m.a, "limited")
 		startFleet(t, m.a.world)
 		m.fraudWarning(t, "evt_efw_limited", "radar.early_fraud_warning.created", "issfr_limited", true)
+		// The finding commits before its alert is claimed.
 		var held *billing.Finding
-		require.Eventually(t, func() bool { held = waiting(t, m.a); return held != nil }, 20*time.Second, 50*time.Millisecond,
-			"a held response is a finding")
-		require.Equal(t, "high", notifiedAt(t, m.a, held.ID), "and alerts once")
+		require.Eventually(t, func() bool {
+			held = waiting(t, m.a)
+			return held != nil && notifiedAt(t, m.a, held.ID) == "high"
+		}, 20*time.Second, 50*time.Millisecond, "a held response is a finding that alerts")
 		waitDisputeJobs(t, m.a)
+		require.Equal(t, 1, findingAlerts(t, m.a, held.ID), "once")
 		require.Empty(t, m.reversals(t), "the refund waits with everything else")
 		require.True(t, m.entitled(t), "access stays while the refund cannot be sent")
 		require.NotContains(t, cardStatuses(t, m.a, m.sub.CustomerID), "disputed")
@@ -688,6 +691,15 @@ func notifiedAt(t *testing.T, a *authorityWorld, id billing.FindingID) string {
 		return ""
 	}
 	return *severity
+}
+
+// findingAlerts is the alerts queued for a finding: one per notification episode.
+func findingAlerts(t *testing.T, a *authorityWorld, id billing.FindingID) int {
+	t.Helper()
+	var n int
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema + "_river", "river_job"}.Sanitize()+
+		" WHERE kind = 'openrails.operator_alert' AND args->'finding'->>'id' = $1 AND args->'channel' IS NULL", id.UUID().String()).Scan(&n))
+	return n
 }
 
 // Chargebacks that bring a PSP's ratio to its acquirer limit's warning raise
