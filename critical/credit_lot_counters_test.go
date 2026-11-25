@@ -332,7 +332,11 @@ func usageOrderChangeIsBought(t *testing.T) {
 	deferred, released := lotMoney(t, a.world, change.ID)
 	require.EqualValues(t, 6_299, deferred)
 	require.Zero(t, released)
-	require.EqualValues(t, 3_703_701, glBalance(t, a.world, "unapplied_cash"), "the order's share of the $3.71 waits for its application")
+	// The order's share of the $3.71 settles its usage receivable.
+	require.Equal(t, []int64{3_703_701}, collected(t, a.world, "usage_collection"))
+	require.Zero(t, glBalance(t, a.world, "usage_receivable"))
+	require.Zero(t, glBalance(t, a.world, "unapplied_cash"))
+	require.EqualValues(t, 3_703_701, glBalance(t, a.world, "usage_revenue"))
 	// The change applies its payment's cash, as a bill's line would: the
 	// per-payment audit counts it.
 	var payment, issued string
