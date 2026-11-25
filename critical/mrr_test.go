@@ -239,19 +239,23 @@ func subscriptionMRRReads(t *testing.T, w *world, q interface {
 	return n
 }
 
-// subscriptionMRRScans is the sequential scans of subscription_mrr, as
-// subscriptionMRRReads counts: a keyed write takes none.
+// subscriptionMRRScans is, for subscription_mrr and each of its indexes,
+// its scans and the rows or entries they returned, as subscriptionMRRReads
+// counts: where a write's reads went.
 func subscriptionMRRScans(t *testing.T, w *world, q interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}, xact bool) int64 {
+}, xact bool) string {
 	t.Helper()
-	fn := "pg_stat_get_numscans"
+	scans, returned := "pg_stat_get_numscans", "pg_stat_get_tuples_returned"
 	if xact {
-		fn = "pg_stat_get_xact_numscans"
+		scans, returned = "pg_stat_get_xact_numscans", "pg_stat_get_xact_tuples_returned"
 	}
-	var n int64
-	require.NoError(t, q.QueryRow(t.Context(), "SELECT "+fn+"($1::regclass)", pgx.Identifier{w.schema, "subscription_mrr"}.Sanitize()).Scan(&n))
-	return n
+	var out string
+	require.NoError(t, q.QueryRow(t.Context(), `SELECT string_agg(r.name || ' ' || `+scans+`(r.oid) || ' scans ' || `+returned+`(r.oid) || ' read', '; ' ORDER BY r.name)
+		FROM (SELECT c.oid, 'table' AS name FROM pg_class c WHERE c.oid = $1::regclass
+		      UNION ALL SELECT i.indexrelid, i.indexrelid::regclass::text FROM pg_index i WHERE i.indrelid = $1::regclass) r`,
+		pgx.Identifier{w.schema, "subscription_mrr"}.Sanitize()).Scan(&out))
+	return out
 }
 
 // Monthly MRR of the fixture prices. A named cadence divides exactly (720
@@ -746,8 +750,8 @@ func TestMRR(t *testing.T) {
 			reads = subscriptionMRRReads(t, a.world, a.pool, false) - before
 			return reads >= members
 		}, 70*time.Second, 250*time.Millisecond, "the import's reads reach the statistics")
-		require.Less(t, reads, int64(50*members), "reads of subscription_mrr grow with the book, not its square (%d sequential scans)",
-			subscriptionMRRScans(t, a.world, a.pool, false)-scans)
+		require.Less(t, reads, int64(50*members), "reads of subscription_mrr grow with the book, not its square: before %s; after %s",
+			scans, subscriptionMRRScans(t, a.world, a.pool, false))
 	})
 
 	t.Run("OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once", func(t *testing.T) {
@@ -774,7 +778,7 @@ func TestMRR(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tx.Exec(t.Context(), "SET CONSTRAINTS ALL IMMEDIATE")
 		require.NoError(t, err)
-		require.Less(t, subscriptionMRRReads(t, a.world, tx, true), int64(50*members), "reads of subscription_mrr grow with the book, not its square (%d sequential scans)",
+		require.Less(t, subscriptionMRRReads(t, a.world, tx, true), int64(50*members), "reads of subscription_mrr grow with the book, not its square: %s",
 			subscriptionMRRScans(t, a.world, tx, true))
 		require.NoError(t, tx.Commit(t.Context()))
 
