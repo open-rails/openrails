@@ -247,7 +247,7 @@ psps:
 `openrails.ParseMerchantDocument` reads one. Unknown or duplicate fields,
 several documents, anchors and tags are refused, and so are the retired keys
 `rail_merchant_accounts` and `provider_accounts`. Keep secrets out of the
-committed file: an overlay or Vault supplies them
+committed file: Vault, or a file mounted from a secret, supplies them
 ([standalone.md](standalone.md#configuration-reference)).
 
 **Environments.** Each PSP declares whether it moves real money; omitted, it is the rail's real-money one, so production declares none. NMI: `live`, `test` (an account in test mode), `sandbox` (sandbox.nmi.com). Stripe: `live`, `test` (key prefixes must agree). CCBill: `live`, `sandbox`. Solana: `mainnet`, `devnet`, `testnet`. A merchant may mix them. OpenRails asks the provider before arming a PSP: NMI's `test_mode_status` and Solana's genesis hash on every RPC endpoint, again once that proof is an hour old; Stripe's `api.stripe.com/v1/account` against `account_id`, plus `api.stripe.com/v1/balance` for a test key, once per key and account. A PSP whose answer disagrees stays disarmed: reads work, writes fail before any byte is sent, and the `openrails_psp_posture` probe reports it. CCBill's sandbox has no signal, so its writes are always refused.
@@ -257,7 +257,7 @@ committed file: an overlay or Vault supplies them
 `basistheory`, never a PSP key, and `{account_id}` is the PSP's account fields
 joined with `-`. The account resolves the merchant, its own secret verifies the
 delivery, and the payload's account must agree. Rotating a signing secret keeps
-the old one for `webhook_secret_overlap` (24 h); `retire_webhook_overlap` on
+the old one for 24 hours; `retire_webhook_overlap` on
 `UpdatePSP` refuses it at once.
 
 A card PSP (NMI, Stripe, CCBill) may declare `dispute_ratio_limit`, its
@@ -960,8 +960,8 @@ for {
 
 Process each page idempotently by event id and save the cursor in the same
 transaction as your effects, empty pages included; a reader never skips an
-earlier uncommitted fact. Retention is `event_retention` (default 90 days);
-reading does not extend it. `410 event_cursor_expired` means the cursor predates
+earlier uncommitted fact. The event log keeps 90 days; reading does not extend
+it. `410 event_cursor_expired` means the cursor predates
 retention: rebuild your state, then start a new cursor. `400 invalid_cursor` is
 malformed or another merchant's or filter's cursor; filters are fixed for a
 cursor. `EventReader()` adapts the client to the helpers module's

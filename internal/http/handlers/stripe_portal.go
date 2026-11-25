@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"slices"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
@@ -9,6 +8,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -59,19 +59,21 @@ func CreateStripePortalSession(r *httprequest.Request) {
 	r.SuccessJSON(StripePortalSession{URL: urlStr})
 }
 
-// portalReturnOrigin returns the browser's origin only when it is an allowed
-// return origin, else the first allowed origin. Request headers never choose
-// an unlisted destination.
+// portalReturnOrigin is the browser's origin when it is one of the merchant's
+// return origins, else the merchant's issuer origin, else the billing
+// origin. Request headers never choose another merchant's site.
 func portalReturnOrigin(r *httprequest.Request) string {
-	if r == nil || r.State == nil || r.State.Config == nil {
+	if r == nil || r.State == nil {
 		return ""
 	}
-	allowed := config.AllowedReturnOrigins(r.State.Config)
-	if len(allowed) == 0 {
+	ctx := r.Request.Context()
+	mid, err := merchant.Require(ctx)
+	if err != nil {
 		return ""
 	}
-	if origin, ok := config.URLOrigin(r.Header("Origin")); ok && slices.Contains(allowed, origin) {
-		return origin
+	embed, err := r.State.EmbedOrigins(ctx, mid)
+	if err != nil {
+		return ""
 	}
-	return allowed[0]
+	return config.PortalReturnOrigin(r.State.Config, r.State.MerchantIssuer(mid), embed, r.Header("Origin"))
 }

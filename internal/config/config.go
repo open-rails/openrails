@@ -546,8 +546,10 @@ func NormalizeDestructiveActionLimits(c billing.DestructiveActionLimitsConfig) (
 	return c, nil
 }
 
-// RateLimitBuckets are the buckets billing.RateLimitsConfig may name.
-var RateLimitBuckets = []string{"purchase", "payment", "subscribe", "webhook", "catalog-ask"}
+// RateLimitBuckets are c's buckets by key: a pointer to each bucket's limit.
+func RateLimitBuckets(c *billing.RateLimitsConfig) map[string]**billing.RateLimit {
+	return map[string]**billing.RateLimit{"purchase": &c.Purchase, "payment": &c.Payment, "subscribe": &c.Subscribe, "webhook": &c.Webhook}
+}
 
 const (
 	CaptchaProviderTurnstile   = "turnstile"

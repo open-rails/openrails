@@ -137,10 +137,10 @@ type Config struct {
 	// Host and Port are where Run and Serve listen.
 	Host string `yaml:"host"`
 	Port int    `yaml:"port"`
-	// PrivatePort is where Run and Serve also serve PrivateHandler, the
-	// operator's /metrics, on Host, apart from the public surface. Zero
-	// serves none.
-	PrivatePort int `yaml:"private_port"`
+	// MetricsPort is where Run and Serve also serve MetricsHandler, the
+	// operator's Prometheus /metrics, on Host, apart from the public surface.
+	// Zero serves none.
+	MetricsPort int `yaml:"metrics_port"`
 }
 
 // DefaultConfig is every setting's default: the engine's (openrails.
@@ -390,7 +390,7 @@ func (s *Server) AuthKit() *authkit.Client { return s.cp.Core() }
 
 // Handler is the whole public surface: health, the engine's routes gated by
 // the server's Auth, AuthKit's and the admin console. The operator's
-// /metrics is PrivateHandler.
+// /metrics is MetricsHandler.
 func (s *Server) Handler() http.Handler { return s.surface.Handler() }
 
 // Routes is the standalone surface without the health routes, for a host's
@@ -460,16 +460,16 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	served := make(chan error, 2)
 	go func() { served <- hs.Serve(ln) }()
 	s.log.InfoContext(ctx, "OpenRails serving", "addr", ln.Addr().String())
-	var private *http.Server
-	if s.cfg.PrivatePort != 0 {
-		pln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.PrivatePort)))
+	var metrics *http.Server
+	if s.cfg.MetricsPort != 0 {
+		mln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.MetricsPort)))
 		if err != nil {
 			_ = hs.Close()
 			return err
 		}
-		private = &http.Server{Handler: s.PrivateHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
-		go func() { served <- private.Serve(pln) }()
-		s.log.InfoContext(ctx, "OpenRails private listener (metrics)", "addr", pln.Addr().String())
+		metrics = &http.Server{Handler: s.MetricsHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
+		go func() { served <- metrics.Serve(mln) }()
+		s.log.InfoContext(ctx, "OpenRails metrics listener", "addr", mln.Addr().String())
 	}
 	if workers {
 		err = s.Start(ctx)
@@ -482,7 +482,7 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 		}
 	}
 	deadline = time.Now().Add(shutdownTimeout)
-	shutdown(s.log, deadline, hs, private)
+	shutdown(s.log, deadline, hs, metrics)
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil
 	}
