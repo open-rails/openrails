@@ -19,9 +19,10 @@ permissions:
 
 # Closing or drafting cancels the PR run. Ordinary draft updates use a separate
 # group so a delayed draft event cannot cancel a newer ready-to-review run.
-# Each merge group has its own ref. A push cancels the branch's older push check.
+# Each merge group has its own ref and each dispatch its own run, so a dispatch
+# cancels nothing. A push cancels the branch's older push check.
 concurrency:
-  group: validate-${{ github.event_name == 'merge_group' && github.ref || github.event_name == 'push' && format('push-{0}', github.ref) || github.event.pull_request.draft && github.event.action != 'converted_to_draft' && github.event.action != 'closed' && format('draft-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
+  group: validate-${{ github.event_name == 'merge_group' && github.ref || github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.event_name == 'push' && format('push-{0}', github.ref) || github.event.pull_request.draft && github.event.action != 'converted_to_draft' && github.event.action != 'closed' && format('draft-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -174,6 +175,9 @@ jobs:
     if: ${{ needs.scope.outputs.core == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write # a push replaces the branch's plain cache
     env:
       GOMAXPROCS: "4"
     steps:
@@ -499,13 +503,17 @@ jobs:
           ((${#reports[@]} == expected)) || { echo "${#reports[@]} shard reports; expected $expected" >&2; exit 1; }
           python3 scripts/critical-results.py critical/coverage.json "${reports[@]}"
 
-  # A push saves the critical build cache the shards restore.
+  # A push saves the critical build cache the shards of dispatches on the RC
+  # (and merge groups) restore.
   critical-cache:
     name: Critical build cache
     needs: scope
     if: ${{ needs.scope.outputs.tier == 'push' && (needs.scope.outputs.core == 'true' || needs.scope.outputs.runtime == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write # a push replaces the branch's critical cache
     env:
       GOMAXPROCS: "4"
       GOWORK: "off"
