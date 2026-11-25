@@ -727,6 +727,9 @@
       "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts/refuses-a-card-counts-cannot-express",
       "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts"
     ],
+    "OR-J31-S17": [
+      "TestCancellationsMigration/OR-J31-S17/an-upgrade-through-the-reporting-rollups-adopts-cancel-decisions-of-every-kind"
+    ],
     "OR-J31-S12": [
       "TestBaselineAdoption/OR-J31-S12/an-older-database-whose-schema-equals-the-baseline-is-accepted-and-re-stamped"
     ],
@@ -1576,6 +1579,9 @@
     "OR-J42-S32": [
       "TestReportingMRR/OR-J42-S32/mrr-leaving-a-product-a-currency-and-a-customer-settles"
     ],
+    "OR-J42-S33": [
+      "TestReportingMRR/OR-J42-S33/a-refund-that-revokes-access-finalizes-and-takes-the-customer-out-once"
+    ],
     "OR-J28-S09": [
       "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
     ],
@@ -2134,7 +2140,7 @@
       "TestRevenueRecognition/OR-J41-S08/an-immediate-cancellation-without-a-refund-forfeits-the-remainder"
     ],
     "OR-J41-S09": [
-      "TestRevenueRecognition/OR-J41-S09/a-usage-orders-payment-books-its-cash-and-leaves-it-for-the-receivable"
+      "TestRevenueRecognition/OR-J41-S09/a-usage-orders-payment-books-its-cash-and-applies-it-to-the-receivable"
     ],
     "OR-J41-S10": [
       "TestRevenueRecognition/OR-J41-S10/revoked-access-ends-its-schedule-and-an-undone-revocation-takes-the-forfeit-back"
@@ -2222,7 +2228,7 @@
       "TestRevenueReversals/OR-J41-S23/a-refund-of-a-payment-from-before-the-books-is-never-refused"
     ],
     "OR-J41-S24": [
-      "TestRevenueReversals/OR-J41-S24/a-usage-orders-refund-takes-what-it-left-unapplied-and-its-chargeback-the-cash-side-alone"
+      "TestRevenueReversals/OR-J41-S24/a-usage-orders-refund-is-contra-and-its-chargeback-reopens-the-owed"
     ],
     "OR-J41-S25": [
       "TestRevenueReversals/OR-J41-S25/refunds-in-pieces-each-reduce-the-price-from-where-the-last-left-it"
@@ -2395,6 +2401,36 @@
     ],
     "OR-J24-S66": [
       "TestEventStore/OR-J24-S66/two-engines-migrating-one-fresh-clickhouse-database-together-both-start"
+    ],
+    "OR-J40-S20": [
+      "TestUsageReceivable/OR-J40-S20/usage-beyond-the-balance-is-receivable-collected-by-card-and-by-remittance/card",
+      "TestUsageReceivable/OR-J40-S20/usage-beyond-the-balance-is-receivable-collected-by-card-and-by-remittance/remittance",
+      "TestUsageReceivable/OR-J40-S20/usage-beyond-the-balance-is-receivable-collected-by-card-and-by-remittance"
+    ],
+    "OR-J40-S21": [
+      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-order-collected-or-waived/waived",
+      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-order-collected-or-waived/uncollectible-then-collected",
+      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-order-collected-or-waived/uncollectible-then-waived",
+      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-order-collected-or-waived"
+    ],
+    "OR-J40-S22": [
+      "TestUsageReceivable/OR-J40-S22/units-owed-equal-the-receivable-after-every-path/invoiced",
+      "TestUsageReceivable/OR-J40-S22/units-owed-equal-the-receivable-after-every-path/terms-withdrawn",
+      "TestUsageReceivable/OR-J40-S22/units-owed-equal-the-receivable-after-every-path/charged-back",
+      "TestUsageReceivable/OR-J40-S22/units-owed-equal-the-receivable-after-every-path"
+    ],
+    "OR-J40-S27": [
+      "TestUsageReceivable/OR-J40-S27/owed-from-before-the-books-is-collected-as-revenue-beside-running-charges"
+    ],
+    "OR-J40-S28": [
+      "TestUsageReceivable/OR-J40-S28/a-chargeback-of-a-usage-payment-reopens-owed-and-its-won-dispute-credits-what-the-customer-paid-again"
+    ],
+    "OR-J40-S29": [
+      "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refunds",
+      "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refund-then-chargeback",
+      "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refund-chargeback-then-won",
+      "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refund-reserved-then-chargeback-then-won",
+      "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled"
     ],
     "OR-J47-S01": [
       "TestCheckoutFunnel/OR-J47-S01/steps-are-recorded-where-the-customer-takes-them"

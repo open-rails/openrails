@@ -182,10 +182,13 @@ type IntegrityReport struct {
 	Awaiting    []books.UnscheduledLine     `json:"awaiting_lines"`
 	Unposted    []books.UnpostedPayment     `json:"unposted_payments"`
 	Misbalanced []books.MisbalancedReversal `json:"misbalanced_reversals"`
+	// Receivables are warnings: customers whose units owed and receivable
+	// differ, as owed from before the books does.
+	Receivables []books.ReceivableDrift `json:"receivable_drifts"`
 }
 
-// OK reports whether the books are intact; side warnings and awaiting lines
-// do not count.
+// OK reports whether the books are intact; side warnings, awaiting lines and
+// receivable drifts do not count.
 func (r IntegrityReport) OK() bool {
 	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0 && len(r.Signs) == 0 && len(r.Applications) == 0 && len(r.Unscheduled) == 0 && len(r.Unposted) == 0 && len(r.Misbalanced) == 0
 }
@@ -222,6 +225,9 @@ func CheckIntegrity(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (Integr
 		return r, err
 	}
 	if r.Sides, err = CheckSides(ctx, q, merchant); err != nil {
+		return r, err
+	}
+	if r.Receivables, err = books.CheckReceivables(ctx, q, merchant); err != nil {
 		return r, err
 	}
 	return r, nil

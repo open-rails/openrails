@@ -14556,6 +14556,7 @@
               "expire",
               "owed_accrual",
               "owed_payment",
+              "owed_reopened",
               "owed_repayment",
               "owed_writeoff",
               "reinstate",

@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -313,7 +312,7 @@ func (b *Books) RepayFromCredit(ctx context.Context, l CreditLot, units int64, c
 	if l.Paid() && (!l.Booked() || l.PaidCurrency != l.Unit) {
 		return b.MoveCredit(ctx, l, CreditMove{Kind: CreditSpent, Units: units, Coord: coord, At: at})
 	}
-	receivable, err := b.receivable(ctx, l.Customer, l.Unit)
+	receivable, err := b.Receivable(ctx, l.Customer, l.Unit)
 	if err != nil {
 		return err
 	}
@@ -339,21 +338,6 @@ func (b *Books) RepayFromCredit(ctx context.Context, l CreditLot, units int64, c
 	unaccrued := coord
 	unaccrued.Source += ":unaccrued"
 	return b.postLot(ctx, l, Ref{Type: PromotionalCredit}, Ref{Type: UsageRevenue}, units-accrued, l.Unit, PromotionalCreditApplied, unaccrued, at)
-}
-
-// receivable is what the general ledger holds receivable from the customer in
-// a currency.
-func (b *Books) receivable(ctx context.Context, customer uuid.UUID, currency string) (int64, error) {
-	acct, err := b.q.GetLedgerAccount(ctx, gen.GetLedgerAccountParams{
-		MerchantID: b.merchant, AccountType: string(UsageReceivable), Currency: currency, CustomerID: &customer,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, fmt.Errorf("books: read the receivable: %w", err)
-	}
-	return acct.DebitsPosted - acct.CreditsPosted, nil
 }
 
 // CreditReversal is a refund or chargeback of a booked lot's payment, l
@@ -480,7 +464,7 @@ func (b *Books) RecoverCredit(ctx context.Context, l CreditLot, r CreditRecovery
 	if !l.Booked() || r.Cash <= 0 {
 		return nil
 	}
-	receivable, err := b.receivable(ctx, l.Customer, l.Unit)
+	receivable, err := b.Receivable(ctx, l.Customer, l.Unit)
 	if err != nil {
 		return err
 	}
