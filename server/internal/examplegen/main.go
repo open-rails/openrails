@@ -200,9 +200,8 @@ func envExample(settings []hostconfig.Setting, d docs) ([]byte, error) {
 # (empty: none) and each secret is empty. A variable is its config.yaml key,
 # upper-cased and joined by "_"; a list is comma-separated, a section or a
 # list of sections JSON. A variable inside a known section that names no key
-# refuses boot. Policy (rate_limits, user_action_rate_limit,
-# destructive_action_limits) is set in config.yaml only. A merchant's settings
-# are no variables: its document is merchant.example.yaml.
+# refuses boot. Policy is set in config.yaml only: ` + strings.Join(hostconfig.FileOnlySections, ", ") + `.
+# A merchant's settings are no variables: its document is merchant.example.yaml.
 `)
 	var order []string
 	sections := map[string][]string{}

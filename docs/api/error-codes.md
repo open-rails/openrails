@@ -54,7 +54,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `default_payment_method_invalid` | 400 | `invalid_request_error` | The card cannot be the customer's default for the currency. |
 | `default_payment_method_required` | 400 | `invalid_request_error` | The customer has no default card for the currency. |
 | `default_rate_card_not_found` | 404 | `invalid_request_error` | The meter has no default rate card. |
-| `destructive_actions_held` | 409 | `invalid_request_error` | The kill switch holds changes that end access or write to a provider; the proposal stays open. |
+| `destructive_actions_held` | 409 | `invalid_request_error` | The merchant's destructive actions are disarmed (`openrails merchant destructive`) or under a destructive hold, so a change that ends access or writes to a provider waits; the proposal stays open. |
 | `embed_origins_required` | 400 | `invalid_request_error` | An embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins. |
 | `entitlement_required` | 403 | `invalid_request_error` | A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks. |
 | `event_cursor_expired` | 410 | `invalid_request_error` | The event cursor is no longer retained; resynchronize current state. |
@@ -146,7 +146,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `provider_outcome_unknown` | 409 | `api_error` | The provider did not confirm the outcome; read the resource before retrying. |
 | `provider_price_unreadable` | 502 | `api_error` | The provider did not answer for the provider price's terms; retry. |
 | `provider_writes_disabled` | 503 | `api_error` | Provider writes are off for the merchant, so it takes no payment; the message names why (the merchant's write posture). |
-| `provider_writes_held` | 409 | `invalid_request_error` | The merchant's readonly write posture holds changes that move money or write to a provider; the proposal stays open. |
+| `provider_writes_held` | 409 | `invalid_request_error` | The merchant's writes are `readonly` (`openrails merchant writes`), so a change that moves money or writes to a provider waits; the proposal stays open. |
 | `psp_claim_requires_proof` | 403 | `authorization_error` | Claiming a provider account needs credentials that prove control of it. |
 | `psp_credentials_rejected` | 400 | `invalid_request_error` | The provider rejected the credentials, or answered that they are not in the PSP's declared environment. |
 | `psp_environment_refused` | 409 | `invalid_request_error` | A live PSP is refused where the deployment wires fake providers. |

@@ -496,8 +496,8 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeFindingNotActionable, 422, invalid, "The finding carries no recommendation to approve; ignore it or fix it out of band."},
 	{CodeFindingActionFailed, 502, fault, "Running the finding's recommendation failed; the finding stays open with the error in its notes."},
 	{CodeFindingRequiresMerchantConfig, 409, invalid, "The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config."},
-	{CodeDestructiveActionsHeld, 409, invalid, "The kill switch holds changes that end access or write to a provider; the proposal stays open."},
-	{CodeProviderWritesHeld, 409, invalid, "The merchant's readonly write posture holds changes that move money or write to a provider; the proposal stays open."},
+	{CodeDestructiveActionsHeld, 409, invalid, "The merchant's destructive actions are disarmed (`openrails merchant destructive`) or under a destructive hold, so a change that ends access or writes to a provider waits; the proposal stays open."},
+	{CodeProviderWritesHeld, 409, invalid, "The merchant's writes are `readonly` (`openrails merchant writes`), so a change that moves money or writes to a provider waits; the proposal stays open."},
 
 	// Merchant configuration and PSPs.
 	{CodePSPNotFound, 404, invalid, "The PSP does not exist."},

@@ -97,14 +97,14 @@ var envNames = map[string]string{
 	"vault_cacert": "vault.ca_cert",
 }
 
-// fileOnlySections are policy, set in config.yaml alone: the environment
+// FileOnlySections are policy, set in config.yaml alone: the environment
 // holds secrets and per-environment facts. A variable naming one refuses
 // boot.
-var fileOnlySections = []string{"rate_limits"}
+var FileOnlySections = []string{"rate_limits"}
 
 // fileOnlySection is the file-only section key is in, "" for none.
 func fileOnlySection(key string) string {
-	for _, section := range fileOnlySections {
+	for _, section := range FileOnlySections {
 		if key == section || strings.HasPrefix(key, section+".") {
 			return section
 		}

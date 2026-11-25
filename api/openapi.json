@@ -28787,7 +28787,7 @@
     "destructive_actions_held": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The kill switch holds changes that end access or write to a provider; the proposal stays open."
+      "meaning": "The merchant's destructive actions are disarmed (`openrails merchant destructive`) or under a destructive hold, so a change that ends access or writes to a provider waits; the proposal stays open."
     },
     "embed_origins_required": {
       "status": 400,
@@ -29247,7 +29247,7 @@
     "provider_writes_held": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The merchant's readonly write posture holds changes that move money or write to a provider; the proposal stays open."
+      "meaning": "The merchant's writes are `readonly` (`openrails merchant writes`), so a change that moves money or writes to a provider waits; the proposal stays open."
     },
     "psp_claim_requires_proof": {
       "status": 403,
