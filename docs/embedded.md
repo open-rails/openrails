@@ -228,10 +228,6 @@ if err := bill.Start(ctx, openrails.WithRiverClient(fleet)); err != nil {
 
 `RiverJobs` adds the `billing` (20 workers), `psp_import` (2), `provider_refresh` (4) and `nmi_history` (1) queues when missing and sets `RescueStuckJobsAfter` to 10 minutes, or the fleet's `JobTimeout` if longer, when unset; each worker declares its own timeout. The fleet must be in `DatabaseConfig.RiverSchema`, run on every replica, and is yours to start and stop. `Start` without `WithRiverClient` after `RiverJobs` went to a fleet is refused. AuthKit joins the same fleet when its River schema matches. Every kind, queue and schedule: [River jobs](river-jobs.md).
 
-Replacing a fleet that ran an older release's scheduled provider refresh: stop
-the old workers first; the new fleet cancels the retired refresh jobs in that
-schema and keeps their history ([provider refresh](standalone.md#provider-refresh)).
-
 ## Several instances
 
 Any number of instances can serve one billing database; there is no primary
@@ -410,10 +406,10 @@ inbox in the billing transaction: unexpected payment failures, required card
 updates or authentication, stopped collection, access loss and applied
 downgrades, each withdrawn when resolved. The `adapters/authkit` module's
 `Notifications(publisher, merchantID, issuer)` builds the channel from AuthKit's
-producer. To adopt an existing inbox, stop billing writers, call
-`LocalClient.ExportNotificationAdoption` and pass its adoptions to AuthKit's
-`AdoptNotifications`; after a billing-archive restore, call
-`RestoreNotificationOrdering` with the matching snapshot before enabling delivery.
+producer. A billing-archive move carries the inbox ordering beside the archive:
+`LocalClient.ExportNotificationOrdering` on the source, then
+`RestoreNotificationOrdering` with that snapshot on the destination before it
+delivers again.
 
 ## Browser configuration
 

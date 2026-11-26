@@ -794,12 +794,6 @@ func TestDeclineCauses(t *testing.T) {
 		near(map[string]float64{"sent": 2.0 / 3, "missing": 0.5},
 			rates(query([]string{"first_try_rebill_approval_rate"}, nil, "network_transaction_id"), "network_transaction_id", "first_try_rebill_approval_rate"))
 
-		// The dimensions decline_cause renamed are refused with it.
-		_, err = a.alpha.QueryMetrics(ctx, billing.QueryMetricsParams{Measures: []string{"rebills"}, By: []string{"first_failure_category"}, Range: window})
-		require.Equal(t, "first_decline_cause", metricRefusals(t, err)["by[0]"]["did_you_mean"])
-		_, err = a.alpha.QueryMetrics(ctx, billing.QueryMetricsParams{Measures: []string{"attempts"}, Filters: map[string][]string{"category": {"issuer_soft"}}, Range: window})
-		require.Equal(t, "decline_cause", metricRefusals(t, err)["filters.category"]["did_you_mean"])
-
 		// The overview shows them: the rates as tiles, the decline mix and the
 		// cuts in Payment health, every one answering.
 		widgets := dashboard.DefaultWidgets(billing.DashboardProfile{Subscriptions: true, CardPayments: true})

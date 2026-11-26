@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
+	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -12,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/invoices"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 // ErrPurchaseProcessing is returned when the provider write's outcome is not
@@ -22,7 +26,7 @@ import (
 var ErrPurchaseProcessing = errors.New("payment is processing; retry with the same idempotency key to check the result")
 
 type NMISaleService struct {
-	Fulfillment              *FulfillmentService
+	clock                    clockwork.Clock
 	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 	// ResolveNMIClient arms the ctx merchant's NMI client from the armed rail
 	// state: the only client source; nil fails closed.
@@ -42,15 +46,11 @@ type NMISaleService struct {
 	Custody *CustodianSaleService
 }
 
-func NewNMISaleService(
-	fulfillment *FulfillmentService,
-	railPMService *paymentmethods.RailPaymentMethodService,
-) *NMISaleService {
-	return &NMISaleService{
-		Fulfillment:              fulfillment,
-		RailPaymentMethodService: railPMService,
-	}
+func NewNMISaleService(clock clockwork.Clock, railPMService *paymentmethods.RailPaymentMethodService) *NMISaleService {
+	return &NMISaleService{clock: timeutil.FirstClock(clock), RailPaymentMethodService: railPMService}
 }
+
+func (s *NMISaleService) now() time.Time { return s.clock.Now() }
 
 func (s *NMISaleService) requireArmed(ctx context.Context, target railTarget) error {
 	if target.Rail != string(models.RailStripe) {

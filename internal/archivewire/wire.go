@@ -23,9 +23,6 @@ const (
 	MaxRecordBytes       = 8 << 20
 )
 
-// ErrPriceOwnershipFormat refuses archives predating explicit price ownership.
-var ErrPriceOwnershipFormat = errors.New("archive version 2 predates price ownership: restore using OpenRails v0.255.0, then upgrade")
-
 type Info struct {
 	TenantID   string `json:"tenant_id,omitempty"`
 	MerchantID string `json:"merchant_id"`
@@ -75,12 +72,6 @@ func ReadHeader(src io.Reader) (Header, io.Reader, error) {
 func parseHeader(line []byte) (Header, error) {
 	var h Header
 	if err := decodeCanonical(line, &h); err != nil || !validHeader(h) {
-		if err == nil && h.Kind == "header" && h.Version > 0 && h.Version < Version {
-			if h.Version == 2 {
-				return Header{}, ErrPriceOwnershipFormat
-			}
-			return Header{}, fmt.Errorf("archive version %d is no longer read: restore it on an earlier release, then export it again", h.Version)
-		}
 		return Header{}, errors.New("invalid archive header or unsupported version")
 	}
 	return h, nil
@@ -236,8 +227,8 @@ type Writer struct {
 	merchantID string
 }
 
-// NewWriterWithTenant preserves the explicit tenant ownership in the archive
-// header. An empty tenant retains the legacy unbound format.
+// NewWriterWithTenant records the merchant's tenant in the archive header;
+// empty for a merchant bound to no tenant.
 func NewWriterWithTenant(w io.Writer, merchantID, tenantID string, catalogRevision int64) (*Writer, error) {
 	h := Header{TenantID: tenantID, Kind: "header", Version: Version, MerchantID: merchantID, CatalogRevision: catalogRevision, Consistency: "repeatable_read", RequiredCutoverCondition: "source_writers_stopped"}
 	if !validHeader(h) {

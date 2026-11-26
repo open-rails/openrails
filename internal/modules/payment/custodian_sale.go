@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -36,7 +37,7 @@ type CustodianSaleService struct {
 	BasisTheoryTransport http.RoundTripper
 	NMIClients           *railresolve.NMIFactory
 	DB                   *db.DB
-	Fulfillment          *FulfillmentService
+	clock                clockwork.Clock
 	Rails                railresolve.Source
 	Config               *billing.Config
 	Log                  *slog.Logger
@@ -159,7 +160,7 @@ func (s *CustodianSaleService) provisionNetworkToken(ctx context.Context, bt *ba
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := paymentmethods.ApplyCardLifecycle(ctx, s.DB.NewWithPgxTx(tx).Gen(ctx), paymentmethods.CardEvent{
 			MerchantID: merchantID, PaymentMethodID: instrumentID, Source: paymentmethods.SourceNetworkToken, EventRef: "provision:" + invoiceID,
-			Card: paymentmethods.Card{NetworkTokenID: nt.ID, NetworkTokenStatus: nt.Status, NetworkTokenPAR: nt.PAR}, At: s.Fulfillment.now(),
+			Card: paymentmethods.Card{NetworkTokenID: nt.ID, NetworkTokenStatus: nt.Status, NetworkTokenPAR: nt.PAR}, At: s.clock.Now(),
 		})
 		return err
 	})

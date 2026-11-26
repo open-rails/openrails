@@ -13,8 +13,8 @@ func TestZeroLocalClientRefuses(t *testing.T) {
 		calls := map[string]error{}
 		_, calls["StartRunningChargeTx"] = c.StartRunningChargeTx(t.Context(), nil, billing.StartRunningChargeParams{})
 		_, calls["StopRunningChargeTx"] = c.StopRunningChargeTx(t.Context(), nil, "reference", billing.StopRunningChargeParams{})
-		_, calls["ExportNotificationAdoption"] = c.ExportNotificationAdoption(t.Context())
-		calls["RestoreNotificationOrdering"] = c.RestoreNotificationOrdering(t.Context(), billing.NotificationAdoption{})
+		_, calls["ExportNotificationOrdering"] = c.ExportNotificationOrdering(t.Context())
+		calls["RestoreNotificationOrdering"] = c.RestoreNotificationOrdering(t.Context(), billing.NotificationOrderingSnapshot{})
 		for name, err := range calls {
 			if !errors.Is(err, errNoLocalClient) {
 				t.Errorf("%s on %#v = %v, want the LocalClient refusal", name, c, err)

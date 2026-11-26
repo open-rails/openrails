@@ -295,14 +295,6 @@ SELECT EXISTS (
       AND g.ends_at IS NOT DISTINCT FROM sqlc.narg(ends_at)::timestamptz
 ) AS exists;
 
--- name: ListOriginalPurchaseGrants :many
--- Original immutable events, including later-revoked sources. Accepted purchase
--- replay validates the original windows without reopening revoked projections.
-SELECT * FROM billing.grants
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND source_type='purchase'
-  AND source_id=sqlc.arg(payment_id)::uuid::text AND event='grant'
-ORDER BY id LIMIT sqlc.arg(row_limit)::int;
-
 -- name: ListInitialMembershipGrants :many
 -- Original source events before the accepted initial period ends; later renewal
 -- events and later revocations do not rewrite this initial history.
@@ -340,11 +332,9 @@ WHERE g.merchant_id=sqlc.arg(merchant_id)::uuid AND g.source_type='subscription'
     WHERE i.merchant_id=g.merchant_id AND i.intent_type='subscription_collection'
       AND i.subscription_id::text=g.source_id AND i.status='succeeded'
       AND g.starts_at=(i.payload->'renewal'->>'period_start')::timestamptz
-      AND g.ends_at IS NOT DISTINCT FROM CASE
-          WHEN i.payload->'renewal' ? 'access_duration_hours' THEN
-            (i.payload->'renewal'->>'period_start')::timestamptz +
-            (i.payload->'renewal'->>'access_duration_hours')::int * interval '1 hour'
-          ELSE (i.payload->'renewal'->>'period_end')::timestamptz END);
+      AND g.ends_at IS NOT DISTINCT FROM
+          (i.payload->'renewal'->>'period_start')::timestamptz +
+          (i.payload->'renewal'->>'access_duration_hours')::int * interval '1 hour');
 
 
 -- name: ListAccessGrantsAt :many

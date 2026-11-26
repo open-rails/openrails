@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -21,10 +20,7 @@ const TypeNMIUpgrade = "nmi_upgrade"
 // RecurringAmount; a downgrade charges nothing, moves the amount (NMI bills it
 // from the next renewal) and schedules the local price for that renewal.
 type NMIUpgradePayload struct {
-	Staff              *StaffChange    `json:"staff,omitempty"`
-	LegacyEntitlements map[string]*int `json:"legacy_entitlements,omitzero"`
-	// AccessEndsAt preserves an already accepted pre-split partial-period upgrade.
-	AccessEndsAt              *time.Time              `json:"access_ends_at,omitempty"`
+	Staff                     *StaffChange            `json:"staff,omitempty"`
 	AccessDurationHours       *int                    `json:"access_duration_hours"`
 	ProviderAccessDefault     bool                    `json:"provider_access_default,omitempty"`
 	Action                    string                  `json:"action"` // upgrade | downgrade
@@ -49,9 +45,6 @@ type NMIUpgradePayload struct {
 	Currency                  string                  `json:"currency"`
 	PeriodStart               time.Time               `json:"period_start"`
 	PeriodEnd                 time.Time               `json:"period_end"`
-	// Entitlements is the keys a tier change admitted before product access,
-	// kept only as accepted evidence. Access follows ProductID.
-	Entitlements json.RawMessage `json:"entitlements,omitempty"`
 	// TargetPlanID is the named NMI plan the schedule switches to when it is
 	// on a named plan (NMI applies plan_amount only to custom schedules).
 	// Empty means the schedule's amount is set directly.
@@ -67,9 +60,6 @@ func DecodeNMIUpgradePayload(in gen.BillingProviderIntent) (NMIUpgradePayload, e
 	var p NMIUpgradePayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return p, err
-	}
-	if p.AccessEndsAt != nil && (!p.AccessEndsAt.Equal(p.PeriodEnd) || p.AccessDurationHours != nil) {
-		return p, errors.New("legacy accepted upgrade access contradicts its paid period")
 	}
 	if p.Staff != nil && !p.Staff.valid() {
 		return p, errors.New("invalid staff change identity")
@@ -113,24 +103,4 @@ func DecodeNMIUpgradePayload(in gen.BillingProviderIntent) (NMIUpgradePayload, e
 		return p, err
 	}
 	return p, nil
-}
-
-func (p *NMIUpgradePayload) UnmarshalJSON(data []byte) error {
-	type plain NMIUpgradePayload
-	var decoded plain
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	if _, _, err := grants.DecodeAcceptedEntitlements(decoded.Entitlements, decoded.LegacyEntitlements); err != nil {
-		return err
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	if _, present := fields["access_duration_hours"]; !present {
-		decoded.AccessEndsAt = &decoded.PeriodEnd
-	}
-	*p = NMIUpgradePayload(decoded)
-	return nil
 }

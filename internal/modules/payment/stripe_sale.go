@@ -185,7 +185,7 @@ func (h *NMISaleIntentHandler) resolveStripeSale(ctx context.Context, in gen.Bil
 // authenticationAbandoned: a buyer who started an issuer challenge and never
 // finished it releases the purchase after the engine's authentication window.
 func (h *NMISaleIntentHandler) authenticationAbandoned(in gen.BillingProviderIntent) bool {
-	if h.Sale == nil || h.Sale.Fulfillment == nil {
+	if h.Sale == nil {
 		return false
 	}
 	p, err := payments.DecodeNMISalePayload(in)
@@ -196,5 +196,5 @@ func (h *NMISaleIntentHandler) authenticationAbandoned(in gen.BillingProviderInt
 	if p.InvoiceID != uuid.Nil && intents.EvidenceString(in, invoiceClosedKey) == "true" {
 		return true
 	}
-	return h.Sale.Fulfillment.now().After(p.AcceptedAt.Add(subscriptions.EngineAuthenticationWindow))
+	return h.Sale.now().After(p.AcceptedAt.Add(subscriptions.EngineAuthenticationWindow))
 }

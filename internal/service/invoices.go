@@ -264,10 +264,7 @@ func (s *Service) createInvoice(ctx context.Context, rt *invoiceRuntime, actor I
 		return InvoiceAnswer{}, err
 	}
 	if claim == nil {
-		return s.replayInvoiceAnswer(ctx, rt, actor, rec, digest, func(id uuid.UUID) (InvoiceAnswer, error) {
-			charged, err := s.resumePayment(ctx, rt, actor, id, pay, "create:"+key)
-			return s.invoiceAnswer(ctx, rt, actor, id, http.StatusOK, charged, true, err)
-		})
+		return s.replayInvoiceAnswer(ctx, rt, actor, rec, digest)
 	}
 	work, stop := claim.Hold(ctx)
 	work = db.WithCommitGuard(work, claim.InTx)
@@ -343,16 +340,6 @@ func (s *Service) placeInvoice(ctx context.Context, rt *invoiceRuntime, actor In
 	return invoice, false, err
 }
 
-// resumePayment runs a one-call buy's payment again under its key: the same
-// attempt, which never charges twice.
-func (s *Service) resumePayment(ctx context.Context, rt *invoiceRuntime, actor InvoiceActor, id uuid.UUID, pay invoicePayment, key string) (payment.InvoiceCharge, error) {
-	invoice, err := rt.Invoices.GetForCustomer(ctx, actor.Customer.UUID(), id)
-	if err != nil || (pay.method == uuid.Nil && pay.card == nil && pay.solana == nil && pay.hosted == nil) || invoice.Status != string(billing.InvoiceOpen) {
-		return payment.InvoiceCharge{}, err
-	}
-	return s.payInvoice(ctx, rt, actor, invoice, pay, key)
-}
-
 // invoiceAnswer reads the invoice a request acted on into its answer: 402 when
 // its payment failed. err passes through.
 func (s *Service) invoiceAnswer(ctx context.Context, rt *invoiceRuntime, actor InvoiceActor, id uuid.UUID, status int, charged payment.InvoiceCharge, replayed bool, err error) (InvoiceAnswer, error) {
@@ -373,9 +360,9 @@ func (s *Service) invoiceAnswer(ctx context.Context, rt *invoiceRuntime, actor I
 	return out, nil
 }
 
-// replayInvoiceAnswer answers a key whose request finished: the answer it gave,
-// or, for a record without one, legacy(invoice).
-func (s *Service) replayInvoiceAnswer(ctx context.Context, rt *invoiceRuntime, actor InvoiceActor, rec *idempotency.Record, digest []byte, legacy func(uuid.UUID) (InvoiceAnswer, error)) (InvoiceAnswer, error) {
+// replayInvoiceAnswer answers a key whose request finished with the answer it
+// gave.
+func (s *Service) replayInvoiceAnswer(ctx context.Context, rt *invoiceRuntime, actor InvoiceActor, rec *idempotency.Record, digest []byte) (InvoiceAnswer, error) {
 	if rec.Status != idempotency.StatusSucceeded {
 		return InvoiceAnswer{}, ErrIdempotencyKeyInUse
 	}
@@ -387,7 +374,7 @@ func (s *Service) replayInvoiceAnswer(ctx context.Context, rt *invoiceRuntime, a
 		return InvoiceAnswer{}, errInvoiceKeyReused
 	}
 	if result.Invoice == nil {
-		return legacy(result.InvoiceID)
+		return InvoiceAnswer{}, errors.New("idempotency record holds no answer")
 	}
 	if result.Invoice.Payment.Status == billing.InvoicePaymentRequiresAction {
 		invoice, err := rt.Invoices.GetForCustomer(ctx, actor.Customer.UUID(), result.InvoiceID)
@@ -453,9 +440,7 @@ func (s *Service) PayInvoice(ctx context.Context, actor InvoiceActor, id billing
 		return InvoiceAnswer{}, err
 	}
 	if claim == nil {
-		return s.replayInvoiceAnswer(ctx, rt, actor, rec, digest, func(id uuid.UUID) (InvoiceAnswer, error) {
-			return s.invoiceAnswer(ctx, rt, actor, id, http.StatusOK, payment.InvoiceCharge{}, true, nil)
-		})
+		return s.replayInvoiceAnswer(ctx, rt, actor, rec, digest)
 	}
 	work, stop := claim.Hold(ctx)
 	work = db.WithCommitGuard(work, claim.InTx)

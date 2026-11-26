@@ -2,7 +2,6 @@ package subscriptions
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -15,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/shared/calendarutil"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -26,7 +24,6 @@ import (
 // consumes these facts without reinterpreting a subsequently edited catalog.
 type RenewalTerms struct {
 	Rail                  models.Rail                 `json:"rail,omitempty"`
-	LegacyEntitlements    map[string]*int             `json:"legacy_entitlements,omitzero"`
 	ProviderAccessDefault bool                        `json:"provider_access_default,omitempty"`
 	AccessDurationHours   *int                        `json:"access_duration_hours"`
 	CreditGrant           *models.CreditGrantSnapshot `json:"credit_grant,omitempty"`
@@ -48,9 +45,6 @@ type RenewalTerms struct {
 	RecurringIntervalMonths *int       `json:"recurring_interval_months,omitempty"`
 	CalendarAnchor          *time.Time `json:"calendar_anchor,omitempty"`
 	CalendarAccessDefault   bool       `json:"calendar_access_default,omitempty"`
-	// Entitlements is the keys a renewal admitted before product access, kept
-	// only to reproduce its provider binding. Access follows ProductID.
-	Entitlements json.RawMessage `json:"entitlements,omitempty"`
 	// ScheduledChangeID is the scheduled change this renewal applies.
 	ScheduledChangeID *uuid.UUID `json:"scheduled_change_id,omitempty"`
 }
@@ -299,29 +293,6 @@ func renewalPaymentCustodian(params *RenewMembershipParams) string {
 		return params.PaymentCustodian
 	}
 	return models.CustodianPSP
-}
-
-// UnmarshalJSON preserves already accepted operations from before access and billing were separated.
-// Only an absent access field uses that operation's original billing period; explicit null is indefinite.
-func (t *RenewalTerms) UnmarshalJSON(data []byte) error {
-	type plain RenewalTerms
-	var decoded plain
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	if _, _, err := grants.DecodeAcceptedEntitlements(decoded.Entitlements, decoded.LegacyEntitlements); err != nil {
-		return err
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	if _, present := fields["access_duration_hours"]; !present {
-		hours := int(decoded.PeriodEnd.Sub(decoded.PeriodStart) / time.Hour)
-		decoded.AccessDurationHours = &hours
-	}
-	*t = RenewalTerms(decoded)
-	return nil
 }
 
 // renewalPaymentPSPID preserves native account binding while an accepted

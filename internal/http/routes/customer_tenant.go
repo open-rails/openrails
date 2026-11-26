@@ -29,7 +29,7 @@ func requireCustomerTenantFor(ctx context.Context, rt *app.Runtime, merchant bil
 		return errors.Join(auth.ErrUnavailable, err)
 	}
 	if row.TenantID == nil {
-		return nil // the explicit legacy, unbound mode
+		return nil // a merchant bound to no tenant has none to match
 	}
 	if verified == nil {
 		return billingauth.Refusal(billing.CodeCustomerTenantMismatch)

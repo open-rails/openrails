@@ -53,7 +53,6 @@ type PurchaseService struct {
 	PriceService             *catalog.PriceService
 	PaymentService           *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
-	Fulfillment              *FulfillmentService
 	NMISaleService           *NMISaleService
 	CustodianSaleService     *CustodianSaleService
 	PaymentMethodService     *paymentmethods.PaymentMethodService
@@ -88,23 +87,16 @@ func (s *PurchaseService) SetSubscriptionLifecycleService(l *subscriptions.Subsc
 	s.Lifecycle = l
 }
 
+func (s *PurchaseService) Clock() clockwork.Clock {
+	return s.clock
+}
+
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *PurchaseService) now() time.Time {
 	if s.clock != nil {
 		return s.clock.Now()
 	}
 	return time.Now()
-}
-
-func (s *PurchaseService) SetClock(c clockwork.Clock) {
-	s.clock = timeutil.FirstClock(c)
-	if s.Fulfillment != nil {
-		s.Fulfillment.SetClock(s.clock)
-	}
-}
-
-func (s *PurchaseService) Clock() clockwork.Clock {
-	return s.clock
 }
 
 // NewPurchaseService creates a new PurchaseService
@@ -128,7 +120,6 @@ func NewPurchaseService(logger *slog.Logger,
 		PriceService:             priceService,
 		PaymentService:           paymentService,
 		EntitlementService:       entitlementService,
-		Fulfillment:              NewFulfillmentService(logger, priceService, productService, paymentService, entitlementService, subscriptionService, clock),
 		PaymentMethodService:     paymentMethodService,
 		RailPaymentMethodService: railPMService,
 		RailCustomerService:      railCustomerService,
@@ -138,37 +129,21 @@ func NewPurchaseService(logger *slog.Logger,
 		Rails:                    railSet,
 		Log:                      logger,
 	}
-	service.NMISaleService = NewNMISaleService(service.Fulfillment, railPMService)
+	service.NMISaleService = NewNMISaleService(clock, railPMService)
 	// The scoped resolver is the only NMI client source; armed once
 	// SetMerchantSecretStore wires the merchant secret store.
 	service.NMISaleService.ResolveNMIClient = service.resolveNMIClient
 	service.CustodianSaleService = &CustodianSaleService{
-		Fulfillment: service.Fulfillment,
-		Rails:       railSet,
-		Config:      cfg,
-		Log:         logger,
+		clock:  clock,
+		Rails:  railSet,
+		Config: cfg,
+		Log:    logger,
 	}
 	if railPMService != nil {
 		service.CustodianSaleService.DB = railPMService.DB
 	}
 	service.NMISaleService.Custody = service.CustodianSaleService
 	return service
-}
-
-func (s *PurchaseService) CheckPurchaseEligibility(ctx context.Context, userID string, priceID uuid.UUID) (*EligibilityResult, error) {
-	if s.Fulfillment == nil {
-		return nil, errors.New("purchase service unavailable")
-	}
-	return s.Fulfillment.CheckPurchaseEligibility(ctx, userID, priceID)
-}
-
-// GetUserProductCoverage reports a user's coverage of a product: an active or
-// pending subscription to it, or live product access windows.
-func (s *PurchaseService) GetUserProductCoverage(ctx context.Context, userID string, product *models.Product) (*CoverageInfo, error) {
-	if s.Fulfillment == nil {
-		return nil, errors.New("purchase service unavailable")
-	}
-	return s.Fulfillment.GetUserProductCoverage(ctx, userID, product)
 }
 
 // processCCBillUpgrade handles CCBill subscription upgrades
@@ -420,18 +395,6 @@ func parseStripeError(body []byte) string {
 		return ""
 	}
 	return strings.TrimSpace(out.Error.Message)
-}
-
-// RegisterPurchase records a confirmed one-time purchase and grants its
-// product, stamping the payment row with the PSP of req.Rail.
-func (s *PurchaseService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
-	if s.Fulfillment == nil {
-		return nil, errors.New("purchase service unavailable")
-	}
-	if req != nil {
-		ctx = s.stampPSP(ctx, req.Rail)
-	}
-	return s.Fulfillment.RegisterPurchase(ctx, req)
 }
 
 func utcPtr(t *time.Time) *time.Time {

@@ -3,7 +3,6 @@ package metrics
 import (
 	"fmt"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -122,7 +121,7 @@ func ValidateIn(q *Query, now time.Time, zone *time.Location) (*Plan, *Validatio
 		}
 		d, ok := dimensionByName[name]
 		if !ok {
-			add(unknownDimension("unknown_dimension", fmt.Sprintf("by[%d]", i), name, DimensionNames(), measures))
+			add(unknownDimension("unknown_dimension", fmt.Sprintf("by[%d]", i), name, DimensionNames()))
 			continue
 		}
 		if seenDim[d.Name] {
@@ -223,7 +222,7 @@ func ValidateIn(q *Query, now time.Time, zone *time.Location) (*Plan, *Validatio
 		vals := q.Filters[name]
 		d, ok := dimensionByName[name]
 		if !ok || name == "time" {
-			add(unknownDimension("unknown_filter_dimension", "filters."+name, name, filterableDimNames(), measures))
+			add(unknownDimension("unknown_filter_dimension", "filters."+name, name, filterableDimNames()))
 			continue
 		}
 		if len(vals) == 0 {
@@ -427,19 +426,10 @@ func autoGrain(from, to time.Time) string {
 	return "month"
 }
 
-// unknownMeasure refuses a name the registry does not serve: a removed one
-// names its replacement, a planned one says so, any other gets a
-// did-you-mean.
+// unknownMeasure refuses a name the registry does not serve: a planned one
+// says so, any other gets a did-you-mean.
 func unknownMeasure(param, name string) FieldError {
 	fe := FieldError{Code: "unknown_measure", Param: param, Valid: PublicMeasureNames()}
-	if r, ok := Removed[name]; ok {
-		fe.DidYouMean = r.Measure
-		fe.Message = fmt.Sprintf("measure %q was removed: use %q, %s", name, r.Measure, r.How)
-		if r.Measure == "" {
-			fe.Message = fmt.Sprintf("measure %q was removed: %s", name, r.How)
-		}
-		return fe
-	}
 	if contains(Deferred, name) {
 		fe.Message = fmt.Sprintf("measure %q is planned and not available yet", name)
 		return fe
@@ -452,21 +442,9 @@ func unknownMeasure(param, name string) FieldError {
 	return fe
 }
 
-// unknownDimension refuses a dimension no measure has. A retired one names
-// its replacement only when the query's measures all take it.
-func unknownDimension(code, param, name string, valid []string, measures []*Measure) FieldError {
+// unknownDimension refuses a dimension no measure has.
+func unknownDimension(code, param, name string, valid []string) FieldError {
 	fe := FieldError{Code: code, Param: param, Valid: valid}
-	if r, ok := RemovedDimensions[name]; ok {
-		for _, m := range measures {
-			if !slices.Contains(m.Dims, r) {
-				fe.Message = fmt.Sprintf("dimension %q was removed", name)
-				return fe
-			}
-		}
-		fe.DidYouMean = r
-		fe.Message = fmt.Sprintf("dimension %q was renamed %q", name, r)
-		return fe
-	}
 	fe.Message = fmt.Sprintf("unknown dimension %q", name)
 	if code == "unknown_filter_dimension" {
 		fe.Message = fmt.Sprintf("unknown filter dimension %q (time is filtered via range)", name)

@@ -25,16 +25,8 @@ func PaymentIssueKinds() []string {
 
 func IsPaymentIssue(kind string) bool { return slices.Contains(PaymentIssueKinds(), kind) }
 
-// IssueKey is the exact inbox issue of one subject and kind. Recipients hold
-// issues keyed before invoices were named, so an invoice keeps the "order"
-// subject and its stopped collection the "order_collection_stopped" kind.
+// IssueKey is the exact inbox issue of one subject and kind.
 func IssueKey(subject string, id uuid.UUID, kind string) string {
-	if subject == "invoice" {
-		subject = "order"
-	}
-	if kind == "invoice_collection_stopped" {
-		kind = "order_collection_stopped"
-	}
 	return subject + ":" + id.String() + ":" + kind
 }
 

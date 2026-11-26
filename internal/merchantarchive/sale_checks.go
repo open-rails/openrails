@@ -9,9 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments"
 )
 
@@ -47,7 +45,6 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	var evidence struct {
 		PaymentID     uuid.UUID `json:"payment_id"`
 		TransactionID string    `json:"transaction_id"`
-		Declined      bool      `json:"declined"`
 	}
 	if err := json.Unmarshal(op.ResultEvidence, &evidence); err != nil {
 		return err
@@ -58,16 +55,13 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	}
 	observed, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: paymentID})
 	if op.Status == intents.StatusFailedTerminal {
-		// A refused or unexecuted sale moved no money (a decline is a payment
-		// attempt); only an older writer's decline record may carry its id.
+		// A refused or unexecuted sale moved no money: a decline is a payment
+		// attempt, never a payment.
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
-		}
-		if evidence.Declined && declineRecord(observed) {
-			return nil
 		}
 		return errors.New("refused sale has a payment")
 	}
@@ -75,13 +69,7 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 		return err
 	}
 	customer, _ := uuid.Parse(p.UserID)
-	bought := observed.InvoiceID != nil && p.InvoiceID != uuid.Nil && *observed.InvoiceID == p.InvoiceID
-	if p.InvoiceID == uuid.Nil && p.PriceID != uuid.Nil {
-		bought, err = q.PaymentMatchesInvoicePrice(ctx, gen.PaymentMatchesInvoicePriceParams{MerchantID: op.MerchantID, PaymentID: observed.ID, PriceID: p.PriceID})
-		if err != nil {
-			return err
-		}
-	}
+	bought := observed.InvoiceID != nil && *observed.InvoiceID == p.InvoiceID
 	subscribed, err := invoiceSubscription(ctx, q, op.MerchantID, p.InvoiceID, observed.SubscriptionID)
 	if err != nil {
 		return err
@@ -92,42 +80,7 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	if !payments.PaymentStatusSucceeded(string(observed.Status)) || observed.MoneyMovement != "rail" || observed.TransactionID != evidence.TransactionID {
 		return errors.New("sale result is not its exact completed payment")
 	}
-	if p.InvoiceID != uuid.Nil {
-		return nil // The invoice's lines are what it bought.
-	}
-	price, err := q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: op.MerchantID, ID: p.PriceID})
-	if err != nil {
-		return err
-	}
-	if price.MerchantID != op.MerchantID || price.ProductID != p.ProductID {
-		return errors.New("sale catalog identity contradicts its accepted product")
-	}
-	retained, err := models.PaymentFromGen(observed)
-	if err != nil {
-		return err
-	}
-	if !models.SameCreditGrantPromise(p.CreditGrant, retained.CreditGrantSnapshot) {
-		return errors.New("sale payment has another credit promise")
-	}
-	original, err := q.ListOriginalPurchaseGrants(ctx, gen.ListOriginalPurchaseGrantsParams{MerchantID: op.MerchantID, PaymentID: paymentID, RowLimit: purchaseGrantLimit})
-	if err != nil {
-		return err
-	}
-	recorded, err := grants.RecordedPurchaseAccess(op.MerchantID, customer, p.ProductID, paymentID, original)
-	if err != nil {
-		return err
-	}
-	if recorded == nil {
-		if p.CreditGrant == nil {
-			return errors.New("terminal sale has incomplete original benefits")
-		}
-		return nil
-	}
-	// A grant converted from per-key windows keeps the windows' longest span.
-	if !grants.Migrated(*recorded) && !grants.SameWindow(*recorded, grants.AccessWindow(p.AccessDurationHours, p.EntitlementStart)) {
-		return errors.New("original access window contradicts accepted purchase")
-	}
-	return nil
+	return nil // The invoice's lines are what it bought.
 }
 
 // invoiceSubscription reports whether a sale payment's subscription is absent or
@@ -135,9 +88,6 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 func invoiceSubscription(ctx context.Context, q *gen.Queries, merchantID, invoiceID uuid.UUID, subscriptionID *uuid.UUID) (bool, error) {
 	if subscriptionID == nil {
 		return true, nil
-	}
-	if invoiceID == uuid.Nil {
-		return false, nil
 	}
 	lines, err := q.ListInvoiceLines(ctx, gen.ListInvoiceLinesParams{MerchantID: merchantID, InvoiceIds: []uuid.UUID{invoiceID}})
 	if err != nil {
@@ -149,14 +99,4 @@ func invoiceSubscription(ctx context.Context, q *gen.Queries, merchantID, invoic
 		}
 	}
 	return false, nil
-}
-
-// purchaseGrantLimit bounds one purchase's original grant events: its access
-// grant and credit lot, plus per-key grants from before product access.
-const purchaseGrantLimit = 10005
-
-// declineRecord is a decline an older writer recorded in payments, not as a
-// payment attempt: it moved no money.
-func declineRecord(p gen.BillingPayment) bool {
-	return p.Status == "failed" && p.MoneyMovement == "none" && p.RefundedPaymentID == nil
 }
