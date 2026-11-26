@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,7 +173,7 @@ func limitsReached(t *testing.T, client *openrails.Client, from, to time.Time) i
 func spendCap(windows ...billing.BudgetWindow) func(*world) {
 	return func(w *world) {
 		m := cfgMerchant(w.cfg, "alpha")
-		m.BillingPolicies = []billing.BillingPolicy{{Name: "capped", Kind: "window_spend_cap", SpendWindows: windows}}
+		m.BillingPolicies = []billing.BillingPolicy{{Name: "capped", SpendWindows: windows}}
 		m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "capped"}}
 		setCfgMerchant(&w.cfg, "alpha", m)
 	}
@@ -403,8 +404,8 @@ func TestLimitDecisions(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.BillingPolicies = []billing.BillingPolicy{
-				{Name: "free", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "free-month", WindowSeconds: 30 * 24 * 3600, Limit: 1000, Currency: "USD"}}},
-				{Name: "gold", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "gold-month", WindowSeconds: 30 * 24 * 3600, Limit: 5000, Currency: "USD"}}},
+				{Name: "free", SpendWindows: []billing.BudgetWindow{{Key: "free-month", WindowSeconds: 30 * 24 * 3600, Limit: 1000, Currency: "USD"}}},
+				{Name: "gold", SpendWindows: []billing.BudgetWindow{{Key: "gold-month", WindowSeconds: 30 * 24 * 3600, Limit: 5000, Currency: "USD"}}},
 			}
 			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "free"}, {PolicyName: "gold", Tier: "gold"}}
 			setCfgMerchant(&w.cfg, "alpha", m)
@@ -430,7 +431,7 @@ func TestLimitDecisions(t *testing.T) {
 		// ¥100 an hour; at the fixture's rate of 1, $100 of USD requests.
 		w := newWorld(t, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
-			m.BillingPolicies = []billing.BillingPolicy{{Name: "yen", Kind: "window_spend_cap", PolicyCurrency: "JPY",
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "yen", PolicyCurrency: "JPY",
 				SpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 1_000_000}}}}
 			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "yen"}}
 			setCfgMerchant(&w.cfg, "alpha", m)
@@ -442,21 +443,60 @@ func TestLimitDecisions(t *testing.T) {
 		balance(t, w.alpha, customer, 300_000_000, 0, 300_000_000)
 	})
 
-	t.Run("OR-J23-S34/a-policys-accrual-rate-cap-is-in-its-policy-currency", func(t *testing.T) {
-		// ¥10 an hour; at the fixture's rate of 1, $10 an hour of USD usage.
-		w := newWorld(t, func(w *world) {
+	t.Run("OR-J23-S42/one-policy-caps-what-is-owed-and-spend-per-window-and-a-customers-own-limit-overrides-its-cap", func(t *testing.T) {
+		// The terms give $30 of credit; the policy caps what is owed at $20
+		// and spend at $15 an hour. A gate refuses on the set's balance code
+		// once the line is gone, and with budget_exceeded once the window is:
+		// both are read from its view.
+		a, _, customer := usageBillingWorld(t, false, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
-			m.BillingPolicies = []billing.BillingPolicy{{Name: "yen-rate", Kind: "accrual_rate_cap", PolicyCurrency: "JPY", AccrualRateCapPerHour: 100_000}}
-			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "yen-rate"}}
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "team", OutstandingCapAmount: 20_000_000,
+				SpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 15_000_000, Currency: "USD"}}}}
+			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "team"}}
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})
-		customer := billing.CustomerID(uuid.New())
-		fund(t, w.alpha, customer, "funded", 100_000_000)
-		_, err := w.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "gpu/1", CustomerID: customer, Currency: "USD", RatePerHour: 4_000_000})
+		view := func() (*billing.LimitSet, billing.ViewLimit) {
+			t.Helper()
+			out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}})
+			set := out.LimitSets[0]
+			require.Nil(t, set.Refusal)
+			for _, key := range set.Limits {
+				if strings.HasPrefix(key, limits.SpendKeyPrefix) {
+					return set, lineOf(t, viewOf(t, out, customer), key)
+				}
+			}
+			require.FailNow(t, "the policy's spend window is in the set", "%v", set.Limits)
+			return nil, billing.ViewLimit{}
+		}
+		set, window := view()
+		require.EqualValues(t, 20_000_000, set.CreditLine, "the policy's cap, not the terms' line")
+		require.Equal(t, billing.DenyInsufficientCredit, set.BalanceDenyCode)
+		require.EqualValues(t, 15_000_000, window.Remaining)
+
+		// $20 owed takes the whole line.
+		_, err := a.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "owed", CustomerID: customer, Currency: "USD", RatePerHour: 20_000_000})
 		require.NoError(t, err)
-		require.True(t, admitOne(t, w.alpha, reservation(customer, "within", 1000)).Allowed(), "$4 an hour is within ¥10, not past 100,000 USD units")
-		_, err = w.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "gpu/2", CustomerID: customer, Currency: "USD", RatePerHour: 7_000_000})
+		a.clock.Advance(time.Hour)
+		_, err = a.alpha.StopRunningCharge(t.Context(), "owed", billing.StopRunningChargeParams{})
 		require.NoError(t, err)
-		requireDenied(t, admitOne(t, w.alpha, reservation(customer, "past", 1000)), billing.DenyAccrualRateCapReached)
+		set, _ = view()
+		require.Zero(t, set.CreditLine)
+		require.Equal(t, billing.DenyOutstandingCapReached, set.BalanceDenyCode)
+
+		// The customer's own $40 overrides the cap.
+		_, err = a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 40_000_000}}})
+		require.NoError(t, err)
+		set, window = view()
+		require.EqualValues(t, 20_000_000, set.CreditLine, "$40 less the $20 owed")
+		require.Equal(t, billing.DenyInsufficientCredit, set.BalanceDenyCode)
+
+		// Another gate's $20 of open requests fills the window while the line
+		// has room.
+		syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(),
+			InFlight: []billing.InFlight{{CustomerID: customer, Limit: window.Limit, Unit: window.Unit, Amount: 20_000_000}}})
+		set, window = view()
+		require.EqualValues(t, 20_000_000, window.Held)
+		require.LessOrEqual(t, window.Remaining, int64(0), "the window refuses")
+		require.EqualValues(t, 20_000_000, set.CreditLine)
 	})
 }

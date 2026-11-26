@@ -675,7 +675,6 @@ pkg openrails/billing, const DeclineUpdateCardholderData DeclineReason = "update
 pkg openrails/billing, const DefaultHeldEntitlements untyped int = 1000
 pkg openrails/billing, const DefaultPageLimit untyped int = 50
 pkg openrails/billing, const DefaultUsagePageLimit untyped int = 100
-pkg openrails/billing, const DenyAccrualRateCapReached DenyCode = "accrual_rate_cap_reached"
 pkg openrails/billing, const DenyBudgetExceeded DenyCode = "budget_exceeded"
 pkg openrails/billing, const DenyDelegatedSpendNotAllowed DenyCode = "delegated_spend_not_allowed"
 pkg openrails/billing, const DenyDelinquentUnpaidInvoice DenyCode = "delinquent_unpaid_invoice"
@@ -1440,14 +1439,11 @@ pkg openrails/billing, type BillingImportResult struct, Reasons map[string]strin
 pkg openrails/billing, type BillingImportResult struct, Skipped []string `json:"skipped"`
 pkg openrails/billing, type BillingMode string
 pkg openrails/billing, type BillingPolicy struct
-pkg openrails/billing, type BillingPolicy struct, AccrualRateCapPerHour int64 `json:"accrual_rate_cap_per_hour,omitempty,string"`
-pkg openrails/billing, type BillingPolicy struct, AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
 pkg openrails/billing, type BillingPolicy struct, BadSpendWindows []BudgetWindow `json:"bad_spend_windows,omitempty"`
 pkg openrails/billing, type BillingPolicy struct, CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
 pkg openrails/billing, type BillingPolicy struct, CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty,string"`
 pkg openrails/billing, type BillingPolicy struct, DelinquencyAmountFloor *int64 `json:"delinquency_amount_floor,omitempty,string"`
 pkg openrails/billing, type BillingPolicy struct, DelinquencyGraceDays *int `json:"delinquency_grace_days,omitempty"`
-pkg openrails/billing, type BillingPolicy struct, Kind string `json:"kind"`
 pkg openrails/billing, type BillingPolicy struct, Name string `json:"name"`
 pkg openrails/billing, type BillingPolicy struct, OutstandingCapAmount int64 `json:"outstanding_cap_amount,omitempty,string"`
 pkg openrails/billing, type BillingPolicy struct, PolicyCurrency catalog.Currency `json:"policy_currency,omitempty"`

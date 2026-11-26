@@ -153,6 +153,12 @@ func disputeInquiry(t *testing.T) {
 		trail(iw).send(t, "charge.dispute.updated", iw.stripe.Dispute("dp_pulled", sub, "under_review", "chargeback", "fraudulent"))
 		require.Eventually(t, func() bool { return responded(t, iw.authorityWorld, "dp_pulled") }, 20*time.Second, 50*time.Millisecond,
 			"a provider's notice is no advisory pull's: the response runs unarmed")
+		// The notice's chargeback ends the subscription: its provider cancel
+		// runs on the fleet, after the response.
+		require.Eventually(t, func() bool { return len(iw.stripe.Mutations("")) == 1 }, 20*time.Second, 50*time.Millisecond)
+		iw.stripeWrites = iw.stripe.Mutations("")
+		require.Equal(t, "/v1/subscriptions/"+sub, iw.stripeWrites[0].Path)
+		require.Equal(t, "true", iw.stripeWrites[0].Form.Get("cancel_at_period_end"), "Stripe stops billing it at its period end")
 	})
 }
 

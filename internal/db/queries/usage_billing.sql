@@ -46,14 +46,20 @@ LIMIT sqlc.arg(row_limit)::int;
 -- currency whose arrears reach the resulting credit limit with enough
 -- unbilled to bill, or with unbilled charges and no bill date, is checked on
 -- the next pass.
-WITH scoped AS (
+WITH bound AS (
     SELECT s.merchant_id, s.customer_id, s.currency, s.usage_next_bill_at, s.usage_minimum_invoice_amount,
-        LEAST(CASE WHEN s.credit_limit_override THEN s.credit_limit_amount ELSE (sqlc.arg(limits)::jsonb->>s.currency)::bigint END,NULLIF((sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
+        s.credit_limit_override, s.credit_limit_amount, (sqlc.arg(limits)::jsonb->>s.currency)::bigint AS terms_credit_limit,
+        sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
         CASE WHEN sqlc.arg(policies)::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
         sqlc.arg(policies)::jsonb -> 'tiers' ->> s.tier,
-        sqlc.arg(policies)::jsonb ->> 'default') ->> 'outstanding_cap_amount')::bigint,0)) AS effective_credit_limit
+        sqlc.arg(policies)::jsonb ->> 'default') AS policy
     FROM billing.money_settings s JOIN billing.customers c ON c.merchant_id=s.merchant_id AND c.id=s.customer_id
     WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND sqlc.arg(limits)::jsonb ? s.currency
+), scoped AS (
+    SELECT merchant_id, customer_id, currency, usage_next_bill_at, usage_minimum_invoice_amount,
+        CASE WHEN credit_limit_override THEN credit_limit_amount
+        ELSE COALESCE(NULLIF(CASE WHEN COALESCE(policy ->> 'policy_currency', currency) = currency THEN (policy ->> 'outstanding_cap_amount')::bigint END, 0), terms_credit_limit) END AS effective_credit_limit
+    FROM bound
 )
 UPDATE billing.money_settings m SET usage_due_at = LEAST(m.usage_due_at, sqlc.arg(now)::timestamptz)
 FROM scoped s
@@ -104,14 +110,20 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND customer_id=sqlc.arg(customer_
     AND currency=sqlc.arg(currency)::text AND origin='usage';
 
 -- name: FindInvalidUsageMinimum :one
-WITH scoped AS (
-    SELECT s.customer_id, COALESCE(s.usage_minimum_invoice_amount,sqlc.arg(default_minimum)::bigint) AS minimum,
-        LEAST(CASE WHEN s.credit_limit_override THEN s.credit_limit_amount ELSE sqlc.arg(default_credit)::bigint END,NULLIF((sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
+WITH bound AS (
+    SELECT s.customer_id, s.currency, COALESCE(s.usage_minimum_invoice_amount,sqlc.arg(default_minimum)::bigint) AS minimum,
+        s.credit_limit_override, s.credit_limit_amount, sqlc.arg(default_credit)::bigint AS terms_credit_limit,
+        sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
         CASE WHEN sqlc.arg(policies)::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
         sqlc.arg(policies)::jsonb -> 'tiers' ->> s.tier,
-        sqlc.arg(policies)::jsonb ->> 'default') ->> 'outstanding_cap_amount')::bigint,0)) AS credit_limit
+        sqlc.arg(policies)::jsonb ->> 'default') AS policy
     FROM billing.money_settings s JOIN billing.customers c ON c.merchant_id=s.merchant_id AND c.id=s.customer_id
     WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.currency=sqlc.arg(currency)::text
+), scoped AS (
+    SELECT customer_id, minimum,
+        CASE WHEN credit_limit_override THEN credit_limit_amount
+        ELSE COALESCE(NULLIF(CASE WHEN COALESCE(policy ->> 'policy_currency', currency) = currency THEN (policy ->> 'outstanding_cap_amount')::bigint END, 0), terms_credit_limit) END AS credit_limit
+    FROM bound
 )
 SELECT customer_id FROM scoped WHERE credit_limit>0 AND minimum>credit_limit
 ORDER BY customer_id LIMIT 1;

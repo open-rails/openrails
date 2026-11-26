@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 820,
+  "scenario_count": 819,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1499,11 +1499,6 @@
       "name": "A spend window that names no currency is in its policy's policy_currency, converted to the request's"
     },
     {
-      "id": "OR-J23-S34",
-      "journey": "J23",
-      "name": "A billing policy's amounts are in its policy_currency: an accrual-rate cap in yen gates USD usage at its converted rate"
-    },
-    {
       "id": "OR-J23-S35",
       "journey": "J23",
       "name": "A limit counting two meters by weight (output four times input, a large model's output six more) admits and refuses at the weighted total, and settles each count rounded half up"
@@ -1532,6 +1527,11 @@
       "id": "OR-J23-S41",
       "journey": "J23",
       "name": "A fixed window that resets between syncs is decided from the view's next window with no sync, and settles there"
+    },
+    {
+      "id": "OR-J23-S42",
+      "journey": "J23",
+      "name": "One billing policy caps what is owed and spend per window, each refusing on its own, and a customer's own credit limit overrides the policy's cap"
     },
     {
       "id": "OR-J29-S07",
@@ -2547,11 +2547,6 @@
       "id": "OR-J25-S37",
       "journey": "J25",
       "name": "A billing pass that waited behind a balance's look leaves the watch that look moved on"
-    },
-    {
-      "id": "OR-J25-S05",
-      "journey": "J25",
-      "name": "A customer's running charges count toward its accrual_rate_cap at their rates while they run"
     },
     {
       "id": "OR-J25-S43",
