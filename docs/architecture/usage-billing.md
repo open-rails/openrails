@@ -249,7 +249,7 @@ Checks:
 Critical journeys, over real PostgreSQL, Redis and Vault:
 - **J24**, intake and posting: OR-J24-S01, S02, S04 to S11, S21, S22, S36, S47 to S64, S71 (replay, pricing on totals, daily posting, owed past the balance, owed dating, lots, the store out of reach, start refusals, erasure, archive, tenancy, recovery from lost commits and a store that lost usage). Its lease scenarios are in [entitlements and limits](entitlements.md).
 - **J25**, running charges and balance looks: OR-J25-S01 to S05, S37, S40 to S42.
-- **J26**, usage billing and delinquency: OR-J26-S01 to S04, S30, S40, S50 to S58.
+- **J26**, usage billing and delinquency: OR-J26-S01 to S04, S30, S40, S50 to S58, S65.
 - **J40**, the usage receivable: OR-J40-S20 to S22, S27 to S29.
 
 Other tests: `internal/modules/money/rating_test.go` prices every accepted model; `usage_price_test.go` a period's total and history by bucket and zone; `usage_posting_test.go` the posting queue and what a posting takes after the store lost usage; `internal/modules/limits/window_test.go` a rate level from buckets.

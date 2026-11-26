@@ -619,4 +619,26 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.NotNil(t, out.LimitSets[0].Refusal)
 		require.Equal(t, billing.DenyDelinquentUnpaidInvoice, out.LimitSets[0].Refusal.DenyCode)
 	})
+	t.Run("OR-J26-S65/a-customer-without-money-settings-reads-the-merchants-usage-mode", func(t *testing.T) {
+		a, _, _ := usageBillingAccount(t, false)
+		customer := billing.CustomerID(uuid.MustParse(a.bob.ID))
+		_, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{
+			CustomerID: customer, Currency: "USD", Amount: 1_000_000, Source: "merchant", SourceID: "usage-mode",
+		}})
+		require.NoError(t, err)
+		var settings int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(a.world, "money_settings")+" WHERE merchant_id=$1 AND customer_id=$2",
+			a.alpha.MerchantID().UUID(), customer.UUID()).Scan(&settings))
+		require.Zero(t, settings)
+		admin, err := a.alphaRemote.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
+		require.NoError(t, err)
+		require.Equal(t, billing.BillingModeArrears, admin.BillingMode)
+		status, raw := a.request(t, http.MethodGet, "/v1/me", a.bobToken, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var me billing.CustomerAccount
+		require.NoError(t, json.Unmarshal(raw, &me))
+		require.Len(t, me.Balances, 1)
+		require.Equal(t, catalog.Currency("USD"), me.Balances[0].Currency)
+		require.Equal(t, billing.BillingModeArrears, me.Balances[0].BillingMode)
+	})
 }

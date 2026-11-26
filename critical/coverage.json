@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 821,
+  "scenario_count": 822,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3827,6 +3827,11 @@
       "id": "OR-J26-S64",
       "journey": "J26",
       "name": "Running charges bill on the merchant's usage_billing terms with no host setting and no event store: PostgreSQL alone bills them"
+    },
+    {
+      "id": "OR-J26-S65",
+      "journey": "J26",
+      "name": "A customer without money settings reads arrears from the admin balance and its own summary under the merchant's usage terms"
     },
     {
       "id": "OR-J24-S66",
