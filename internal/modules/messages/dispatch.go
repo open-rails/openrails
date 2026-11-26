@@ -2,10 +2,10 @@ package messages
 
 import (
 	"context"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/logx"
 )
@@ -63,7 +63,8 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
-// listen rings wake for this schema's notifications, on a dedicated session.
+// listen rings wake for this schema's notifications, and on every
+// (re)connect for those queued while nothing listened, on a session of its own.
 func (s *Service) listen(ctx context.Context, wake chan<- struct{}) {
 	schema := s.DB.DataPool().Schema()
 	ring := func() {
@@ -72,33 +73,16 @@ func (s *Service) listen(ctx context.Context, wake chan<- struct{}) {
 		default:
 		}
 	}
-	for ctx.Err() == nil {
-		err := func() error {
-			conn, err := s.DB.ConnectSession(ctx)
-			if err != nil {
-				return err
+	s.DB.Listen(ctx, db.Listener{
+		Channel:   channel,
+		Connected: func(context.Context) { ring() },
+		Notified: func(_ context.Context, payload string) {
+			if payload == schema {
+				ring()
 			}
-			defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
-			if _, err := conn.Exec(ctx, "LISTEN "+pgx.Identifier{channel}.Sanitize()); err != nil {
-				return err
-			}
-			ring()
-			for {
-				n, err := conn.WaitForNotification(ctx)
-				if err != nil {
-					return err
-				}
-				if n.Payload == schema {
-					ring()
-				}
-			}
-		}()
-		if err != nil && ctx.Err() == nil {
+		},
+		Interrupted: func(ctx context.Context, err error) {
 			s.Log.WarnContext(ctx, "customer messages: wake notifications interrupted; reconnecting", logx.Err(err))
-			select {
-			case <-ctx.Done():
-			case <-time.After(time.Second):
-			}
-		}
-	}
+		},
+	})
 }

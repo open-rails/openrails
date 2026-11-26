@@ -22,7 +22,7 @@ require (
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/v2 v2.2.2
 	github.com/open-rails/authkit v1.57.0
-	github.com/open-rails/helpers v1.22.1
+	github.com/open-rails/helpers v1.23.0
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/riverqueue/river v0.49.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.49.0

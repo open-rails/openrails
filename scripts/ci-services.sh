@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # CI's disposable services for the critical/SQL jobs, pulled and started in the
 # background while the job sets up Go:
-#   scripts/ci-services.sh start postgres [redis] [vault] [clickhouse]
+#   scripts/ci-services.sh start postgres [redis] [vault] [clickhouse] [pgbouncer]
 #   ...
 #   scripts/ci-services.sh ready
 # ready waits until every started service answers, prints their logs, and adds
@@ -54,15 +54,45 @@ start_clickhouse() {
   timeout 60 bash -c 'until docker exec critical-clickhouse clickhouse-client --query "SELECT 1"; do sleep 1; done'
 }
 
+# PgBouncer in transaction mode before critical-postgres, as production runs
+# it: server-side prepared statements off, four server connections for the
+# critical database (OPENRAILS_CRITICAL_PGBOUNCER_DSN), so its scenarios reach
+# every one. 6440: the Debian package starts its own instance on 6432.
+start_pgbouncer() {
+  sudo apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends pgbouncer
+  local dir="$state/pgbouncer"
+  mkdir -p "$dir"
+  printf '"postgres" "postgres"\n' >"$dir/userlist.txt"
+  cat >"$dir/pgbouncer.ini" <<INI
+[databases]
+openrails_test = host=127.0.0.1 port=5432 dbname=openrails_test pool_size=4
+
+[pgbouncer]
+listen_addr = 127.0.0.1
+listen_port = 6440
+unix_socket_dir =
+auth_type = scram-sha-256
+auth_file = $dir/userlist.txt
+pool_mode = transaction
+max_prepared_statements = 0
+max_client_conn = 500
+logfile = $dir/pgbouncer.log
+pidfile = $dir/pgbouncer.pid
+INI
+  /usr/sbin/pgbouncer -d "$dir/pgbouncer.ini"
+  timeout 60 bash -c 'until (exec 3<>/dev/tcp/127.0.0.1/6440) 2>/dev/null; do sleep 1; done'
+}
+
 case "${1:-}" in
 start)
   shift
-  (($#)) || { echo "usage: ci-services.sh start postgres|redis|vault|clickhouse..." >&2; exit 2; }
+  (($#)) || { echo "usage: ci-services.sh start postgres|redis|vault|clickhouse|pgbouncer..." >&2; exit 2; }
   rm -rf "$state"
   mkdir -p "$state"
   printf '%s\n' "$@" >"$state/services"
   for service in "$@"; do
-    case "$service" in postgres | redis | vault | clickhouse) ;; *) echo "ci-services: unknown service $service" >&2; exit 2 ;; esac
+    case "$service" in postgres | redis | vault | clickhouse | pgbouncer) ;; *) echo "ci-services: unknown service $service" >&2; exit 2 ;; esac
     # Detached from the step's output: its log and exit status land in $state.
     (
       set +e
@@ -99,7 +129,7 @@ ready)
   fi
   ;;
 *)
-  echo "usage: ci-services.sh start postgres|redis|vault|clickhouse... | ready" >&2
+  echo "usage: ci-services.sh start postgres|redis|vault|clickhouse|pgbouncer... | ready" >&2
   exit 2
   ;;
 esac

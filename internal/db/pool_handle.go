@@ -13,15 +13,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// Connection discipline: a request pins one connection (WithMerchantConn) and
-// its pool-backed statements reuse that pin while it is idle, so a request
-// never waits for a second connection while holding one (a deadlock at
-// concurrency >= pool size). Every pool wait is bounded: a saturated pool
-// answers ErrPoolExhausted (503), never a hang.
+// Connection discipline: a statement outside a transaction holds a pooled
+// connection only while it runs, and every pool wait is bounded: a saturated
+// pool answers ErrPoolExhausted (503), never a hang.
 
 // poolAcquireTimeout bounds one wait for a pooled connection.
 const poolAcquireTimeout = 5 * time.Second
@@ -44,65 +43,34 @@ func acquire(ctx context.Context, pool *pgxpool.Pool) (*pgxpool.Conn, error) {
 	return nil, err
 }
 
-// requestConn is the request's pinned connection on pool when it can take a
-// statement now: pinned to this pool and schema for the context's merchant,
-// not busy with an open result, and not inside a transaction (whose scope a
-// pool statement must not join). Otherwise the statement takes a fresh
-// connection, whose wait is bounded.
-func requestConn(ctx context.Context, pool *pgxpool.Pool, schema string) (*lazyMerchantPgxConn, *pgx.Conn) {
-	lc, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn)
-	if !ok || lc.pool != pool || lc.schema != schema || lc.transactionLocal {
-		return nil, nil
-	}
-	if mid, ok := merchant.FromContext(ctx); !ok || mid.String() != lc.tenantID {
-		return nil, nil
-	}
-	conn, err := lc.get(ctx)
-	if err != nil || conn.IsClosed() || conn.PgConn().IsBusy() || conn.PgConn().TxStatus() != 'I' {
-		return nil, nil
-	}
-	return lc, conn
-}
-
-// pooledDBTX runs statements on the request's pin when it can, else on a
-// pooled connection acquired with a bound. directory skips the pin: platform
-// directory reads must not carry the request's merchant session state.
+// pooledDBTX runs each statement on a pooled connection acquired with a
+// bound, as the context's merchant scope when it has one for this pool and
+// schema. directory ignores the scope: platform directory reads run as no
+// merchant.
 type pooledDBTX struct {
 	pool      *pgxpool.Pool
 	schema    string
 	directory bool
 }
 
-func (p pooledDBTX) pin(ctx context.Context) (*lazyMerchantPgxConn, *pgx.Conn) {
+// scoped is the merchant the context scopes statements on this pool to.
+func (p pooledDBTX) scoped(ctx context.Context) (string, bool) {
 	if p.directory {
-		return nil, nil
+		return "", false
 	}
-	return requestConn(ctx, p.pool, p.schema)
-}
-
-func (p pooledDBTX) pinned(ctx context.Context) *pgx.Conn {
-	_, conn := p.pin(ctx)
-	return conn
-}
-
-func (p pooledDBTX) merchantStatement(ctx context.Context) (merchantStatement, bool) {
-	scope, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn)
-	if p.directory || !ok || !scope.transactionLocal || scope.pool != p.pool || scope.schema != p.schema {
-		return merchantStatement{}, false
+	scope, ok := ctx.Value(merchantScopeKey{}).(*merchantScope)
+	if !ok || scope.pool != p.pool || scope.schema != p.schema {
+		return "", false
 	}
-	mid, ok := merchant.FromContext(ctx)
-	if !ok || mid.String() != scope.tenantID {
-		return merchantStatement{}, false
+	if mid, ok := merchant.FromContext(ctx); !ok || mid.String() != scope.tenantID {
+		return "", false
 	}
-	return merchantStatement{pool: p.pool, merchantID: mid}, true
+	return scope.tenantID, true
 }
 
 func (p pooledDBTX) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	if statement, ok := p.merchantStatement(ctx); ok {
-		return statement.Exec(ctx, sql, args...)
-	}
-	if conn := p.pinned(ctx); conn != nil {
-		return conn.Exec(ctx, sql, args...)
+	if id, ok := p.scoped(ctx); ok {
+		return scopedStatement{pool: p.pool, merchantID: id}.Exec(ctx, sql, args...)
 	}
 	conn, err := acquire(ctx, p.pool)
 	if err != nil {
@@ -113,11 +81,8 @@ func (p pooledDBTX) Exec(ctx context.Context, sql string, args ...any) (pgconn.C
 }
 
 func (p pooledDBTX) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-	if statement, ok := p.merchantStatement(ctx); ok {
-		return statement.Query(ctx, sql, args...)
-	}
-	if conn := p.pinned(ctx); conn != nil {
-		return conn.Query(ctx, sql, args...)
+	if id, ok := p.scoped(ctx); ok {
+		return scopedStatement{pool: p.pool, merchantID: id}.Query(ctx, sql, args...)
 	}
 	conn, err := acquire(ctx, p.pool)
 	if err != nil {
@@ -132,11 +97,8 @@ func (p pooledDBTX) Query(ctx context.Context, sql string, args ...any) (pgx.Row
 }
 
 func (p pooledDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	if statement, ok := p.merchantStatement(ctx); ok {
-		return statement.QueryRow(ctx, sql, args...)
-	}
-	if conn := p.pinned(ctx); conn != nil {
-		return conn.QueryRow(ctx, sql, args...)
+	if id, ok := p.scoped(ctx); ok {
+		return scopedStatement{pool: p.pool, merchantID: id}.QueryRow(ctx, sql, args...)
 	}
 	conn, err := acquire(ctx, p.pool)
 	if err != nil {
@@ -145,17 +107,9 @@ func (p pooledDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.R
 	return releasingRow{row: conn.QueryRow(ctx, sql, args...), conn: conn}
 }
 
+// Begin opens a transaction on a connection of its own, the context's
+// merchant scope set locally in it.
 func (p pooledDBTX) Begin(ctx context.Context) (pgx.Tx, error) {
-	if lc, conn := p.pin(ctx); conn != nil {
-		tx, err := conn.Begin(ctx)
-		if err != nil {
-			return nil, err
-		}
-		lc.mu.Lock()
-		lc.poolTx = true
-		lc.mu.Unlock()
-		return &pinnedPoolTx{Tx: tx, lc: lc}, nil
-	}
 	conn, err := acquire(ctx, p.pool)
 	if err != nil {
 		return nil, err
@@ -165,30 +119,14 @@ func (p pooledDBTX) Begin(ctx context.Context) (pgx.Tx, error) {
 		conn.Release()
 		return nil, err
 	}
-	return &releasingTx{Tx: tx, conn: conn}, nil
-}
-
-// pinnedPoolTx is a pool transaction on the request's pin; while it is open,
-// DB statements on the pin are refused rather than joining it.
-type pinnedPoolTx struct {
-	pgx.Tx
-	lc *lazyMerchantPgxConn
-}
-
-func (t *pinnedPoolTx) Commit(ctx context.Context) error {
-	defer t.done()
-	return t.Tx.Commit(ctx)
-}
-
-func (t *pinnedPoolTx) Rollback(ctx context.Context) error {
-	defer t.done()
-	return t.Tx.Rollback(ctx)
-}
-
-func (t *pinnedPoolTx) done() {
-	t.lc.mu.Lock()
-	t.lc.poolTx = false
-	t.lc.mu.Unlock()
+	scoped := &releasingTx{Tx: tx, conn: conn}
+	if id, ok := p.scoped(ctx); ok {
+		if _, err := gen.New(tx).SetConfig(ctx, gen.SetConfigParams{Setting: MerchantGUC, Value: id, IsLocal: true}); err != nil {
+			_ = scoped.Rollback(context.WithoutCancel(ctx))
+			return nil, fmt.Errorf("db: set %s GUC: %w", MerchantGUC, err)
+		}
+	}
+	return scoped, nil
 }
 
 // releasingRows returns its connection once the rows are done.
@@ -246,85 +184,80 @@ func (t *releasingTx) Rollback(ctx context.Context) error {
 
 func (t *releasingTx) release() { t.once.Do(t.conn.Release) }
 
-// merchantStatement keeps a standalone statement and its local merchant GUC
-// on one PostgreSQL session through completion. Calls inside a real domain
-// transaction use that transaction instead.
-type merchantStatement struct {
+// scopeStatement sets the merchant for the statement queued after it.
+const scopeStatement = "SELECT set_config('" + MerchantGUC + "', $1, true)"
+
+// scopedStatement runs one statement as a merchant outside any transaction:
+// the merchant setting and the statement go in one batch, which PostgreSQL
+// runs as one implicit transaction, so the setting ends with the statement on
+// the same server connection, in one round trip.
+type scopedStatement struct {
 	pool       *pgxpool.Pool
-	merchantID billing.MerchantID
+	merchantID string
 }
 
-func (s merchantStatement) begin(ctx context.Context) (pgx.Tx, error) {
-	tx, err := (pooledDBTX{pool: s.pool, directory: true}).Begin(ctx)
+func (s scopedStatement) send(ctx context.Context, sql string, args []any) (*pgxpool.Conn, pgx.BatchResults, error) {
+	conn, err := acquire(ctx, s.pool)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := setMerchantLocalGUCPgx(ctx, tx, s.merchantID); err != nil {
-		_ = tx.Rollback(context.WithoutCancel(ctx))
-		return nil, err
+	b := &pgx.Batch{}
+	b.Queue(scopeStatement, s.merchantID)
+	b.Queue(sql, args...)
+	results := conn.SendBatch(ctx, b)
+	if _, err := results.Exec(); err != nil {
+		_ = results.Close()
+		conn.Release()
+		return nil, nil, fmt.Errorf("db: set %s GUC: %w", MerchantGUC, err)
 	}
-	return tx, nil
+	return conn, results, nil
 }
 
-func (s merchantStatement) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	tx, err := s.begin(ctx)
+func (s scopedStatement) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	conn, results, err := s.send(ctx, sql, args)
 	if err != nil {
 		return pgconn.CommandTag{}, err
 	}
-	tag, err := tx.Exec(ctx, sql, args...)
-	return tag, finishMerchantStatement(ctx, tx, err)
+	defer conn.Release()
+	tag, err := results.Exec()
+	if closeErr := results.Close(); err == nil {
+		err = closeErr
+	}
+	return tag, err
 }
 
-func (s merchantStatement) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-	tx, err := s.begin(ctx)
+func (s scopedStatement) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	conn, results, err := s.send(ctx, sql, args)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, sql, args...)
+	rows, err := results.Query()
 	if err != nil {
-		return nil, finishMerchantStatement(ctx, tx, err)
+		_ = results.Close()
+		conn.Release()
+		return nil, err
 	}
-	return &merchantStatementRows{Rows: rows, tx: tx, ctx: ctx}, nil
+	return &batchRows{Rows: rows, results: results, conn: conn}, nil
 }
 
-func (s merchantStatement) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	tx, err := s.begin(ctx)
+func (s scopedStatement) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	conn, results, err := s.send(ctx, sql, args)
 	if err != nil {
 		return errRow{err}
 	}
-	return merchantStatementRow{Row: tx.QueryRow(ctx, sql, args...), tx: tx, ctx: ctx}
+	return batchRow{row: results.QueryRow(), results: results, conn: conn}
 }
 
-func finishMerchantStatement(ctx context.Context, tx pgx.Tx, statementErr error) error {
-	if statementErr != nil && !errors.Is(statementErr, pgx.ErrNoRows) {
-		_ = tx.Rollback(context.WithoutCancel(ctx))
-		return statementErr
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-	return statementErr
-}
-
-type merchantStatementRow struct {
-	pgx.Row
-	tx  pgx.Tx
-	ctx context.Context
-}
-
-func (r merchantStatementRow) Scan(dest ...any) error {
-	return finishMerchantStatement(r.ctx, r.tx, r.Row.Scan(dest...))
-}
-
-type merchantStatementRows struct {
+// batchRows ends its batch and returns its connection once the rows are done.
+type batchRows struct {
 	pgx.Rows
-	tx   pgx.Tx
-	ctx  context.Context
-	once sync.Once
-	err  error
+	results pgx.BatchResults
+	conn    *pgxpool.Conn
+	once    sync.Once
+	err     error
 }
 
-func (r *merchantStatementRows) Next() bool {
+func (r *batchRows) Next() bool {
 	if r.Rows.Next() {
 		return true
 	}
@@ -332,16 +265,32 @@ func (r *merchantStatementRows) Next() bool {
 	return false
 }
 
-func (r *merchantStatementRows) Close() {
+func (r *batchRows) Close() {
 	r.once.Do(func() {
 		r.Rows.Close()
-		r.err = finishMerchantStatement(r.ctx, r.tx, r.Rows.Err())
+		r.err = r.results.Close()
+		r.conn.Release()
 	})
 }
 
-func (r *merchantStatementRows) Err() error {
-	if r.err != nil {
-		return r.err
+func (r *batchRows) Err() error {
+	if err := r.Rows.Err(); err != nil {
+		return err
 	}
-	return r.Rows.Err()
+	return r.err
+}
+
+type batchRow struct {
+	row     pgx.Row
+	results pgx.BatchResults
+	conn    *pgxpool.Conn
+}
+
+func (r batchRow) Scan(dest ...any) error {
+	defer r.conn.Release()
+	err := r.row.Scan(dest...)
+	if closeErr := r.results.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }

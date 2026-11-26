@@ -29,7 +29,7 @@ import (
 // database that has used one: refused.
 func attachEventStore(ctx context.Context, cfg *billing.Config, database *db.DB, conn driver.Conn, logger *slog.Logger) (*eventstore.Store, error) {
 	store, err := eventstore.Open(ctx, conn, config.ClickHouseDatabase(cfg), eventstore.Options{Logger: logger,
-		Serialize: migrate.ClickHouseLock(database.Pool(), config.ClickHouseDatabase(cfg))})
+		Serialize: migrate.ClickHouseLock(database.SessionDialConfig(), config.ClickHouseDatabase(cfg))})
 	if err != nil {
 		return nil, err
 	}

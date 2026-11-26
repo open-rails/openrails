@@ -69,5 +69,5 @@ func openAttachedStore(ctx context.Context, database *db.DB) (*eventstore.Store,
 	cli.closes = append(cli.closes, func() { _ = conn.Close() })
 	cli.mu.Unlock()
 	chdb := config.ClickHouseDatabase(&h.Server.Engine)
-	return eventstore.Open(ctx, conn, chdb, eventstore.Options{Logger: slog.Default(), Serialize: migrate.ClickHouseLock(database.Pool(), chdb)})
+	return eventstore.Open(ctx, conn, chdb, eventstore.Options{Logger: slog.Default(), Serialize: migrate.ClickHouseLock(database.Pool().Config(), chdb)})
 }

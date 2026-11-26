@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
@@ -22,11 +23,19 @@ import (
 
 // withTaggedSessions gives the engine a direct session configuration whose
 // sessions carry the world's schema as their application name, so a scenario
-// sees every session the engine dials.
+// sees every session the engine dials. Its pool is the world's, in the
+// pooler-safe mode a session configuration requires.
 func withTaggedSessions(w *world) {
 	cfg := w.pool.Config()
 	cfg.ConnConfig.RuntimeParams["application_name"] = w.schema
 	w.deps.PostgresSession = cfg
+	pooled := w.pool.Config()
+	pooled.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
+	pool, err := pgxpool.NewWithConfig(context.Background(), pooled)
+	if err != nil {
+		panic(err)
+	}
+	w.deps.Postgres = pool
 }
 
 // heldSessions counts the world's direct sessions that are not listening:
@@ -43,7 +52,7 @@ WHERE application_name = $1 AND query <> '' AND query NOT LIKE 'LISTEN %'`, w.sc
 // sessions tagged as the engine's when it has a session configuration.
 func worldDB(t *testing.T, w *world) *db.DB {
 	t.Helper()
-	database, err := db.NewWithPGXPoolAndSessions(slog.Default(), w.pool, w.schema, w.deps.PostgresSession)
+	database, err := db.NewWithPGXPoolAndSessions(slog.Default(), w.deps.Postgres, w.schema, w.deps.PostgresSession)
 	require.NoError(t, err)
 	return database
 }

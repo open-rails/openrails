@@ -249,16 +249,37 @@ and no sticky session.
 
 Size PostgreSQL `max_connections` for every pool, plus the 4 connections of each instance's lease pool (idempotency claims, the billing pass, merchant pulls), plus each instance's direct sessions:
 
-- **Listeners**, held while the instance runs: five on an instance running workers (unverified subscriptions, Solana Pay, customer messages, dispute responses, MRR risk changes), and on every instance one for configuration edits with Vault configuration.
+- **Listeners**, held while the instance runs: River's, and five on an instance running workers (unverified subscriptions, Solana Pay, customer messages, dispute responses, MRR risk changes), and on every instance one for configuration edits with Vault configuration.
 - **Short session locks**: one while a usage policy write runs, one while a billing import lands, and `New`'s migration pool while it migrates.
 
 The billing pass and a merchant's pulls hold no session: each holds a lease row, renewed on the lease pool while it runs and lapsing within two minutes of its holder dying.
 
+A notification only wakes a worker; its table is the record. Each listener reads what it missed on every (re)connect, pings its session every 30 seconds and redials one that died, and each worker's periodic pass covers whatever is still missed.
+
 ## PgBouncer
 
-With transaction pooling, give `Postgres` the PgBouncer pool and set `poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe` on it; set `PostgresSession` to a `pgxpool.ParseConfig` result for the same database and role through PostgreSQL's direct endpoint. OpenRails scopes the merchant to each transaction, and everything else it runs, leases included, goes through the pooler. `PostgresSession` serves only the listeners and short session locks above: each instance's direct floor is five sessions with workers, one more with Vault configuration. Its own River workers poll in this mode; a host fleet on the PgBouncer pool sets `river.Config.PollOnly`.
+Behind PgBouncer in transaction mode, give `Postgres` the PgBouncer pool in a mode that prepares no statement across round trips, and `PostgresSession` the same database and role through PostgreSQL's direct endpoint:
 
-`LISTEN` needs a session: a transaction-pooled connection drops its notifications. Without `PostgresSession` the listeners dial with the `Postgres` pool's settings, so behind PgBouncer that pool must be in session mode.
+```go guide:embedded-pgbouncer
+pooled, err := pgxpool.ParseConfig(os.Getenv("DATABASE_URL")) // PgBouncer, transaction mode
+if err != nil {
+	return nil, err
+}
+pooled.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
+pool, err := pgxpool.NewWithConfig(ctx, pooled)
+if err != nil {
+	return nil, err
+}
+session, err := pgxpool.ParseConfig(os.Getenv("DATABASE_SESSION_URL")) // direct
+if err != nil {
+	return nil, err
+}
+bill, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, PostgresSession: session})
+```
+
+`New` refuses a `PostgresSession` beside a pool whose `DefaultQueryExecMode` is not `cache_describe`, `exec` or `simple_protocol`. Nothing OpenRails runs through the pool outlives its transaction: the merchant and every other `openrails.*` setting is set locally in the transaction that uses it, and its locks on the pool are transaction locks. What needs a session dials one from `PostgresSession`: the listeners and short session locks above, and `New`'s migrations. OpenRails' own River works through the pool and listens on a direct session; a host fleet does the same with `riverhelpers.NewWithSession(ctx, pool, session, cfg, bill.RiverJobs())`. `Migrate` and `MigrateClickHouse` hold session locks: give them a direct pool.
+
+Without `PostgresSession`, `Postgres` reaches PostgreSQL directly or through a session-mode pooler.
 
 ## Routes
 

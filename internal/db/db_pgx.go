@@ -2,16 +2,13 @@ package db
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
-	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/tracelog"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -25,23 +22,20 @@ import (
 const MerchantGUC = "openrails.merchant_id"
 
 // Qx returns the handle sqlc queries use: the open transaction this DB is
-// scoped to (NewWithPgxTx), else the request's pinned merchant connection,
-// else the base pool. Choosing a handle authorizes nothing; tenant queries
-// still carry their verified merchant predicate.
-
+// scoped to (NewWithPgxTx), else the pool, whose statements run as the
+// context's merchant scope (WithMerchantConn). Choosing a handle authorizes
+// nothing; tenant queries still carry their verified merchant predicate.
 func (d *DB) Qx(ctx context.Context) gen.DBTX {
 	if d == nil {
 		return errDBTX{fmt.Errorf("db: Qx on nil DB")}
 	}
-	// d.pgtx already rewrites schemas (pgxBegin / Pool.Begin); the pool and
-	// the lazy merchant connection are raw, so wrap them here.
+	// d.pgtx already rewrites schemas (pgxBegin / Pool.Begin); the pool is
+	// raw, so wrap it here.
 	if d.pgtx != nil {
 		return d.pgtx
 	}
-	if lc, err := d.merchantConn(ctx); err != nil {
+	if _, err := d.merchantScope(ctx); err != nil {
 		return errDBTX{err}
-	} else if lc != nil && !lc.transactionLocal {
-		return d.rw.wrapDBTX(lc)
 	}
 	if d.pool != nil {
 		return d.rw.wrapDBTX(pooledDBTX{pool: d.pool, schema: d.rw.schema()})
@@ -65,13 +59,6 @@ func (d *DB) GenDirectory() *gen.Queries {
 	return gen.New(d.rw.wrapDBTX(pooledDBTX{pool: d.pool, directory: true}))
 }
 
-// pgxBeginner abstracts where a transaction starts: the pinned merchant
-// connection when one is in flight (so the tx inherits its session GUC), the
-// base pool otherwise.
-type pgxBeginner interface {
-	Begin(ctx context.Context) (pgx.Tx, error)
-}
-
 func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 	if d == nil {
 		return nil, fmt.Errorf("db: transaction on nil DB")
@@ -82,19 +69,8 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 		// Nested: pgx models nesting as savepoints via tx.Begin.
 		return d.pgtx.Begin(ctx)
 	}
-	lc, err := d.merchantConn(ctx)
-	if err != nil {
+	if _, err := d.merchantScope(ctx); err != nil {
 		return nil, err
-	}
-	if lc != nil && !lc.transactionLocal {
-		// Begin on the pinned merchant connection (acquiring it now if this is
-		// the request's first sqlc touch) so the tx inherits the session GUC.
-		// Never a second BEGIN inside a transaction already open on it.
-		tx, err := lc.begin(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return schemaTx{Tx: tx, rw: d.rw, river: d.river}, nil
 	}
 	if d.pool != nil {
 		tx, err := pooledDBTX{pool: d.pool, directory: true}.Begin(ctx)
@@ -107,15 +83,14 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 }
 
 // RunInTx runs fn in a transaction for work that uses explicit merchant_id
-// predicates. It inherits an active merchant scope from the pinned connection
-// or sets it locally when using transaction pooling.
+// predicates. Within a merchant scope it sets the merchant locally.
 func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	tx, err := d.pgxBegin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if err := d.bindTransactionPoolMerchant(ctx, tx); err != nil {
+	if err := d.bindScopedMerchant(ctx, tx); err != nil {
 		return err
 	}
 	if err := fn(transactionContext(ctx), tx); err != nil {
@@ -158,11 +133,11 @@ func setMerchantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id billing.MerchantI
 	return nil
 }
 
-// Bind the scope that a direct pool's pinned connection would have supplied.
+// bindScopedMerchant sets the context's merchant scope locally in tx.
 // Snapshot callers must set their transaction mode before this first query.
-func (d *DB) bindTransactionPoolMerchant(ctx context.Context, tx pgx.Tx) error {
-	pin, err := d.merchantConn(ctx)
-	if err != nil || pin == nil || !pin.transactionLocal {
+func (d *DB) bindScopedMerchant(ctx context.Context, tx pgx.Tx) error {
+	scope, err := d.merchantScope(ctx)
+	if err != nil || scope == nil {
 		return err
 	}
 	mid, err := merchant.Require(ctx)
@@ -205,147 +180,6 @@ func (d *DB) BindMerchantTx(ctx context.Context, tx pgx.Tx, id billing.MerchantI
 	}
 	ctx = merchant.WithID(ctx, id)
 	return transactionContext(ctx), d.NewWithPgxTx(tx), nil
-}
-
-// lazyMerchantPgxConn is the request's merchant-scoped connection, acquired on
-// the first query (not in WithMerchantConn) so requests that never touch the
-// database hold no pool connection. Acquiring it sets the
-// openrails.merchant_id session GUC; it stays pinned until release().
-type lazyMerchantPgxConn struct {
-	pool     *pgxpool.Pool
-	tenantID string
-	schema   string
-	// In transaction pooling the scope is lazy without retaining a session.
-	transactionLocal bool
-
-	mu   sync.Mutex
-	conn *pgxpool.Conn
-	// poolTx marks a pool transaction open on the pin.
-	poolTx bool
-	Log    *slog.Logger
-}
-
-// get returns the pinned connection, acquiring it on first use. It hands out
-// the underlying *pgx.Conn: a caller still holding it after a re-pin gets
-// "conn closed" from the dead connection, never a released pool handle.
-func (l *lazyMerchantPgxConn) get(ctx context.Context) (*pgx.Conn, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.conn != nil {
-		if pinned := l.conn.Conn(); !pinned.IsClosed() || !isDetachedWrite(ctx) {
-			return pinned, nil
-		}
-		// A detached write on a pin its caller's cancellation closed
-		// (DetachedWriteContext). Releasing a closed connection destroys it
-		// and frees its pool slot before the re-acquire below.
-		l.conn.Release()
-		l.conn = nil
-	}
-	conn, err := acquire(ctx, l.pool)
-	if err != nil {
-		return nil, fmt.Errorf("db: acquire pgx merchant connection: %w", err)
-	}
-	if _, err := gen.New(conn).SetConfig(ctx, gen.SetConfigParams{Setting: MerchantGUC, Value: l.tenantID}); err != nil {
-		conn.Release()
-		return nil, fmt.Errorf("db: set %s on pgx merchant connection: %w", MerchantGUC, err)
-	}
-	l.conn = conn
-	return conn.Conn(), nil
-}
-
-// release resets the GUC and returns the connection to the pool (no-op when
-// the request never touched a sqlc call site).
-func (l *lazyMerchantPgxConn) release() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.conn == nil {
-		return
-	}
-	if l.conn.Conn().IsClosed() {
-		// A closed connection carries no session state and the pool destroys it
-		// on release; resetting it would only fail loudly.
-		l.conn.Release()
-		l.conn = nil
-		return
-	}
-	// Background context so release works after request cancellation. Never
-	// pool a connection that may still carry a merchant GUC: on reset failure,
-	// close it so the pool destroys it.
-	if _, err := gen.New(l.conn).SetConfig(context.Background(), gen.SetConfigParams{Setting: MerchantGUC}); err != nil {
-		l.Log.Warn("db: failed to reset merchant GUC on pgx connection release; discarding connection", logx.Err(err))
-		_ = l.conn.Conn().Close(context.Background())
-	}
-	l.conn.Release()
-	l.conn = nil
-}
-
-// releaseIdle releases the pin when no transaction is open on it.
-func (l *lazyMerchantPgxConn) releaseIdle() {
-	l.mu.Lock()
-	idle := l.conn != nil && !l.conn.Conn().IsClosed() && l.conn.Conn().PgConn().TxStatus() == 'I'
-	l.mu.Unlock()
-	if idle {
-		l.release()
-	}
-}
-
-// ErrPinInTransaction refuses work on the request's connection that would
-// silently join a transaction it did not open: a second BEGIN inside an open
-// transaction (whose inner COMMIT would end the outer one early), or a DB
-// statement inside a pool transaction. Use that transaction's handle.
-var ErrPinInTransaction = errors.New("db: the request's connection is inside a transaction; use that transaction")
-
-// idle returns the pinned connection for a DB statement. A DB transaction open
-// on it is joined; a pool transaction open on it is refused.
-func (l *lazyMerchantPgxConn) idle(ctx context.Context) (*pgx.Conn, error) {
-	conn, err := l.get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	l.mu.Lock()
-	poolTx := l.poolTx
-	l.mu.Unlock()
-	if poolTx && conn.PgConn().TxStatus() != 'I' {
-		return nil, ErrPinInTransaction
-	}
-	return conn, nil
-}
-
-// begin opens a transaction on the pinned connection, never a second one
-// inside a transaction already open on it.
-func (l *lazyMerchantPgxConn) begin(ctx context.Context) (pgx.Tx, error) {
-	conn, err := l.get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if conn.PgConn().TxStatus() != 'I' {
-		return nil, ErrPinInTransaction
-	}
-	return conn.Begin(ctx)
-}
-
-func (l *lazyMerchantPgxConn) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
-	conn, err := l.idle(ctx)
-	if err != nil {
-		return pgconn.CommandTag{}, err
-	}
-	return conn.Exec(ctx, sql, args...)
-}
-
-func (l *lazyMerchantPgxConn) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
-	conn, err := l.idle(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return conn.Query(ctx, sql, args...)
-}
-
-func (l *lazyMerchantPgxConn) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
-	conn, err := l.idle(ctx)
-	if err != nil {
-		return errRow{err}
-	}
-	return conn.QueryRow(ctx, sql, args...)
 }
 
 // errDBTX satisfies gen.DBTX but fails every call with a descriptive error.

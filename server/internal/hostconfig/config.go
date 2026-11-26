@@ -128,6 +128,11 @@ type DatabaseConnection struct {
 	// (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD or PGPASSFILE,
 	// PGSSLMODE, PGSSLROOTCERT); with neither, Compose's local Postgres.
 	URL string `yaml:"url"`
+	// SessionURL is the same database and role without the pooler, set when
+	// URL is a transaction pooler (PgBouncer in transaction mode): listeners,
+	// session locks, migrations and AuthKit connect through it. Unset, URL
+	// reaches PostgreSQL directly or through a session pooler.
+	SessionURL string `yaml:"session_url"`
 }
 
 // DSN is the connection string the pool opens, getenv reading the process

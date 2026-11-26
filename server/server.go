@@ -283,9 +283,14 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 
 	akDeps := deps.Auth
 	if akDeps.Postgres == nil {
-		// AuthKit's own pool: an authority read can follow a pinned billing
-		// read, so a one-connection engine pool must not also serve it.
-		if s.pool, err = pgxpool.NewWithConfig(ctx, s.graph.Runtime.DB.Pool().Config()); err != nil {
+		// AuthKit's own pool, so a one-connection engine pool never also
+		// serves it. AuthKit holds sessions (its LISTEN and advisory locks):
+		// behind a transaction pooler it connects directly.
+		cfg := s.graph.Runtime.DB.Pool().Config()
+		if session := deps.Engine.PostgresSession; session != nil {
+			cfg = session.Copy()
+		}
+		if s.pool, err = pgxpool.NewWithConfig(ctx, cfg); err != nil {
 			return fail(fmt.Errorf("server: AuthKit pool: %w", err))
 		}
 		akDeps.Postgres = s.pool

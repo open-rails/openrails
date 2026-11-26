@@ -3,8 +3,13 @@
 package critical_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +23,18 @@ import (
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
+// scheduleReadByID is NMI's recurring report for named schedules: the
+// verifier's read of rows it is told of.
+func scheduleReadByID(r *http.Request) bool {
+	body, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	form, _ := url.ParseQuery(string(body))
+	for k, v := range r.URL.Query() {
+		form[k] = v
+	}
+	return form.Get("report_type") == "recurring" && form.Get("subscription_id") != ""
+}
+
 // The bulk roster read resolves unverified NMI rows only from a whole roster:
 // a page NMI cuts short is refused.
 func TestNMIRoster(t *testing.T) {
@@ -25,10 +42,14 @@ func TestNMIRoster(t *testing.T) {
 	unverified := billing.SubscriptionStatus("unverified")
 	t.Run("OR-J15-S71/a-truncated-roster-page-resolves-nothing", func(t *testing.T) {
 		a, old, book, now := lapsedNMIBook(t, members)
-		// Import before the listener starts. With periodic work paused in the
-		// fixture, only the operator's job can read the outstanding rows.
+		// The listener reads the imported rows by id when it connects; NMI
+		// refuses those reads meanwhile, and periodic work is paused in the
+		// fixture, so only the operator's job reads the outstanding rows.
 		const truncated = 1 << 20
 		old.TruncateRoster(truncated)
+		old.Intercept(scheduleReadByID, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusServiceUnavailable, Status: "503 Service Unavailable", Header: http.Header{}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+		})
 		imported, err := a.alpha.ImportBilling(t.Context(), book)
 		require.NoError(t, err)
 		require.Empty(t, imported.Blocked, "%+v", imported.Reasons)
@@ -50,6 +71,7 @@ func TestNMIRoster(t *testing.T) {
 			}, 3*time.Second, 100*time.Millisecond, "a cut-short roster is no evidence: nothing is adopted or cancelled")
 		}
 		old.TruncateRoster(0)
+		old.ClearIntercepts()
 		_, err = fleet.JobRetry(t.Context(), job.Job.ID)
 		require.NoError(t, err)
 		require.Eventually(t, func() bool {

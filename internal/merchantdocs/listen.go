@@ -4,10 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -29,40 +27,23 @@ func Channel(schema string) string {
 	return prefix + hex.EncodeToString(sum[:16])
 }
 
-// Listen reloads each merchant another replica announces until ctx ends,
-// reconnecting after a failure on a dedicated session.
+// Listen reloads each merchant another replica announces until ctx ends, on
+// a session of its own. Each (re)connect expires every cached merchant, so an
+// edit announced while nothing listened is read on the merchant's next use.
 func (c *Cache) Listen(ctx context.Context, database *db.DB, schema string) {
 	if database.Pool() == nil {
 		return
 	}
-	channel := pgx.Identifier{Channel(schema)}.Sanitize()
-	for ctx.Err() == nil {
-		if err := c.listenOnce(ctx, database, channel); err != nil && ctx.Err() == nil {
-			c.Log.WarnContext(ctx, "merchant config: edit notifications interrupted; reconnecting", logx.Err(err))
-			select {
-			case <-ctx.Done():
-			case <-time.After(time.Second):
+	database.Listen(ctx, db.Listener{
+		Channel:   Channel(schema),
+		Connected: func(context.Context) { c.Expire() },
+		Notified: func(_ context.Context, payload string) {
+			if id, err := uuid.Parse(payload); err == nil {
+				c.Invalidate(billing.MerchantID(id))
 			}
-		}
-	}
-}
-
-func (c *Cache) listenOnce(ctx context.Context, database *db.DB, channel string) error {
-	conn, err := database.ConnectSession(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
-	if _, err := conn.Exec(ctx, "LISTEN "+channel); err != nil {
-		return err
-	}
-	for {
-		n, err := conn.WaitForNotification(ctx)
-		if err != nil {
-			return err
-		}
-		if id, err := uuid.Parse(n.Payload); err == nil {
-			c.Invalidate(billing.MerchantID(id))
-		}
-	}
+		},
+		Interrupted: func(ctx context.Context, err error) {
+			c.Log.WarnContext(ctx, "merchant config: edit notifications interrupted; reconnecting", logx.Err(err))
+		},
+	})
 }

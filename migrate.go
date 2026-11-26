@@ -16,15 +16,18 @@ import (
 
 // Migrate prepares OpenRails' schema and River's tables in database's
 // schemas, without constructing an engine: ahead of a deploy, after which
-// New's own migration is a no-op under the same lock.
+// New's own migration is a no-op under the same lock. pool reaches
+// PostgreSQL directly, not through a transaction pooler: the migration holds
+// session locks.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, database billing.DatabaseConfig) error {
 	return engine.Migrate(ctx, pool, billing.Config{Database: database}.WithDefaults())
 }
 
 // MigrateClickHouse creates or upgrades the event store's database on conn,
 // as New does with Deps.ClickHouse: run it beside Migrate. It holds a PostgreSQL
-// advisory lock on pool while it migrates, so instances migrating together
-// take turns.
+// advisory lock on a session dialed from pool's configuration while it
+// migrates, so instances migrating together take turns; that configuration
+// reaches PostgreSQL directly.
 func MigrateClickHouse(ctx context.Context, pool *pgxpool.Pool, conn driver.Conn, clickhouse billing.ClickHouseConfig) error {
 	if pool == nil {
 		return errors.New("openrails: MigrateClickHouse requires a Postgres pool")
@@ -38,5 +41,5 @@ func MigrateClickHouse(ctx context.Context, pool *pgxpool.Pool, conn driver.Conn
 	}
 	// MigrateClickHouse takes no Deps: it logs to slog.Default().
 	database := config.ClickHouseDatabase(&cfg)
-	return eventstore.Migrate(ctx, conn, database, eventstore.Options{Logger: logx.New(nil), Serialize: migrate.ClickHouseLock(pool, database)})
+	return eventstore.Migrate(ctx, conn, database, eventstore.Options{Logger: logx.New(nil), Serialize: migrate.ClickHouseLock(pool.Config(), database)})
 }

@@ -212,6 +212,7 @@ A return URL (a pay URL's `success_url` and `cancel_url`, a hosted payment's `re
 | Key | Default | Meaning |
 |---|---|---|
 | `database.url` | `postgres://app:app_password@localhost:5434/openrails_db?sslmode=disable` when neither it nor a libpq variable is set | the connection string (`DATABASE_URL`). Unset, libpq's `PG*` variables name the database, `sslmode` `verify-full` off this machine unless `PGSSLMODE` says otherwise. The default is Compose's Postgres: a deploy that forgets its database fails to connect |
+| `database.session_url` | none | the same database and role without the pooler (`DATABASE_SESSION_URL`), when `database.url` is PgBouncer in transaction mode: the engine's pool then prepares no statement, and its listeners, session locks, migrations, AuthKit's pool and one-off commands connect through `session_url` |
 | `database.schema` | `billing` | every OpenRails table, function and type; a plain identifier. River's jobs are in the schema plus `_river` |
 
 Boot migrates, replicas taking turns on a lock; `openrails migrate up` runs the same ahead of a deploy. A separate pool of 4 connections renews leases (idempotency claims, the billing pass, merchant pulls): count it in `max_connections`.
@@ -337,7 +338,7 @@ mounted file or the environment, named like its key's variable.
 
 | Secret | Where it goes |
 |---|---|
-| database URL | `DATABASE_URL` (with `sslmode=verify-full` across a network) |
+| database URL | `DATABASE_URL`, and `DATABASE_SESSION_URL` behind a transaction pooler (with `sslmode=verify-full` across a network) |
 | Redis | `REDIS_URL`, `REDIS_CA_CERT` |
 | ClickHouse | `CLICKHOUSE_URL` |
 | SMTP | `EMAIL_SMTP_PASSWORD` |
@@ -668,7 +669,7 @@ count, primary or sticky session.
 - **Caches:** catalog, merchants, merchant controls and access are
   read per request. Merchant configuration is cached per instance (see
   [Vault](#vault)). An FX rate published more than 48 hours ago is never quoted.
-- **Connections:** size PostgreSQL `max_connections` for every instance's two pools (the engine's and its AuthKit's, of the same size), its lease pool of 4, and one connection per instance for each listener: unverified subscriptions, Solana Pay, customer messages, dispute responses, MRR risk changes and, with Vault configuration, configuration edits. `LISTEN` needs a session, so a pooler in front of the database must run in session mode, not transaction mode. The billing pass and merchant pulls hold lease rows, not sessions.
+- **Connections:** size PostgreSQL `max_connections` for every instance's two pools (the engine's and its AuthKit's, of the same size), its lease pool of 4, and one connection per instance for each listener: River's, unverified subscriptions, Solana Pay, customer messages, dispute responses, MRR risk changes and, with Vault configuration, configuration edits. Behind PgBouncer in transaction mode set `database.session_url`: the engine's pool and lease pool go through the pooler, and the listeners, session locks, migrations and AuthKit's pool, which hold sessions, connect directly. Without it, a pooler in front of the database runs in session mode. The billing pass and merchant pulls hold lease rows, not sessions.
 
 A webhook takes effect once per provider event: a concurrent copy waits up to
 10 seconds, then answers 500 so the provider retries. An idempotent request runs

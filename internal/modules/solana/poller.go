@@ -158,45 +158,26 @@ func (p *SolanaPayPoller) untilNext(ctx context.Context) (time.Duration, bool) {
 	return next.Sub(now), true
 }
 
-// listen rings wake for each wakeChannel notification, and once on every (re)connect
-// for any it missed, until ctx ends. It uses a dedicated session.
+// listen rings wake for each wakeChannel notification, and once on every
+// (re)connect for any it missed, until ctx ends, on a session of its own.
 func (p *SolanaPayPoller) listen(ctx context.Context, wake chan<- struct{}) {
 	if p.db.Pool() == nil {
 		return
 	}
-	channel := pgx.Identifier{wakeChannel + p.db.DataPool().Schema()}.Sanitize()
 	ring := func() {
 		select {
 		case wake <- struct{}{}:
 		default:
 		}
 	}
-	for ctx.Err() == nil {
-		err := func() error {
-			conn, err := p.db.ConnectSession(ctx)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
-			if _, err := conn.Exec(ctx, "LISTEN "+channel); err != nil {
-				return err
-			}
-			ring()
-			for {
-				if _, err := conn.WaitForNotification(ctx); err != nil {
-					return err
-				}
-				ring()
-			}
-		}()
-		if err != nil && ctx.Err() == nil {
+	p.db.Listen(ctx, db.Listener{
+		Channel:   wakeChannel + p.db.DataPool().Schema(),
+		Connected: func(context.Context) { ring() },
+		Notified:  func(context.Context, string) { ring() },
+		Interrupted: func(ctx context.Context, err error) {
 			p.Log.WarnContext(ctx, "Solana Pay: wake notifications interrupted; reconnecting", logx.Err(err))
-			select {
-			case <-ctx.Done():
-			case <-time.After(time.Second):
-			}
-		}
-	}
+		},
+	})
 }
 
 func (p *SolanaPayPoller) Stop() {

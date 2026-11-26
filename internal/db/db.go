@@ -12,13 +12,17 @@ import (
 // sqlc-generated queries run on (Qx/Gen). A DB can also be transaction-scoped
 // (pgtx set, via NewWithPgxTx) so services can hand repos a tx-bound DB.
 //
-// The bun ORM side that coexisted here during the #334 transition is gone:
-// one driver, one pool.
+// Nothing it runs on the pool outlives its transaction: no session setting,
+// lock or prepared statement, so the pool may be a transaction pooler
+// (PgBouncer in transaction mode). What needs a session (LISTEN, session
+// advisory locks, migrations) dials one: from direct when set, else from the
+// pool's configuration.
 type DB struct {
 	pool  *pgxpool.Pool
 	pgtx  pgx.Tx
 	river *runtimeBinding
-	// direct is set only for transaction pooling and copied from the host.
+	// direct is the session configuration when pool is a transaction pooler,
+	// copied from the host.
 	direct *pgxpool.Config
 
 	// ownsPool: Close closes the pool (NewOwningPGXPool, SeparatePool);
@@ -52,8 +56,8 @@ func NewOwningPGXPool(logger *slog.Logger, pool *pgxpool.Pool, schema string) (*
 	return d, nil
 }
 
-// NewWithPGXPoolAndSessions uses direct for session work when pool is
-// transaction-pooled. The host still owns pool.
+// NewWithPGXPoolAndSessions uses direct for session work when pool is a
+// transaction pooler. The host still owns pool.
 func NewWithPGXPoolAndSessions(logger *slog.Logger, pool *pgxpool.Pool, schema string, direct *pgxpool.Config) (*DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("pgx pool is nil")
@@ -61,6 +65,9 @@ func NewWithPGXPoolAndSessions(logger *slog.Logger, pool *pgxpool.Pool, schema s
 	if direct != nil {
 		if direct.ConnConfig == nil {
 			return nil, fmt.Errorf("direct Postgres session configuration has no connection settings")
+		}
+		if err := RequirePoolerSafe(pool); err != nil {
+			return nil, err
 		}
 		direct = direct.Copy()
 	}
@@ -104,4 +111,16 @@ func NewWithPgxTx(logger *slog.Logger, tx pgx.Tx) *DB {
 
 func (d *DB) NewWithPgxTx(tx pgx.Tx) *DB {
 	return &DB{pgtx: schemaTx{Tx: tx, rw: d.rw, river: d.river}, rw: d.rw, river: d.river, Log: d.Log}
+}
+
+// RequirePoolerSafe refuses a pool whose statements need a server-side
+// prepared statement to outlive one round trip: a transaction pooler may run
+// the next round trip on another server connection.
+func RequirePoolerSafe(pool *pgxpool.Pool) error {
+	switch mode := pool.Config().ConnConfig.DefaultQueryExecMode; mode {
+	case pgx.QueryExecModeCacheDescribe, pgx.QueryExecModeExec, pgx.QueryExecModeSimpleProtocol:
+		return nil
+	default:
+		return fmt.Errorf("a transaction-pooled Postgres pool (one with a direct session configuration) needs DefaultQueryExecMode cache_describe, exec or simple_protocol, not %s", mode)
+	}
 }

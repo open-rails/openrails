@@ -15,6 +15,7 @@ guards() {
   go run ./scripts/business-time
   bash scripts/check-one-pull-entry.sh
   bash scripts/check-borrowed-connections.sh
+  python3 scripts/check-session-state.py
   bash scripts/check-logging.sh
   bash scripts/check-image-digests.sh
   go run ./scripts/contracts -lint
