@@ -36,6 +36,9 @@ func (h *SubscriptionCollectionHandler) keepUnresolvedRenewalAccess(ctx context.
 	if err != nil {
 		return err
 	}
+	if sub.Status != models.StatusActive {
+		return nil
+	}
 	if policy, err := subscriptions.CasePolicy(ctx, h.DB, sub); err != nil || !policy.SuspendWhenHeld {
 		return err
 	}

@@ -211,7 +211,7 @@ func TestNMIEngineRenewalRecovery(t *testing.T) {
 		}
 	})
 	t.Run("OR-J14-S09/duplicate-and-ambiguous-renewals-stay-unknown", func(t *testing.T) {
-		for _, code := range []string{"duplicate", "duplicate-report", "duplicate-older-report", "420", "421", "430", "transport"} {
+		for _, code := range []string{"duplicate", "duplicate-report", "duplicate-older-report", "duplicate-lost-report", "420", "421", "430", "transport"} {
 			t.Run(code, func(t *testing.T) {
 				a, p, sub := nmiEngineMembership(t)
 				if code == "duplicate" {
@@ -221,6 +221,9 @@ func TestNMIEngineRenewalRecovery(t *testing.T) {
 					p.core.Intercept(nmiSaleRequest, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
 						response := serve()
 						require.NoError(t, response.Body.Close())
+						if code == "duplicate-lost-report" {
+							return nil, fmt.Errorf("lost duplicate response")
+						}
 						response.Body = io.NopCloser(strings.NewReader("response=3&response_code=300&responsetext=Duplicate+transaction+REFID:3187654321"))
 						return response, nil
 					})
@@ -245,13 +248,17 @@ func TestNMIEngineRenewalRecovery(t *testing.T) {
 				}
 				row := executeEngineRenewal(t, a, sub)
 				require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+				if strings.HasPrefix(code, "duplicate-") {
+					_, marked := intents.DuplicateRefusedAt(row)
+					require.Equal(t, code != "duplicate-lost-report", marked)
+				}
 				rt := embedded.Graph(a.engine).Runtime
 				a.clock.Advance(25 * time.Hour)
 				require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
 					if strings.HasPrefix(code, "duplicate-") {
 						attempts, err := intents.ReadNMIOrderAttempts(ctx, row, rt.CollectionResolver)
 						require.NoError(t, err)
-						require.Equal(t, 1, attempts.Transactions, "an older duplicate still owns a possible charge")
+						require.Zero(t, attempts.Transactions, "a duplicate refusal did not process a charge")
 						require.False(t, attempts.Declined)
 					}
 					var err error
@@ -264,6 +271,17 @@ func TestNMIEngineRenewalRecovery(t *testing.T) {
 				require.Nil(t, current.Dunning)
 				p.money(t, 1, 1000)
 				require.LessOrEqual(t, len(p.core.Attempts()), 2, "enrollment and at most one renewal")
+				if strings.HasPrefix(code, "duplicate-") {
+					require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+						var err error
+						row, err = rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Confirmed only duplicate refusals under the order"})
+						return err
+					}))
+					require.Equal(t, intents.StatusFailedTerminal, row.Status)
+					require.NoError(t, intents.ValidateSubscriptionCollectionTerminal(row))
+					require.Contains(t, string(row.ResultEvidence), `"operator_resolution"`)
+					p.money(t, 1, 1000)
+				}
 			})
 		}
 	})
@@ -546,11 +564,30 @@ func TestSubmittedRenewalGrace(t *testing.T) {
 		}))
 		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
 		a.clock.Advance(intents.LostSubmissionSettle)
-		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-			var err error
-			row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
-			return err
-		}))
+		lock, err := a.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer lock.Rollback(context.Background())
+		_, err = lock.Exec(t.Context(), "SELECT id FROM "+pgx.Identifier{a.schema, "customers"}.Sanitize()+" WHERE id=$1 FOR UPDATE", sub.CustomerID.UUID())
+		require.NoError(t, err)
+		_, err = lock.Exec(t.Context(), "SELECT id FROM "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" WHERE id=$1 FOR UPDATE", sub.ID.UUID())
+		require.NoError(t, err)
+		done := make(chan error, 1)
+		go func() {
+			done <- rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+				var err error
+				row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+				return err
+			})
+		}()
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			require.NoError(t, lock.Rollback(t.Context()))
+			require.NoError(t, <-done)
+			t.Fatal("past-due verification waited for customer or subscription locks")
+		}
+		require.NoError(t, lock.Rollback(t.Context()))
 		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
 		subscriptionState(t, a, sub.ID, "past_due")
 		require.False(t, entitled(t, a.alpha, sub.CustomerID, "nmi:engine"))
