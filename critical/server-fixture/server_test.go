@@ -40,8 +40,10 @@ import (
 type config struct {
 	MappedCustomers, CustomerAdmissionPolicy bool
 	// Console serves the admin console; StaffMFA keeps the production rule
-	// that every own account needs a second factor.
-	Console, StaffMFA                          bool
+	// that every own account needs a second factor. StaffElsewhere is a
+	// hosted product whose staff sign in elsewhere: its AuthKit mounts
+	// sign-in alone and registers nobody.
+	Console, StaffMFA, StaffElsewhere          bool
 	Schema, Ready, ControlKey, FXURL, RedisURL string
 	CheckoutOrigin, PaymentAssets              string
 	At                                         time.Time
@@ -178,6 +180,10 @@ func TestServerFixture(t *testing.T) {
 			c.Agreements = []authkit.AgreementConfig{{Key: "network-terms", Version: "critical-v1", URL: "https://critical.invalid/network-terms"}}
 			if !cfg.StaffMFA {
 				c.TwoFactor = iam.TwoFactorDisabled
+			}
+			if cfg.StaffElsewhere {
+				c.Registration = iam.RegistrationModeClosed
+				c.HTTP = &authkit.HTTPConfig{Groups: []iam.RouteGroup{iam.RouteAuth, iam.RouteAccount, iam.RouteAuthorizationServer, iam.RouteSCIM}}
 			}
 		},
 		Naming:       billing.NamingConfig{RenameInterval: &renameInterval},

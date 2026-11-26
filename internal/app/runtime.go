@@ -626,6 +626,17 @@ func (r *Runtime) RiverBound() bool {
 	return r.RiverClient != nil
 }
 
+// Fleet is the bound River client, OpenRails' own or the host's; nil before
+// one binds.
+func (r *Runtime) Fleet() *river.Client[pgx.Tx] {
+	if r == nil {
+		return nil
+	}
+	r.riverCompositionMu.Lock()
+	defer r.riverCompositionMu.Unlock()
+	return r.RiverClient
+}
+
 // BindRiverProducer binds an insert-only River client in the runtime's River
 // schema, so jobs queued before Start wait there for whichever fleet runs
 // them. Runtime construction created River's tables there.
