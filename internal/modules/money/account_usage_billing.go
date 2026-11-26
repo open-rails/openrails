@@ -228,7 +228,7 @@ func (s *MoneyService) requestUsageBilling(ctx context.Context, q *gen.Queries, 
 }
 
 // MarkUsageAccountsDue marks due, after a change to the merchant's usage
-// terms, each of its accounts whose arrears reach the resulting credit limit
+// terms, each of its accounts whose arrears reach the collection threshold
 // with enough unbilled to bill, or that has unbilled charges and no bill
 // date.
 func (s *MoneyService) MarkUsageAccountsDue(ctx context.Context) error {
@@ -245,9 +245,13 @@ func (s *MoneyService) MarkUsageAccountsDue(ctx context.Context) error {
 	}
 	limits := map[string]int64{}
 	minimums := map[string]int64{}
+	thresholds := map[string]int64{}
 	for _, cur := range settings.Config.UsageBilling.Currencies {
 		limits[string(cur.Currency)] = cur.CreditLimit
 		minimums[string(cur.Currency)] = cur.MinimumInvoiceAmount
+		if cur.CollectionThreshold != nil {
+			thresholds[string(cur.Currency)] = *cur.CollectionThreshold
+		}
 	}
 	encodedLimits, err := json.Marshal(limits)
 	if err != nil {
@@ -257,8 +261,12 @@ func (s *MoneyService) MarkUsageAccountsDue(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	encodedThresholds, err := json.Marshal(thresholds)
+	if err != nil {
+		return err
+	}
 	return s.db.Gen(ctx).MarkUsageAccountsDue(ctx, gen.MarkUsageAccountsDueParams{
-		MerchantID: mid.UUID(), Limits: encodedLimits, Minimums: encodedMinimums, Policies: settings.PoliciesParam(), Now: s.now(),
+		MerchantID: mid.UUID(), Limits: encodedLimits, Minimums: encodedMinimums, Thresholds: encodedThresholds, Policies: settings.PoliciesParam(), Now: s.now(),
 	})
 }
 
