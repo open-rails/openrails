@@ -412,7 +412,8 @@
       "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal",
       "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal/same-product",
       "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal/same-tier-group",
-      "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal/canceled-replacement"
+      "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal/canceled-replacement",
+      "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal/unpaid-replacement-invoice"
     ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"

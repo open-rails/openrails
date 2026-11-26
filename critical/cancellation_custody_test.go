@@ -326,6 +326,45 @@ func TestCanceledUnknownRenewal(t *testing.T) {
 				p.money(t, 3, 2000)
 			})
 		}
+		t.Run("unpaid-replacement-invoice", func(t *testing.T) {
+			a, p, sub := nmiEngineMembership(t)
+			p.core.HideSales(1)
+			row := executeEngineRenewal(t, a, sub)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+			accepted, err := subscriptions.DecodeSubscriptionCollectionPayload(row)
+			require.NoError(t, err)
+			status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", a.aliceToken, map[string]any{"reason": "Stop future renewals"})
+			require.Equal(t, http.StatusOK, status, string(raw))
+			canceled := subscriptionState(t, a, sub.ID, "canceled")
+			// An unpaid invoice for the same product claims the slot.
+			input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: sub.PriceID}}, ExpectedTotal: ptr(int64(10_000_000))}
+			status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "unpaid-replacement"})
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(raw, &invoice))
+			require.NotEqual(t, billing.InvoiceComplete, invoice.Status)
+			p.core.Reveal()
+			rt := embedded.Graph(a.engine).Runtime
+			require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+				var err error
+				row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+				return err
+			}))
+			require.Equal(t, intents.StatusSucceeded, row.Status)
+			current := subscriptionState(t, a, sub.ID, "canceled")
+			require.Equal(t, canceled.CurrentPeriodEndsAt, current.CurrentPeriodEndsAt, "the late charge buys no period while a replacement invoice claims the slot")
+			oldInvoice, err := a.alpha.GetInvoice(t.Context(), billing.InvoiceID(accepted.InvoiceID))
+			require.NoError(t, err)
+			require.Equal(t, billing.InvoiceVoid, oldInvoice.Status)
+			fleet := startFleet(t, a.world)
+			require.Eventually(t, func() bool {
+				wakeJobs(t, fleet, "openrails.provider_operation")
+				var refunded int64
+				err := p.pool.QueryRow(t.Context(), "SELECT refunded FROM "+pgx.Identifier{p.schema, "transactions"}.Sanitize()+" WHERE id=$1", intents.EvidenceString(row, "transaction_id")).Scan(&refunded)
+				return err == nil && refunded == 1000
+			}, 15*time.Second, 20*time.Millisecond)
+			require.NoError(t, fleet.Stop(context.Background()))
+		})
 	})
 	t.Run("OR-J17-S18/revoke-access-cancel-refunds-a-late-paid-renewal", func(t *testing.T) {
 		for _, tc := range []struct {

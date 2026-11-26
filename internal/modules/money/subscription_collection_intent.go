@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -574,20 +575,16 @@ func (h *SubscriptionCollectionHandler) renewMembership(ctx context.Context, d *
 		}
 		if current && sub.Status == models.StatusCanceled && sub.CanceledAt != nil && sub.EndedAt != nil && !sub.EndedAt.Before(p.PreviousPeriodEnd) && sub.CancelType != nil && (*sub.CancelType == models.CancelTypeUser || *sub.CancelType == models.CancelTypeMerchant) {
 			params.KeepCanceled = intents.EvidenceString(in, "cancel_revoked_access_at") == ""
+			// A replacement holding the slot (live, paid through now, awaiting its
+			// first payment or an unpaid invoice) means the late charge is refunded.
 			if params.KeepCanceled {
-				_, err := d.Gen(ctx).GetConflictingInitialEnrollmentSubscription(ctx, gen.GetConflictingInitialEnrollmentSubscriptionParams{MerchantID: in.MerchantID, CustomerID: sub.CustomerID, ProductID: p.Renewal.ProductID})
-				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				slot := intents.MembershipSlot{MerchantID: in.MerchantID, CustomerID: sub.CustomerID, ProductID: p.Renewal.ProductID, At: h.now()}
+				var held *apperr.Error
+				if err := slot.Refuse(ctx, d.Gen(ctx)); errors.As(err, &held) {
+					params.KeepCanceled = false
+				} else if err != nil {
 					return err
 				}
-				params.KeepCanceled = errors.Is(err, pgx.ErrNoRows)
-			}
-			// A canceled replacement still paid through now holds the slot too.
-			if params.KeepCanceled {
-				runway, err := d.Gen(ctx).GetPaidRunwaySubscription(ctx, gen.GetPaidRunwaySubscriptionParams{MerchantID: in.MerchantID, CustomerID: sub.CustomerID, ProductID: p.Renewal.ProductID, Now: h.now()})
-				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-					return err
-				}
-				params.KeepCanceled = err != nil || runway.ID == sub.ID
 			}
 		}
 		if sub.Status == models.StatusCanceled && !params.KeepCanceled || (!current && !replay) {
