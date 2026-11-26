@@ -37,6 +37,9 @@ func (a *KVv2Adapter) ReadDocument(ctx context.Context, rel string) (Document, e
 	if a.refused != nil {
 		return Document{}, fmt.Errorf("vault kv read: %w", a.refused)
 	}
+	if err := a.login.Wait(ctx); err != nil {
+		return Document{}, fmt.Errorf("vault kv read %s: %w", rel, err)
+	}
 	sec, err := a.client.Logical().ReadWithDataWithContext(ctx, a.documentPath("data", rel), nil)
 	if err != nil {
 		return Document{}, fmt.Errorf("vault kv read %s: %w", rel, credentialBackendError(err))
@@ -67,6 +70,9 @@ func (a *KVv2Adapter) WriteDocument(ctx context.Context, rel string, data json.R
 	}
 	if a.refused != nil {
 		return Document{}, fmt.Errorf("vault kv write: %w", a.refused)
+	}
+	if err := a.login.Wait(ctx); err != nil {
+		return Document{}, fmt.Errorf("vault kv write %s: %w", rel, err)
 	}
 	body := map[string]any{"data": object, "options": map[string]any{"cas": cas}}
 	sec, err := a.client.Logical().WriteWithContext(ctx, a.documentPath("data", rel), body)
@@ -99,6 +105,9 @@ func (a *KVv2Adapter) ListDocuments(ctx context.Context, rel string) ([]string, 
 	if a.refused != nil {
 		return nil, fmt.Errorf("vault kv list: %w", a.refused)
 	}
+	if err := a.login.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("vault kv list %s: %w", rel, err)
+	}
 	sec, err := a.client.Logical().ListWithContext(ctx, a.documentPath("metadata", rel))
 	if err != nil {
 		return nil, fmt.Errorf("vault kv list %s: %w", rel, credentialBackendError(err))
@@ -120,6 +129,9 @@ func (a *KVv2Adapter) ListDocuments(ctx context.Context, rel string) ([]string, 
 func (a *KVv2Adapter) DeleteDocument(ctx context.Context, rel string) error {
 	if a.refused != nil {
 		return fmt.Errorf("vault kv delete: %w", a.refused)
+	}
+	if err := a.login.Wait(ctx); err != nil {
+		return fmt.Errorf("vault kv delete %s: %w", rel, err)
 	}
 	if _, err := a.client.Logical().DeleteWithContext(ctx, a.documentPath("metadata", rel)); err != nil {
 		return fmt.Errorf("vault kv delete %s: %w", rel, credentialBackendError(err))

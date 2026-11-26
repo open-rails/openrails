@@ -20,6 +20,7 @@ type KVv2Adapter struct {
 	mount  string
 	// refused, when set, refuses every operation without a network call.
 	refused error
+	login   *FirstLogin
 }
 
 // NewKVv2Adapter builds a KV-v2 adapter for the given mount (e.g. "secret").
@@ -33,6 +34,12 @@ func (a *KVv2Adapter) Refuse(err error) *KVv2Adapter {
 	if err != nil {
 		a.refused = fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
+	return a
+}
+
+// AwaitLogin holds each operation for the host's first login.
+func (a *KVv2Adapter) AwaitLogin(l *FirstLogin) *KVv2Adapter {
+	a.login = l
 	return a
 }
 

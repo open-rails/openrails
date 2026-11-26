@@ -17,6 +17,7 @@ type TransitAdapter struct {
 	client  *vaultapi.Client
 	mount   string
 	refused error
+	login   *FirstLogin
 }
 
 // NewTransitAdapter builds a Transit adapter for the given mount (e.g. "transit").
@@ -30,6 +31,12 @@ func (t *TransitAdapter) Refuse(err error) *TransitAdapter {
 	if err != nil {
 		t.refused = fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
+	return t
+}
+
+// AwaitLogin holds each operation for the host's first login.
+func (t *TransitAdapter) AwaitLogin(l *FirstLogin) *TransitAdapter {
+	t.login = l
 	return t
 }
 
@@ -47,6 +54,9 @@ func (t *TransitAdapter) failed(op string, err error) error {
 func (t *TransitAdapter) Sign(ctx context.Context, name string, input []byte) ([]byte, error) {
 	if t.refused != nil {
 		return nil, fmt.Errorf("vault transit sign: %w", t.refused)
+	}
+	if err := t.login.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("vault transit sign: %w", err)
 	}
 	res, err := t.client.Logical().WriteWithContext(ctx, t.mount+"/sign/"+name, map[string]any{
 		"input":     base64.StdEncoding.EncodeToString(input),
@@ -75,6 +85,9 @@ func (t *TransitAdapter) Sign(ctx context.Context, name string, input []byte) ([
 func (t *TransitAdapter) PublicKey(ctx context.Context, name string) ([]byte, error) {
 	if t.refused != nil {
 		return nil, fmt.Errorf("vault transit read key: %w", t.refused)
+	}
+	if err := t.login.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("vault transit read key: %w", err)
 	}
 	res, err := t.client.Logical().ReadWithContext(ctx, t.mount+"/keys/"+name)
 	if err != nil {

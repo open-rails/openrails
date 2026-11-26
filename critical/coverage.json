@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 807,
+  "scenario_count": 808,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3602,6 +3602,11 @@
       "id": "OR-J04-S84",
       "journey": "J04",
       "name": "Two fleets on one database: neither fails job progress while the other queues the billing pass, its lease live or lapsed; the fleet whose queued pass never runs reports it, and once no fleet has queued one for a day every fleet does"
+    },
+    {
+      "id": "OR-J04-S85",
+      "journey": "J04",
+      "name": "A host whose Vault login is still under way at New: New waits for its first token and the configuration probe never reports Vault refused; a login slower than New's wait is reported as one under way and served once it completes"
     },
     {
       "id": "OR-J38-S83",

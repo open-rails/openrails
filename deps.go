@@ -44,7 +44,9 @@ type Deps struct {
 	// OpenRails never closes it.
 	Redis redis.UniversalClient
 	// Vault is an authenticated client (helpers/vault's Session.Client);
-	// Config.Vault names its mounts. The host keeps it logged in.
+	// Config.Vault names its mounts. The host keeps it logged in; until its
+	// first login sets the token, OpenRails' Vault calls wait for it, up to
+	// 30 seconds after New.
 	Vault *vaultapi.Client
 	// ClickHouse is the event store usage needs, Config.ClickHouse naming
 	// its database, which New creates or upgrades. Nil turns usage off:
