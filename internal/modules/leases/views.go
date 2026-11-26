@@ -89,7 +89,7 @@ func (r *syncRun) views(ctx context.Context) error {
 			return err
 		}
 		d := r.DB.NewWithPgxTx(tx)
-		v := &viewing{run: r, ctx: ctx, q: gen.New(tx), money: r.Money.WithDatabase(d), admitter: r.Admitter.Bind(d, func() time.Time { return r.now }),
+		v := &viewing{run: r, ctx: ctx, q: gen.New(tx), money: r.Money.WithDatabase(d), admitter: r.Admitter.Bind(d),
 			builds: map[viewKey]*viewBuild{}}
 		v.usage = &storeUsage{v: v, store: r.DB.EventStore()}
 		if err := v.answer(); err != nil {
@@ -321,7 +321,8 @@ func (v *viewing) limitSet(b *viewBuild, vp billing.ViewParams, eventType string
 	if err != nil {
 		return nil, err
 	}
-	out := &billing.LimitSet{CustomerID: vp.CustomerID, Currency: catalog.Currency(b.key.currency), Limits: []string{catalog.BalanceLimit}, Capacities: []billing.LimitCapacity{}}
+	out := &billing.LimitSet{CustomerID: vp.CustomerID, Currency: catalog.Currency(b.key.currency), TrustLevel: set.Trust.TrustLevel, TrustLevelSource: set.Trust.Source,
+		Limits: []string{catalog.BalanceLimit}, Capacities: []billing.LimitCapacity{}}
 	if set.Refusal != nil {
 		out.Refusal = &billing.Refusal{DenyCode: set.Refusal.DenyCode}
 		if set.Refusal.RetryAfterSeconds > 0 {

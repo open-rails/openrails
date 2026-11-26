@@ -675,7 +675,6 @@ pkg openrails/billing, const DeclineUpdateCardholderData DeclineReason = "update
 pkg openrails/billing, const DefaultHeldEntitlements untyped int = 1000
 pkg openrails/billing, const DefaultPageLimit untyped int = 50
 pkg openrails/billing, const DefaultUsagePageLimit untyped int = 100
-pkg openrails/billing, const DenyAccrualRateCapReached DenyCode = "accrual_rate_cap_reached"
 pkg openrails/billing, const DenyBudgetExceeded DenyCode = "budget_exceeded"
 pkg openrails/billing, const DenyDelegatedSpendNotAllowed DenyCode = "delegated_spend_not_allowed"
 pkg openrails/billing, const DenyDelinquentUnpaidInvoice DenyCode = "delinquent_unpaid_invoice"
@@ -1022,6 +1021,9 @@ pkg openrails/billing, const SyncStatusInSync SyncStatus = "in_sync"
 pkg openrails/billing, const SyncStatusMissing SyncStatus = "missing"
 pkg openrails/billing, const SyncStatusSyncDisabled SyncStatus = "sync_disabled"
 pkg openrails/billing, const SyncStatusUnknown SyncStatus = "unknown"
+pkg openrails/billing, const TrustLevelDefault TrustLevelSource = "default"
+pkg openrails/billing, const TrustLevelExplicit TrustLevelSource = "explicit"
+pkg openrails/billing, const TrustLevelRule TrustLevelSource = "rule"
 pkg openrails/billing, const UsageByEventType UsageGroupBy = "event_type"
 pkg openrails/billing, const UsageByInvoker UsageGroupBy = "invoker"
 pkg openrails/billing, const UsageByMeter UsageGroupBy = "meter"
@@ -1440,14 +1442,11 @@ pkg openrails/billing, type BillingImportResult struct, Reasons map[string]strin
 pkg openrails/billing, type BillingImportResult struct, Skipped []string `json:"skipped"`
 pkg openrails/billing, type BillingMode string
 pkg openrails/billing, type BillingPolicy struct
-pkg openrails/billing, type BillingPolicy struct, AccrualRateCapPerHour int64 `json:"accrual_rate_cap_per_hour,omitempty,string"`
-pkg openrails/billing, type BillingPolicy struct, AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
 pkg openrails/billing, type BillingPolicy struct, BadSpendWindows []BudgetWindow `json:"bad_spend_windows,omitempty"`
 pkg openrails/billing, type BillingPolicy struct, CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
 pkg openrails/billing, type BillingPolicy struct, CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty,string"`
 pkg openrails/billing, type BillingPolicy struct, DelinquencyAmountFloor *int64 `json:"delinquency_amount_floor,omitempty,string"`
 pkg openrails/billing, type BillingPolicy struct, DelinquencyGraceDays *int `json:"delinquency_grace_days,omitempty"`
-pkg openrails/billing, type BillingPolicy struct, Kind string `json:"kind"`
 pkg openrails/billing, type BillingPolicy struct, Name string `json:"name"`
 pkg openrails/billing, type BillingPolicy struct, OutstandingCapAmount int64 `json:"outstanding_cap_amount,omitempty,string"`
 pkg openrails/billing, type BillingPolicy struct, PolicyCurrency catalog.Currency `json:"policy_currency,omitempty"`
@@ -1791,6 +1790,7 @@ pkg openrails/billing, type Customer struct, DefaultPaymentMethods []DefaultPaym
 pkg openrails/billing, type Customer struct, ID CustomerID `json:"id"`
 pkg openrails/billing, type Customer struct, LastSeenAt time.Time `json:"last_seen_at"`
 pkg openrails/billing, type Customer struct, Settings CustomerSettings `json:"settings"`
+pkg openrails/billing, type Customer struct, TrustLevels []EffectiveTrustLevel `json:"trust_levels"`
 pkg openrails/billing, type CustomerAccount struct
 pkg openrails/billing, type CustomerAccount struct, Balances []Balance `json:"balances"`
 pkg openrails/billing, type CustomerAccount struct, DefaultPaymentMethods []DefaultPaymentMethod `json:"default_payment_methods"`
@@ -2160,6 +2160,12 @@ pkg openrails/billing, type EffectiveLowBalanceLine struct, Amount int64 `json:"
 pkg openrails/billing, type EffectiveLowBalanceLine struct, Currency catalog.Currency `json:"currency"`
 pkg openrails/billing, type EffectiveLowBalanceLine struct, RunwayHours int `json:"runway_hours"`
 pkg openrails/billing, type EffectiveLowBalanceLine struct, Source LowBalanceLineSource `json:"source"`
+pkg openrails/billing, type EffectiveTrustLevel struct
+pkg openrails/billing, type EffectiveTrustLevel struct, Currency catalog.Currency `json:"currency"`
+pkg openrails/billing, type EffectiveTrustLevel struct, FirstPaidAt *time.Time `json:"first_paid_at"`
+pkg openrails/billing, type EffectiveTrustLevel struct, NetPaidAmount int64 `json:"net_paid_amount,string"`
+pkg openrails/billing, type EffectiveTrustLevel struct, Source TrustLevelSource `json:"source"`
+pkg openrails/billing, type EffectiveTrustLevel struct, TrustLevel string `json:"trust_level"`
 pkg openrails/billing, type EntitlementChange struct
 pkg openrails/billing, type EntitlementChange struct, Added []string `json:"added"`
 pkg openrails/billing, type EntitlementChange struct, Holders int64 `json:"holders"`
@@ -2597,6 +2603,8 @@ pkg openrails/billing, type LimitSet struct, Currency catalog.Currency `json:"cu
 pkg openrails/billing, type LimitSet struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type LimitSet struct, Limits []string `json:"limits"`
 pkg openrails/billing, type LimitSet struct, Refusal *Refusal `json:"refusal"`
+pkg openrails/billing, type LimitSet struct, TrustLevel string `json:"trust_level"`
+pkg openrails/billing, type LimitSet struct, TrustLevelSource TrustLevelSource `json:"trust_level_source"`
 pkg openrails/billing, type LinkPSPImportParams struct
 pkg openrails/billing, type LinkPSPImportParams struct, Links []PSPImportLink `json:"links,omitempty"`
 pkg openrails/billing, type LinkPSPImportParams struct, Prices []PSPImportPriceLink `json:"prices,omitempty"`
@@ -2788,6 +2796,7 @@ pkg openrails/billing, type MerchantSettings struct, PSPRouting *[]PSPRoutingRul
 pkg openrails/billing, type MerchantSettings struct, Profile *MerchantProfile `json:"profile,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, ProviderRefundAccess *ProviderRefundAccess `json:"provider_refund_access,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
+pkg openrails/billing, type MerchantSettings struct, TrustTiers []TrustTier `json:"trust_tiers,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, UsageBilling *UsageBillingSettings `json:"usage_billing,omitempty"`
 pkg openrails/billing, type MerchantStatus string
 pkg openrails/billing, type MessageChannel string
@@ -4063,6 +4072,14 @@ pkg openrails/billing, type TestMessage struct, Recipient string `json:"recipien
 pkg openrails/billing, type TrustLevel struct
 pkg openrails/billing, type TrustLevel struct, Currency catalog.Currency `json:"currency"`
 pkg openrails/billing, type TrustLevel struct, TrustLevel string `json:"trust_level"`
+pkg openrails/billing, type TrustLevelSource string
+pkg openrails/billing, type TrustTier struct
+pkg openrails/billing, type TrustTier struct, Name string `json:"name"`
+pkg openrails/billing, type TrustTier struct, Requirements []TrustTierRequirement `json:"requirements"`
+pkg openrails/billing, type TrustTierRequirement struct
+pkg openrails/billing, type TrustTierRequirement struct, Currency catalog.Currency `json:"currency"`
+pkg openrails/billing, type TrustTierRequirement struct, DaysSinceFirstPayment int `json:"days_since_first_payment,omitempty"`
+pkg openrails/billing, type TrustTierRequirement struct, NetPaidAmount int64 `json:"net_paid_amount,omitempty,string"`
 pkg openrails/billing, type UnreadCount struct
 pkg openrails/billing, type UnreadCount struct, UnreadCount int64 `json:"unread_count"`
 pkg openrails/billing, type UpdateAlertWebhookParams struct

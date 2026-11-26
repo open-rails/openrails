@@ -20,7 +20,6 @@ func (s *Service) SyncLeases(ctx context.Context, params billing.SyncLeasesParam
 	loader := admission.NewSpendgatePolicyLoader(admission.NewBillingPolicyStore(s.rt.DB), s.rt.FXProvider)
 	adm := admission.NewAdmitter(s.moneyService(), loader, s.now).
 		WithFailedUsageCutoff(failedUsageCutoff{s}).
-		WithDelinquency(s.delinquencyService()).
-		WithAccrualRateMeter(admission.NewAccrualRateMeter(s.rt.DB))
+		WithDelinquency(s.delinquencyService())
 	return leases.Syncer{DB: s.rt.DB, Money: s.moneyService(), Admitter: adm, FailedWindows: s.failedUsageWindows, Allows: allows, Now: s.now}.Sync(ctx, params)
 }

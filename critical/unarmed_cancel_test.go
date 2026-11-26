@@ -20,7 +20,7 @@ import (
 )
 
 // The arming switch guards OpenRails' own destruction and staff cancels, never
-// a customer's own cancel: only the customer budget refuses that.
+// a customer's own cancel.
 func TestUnarmedCancels(t *testing.T) {
 	customerCancel := func(t *testing.T, a *authorityWorld, sub billing.SubscriptionID) billing.Subscription {
 		t.Helper()
@@ -108,8 +108,7 @@ func TestUnarmedCancels(t *testing.T) {
 		})
 	})
 
-	// Five other customers' own cancels spend a small merchant's hour; each
-	// has a token and a subscription of its own.
+	// Each of five other customers has a token and subscription of their own.
 	others := func(t *testing.T, a *authorityWorld) ([]billing.CustomerID, []string) {
 		t.Helper()
 		var customers []billing.CustomerID
@@ -120,22 +119,22 @@ func TestUnarmedCancels(t *testing.T) {
 		}
 		return customers, tokens
 	}
-	overBudget := func(t *testing.T, a *authorityWorld, sub billing.SubscriptionID) {
+	acceptedCancel := func(t *testing.T, a *authorityWorld, sub billing.SubscriptionID) {
 		t.Helper()
-		status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.String()+"/cancel", a.aliceToken, map[string]any{"reason": "Moving on from it"})
-		require.Equal(t, http.StatusTooManyRequests, status, string(raw))
-		require.Contains(t, string(raw), `"code":"rate_limit_exceeded"`)
-		kept, err := a.alpha.GetSubscription(t.Context(), sub)
-		require.NoError(t, err)
-		require.Equal(t, billing.SubscriptionActive, kept.Status, "a refused cancel changes nothing")
-		require.Nil(t, kept.DeletionScheduledAt)
-		var operations int
+		customerCancel(t, a, sub)
+		var operations, reservations int
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+
-			" WHERE merchant_id = $1 AND subscription_id = $2", a.alpha.MerchantID().UUID(), sub.UUID()).Scan(&operations))
-		require.Zero(t, operations, "a refused cancel queues nothing for the provider")
+			" WHERE merchant_id = $1 AND subscription_id = $2 AND origin = 'user'", a.alpha.MerchantID().UUID(), sub.UUID()).Scan(&operations))
+		require.Equal(t, 1, operations, "the sixth cancel queues its provider stop")
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "user_destructive_reservations"}.Sanitize()+
+			" WHERE merchant_id = $1", a.alpha.MerchantID().UUID()).Scan(&reservations))
+		require.Zero(t, reservations, "customer cancellations spend no card-removal budget")
+		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.customer_action_rate.exceeded"})
+		require.NoError(t, err)
+		require.Empty(t, findings.Items)
 	}
 
-	t.Run("OR-J17-S15/over-the-customer-budget-a-customers-own-cancel-reaches-no-provider", func(t *testing.T) {
+	t.Run("OR-J17-S15/six-customers-own-cancels-all-stop-the-provider-without-spending-the-card-budget", func(t *testing.T) {
 		t.Run("nmi", func(t *testing.T) {
 			a, p := newNMIWorld(t)
 			customers, tokens := others(t, a)
@@ -164,8 +163,8 @@ func TestUnarmedCancels(t *testing.T) {
 				status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+page.Items[0].ID.String()+"/cancel", tokens[i], map[string]any{"reason": "Stop renewing"})
 				require.Equal(t, http.StatusOK, status, string(raw))
 			}
-			overBudget(t, a, sub.ID)
-			// The others' accepted deletes reach NMI; the refused one never does.
+			acceptedCancel(t, a, sub.ID)
+			// Every accepted delete reaches NMI, including the sixth customer's.
 			fleet := quietFleet(t, a.world)
 			a.clock.Advance(sub.CurrentPeriodEndsAt.Add(-subscriptions.NMIDeleteSafetyMargin).Sub(a.clock.Now()) + time.Minute)
 			require.Eventually(t, func() bool {
@@ -175,13 +174,12 @@ func TestUnarmedCancels(t *testing.T) {
 						return false
 					}
 				}
-				return true
-			}, 20*time.Second, 100*time.Millisecond, "the accepted cancels' schedules are deleted")
-			require.True(t, p.core.ScheduleLive(*sub.RailSubscriptionID))
-			require.Zero(t, p.core.ScheduleDeletes(*sub.RailSubscriptionID), "NMI hears nothing of the refused cancel")
+				return !p.core.ScheduleLive(*sub.RailSubscriptionID)
+			}, 20*time.Second, 100*time.Millisecond, "all six cancels' schedules are deleted")
+			require.Equal(t, 1, p.core.ScheduleDeletes(*sub.RailSubscriptionID))
 			kept, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 			require.NoError(t, err)
-			require.Equal(t, billing.SubscriptionActive, kept.Status)
+			require.Equal(t, billing.SubscriptionCanceled, kept.Status)
 			p.money(t, 6, 6000)
 		})
 		t.Run("ccbill", func(t *testing.T) {
@@ -210,20 +208,20 @@ func TestUnarmedCancels(t *testing.T) {
 				status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.String()+"/cancel", tokens[i], map[string]any{"reason": "Stop renewing"})
 				require.Equal(t, http.StatusOK, status, string(raw))
 			}
-			overBudget(t, a, alice)
-			// The others' accepted cancels reach CCBill; the refused one never does.
+			acceptedCancel(t, a, alice)
+			// Every accepted cancel reaches CCBill, including the sixth customer's.
 			fleet := quietFleet(t, a.world)
 			require.Eventually(t, func() bool {
 				wakeJobs(t, fleet, "openrails.provider_operation")
-				return len(dataLink.Mutations()) == len(customers)
+				return len(dataLink.Mutations()) == len(customers)+1
 			}, 20*time.Second, 100*time.Millisecond, "the accepted cancels reach CCBill")
-			require.Zero(t, dataLink.Canceled("556677889900118800"), "CCBill hears nothing of the refused cancel")
+			require.Equal(t, 1, dataLink.Canceled("556677889900118800"))
 			for i := range customers {
 				require.Equal(t, 1, dataLink.Canceled(fmt.Sprintf("5566778899001188%02d", i+1)))
 			}
 			kept, err := a.alpha.GetSubscription(t.Context(), alice)
 			require.NoError(t, err)
-			require.Equal(t, billing.SubscriptionActive, kept.Status)
+			require.Equal(t, billing.SubscriptionCanceled, kept.Status)
 		})
 	})
 

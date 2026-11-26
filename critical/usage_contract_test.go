@@ -204,7 +204,7 @@ func TestUsageContracts(t *testing.T) {
 	t.Run("OR-J24-S05/charged-failure-replayed-past-its-key-window-charges-once", func(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
-			m.BillingPolicies = []billing.BillingPolicy{{Name: "grace", Kind: "outstanding_cap", BadSpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 100, Currency: "USD"}}}}
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "grace", BadSpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 100, Currency: "USD"}}}}
 			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "grace"}}
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})

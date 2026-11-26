@@ -89,7 +89,7 @@ func (e *env) storageWorld(ctx context.Context, name string, from, to time.Time)
 	}
 	clock := clockwork.NewFakeClockAt(from)
 	cfg := embeddedConfig(schema, schema, []string{"store"})
-	cfg.Merchants[0].BillingPolicies = []billing.BillingPolicy{{Name: "daily", Kind: "window_spend_cap",
+	cfg.Merchants[0].BillingPolicies = []billing.BillingPolicy{{Name: "daily",
 		SpendWindows: []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: 1_000_000_000_000_000, Currency: "USD"}}}}
 	cfg.Merchants[0].BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "daily"}}
 	eng, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: e.pool, ClickHouse: e.ch, Clock: clock, FXTransport: fxWire{}, Logger: quietLogger(os.Stderr)})

@@ -122,7 +122,7 @@ an optional section is on once set.
 
 How much OpenRails writes to a merchant's providers, whether the charges it initiates wait and whether its destructive actions run are the merchant's controls, kept in the database: `openrails merchant writes`, `merchant rebills` and `merchant destructive`, run with the engine's database and schema, change them ([merchant controls](standalone.md#merchant-controls)).
 
-A return URL (a pay URL's `success_url` and `cancel_url`, a hosted payment's `return_url`, the Stripe billing portal's return) may name only the origin of `PublicURL`, of the merchant's `Issuer`, or one of its `checkout.embed_origins`. The event log keeps 90 days, and a rotated-out PSP webhook signing secret verifies for 24 hours. Customers' own cancellations and card removals, and staff destructive actions, have fixed limits ([destructive holds](client.md#destructive-holds)).
+A return URL (a pay URL's `success_url` and `cancel_url`, a hosted payment's `return_url`, the Stripe billing portal's return) may name only the origin of `PublicURL`, of the merchant's `Issuer`, or one of its `checkout.embed_origins`. The event log keeps 90 days, and a rotated-out PSP webhook signing secret verifies for 24 hours. Customers' own card removals and staff destructive actions have fixed limits ([destructive holds](client.md#destructive-holds)). Customers' own cancellations never spend the card-removal budget and are never refused by it.
 
 Several instances must agree on the schemas, `Merchants`, `RateLimits`, `Captcha`, `TrustedProxies` and the mounted `Routes` (a route some instances lack answers 404 there).
 
@@ -154,7 +154,7 @@ and closes none.
 
 Usage needs an event store on ClickHouse: `Deps.ClickHouse`, with `Config.ClickHouse.Database` naming its database. Money stays in PostgreSQL. Whether `Deps.ClickHouse` is set decides what is served; no setting does.
 
-- **With ClickHouse:** usage reporting (`SyncLeases` and the `Gate`), meters, limits, usage rate cards, spend windows, failed-usage grace and cutoffs, the accrual-rate cap, usage history and usage metrics.
+- **With ClickHouse:** usage reporting (`SyncLeases` and the `Gate`), meters, limits, usage rate cards, spend windows, failed-usage grace and cutoffs, usage history and usage metrics.
 - **With PostgreSQL only:** subscriptions, one-time purchases, carts and checkout, entitlements, credit packs and balances, running charges, usage invoices (billing what running charges leave owed), customer messages and the books.
 
 Without ClickHouse every usage route stays mounted and answers 409 `event_store_required` once its caller is authenticated, and the `Client`'s methods return the same error (`billing.ErrEventStoreRequired`). `ApplyCatalog` refuses a document declaring meters, limits, a product's `limits` or `rate_cards`, and `UpdateMerchantConfiguration` refuses the settings only usage reads. `NewGate` over the engine returns `billing.ErrEventStoreRequired`. Meters and limits already stored stay dormant: `New` names them in one log line and a `consistency.dormant_usage` finding, and the next document `ApplyCatalog` applies removes them. `GET /v1/config` reports `usage: false`.

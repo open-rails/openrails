@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 822,
+  "scenario_count": 857,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -536,7 +536,37 @@
     {
       "id": "OR-J17-S15",
       "journey": "J17",
-      "name": "Over the merchant's customer cancellation budget, a customer's own cancel of an NMI or CCBill schedule is refused 429, queues nothing and reaches no provider, and the subscription stays live; the accepted cancels before it reach the provider"
+      "name": "Six distinct customers can cancel NMI or CCBill schedules within an hour without card-removal reservations or a wave finding; all provider stops execute on a disarmed merchant"
+    },
+    {
+      "id": "OR-J17-S16",
+      "journey": "J17",
+      "name": "An admin revoke leaves ended paid periods unrevoked without excess grant effects"
+    },
+    {
+      "id": "OR-J17-S17",
+      "journey": "J17",
+      "name": "A period-end cancel during an unknown card renewal keeps the paid period and accepted access duration without resuming or granting grace, and permits archive export"
+    },
+    {
+      "id": "OR-J17-S18",
+      "journey": "J17",
+      "name": "An immediate access revoke during an unknown card renewal, including after a period-end cancel, refunds the late charge without restoring access"
+    },
+    {
+      "id": "OR-J17-S19",
+      "journey": "J17",
+      "name": "A canceled renewal resolving declined or not executed voids its invoice without dunning"
+    },
+    {
+      "id": "OR-J17-S20",
+      "journey": "J17",
+      "name": "Engine customer and admin cancellations wait for the customer before locking the subscription and commit alongside renewal completion"
+    },
+    {
+      "id": "OR-J17-S21",
+      "journey": "J17",
+      "name": "A replacement membership of the same product or tier group refunds a canceled subscription's late renewal charge without another period or changes to the replacement"
     },
     {
       "id": "OR-J18-S01",
@@ -1139,6 +1169,11 @@
       "name": "Open limit windows and staff adjustments move with the book: lifetime and current-window usage and adjustments survive a round trip"
     },
     {
+      "id": "OR-J31-S15",
+      "journey": "J31",
+      "name": "A canceled unresolved renewal retains its access revocation evidence through terminal completion and archive restore"
+    },
+    {
       "id": "OR-J32-S01",
       "journey": "J32",
       "name": "Provision find list and rename merchant retain stable identity"
@@ -1369,6 +1404,31 @@
       "name": "The standalone server listens on loopback unless host names another address, and refuses to start listening beyond loopback while the development operator task dev seeds, with its published password, exists in its database"
     },
     {
+      "id": "OR-J01-S34",
+      "journey": "J01",
+      "name": "A fresh standalone server logs one single-use setup link to the console's /admin/setup and advertises the setup, invitation and Team routes; the link creates the owner, whose first sign-in enrolls a second factor and who is the console's operator, and once spent it creates nobody (setup_link_invalid)"
+    },
+    {
+      "id": "OR-J01-S35",
+      "journey": "J01",
+      "name": "A server whose root holds a seeded operator logs no setup link; openrails setup-link issues one that replaces the live link and creates another owner once while operators exist; without the console it refuses"
+    },
+    {
+      "id": "OR-J01-S36",
+      "journey": "J01",
+      "name": "Where email is not configured an operator's invitation of an operator by email is not sent and is answered 201 with its /admin/invite#invite_code= link to share; an invite link carries its code as #link_code="
+    },
+    {
+      "id": "OR-J01-S37",
+      "journey": "J01",
+      "name": "An operator's emailed invitation registers the invitee with its code: they prove the address, enroll a second factor and hold the invited root role, an operator in the console's directory"
+    },
+    {
+      "id": "OR-J01-S38",
+      "journey": "J01",
+      "name": "A server whose AuthKit mounts sign-in alone (a hosted product's staff sign in elsewhere) advertises neither groups, invitations nor setup in /capabilities route_groups and serves none of their routes; without the console the server's own accounts keep their groups and no setup route is mounted"
+    },
+    {
       "id": "OR-J22-S05",
       "journey": "J22",
       "name": "Recurring $20 payments grant 25 service credits once per paid cycle with independent expiry and cash-limited refunds"
@@ -1499,11 +1559,6 @@
       "name": "A spend window that names no currency is in its policy's policy_currency, converted to the request's"
     },
     {
-      "id": "OR-J23-S34",
-      "journey": "J23",
-      "name": "A billing policy's amounts are in its policy_currency: an accrual-rate cap in yen gates USD usage at its converted rate"
-    },
-    {
       "id": "OR-J23-S35",
       "journey": "J23",
       "name": "A limit counting two meters by weight (output four times input, a large model's output six more) admits and refuses at the weighted total, and settles each count rounded half up"
@@ -1532,6 +1587,51 @@
       "id": "OR-J23-S41",
       "journey": "J23",
       "name": "A fixed window that resets between syncs is decided from the view's next window with no sync, and settles there"
+    },
+    {
+      "id": "OR-J23-S42",
+      "journey": "J23",
+      "name": "One billing policy caps what is owed and spend per window, each refusing on its own, and a customer's own credit limit overrides the policy's cap"
+    },
+    {
+      "id": "OR-J23-S43",
+      "journey": "J23",
+      "name": "A customer graduates to the tier its net amount paid reaches, and the tier's billing policy decides its requests"
+    },
+    {
+      "id": "OR-J23-S44",
+      "journey": "J23",
+      "name": "A tier asking days since the first payment is reached only once they pass, by OpenRails' clock"
+    },
+    {
+      "id": "OR-J23-S45",
+      "journey": "J23",
+      "name": "A tier asking a net amount paid and days since the first payment is reached only when both are met"
+    },
+    {
+      "id": "OR-J23-S46",
+      "journey": "J23",
+      "name": "A chargeback or refund lowers the net amount paid and the customer's tier drops with it"
+    },
+    {
+      "id": "OR-J23-S47",
+      "journey": "J23",
+      "name": "A customer's explicit trust level beats the merchant's tier rules, and a request's own trust level picks that request's spend windows"
+    },
+    {
+      "id": "OR-J23-S48",
+      "journey": "J23",
+      "name": "A gate's view carries the computed trust tier, where it came from and its policy, and the gate decides on it"
+    },
+    {
+      "id": "OR-J23-S49",
+      "journey": "J23",
+      "name": "Trust tiers that are unbound, out of order, ask nothing or are not in whole minor units are refused at load and on edit, and a refused edit writes nothing"
+    },
+    {
+      "id": "OR-J23-S50",
+      "journey": "J23",
+      "name": "A customer's credit line and delinquency grace follow the billing policy of its computed trust tier, money the merchant recorded counting as paid"
     },
     {
       "id": "OR-J29-S07",
@@ -2559,11 +2659,6 @@
       "name": "A billing pass that waited behind a balance's look leaves the watch that look moved on"
     },
     {
-      "id": "OR-J25-S05",
-      "journey": "J25",
-      "name": "A customer's running charges count toward its accrual_rate_cap at their rates while they run"
-    },
-    {
       "id": "OR-J25-S43",
       "journey": "J25",
       "name": "While ClickHouse is out of reach a balance look at a customer without pending usage expires its lapsed lot"
@@ -2582,6 +2677,11 @@
       "id": "OR-J18-S07",
       "journey": "J18",
       "name": "An upgrade in the microsecond its membership started ends the superseded period after it starts"
+    },
+    {
+      "id": "OR-J18-S08",
+      "journey": "J18",
+      "name": "An upgrade leaves ended paid periods unrevoked without excess grant effects"
     },
     {
       "id": "OR-J19-S07",
@@ -3706,7 +3806,7 @@
     {
       "id": "OR-J06-S83",
       "journey": "J06",
-      "name": "Customers' own cancellations past the merchant's cap wait with the time to wait; the finding names the wave and alerts staff once; staff cancellations spend none of the cap"
+      "name": "Six distinct customers can cancel within an hour without a wave finding; card removals past the merchant cap are refused 429 and alert staff once; another customer can still cancel after that cap is exhausted"
     },
     {
       "id": "OR-J06-S84",
@@ -4112,6 +4212,81 @@
       "id": "OR-J38-S97",
       "journey": "J38",
       "name": "A second CCBill rebill callback inside a settled cycle, its next renewal date a day off the accepted cadence, is kept as an extra capture of that cycle, not refused with a 500"
+    },
+    {
+      "id": "OR-J14-S08",
+      "journey": "J14",
+      "name": "NMI engine renewal gateway refusals settle through dunning"
+    },
+    {
+      "id": "OR-J14-S09",
+      "journey": "J14",
+      "name": "Duplicate and ambiguous NMI renewals stay unknown without automatic release; reported duplicate refusals permit operator-attested release"
+    },
+    {
+      "id": "OR-J14-S10",
+      "journey": "J14",
+      "name": "Operator qualifies the exact NMI renewal receipt and rejects contradictory evidence"
+    },
+    {
+      "id": "OR-J14-S11",
+      "journey": "J14",
+      "name": "Operator releases an empty NMI renewal order and the next attempt catches late money"
+    },
+    {
+      "id": "OR-J14-S12",
+      "journey": "J14",
+      "name": "Operator settles an NMI renewal from its definitive order decline"
+    },
+    {
+      "id": "OR-J14-S13",
+      "journey": "J14",
+      "name": "Stripe engine renewals reject operator receipt and nonexecution resolution"
+    },
+    {
+      "id": "OR-J14-S14",
+      "journey": "J14",
+      "name": "Stuck renewal verification grows with submission age up to two hours without consuming execution attempts"
+    },
+    {
+      "id": "OR-J14-S15",
+      "journey": "J14",
+      "name": "A renewal submitted long after admission starts verification with the handler backoff"
+    },
+    {
+      "id": "OR-J04-S90",
+      "journey": "J04",
+      "name": "A submitted renewal with an unknown answer keeps access under suspend, including a late submission, then follows payment or dunning"
+    },
+    {
+      "id": "OR-J04-S91",
+      "journey": "J04",
+      "name": "Operator release of an unanswered renewal restores bounded suspend access while rebills are held"
+    },
+    {
+      "id": "OR-J04-S92",
+      "journey": "J04",
+      "name": "Held renewals and pre-submission read failures suspend access at the renewal allowance"
+    },
+    {
+      "id": "OR-J04-S93",
+      "journey": "J04",
+      "name": "A normal successful renewal adds only its existing three grant rows and two product access rows"
+    },
+    {
+      "id": "OR-J04-S94",
+      "journey": "J04",
+      "name": "An unanswered dunning retry keeps access suspended and verifies without customer or subscription locks"
+    },
+    {
+      "id": "OR-J04-S95",
+      "journey": "J04",
+      "name": "An unresolved renewal finding survives a grace write failure"
+    },
+    {
+      "id": "OR-J04-S96",
+      "journey": "J04",
+      "name": "Keep-policy verification does not lock the membership"
     }
   ]
 }

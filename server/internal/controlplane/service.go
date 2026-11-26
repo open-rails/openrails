@@ -155,7 +155,7 @@ func AuthKit(cfg *billing.Config, opts Options) (authkit.Config, error) {
 	// ranges, whose CF-Connecting-IP AuthKit takes.
 	http.TrustedProxies, http.CloudflareProxies, http.DirectPeerIP = slices.Clone(cfg.TrustedProxies), slices.Clone(iputil.CloudflareRanges), false
 	if http.Groups == nil {
-		http.Groups = routeGroups(a.Registration, a.Resource.Enabled())
+		http.Groups = routeGroups(a.Registration, a.Resource.Enabled(), opts.Console)
 	}
 	a.HTTP = &http
 	return a, nil

@@ -103,8 +103,8 @@ products:
 func sameWindowTrust(w *world) {
 	m := cfgMerchant(w.cfg, "alpha")
 	m.BillingPolicies = []billing.BillingPolicy{
-		{Name: "free", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 1000, Currency: "USD"}}},
-		{Name: "gold", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 5000, Currency: "USD"}}},
+		{Name: "free", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 1000, Currency: "USD"}}},
+		{Name: "gold", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 5000, Currency: "USD"}}},
 	}
 	m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "free"}, {PolicyName: "gold", Tier: "gold"}}
 	setCfgMerchant(&w.cfg, "alpha", m)
@@ -114,8 +114,8 @@ func sameWindowTrust(w *world) {
 func goldTrust(w *world) {
 	m := cfgMerchant(w.cfg, "alpha")
 	m.BillingPolicies = []billing.BillingPolicy{
-		{Name: "free", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "free-month", WindowSeconds: 30 * 24 * 3600, Limit: 1000, Currency: "USD"}}},
-		{Name: "gold", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "gold-month", WindowSeconds: 30 * 24 * 3600, Limit: 5000, Currency: "USD"}}},
+		{Name: "free", SpendWindows: []billing.BudgetWindow{{Key: "free-month", WindowSeconds: 30 * 24 * 3600, Limit: 1000, Currency: "USD"}}},
+		{Name: "gold", SpendWindows: []billing.BudgetWindow{{Key: "gold-month", WindowSeconds: 30 * 24 * 3600, Limit: 5000, Currency: "USD"}}},
 	}
 	m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "free"}, {PolicyName: "gold", Tier: "gold"}}
 	setCfgMerchant(&w.cfg, "alpha", m)

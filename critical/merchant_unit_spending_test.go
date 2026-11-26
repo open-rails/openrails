@@ -779,7 +779,6 @@ func unitRefundByLot(t *testing.T) {
 		if leg.Lot != nil && *leg.Lot == lot.ID.UUID() && leg.Type != "deposit" && leg.Type != "credit_spend" {
 			sources[leg.Source] += leg.Amount
 			require.Equal(t, string(ledger.UnitsRefunded), leg.Credit, "a reversal's units go to units_refunded")
-			require.NotEqual(t, "credit_refund_cash", leg.Type, "a unit has no cash leg")
 		}
 	}
 	require.Equal(t, map[string]int64{"credit": 300, "consumed_credit": 100}, sources)

@@ -5651,7 +5651,7 @@
           "admin"
         ],
         "operationId": "GetCustomer",
-        "description": "GetCustomer reads one customer: its contact, its settings, and per currency its balance and the card that pays its invoices.",
+        "description": "GetCustomer reads one customer: its contact, its settings, and per currency its balance, the card that pays its invoices and its effective trust tier.",
         "parameters": [
           {
             "name": "customer_id",
@@ -9524,7 +9524,6 @@
         "x-openrails-errors": [
           "cancel_unsupported_on_rail",
           "invalid_param",
-          "payment_in_progress",
           "resource_not_found",
           "service_unavailable",
           "subscription_not_active"
@@ -14881,9 +14880,6 @@
           "name": {
             "type": "string"
           },
-          "kind": {
-            "type": "string"
-          },
           "outstanding_cap_amount": {
             "type": "string",
             "description": "A number as a decimal string."
@@ -14893,13 +14889,6 @@
             "items": {
               "$ref": "#/components/schemas/BudgetWindow"
             }
-          },
-          "accrual_rate_cap_per_hour": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "accrual_rate_window_seconds": {
-            "type": "integer"
           },
           "collection_threshold_amount": {
             "type": "string",
@@ -14926,8 +14915,7 @@
           }
         },
         "required": [
-          "name",
-          "kind"
+          "name"
         ]
       },
       "BillingPolicyBinding": {
@@ -16519,6 +16507,12 @@
             "items": {
               "$ref": "#/components/schemas/DefaultPaymentMethod"
             }
+          },
+          "trust_levels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EffectiveTrustLevel"
+            }
           }
         },
         "required": [
@@ -16528,7 +16522,8 @@
           "last_seen_at",
           "settings",
           "balances",
-          "default_payment_methods"
+          "default_payment_methods",
+          "trust_levels"
         ]
       },
       "CustomerAccount": {
@@ -18178,6 +18173,47 @@
           "amount",
           "runway_hours",
           "source"
+        ]
+      },
+      "EffectiveTrustLevel": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "trust_level": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "default",
+              "explicit",
+              "rule"
+            ]
+          },
+          "net_paid_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "first_paid_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "currency",
+          "trust_level",
+          "source",
+          "net_paid_amount",
+          "first_paid_at"
         ]
       },
       "EntitlementChange": {
@@ -20598,6 +20634,17 @@
           "currency": {
             "type": "string"
           },
+          "trust_level": {
+            "type": "string"
+          },
+          "trust_level_source": {
+            "type": "string",
+            "enum": [
+              "default",
+              "explicit",
+              "rule"
+            ]
+          },
           "limits": {
             "type": "array",
             "items": {
@@ -20617,7 +20664,6 @@
           "balance_deny_code": {
             "type": "string",
             "enum": [
-              "accrual_rate_cap_reached",
               "budget_exceeded",
               "delegated_spend_not_allowed",
               "delinquent_unpaid_invoice",
@@ -20642,6 +20688,8 @@
         "required": [
           "customer_id",
           "currency",
+          "trust_level",
+          "trust_level_source",
           "limits",
           "capacities",
           "credit_line",
@@ -21156,6 +21204,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BillingPolicyBinding"
+            }
+          },
+          "trust_tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrustTier"
             }
           },
           "delegated_invoker_wasted_spend_limits": {
@@ -25495,7 +25549,6 @@
           "deny_code": {
             "type": "string",
             "enum": [
-              "accrual_rate_cap_reached",
               "budget_exceeded",
               "delegated_spend_not_allowed",
               "delinquent_unpaid_invoice",
@@ -27372,6 +27425,42 @@
           "trust_level"
         ]
       },
+      "TrustTier": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrustTierRequirement"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "requirements"
+        ]
+      },
+      "TrustTierRequirement": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "net_paid_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "days_since_first_payment": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "currency"
+        ]
+      },
       "UpdateAlertWebhookParams": {
         "type": "object",
         "properties": {
@@ -27563,6 +27652,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BillingPolicyBinding"
+            }
+          },
+          "trust_tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrustTier"
             }
           },
           "delegated_invoker_wasted_spend_limits": {
@@ -28973,7 +29068,7 @@
     "event_store_required": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off."
+      "meaning": "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows and usage history are off."
     },
     "finding_action_failed": {
       "status": 502,
