@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 819,
+  "scenario_count": 824,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1367,6 +1367,31 @@
       "id": "OR-J01-S33",
       "journey": "J01",
       "name": "The standalone server listens on loopback unless host names another address, and refuses to start listening beyond loopback while the development operator task dev seeds, with its published password, exists in its database"
+    },
+    {
+      "id": "OR-J01-S34",
+      "journey": "J01",
+      "name": "A fresh standalone server logs one single-use setup link to the console's /admin/setup and advertises the setup, invitation and Team routes; the link creates the owner, whose first sign-in enrolls a second factor and who is the console's operator, and once spent it creates nobody (setup_link_invalid)"
+    },
+    {
+      "id": "OR-J01-S35",
+      "journey": "J01",
+      "name": "A server whose root holds a seeded operator logs no setup link; openrails setup-link issues one that replaces the live link and creates another owner once while operators exist; without the console it refuses"
+    },
+    {
+      "id": "OR-J01-S36",
+      "journey": "J01",
+      "name": "Where email is not configured an operator's invitation of an operator by email is not sent and is answered 201 with its /admin/invite#invite_code= link to share; an invite link carries its code as #link_code="
+    },
+    {
+      "id": "OR-J01-S37",
+      "journey": "J01",
+      "name": "An operator's emailed invitation registers the invitee with its code: they prove the address, enroll a second factor and hold the invited root role, an operator in the console's directory"
+    },
+    {
+      "id": "OR-J01-S38",
+      "journey": "J01",
+      "name": "A server whose AuthKit mounts sign-in alone (a hosted product's staff sign in elsewhere) advertises neither groups, invitations nor setup in /capabilities route_groups and serves none of their routes; without the console the server's own accounts keep their groups and no setup route is mounted"
     },
     {
       "id": "OR-J22-S05",

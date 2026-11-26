@@ -5,7 +5,8 @@ import { ConsoleSession, createConsoleSession } from "./lib/session"
 import { useIdentity } from "./lib/identity"
 import { Redirect } from "./lib/redirect"
 import { LoginPage } from "./pages/login"
-import { AccountLinkPage, InvitationPage } from "./pages/account-links"
+import { AccountLinkPage } from "./pages/account-links"
+import { InvitePage, SetupPage } from "./pages/staff"
 import { MerchantWorkspace } from "./workspace"
 import type { BootstrapConfig } from "./config"
 
@@ -16,12 +17,8 @@ export function ConsoleApp({ config }: { config: BootstrapConfig }) {
     <ConsoleSession auth={auth}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/invite"
-          element={
-            <InvitationPage auth={auth} onDone={() => void navigate("/")} />
-          }
-        />
+        <Route path="/setup" element={<SetupPage />} />
+        <Route path="/invite" element={<InvitePage />} />
         {(["reset", "verify", "passwordless"] as const).map((kind) => (
           <Route
             key={kind}
