@@ -58,7 +58,7 @@ func publicAccess(t *testing.T, a *authorityWorld, at time.Time, expected bool) 
 }
 
 func TestPublicEntitlements(t *testing.T) {
-	t.Run("OR-J38-S87/consumable-purchases-do-not-report-duplicate-ownership", func(t *testing.T) {
+	t.Run("OR-J38-S96/consumable-purchases-do-not-report-duplicate-ownership", func(t *testing.T) {
 		a, journal := newNMIWorld(t)
 		consumable, price := publicSale(t, a, "repeat-consumable", 5_000_000, nil)
 		unique, uniquePrice := publicSale(t, a, "duplicate-unique", 5_000_000, nil)

@@ -26,7 +26,7 @@ import (
 )
 
 func TestPublicLifecycle(t *testing.T) {
-	t.Run("OR-J38-S86/customer-cancel-preserves-usage-and-merchant-invoices", func(t *testing.T) {
+	t.Run("OR-J38-S95/customer-cancel-preserves-usage-and-merchant-invoices", func(t *testing.T) {
 		a, customer, usage := openUsageInvoice(t)
 		_, price := publicSale(t, a, "merchant-cancel", 5_000_000, nil)
 		created, err := a.alphaRemote.CreateInvoice(t.Context(), "merchant-cancel", billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}})

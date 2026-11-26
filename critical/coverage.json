@@ -3949,12 +3949,12 @@
       "name": "A customer's erasure clears every attribution field of its checkouts; the checkouts stand"
     },
     {
-      "id": "OR-J38-S86",
+      "id": "OR-J38-S95",
       "journey": "J38",
       "name": "A customer cannot cancel a usage invoice or one the merchant created: both answer 409 invoice_not_cancelable and stay open, the usage stays owed to that invoice, and the merchant cancels its invoice"
     },
     {
-      "id": "OR-J38-S87",
+      "id": "OR-J38-S96",
       "journey": "J38",
       "name": "Buying a consumable product again raises no duplicate-ownership finding; a second live purchase of a non-consumable still does"
     },
