@@ -140,8 +140,8 @@ Checks:
 ### 4. Access control and tenant isolation
 The check route needs `merchant:entitlements:read` (or `root:entitlements:read`);
 lease and limit routes the `merchant:usage:manage` or
-`merchant:usage:read` pair; adjustments `merchant:customer:manage`. Both obey the
-credential's customer scope (`commerceCustomer`, `Syncer.Allows`), refusing
+`merchant:usage:read` pair; adjustments `merchant:customer:manage`. Lease syncs
+and views obey the credential's customer scope (`Syncer.Allows`), refusing
 `service_credential_customer_scope_denied`; a sync refuses that item alone and
 never locks the customer. `/v1/me` routes act as the signed-in customer. Every
 query names `merchant_id`; `product_access` references its customer by

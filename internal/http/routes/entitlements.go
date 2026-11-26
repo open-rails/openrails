@@ -14,7 +14,7 @@ var entitlementsRoutes = []Route{
 		Doc: "GetAccessTenure returns the customer's elapsed access to the requested entitlement keys, including " +
 			"past product access and retired keys. params.At must not be in the future; zero uses OpenRails' " +
 			"clock.",
-		Query: billing.GetAccessTenureParams{}, Responses: []Reply{{200, billing.AccessTenure{}}}, Errors: codes("invalid_param", "service_credential_customer_scope_denied"), Handler: h(handlers.GetAccessTenure)},
+		Query: billing.GetAccessTenureParams{}, Responses: []Reply{{200, billing.AccessTenure{}}}, Errors: codes("invalid_param"), Handler: h(handlers.GetAccessTenure)},
 	{Method: GET, Path: "/v1/me/access-tenure", Group: Customer, Auth: AuthCustomer,
 		Query: billing.GetAccessTenureParams{}, Responses: []Reply{{200, billing.AccessTenure{}}}, Errors: codes("authentication_required", "invalid_param"), Handler: h(handlers.SelfAccessTenure)},
 	{Method: GET, Path: "/v1/admin/entitlements", Group: Admin, Auth: AuthMerchant, Name: "ListEntitlements", Level: LevelRead,
@@ -22,7 +22,7 @@ var entitlementsRoutes = []Route{
 			"then key in byte order: of params.CustomerIDs (1 to billing.MaxBatchItems), only params.Entitlements " +
 			"and keys under params.Prefix. A key absent from the answer is not held. Without customers, " +
 			"params.Entitlements names one key and the page is its holders.",
-		Query: billing.EntitlementListParams{}, Responses: []Reply{{200, billing.ListPage[billing.CustomerEntitlement]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_credential_customer_scope_denied"), Handler: h(handlers.ListEntitlements)},
+		Query: billing.EntitlementListParams{}, Responses: []Reply{{200, billing.ListPage[billing.CustomerEntitlement]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query"), Handler: h(handlers.ListEntitlements)},
 	{Method: POST, Path: "/v1/app/entitlements/check", Group: App, Auth: AuthApplication, Permission: needEntitlements, Name: "CheckEntitlements", Level: LevelRead,
 		Client: HandWritten,
 		Doc: "CheckEntitlements is the programmatic content gate: which of params.Entitlements params.CustomerID " +
@@ -33,12 +33,12 @@ var entitlementsRoutes = []Route{
 			"(RouteGroups.Programmatic). A remote client answers a current exact-key check from its entitlement " +
 			"cache when every key is allowed there (EntitlementCheckCacheOptions), unless the handle is Uncached; " +
 			"a denial always asks OpenRails.",
-		Request: billing.CheckEntitlementsParams{}, Responses: []Reply{{200, billing.EntitlementCheck{}}}, Errors: codes("invalid_param", "service_credential_customer_scope_denied"), Handler: h(handlers.AppCheckEntitlements)},
+		Request: billing.CheckEntitlementsParams{}, Responses: []Reply{{200, billing.EntitlementCheck{}}}, Errors: codes("invalid_param"), Handler: h(handlers.AppCheckEntitlements)},
 	{Method: GET, Path: "/v1/admin/product-access", Group: Admin, Auth: AuthMerchant, Name: "ListProductAccess", Level: LevelRead,
 		Doc: "ListProductAccess returns one page of product-access windows, newest first: bought, subscribed and " +
 			"granted, of params.CustomerIDs and params.ProductIDs (each 1 to billing.MaxBatchItems; none: any). " +
 			"params.LiveOnly keeps those live now. params.IDs instead reads named windows.",
-		Query: billing.ProductAccessListParams{}, Responses: []Reply{{200, billing.ListPage[billing.ProductAccessGrant]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_credential_customer_scope_denied"), Handler: h(handlers.ListProductAccess)},
+		Query: billing.ProductAccessListParams{}, Responses: []Reply{{200, billing.ListPage[billing.ProductAccessGrant]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query"), Handler: h(handlers.ListProductAccess)},
 	{Method: POST, Path: "/v1/admin/product-access", Group: Admin, Auth: AuthMerchant, Name: "CreateProductAccess", Level: LevelUpdate, Limit: middleware.AdminOperationGrant, IdempotencyKey: true,
 		Doc: "CreateProductAccess grants 1 to billing.MaxBatchItems products free, across any customers, all or " +
 			"none; the answer is in request order. Each grant is a window of its product: the customer holds the " +
@@ -46,7 +46,7 @@ var entitlementsRoutes = []Route{
 			"first answer and grants nothing again; a retry with other items or terms is idempotency_key_reused. " +
 			"A retry after staff removed a window it granted (revoked before it started) is resource_conflict; " +
 			"grant again under a new key.",
-		Request: billing.CreateProductAccessBatchParams{}, Responses: []Reply{{201, billing.CreateProductAccessBatchResult{}}}, Errors: codes("authentication_required", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "resource_conflict", "resource_not_found", "service_credential_customer_scope_denied"), Handler: h(handlers.CreateProductAccess)},
+		Request: billing.CreateProductAccessBatchParams{}, Responses: []Reply{{201, billing.CreateProductAccessBatchResult{}}}, Errors: codes("authentication_required", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "resource_conflict", "resource_not_found"), Handler: h(handlers.CreateProductAccess)},
 	{Method: POST, Path: "/v1/admin/product-access/{id}/revoke", Group: Admin, Auth: AuthMerchant, Name: "RevokeProductAccess", Level: LevelUpdate,
 		Args: []any{billing.ProductAccessID{}},
 		Doc: "RevokeProductAccess takes back a product a customer holds, with params.Reason; a window not yet " +
