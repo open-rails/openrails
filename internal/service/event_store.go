@@ -18,9 +18,9 @@ import (
 )
 
 // Without the event store a catalog declares no meter, limit, product limit
-// or rate card, and settings keep nothing only usage reads: spend windows,
-// failed-usage grace and cutoffs, the accrual-rate cap. Clearing them is
-// allowed; what is stored stays dormant.
+// or rate card, and settings keep nothing only usage reads: spend windows and
+// failed-usage grace and cutoffs. Clearing them is allowed; what is stored
+// stays dormant.
 
 // refuseUsageCatalog refuses a document declaring what needs the event store.
 func (s *Service) refuseUsageCatalog(app catalogwire.Application) error {
@@ -63,11 +63,8 @@ func (s *Service) refuseUsageSettings(settings *billing.MerchantSettings) error 
 		if len(p.BadSpendWindows) > 0 {
 			paths = append(paths, at+"bad_spend_windows")
 		}
-		if p.AccrualRateCapPerHour != 0 || p.Kind == "accrual_rate_cap" {
-			paths = append(paths, at+"accrual_rate_cap_per_hour")
-		}
 	}
-	return s.eventStoreRefusal("spend windows, failed-usage windows and the accrual-rate cap", paths)
+	return s.eventStoreRefusal("spend windows and failed-usage windows", paths)
 }
 
 func (s *Service) eventStoreRefusal(what string, paths []string) error {

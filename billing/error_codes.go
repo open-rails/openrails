@@ -483,7 +483,7 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeRateCardProductNotFound, 404, invalid, "The rate card names a product that does not exist."},
 	{CodeUsageRateCardInvalid, 400, invalid, "The usage rate card is invalid."},
 	{CodeUsageMeterInvalid, 400, invalid, "The meter definition is invalid."},
-	{CodeEventStoreRequired, 409, invalid, "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off."},
+	{CodeEventStoreRequired, 409, invalid, "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows and usage history are off."},
 	{CodeUsageNotPriced, 422, invalid, "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field."},
 	{CodeMeterInUse, 409, invalid, "The meter is referenced and cannot change this way."},
 	{CodeMeterRateCardConflict, 409, invalid, "The meter and its rate card disagree."},

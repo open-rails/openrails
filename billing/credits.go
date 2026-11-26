@@ -431,7 +431,7 @@ type MerchantSettings struct {
 	// that can, the CardVault PSP alone when it is a PSP. OpenRails-run
 	// renewals stay on the PSP their subscription was sold through.
 	ChargePSPs []string `json:"charge_psps,omitempty"`
-	// BillingPolicies are named spend limits: an outstanding cap, a window spend cap or an accrual rate cap.
+	// BillingPolicies are named spend limits: a cap on what is owed, spend windows, or both.
 	BillingPolicies []BillingPolicy `json:"billing_policies,omitempty"`
 	// BillingPolicyBindings choose the merchant default policy and each trust tier's.
 	BillingPolicyBindings []BillingPolicyBinding `json:"billing_policy_bindings,omitempty"`
@@ -456,31 +456,22 @@ type AccountingSettings struct {
 	Timezone string `json:"timezone,omitempty"`
 }
 
-// BillingPolicy declares one named billing policy (or#897). The policy says
-// WHICH quantity is capped; the binding says who it applies to.
+// BillingPolicy declares one named billing policy (or#897): the caps it sets,
+// any of them; the binding says who it applies to.
 type BillingPolicy struct {
 	// Name is the policy's, which bindings name.
 	Name string `json:"name"`
-	// Kind is "outstanding_cap" (cap LEDGER-measured unpaid arrears — a credit
-	// line on debt, refused with outstanding_cap_reached), "window_spend_cap"
-	// (cap NEW spend per rolling window; prior debt drives delinquency, not
-	// admission), or "accrual_rate_cap" (cap the measured accrual RATE in
-	// micros/hour — the cloud quota, refused with accrual_rate_cap_reached).
-	Kind string `json:"kind"`
-	// OutstandingCapAmount (micros) is the credit line for kind=outstanding_cap.
-	// Zero defers to the payer's own arrears credit limit.
+	// OutstandingCapAmount (micros) is the credit line on unpaid arrears of a
+	// bound customer without its own credit limit; what it owes is taken from
+	// it, and a request past it is refused with outstanding_cap_reached. Zero
+	// defers to the merchant's usage terms.
 	OutstandingCapAmount int64 `json:"outstanding_cap_amount,omitempty,string"`
-	// SpendWindows are the rolling NEW-spend ceilings for kind=window_spend_cap.
+	// SpendWindows are the rolling NEW-spend ceilings, refused with
+	// budget_exceeded.
 	SpendWindows []BudgetWindow `json:"spend_windows,omitempty"`
-	// AccrualRateCapPerHour (kind=accrual_rate_cap) caps the measured accrual
-	// rate in micros PER HOUR — the cloud quota. AccrualRateWindowSeconds is the
-	// measurement lookback (default 3600).
-	AccrualRateCapPerHour int64 `json:"accrual_rate_cap_per_hour,omitempty,string"`
-	// AccrualRateWindowSeconds is the accrual rate's measurement lookback (default 3600).
-	AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
 	// CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor
 	// override the merchant-wide invoice policy for payers bound here; nil defers
-	// to it. All three ride on any kind. DelinquencyAmountFloor is in
+	// to it. DelinquencyAmountFloor is in
 	// PolicyCurrency, which it requires, and applies to debt in it.
 	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty,string"`
 	DelinquencyGraceDays      *int   `json:"delinquency_grace_days,omitempty"`
@@ -491,13 +482,12 @@ type BillingPolicy struct {
 	CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
 	// windows: at most Limit of host-reported wasted spend is forgiven per window;
-	// direct-payer overage is charged. Allowed on either kind.
+	// direct-payer overage is charged.
 	BadSpendWindows []BudgetWindow `json:"bad_spend_windows,omitempty"`
 	// PolicyCurrency is the currency of the policy's amounts and of a spend or
 	// bad-spend window that names none; absent, the request's. The outstanding
 	// cap and collection threshold bind only money in it, in admission and
-	// usage billing; windows and the accrual-rate cap are converted to the
-	// request's currency.
+	// usage billing; windows are converted to the request's currency.
 	PolicyCurrency catalog.Currency `json:"policy_currency,omitempty"`
 }
 
