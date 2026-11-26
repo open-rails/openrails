@@ -86,13 +86,6 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 		if err := r.DB.ValidateRiverJobBinding(ctx, binding.Pool, client.Schema()); err != nil {
 			return err
 		}
-		retired, err := riverjobs.RetireLegacyProviderRefresh(ctx, client)
-		if err != nil {
-			return err
-		}
-		if retired > 0 {
-			r.Log.InfoContext(ctx, "retiring scheduled provider refresh jobs", "river_schema", client.Schema(), "jobs", retired)
-		}
 		r.riverCompositionMu.Lock()
 		if r.riverClosed.Load() || r.riverCompositionFailed {
 			r.riverCompositionMu.Unlock()

@@ -124,13 +124,6 @@ func PublicPSPConfigFor(scope PSPScope, custodian *CustodianScope) (PublicPSPCon
 	if !known {
 		return PublicPSPConfig{}, "rail has no browser purchase profile", false
 	}
-	// A PSP that still carries an inline custody block is misconfigured, not
-	// custodial: refuse it rather than advertise a tokenizer key the browser
-	// must not use (or#880 moved custody into its own declaration).
-	if err := config.RejectRetiredCustodySettings(scope.Settings); err != nil {
-		return PublicPSPConfig{}, err.Error(), false
-	}
-
 	key := strings.ToLower(strings.TrimSpace(scope.Key))
 	if key == "" {
 		key = rail

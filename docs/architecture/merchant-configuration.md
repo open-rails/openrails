@@ -190,9 +190,8 @@ Checks:
 - OR-J06-S04 (secrets redacted), OR-J06-S06 (custody ownership), OR-J31-S02.
 
 ### 5. Contracts match the code
-The client methods are in `api/go.txt`. Declarations and documents parse strictly and
-name retired keys (`retiredDeclarationKeys`). Import reads only `archivewire.Version`;
-version 2 is `ErrPriceOwnershipFormat`. The CLI calls the same `ExportBillingArchive`
+The client methods are in `api/go.txt`. Declarations and documents parse strictly.
+Import reads only `archivewire.Version`. The CLI calls the same `ExportBillingArchive`
 and `ImportBillingArchive` in process and over HTTP.
 
 Checks:
@@ -256,7 +255,7 @@ Checks:
 - **J31** (archives): OR-J31-S01 identities and totals; S02 bad archive or occupied
   target refused atomically; S03 no charge before arming; S04 unresolved work refuses
   export; S06, S09 NMI and Stripe state verbatim; S10 restored
-  Solana pull; S12, S13 baseline adoption; S14 limit windows; S40 notification export.
+  Solana pull; S12, S13 baseline adoption; S14 limit windows.
 - **J05** (merchant units): OR-J05-S06 units served with their scale; S07 invalid or colliding units refused at load and on edit, and a counted unit neither removed nor rescaled; S08 never owed, never a pack's price, and unknown when undeclared; S09 invisible to another merchant; S10 a restart on a file that rescales a counted unit keeps its recorded scale; S11 a catalog that names a unit counts it; S12 a first count reads the declaration where it is stored. J48 buys and spends them ([credits](credits.md)).
 - **J43** (configuration history): OR-J43-S03 an API change is recorded with its actor and a credential only as "changed"; S04 a Vault document written outside OpenRails is recorded once with several replicas loading, and a file change once on restart.
 - **J06** (PSP configuration): OR-J06-S01 to S06 and S08; S07 is in

@@ -70,7 +70,6 @@ type WebhookDispatcher struct {
 	RailConfigs railresolve.Source
 	// NMIResolver arms an NMI account's client for the reads a notice needs.
 	NMIResolver           railresolve.NMIClientResolver
-	PurchaseRegistrar     stripePurchaseRegistrar
 	InvoiceAttemptService *payment.InvoiceAttemptService
 	MoneyService          *money.MoneyService
 	// ConvergeEnqueuer schedules the coalesced fetch-and-converge job the
@@ -227,7 +226,6 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		SubscriptionService:          d.SubscriptionService,
 		SubscriptionLifecycleService: d.SubscriptionLifecycleService,
 
-		PurchaseRegistrar:     d.PurchaseRegistrar,
 		PaymentService:        d.PaymentService,
 		MoneyService:          d.MoneyService,
 		DeduplicationService:  d.DeduplicationService,

@@ -730,7 +730,6 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 	purchaseService.StripeClients = stripeClients
 	purchaseService.StripeService.StripeClients = stripeClients
 	purchaseService.SetSubscriptionLifecycleService(subscriptionLifecycleService)
-	webhookDispatcher.PurchaseRegistrar = purchaseService
 	invoiceAttemptService := payment.NewInvoiceAttemptService(
 		database,
 		priceService,

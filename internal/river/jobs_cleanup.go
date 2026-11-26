@@ -142,6 +142,7 @@ type CleanupResult struct {
 	Leases                     int64
 	LimitAdjustments           int64
 	WebhookHealthDays          int64
+	ListedRebills              int64
 	ReconciliationFindings     int64
 	ProviderIntents            int64
 	OperationLog               int64
@@ -214,6 +215,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 			LimitWindowCutoff:    now.Add(-retention.LimitWindows),
 			ReplayCutoff:         now.Add(-retention.Leases),
 			MessageCutoff:        now.Add(-retention.CustomerMessages),
+			ListedRebillCutoff:   now.Add(-retention.ListedRebills),
 			After:                after,
 			MerchantLimit:        limit,
 		})
@@ -240,7 +242,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 		}
 	}
 
-	opsmetric.Emit(ctx, w.Log, opsmetric.MetricRetentionSweep, []any{"worker", KindCleanupExpiredData, "merchants_with_work", len(merchantIDs), "merchants_budget_capped", result.MerchantsBudgetCapped, "continued", after != nil, "more_work_queued", next != nil, "duration_ms", clock.Now().Sub(started).Milliseconds(), "carts", result.Carts, "idempotency_keys", result.IdempotencyKeys, "solana_pay_references", result.SolanaPayReferences, "periodic_leases", result.PeriodicLeases, "notification_events", result.NotificationEvents, "event_log", result.EventLog, "webhook_events", result.WebhookEvents, "host_outbox", result.HostOutbox, "payment_attempts", result.PaymentAttempts, "rebill_cycles", result.RebillCycles, "nmi_history_months", result.NMIHistoryMonths, "subscription_transitions", result.SubscriptionTransitions, "subscription_billing_changes", result.SubscriptionBillingChanges, "invoice_attempts", result.InvoiceAttempts, "unpaid_invoices", result.UnpaidInvoices, "limit_windows", result.LimitWindows, "leases", result.Leases, "limit_adjustments", result.LimitAdjustments, "webhook_health_days", result.WebhookHealthDays, "reconciliation_findings", result.ReconciliationFindings, "provider_intents", result.ProviderIntents, "operation_log", result.OperationLog, "released_parks", result.ReleasedParks, "customer_messages", result.CustomerMessages})
+	opsmetric.Emit(ctx, w.Log, opsmetric.MetricRetentionSweep, []any{"worker", KindCleanupExpiredData, "merchants_with_work", len(merchantIDs), "merchants_budget_capped", result.MerchantsBudgetCapped, "continued", after != nil, "more_work_queued", next != nil, "duration_ms", clock.Now().Sub(started).Milliseconds(), "carts", result.Carts, "idempotency_keys", result.IdempotencyKeys, "solana_pay_references", result.SolanaPayReferences, "periodic_leases", result.PeriodicLeases, "notification_events", result.NotificationEvents, "event_log", result.EventLog, "webhook_events", result.WebhookEvents, "host_outbox", result.HostOutbox, "payment_attempts", result.PaymentAttempts, "rebill_cycles", result.RebillCycles, "nmi_history_months", result.NMIHistoryMonths, "subscription_transitions", result.SubscriptionTransitions, "subscription_billing_changes", result.SubscriptionBillingChanges, "invoice_attempts", result.InvoiceAttempts, "unpaid_invoices", result.UnpaidInvoices, "limit_windows", result.LimitWindows, "leases", result.Leases, "limit_adjustments", result.LimitAdjustments, "webhook_health_days", result.WebhookHealthDays, "provider_listed_rebills", result.ListedRebills, "reconciliation_findings", result.ReconciliationFindings, "provider_intents", result.ProviderIntents, "operation_log", result.OperationLog, "released_parks", result.ReleasedParks, "customer_messages", result.CustomerMessages})
 
 	if cleanupErr != nil {
 		return next, fmt.Errorf("cleanup expired data: %w", cleanupErr)
@@ -460,6 +462,12 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	sweep("delete webhook health days", &result.WebhookHealthDays, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteWebhookHealthDaysBefore(ctx, gen.DeleteWebhookHealthDaysBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.MetricCounters), RowLimit: limit,
+		})
+	})
+
+	sweep("delete listed rebills", &result.ListedRebills, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteProviderListedRebillsBefore(ctx, gen.DeleteProviderListedRebillsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.ListedRebills), RowLimit: limit,
 		})
 	})
 

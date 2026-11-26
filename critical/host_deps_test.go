@@ -130,7 +130,7 @@ func TestHostDeps(t *testing.T) {
 		require.NoError(t, err, "the other declarations serve")
 		require.Equal(t, w.alpha.MerchantID(), alpha)
 	})
-	t.Run("OR-J04-S77/a-vault-merchant-document-with-a-retired-key-names-its-replacement", func(t *testing.T) {
+	t.Run("OR-J04-S77/a-vault-merchant-document-with-an-unknown-key-is-refused", func(t *testing.T) {
 		t.Setenv(vaulttest.AddrEnv, os.Getenv("OPENRAILS_CRITICAL_VAULT_ADDR"))
 		t.Setenv(vaulttest.TokenEnv, os.Getenv("OPENRAILS_CRITICAL_VAULT_TOKEN"))
 		vault := vaulttest.New(t)
@@ -142,13 +142,13 @@ func TestHostDeps(t *testing.T) {
 			}
 		})
 		vault.Put(t, "openrails/merchants/"+w.alpha.MerchantID().UUID().String()+"/merchant", map[string]any{"display_name": "Alpha", "monthly_floor": "5000000"})
-		// The next process to load it refuses it, saying what replaced the key.
+		// The next process to load it refuses it, naming the key.
 		// The configuration loads after New returns.
 		engine, err := openrails.New(t.Context(), w.cfg, w.deps)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, engine.Close(context.Background())) })
 		probe := configurationProbe(t, engine)
-		const want = "monthly_floor was replaced by usage_billing.currencies[].delinquency_floor"
+		const want = `unknown field "monthly_floor"`
 		require.Eventually(t, func() bool {
 			err := probe.Check(t.Context())
 			return err != nil && strings.Contains(err.Error(), want)

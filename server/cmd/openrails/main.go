@@ -47,9 +47,6 @@ func newRootCmd() *cobra.Command {
 				return fmt.Errorf("failed to get config flag: %w", err)
 			}
 
-			if cmd.Flags().Changed("provider-write-mode") {
-				return fmt.Errorf("--provider-write-mode was removed: %s", hostconfig.WritePostureHint)
-			}
 			cfg, err := hostconfig.Load(configPath)
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
@@ -73,9 +70,6 @@ func newRootCmd() *cobra.Command {
 
 	rootCmd.PersistentFlags().
 		StringP("config", "c", "config.yaml", "Path to config file")
-	// Retired: kept only to refuse it by name.
-	rootCmd.PersistentFlags().String("provider-write-mode", "", "")
-	_ = rootCmd.PersistentFlags().MarkHidden("provider-write-mode")
 
 	serverCmd := &cobra.Command{
 		Use:   "run-server",

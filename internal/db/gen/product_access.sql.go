@@ -625,42 +625,6 @@ func (q *Queries) MaterializeProductAccess(ctx context.Context, arg MaterializeP
 	return err
 }
 
-const productAccessCoverage = `-- name: ProductAccessCoverage :one
-SELECT COALESCE(bool_or(pa.ends_at IS NULL), false)::boolean AS indefinite,
-       COALESCE(max(pa.ends_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end_at
-FROM billing.product_access pa
-WHERE pa.merchant_id = $1::uuid AND pa.customer_id = $2::uuid
-  AND pa.product_id = ANY($3::uuid[])
-  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-  AND (pa.ends_at IS NULL OR pa.ends_at > $4::timestamptz)
-`
-
-type ProductAccessCoverageParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	ProductIds []uuid.UUID
-	At         time.Time
-}
-
-type ProductAccessCoverageRow struct {
-	Indefinite  bool
-	LatestEndAt time.Time
-}
-
-// Across the customer's live windows of a product at at: whether one is
-// indefinite, else the latest end.
-func (q *Queries) ProductAccessCoverage(ctx context.Context, arg ProductAccessCoverageParams) (ProductAccessCoverageRow, error) {
-	row := q.db.QueryRow(ctx, productAccessCoverage,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.ProductIds,
-		arg.At,
-	)
-	var i ProductAccessCoverageRow
-	err := row.Scan(&i.Indefinite, &i.LatestEndAt)
-	return i, err
-}
-
 const productAccessExistsBySource = `-- name: ProductAccessExistsBySource :one
 SELECT EXISTS (
     SELECT 1 FROM billing.product_access pa

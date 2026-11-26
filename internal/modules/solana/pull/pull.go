@@ -393,10 +393,13 @@ func (h *Handler) expiredUnseen(ctx context.Context, intent gen.BillingProviderI
 	return err == nil && never
 }
 
-// repairFromSignature runs the renewal repair for a pull CONFIRMED on-chain:
+// repairFromSignature runs the renewal repair for a pull FINALIZED on-chain:
 // RenewMembership (idempotent on the signature) + AdvanceAfterPull.
 func (h *Handler) repairFromSignature(ctx context.Context, repo *solanasubs.SolanaSubscriptionRepo, agreement *Agreement, intent gen.BillingProviderIntent, sig string) intents.Outcome {
 	receipt, err := recurring.VerifyPullReceipt(ctx, h.Chain, &agreement.Row, sig, agreement.TokenAmount, agreement.PeriodHours, agreement.TokenDecimals, intent.ID)
+	if errors.Is(err, recurring.ErrPaymentNotLanded) {
+		return intents.Ambiguous("pull landed; its settlement awaits finality")
+	}
 	if err != nil {
 		return intents.Ambiguous("pull receipt does not qualify its accepted agreement: " + err.Error())
 	}
@@ -422,8 +425,9 @@ const (
 	sigVerdictNotLanded
 )
 
-// checkSignature reads the chain for the recorded signature. sigVerdictLanded
-// reports a confirmed, on-chain-successful transaction. Reverted receipts
+// checkSignature reads the chain for the recorded signature at finalized
+// commitment. sigVerdictLanded reports a finalized, on-chain-successful
+// transaction; one only confirmed is sigVerdictUnknown. Reverted receipts
 // also return their validated envelope for authoritative decline classification.
 func (h *Handler) checkSignature(ctx context.Context, signature string) (*rpc.GetTransactionResult, sigVerdict) {
 	return checkSolanaSignature(ctx, h.Chain, signature)
@@ -437,7 +441,7 @@ func checkSolanaSignature(ctx context.Context, chain solanaint.ChainReader, sign
 	if err != nil {
 		return nil, sigVerdictUnknown
 	}
-	result, err := chain.GetTransaction(ctx, sig)
+	result, err := chain.GetFinalizedTransaction(ctx, sig)
 	if err != nil || result == nil {
 		return nil, sigVerdictUnknown
 	}

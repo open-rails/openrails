@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/custodians"
@@ -23,43 +22,6 @@ import (
 // and each PSP whose gateway those cards are charged through REFERENCES it:
 //
 //	merchants.<slug>.psps.<key>.custodian: <custodian key>
-//
-// Phase 2 kept the whole arrangement inside each PSP's settings map. That was
-// right about where custody hangs and wrong about whose credentials those are:
-// copied per PSP, one custodian silently became two.
-
-// retiredPSPCustodySettingKeys fail LOUDLY rather than being ignored. Every one
-// of them named a credential that now belongs to the custodian entry, and a
-// custody knob accepted-but-inert sits on a money path reading as "this works".
-var retiredPSPCustodySettingKeys = map[string]string{
-	"custodian":                "moved: custody is a REFERENCE now — declare merchants.<slug>.custodians.<key>.<kind> once and point this PSP at it with `custodian: <key>` on the PSP entry (a sibling of account_id), not a settings key",
-	"custodian_account_id":     "moved: the custodian-native tenant id is the custodian entry's account_id",
-	"custodian_public_api_key": "moved: declare it as the custodian entry's settings." + custodians.SettingPublicAPIKey,
-	"custodian_network_tokens": "moved: declare it as the custodian entry's settings." + custodians.SettingNetworkTokens,
-	"custodian_api_key":        "moved: the custodian's private application key is the custodian entry's `" + custodians.SecretAPIKey + "` secret, not a PSP setting",
-	// or#879's own retirements, still loud: they were keys of the fake
-	// `vaulted_card` rail, and accepting one would arm a PSP charging nothing.
-	"gateway_account": "removed: a vaulted_card account pointed at the NMI PSP it charged through. Declare the custodian once and reference it from that NMI PSP instead",
-	"nt_charges":      "removed: it was only ever a hard error (NMI documents no external DPAN+cryptogram acceptance). charge_via routing is decided per instrument, not per account",
-}
-
-// RejectRetiredCustodySettings refuses a PSP settings map that still carries an
-// inline custody block. It runs on both ingestion planes — manifest push and
-// stored-settings resolution — so neither can arm one.
-func RejectRetiredCustodySettings(settings map[string]any) error {
-	var retired []string
-	for key := range settings {
-		if _, ok := retiredPSPCustodySettingKeys[strings.ToLower(strings.TrimSpace(key))]; ok {
-			retired = append(retired, key)
-		}
-	}
-	if len(retired) == 0 {
-		return nil
-	}
-	sort.Strings(retired)
-	first := strings.ToLower(strings.TrimSpace(retired[0]))
-	return fmt.Errorf("psp settings: %q is %s", retired[0], retiredPSPCustodySettingKeys[first])
-}
 
 // CustodianEntry is ONE declared custodian, in the shape both ingestion planes
 // converge on: the manifest block and a mode-2 API write validate through

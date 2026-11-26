@@ -518,14 +518,9 @@ func ccbillReservation(raw string) (uuid.UUID, bool) {
 	return providerAttemptID(raw)
 }
 
-// providerAttemptID reads an invoice attempt id a provider echoes back. A
-// sale opened before the attempt was named an invoice attempt carries oat_.
+// providerAttemptID reads an invoice attempt id a provider echoes back.
 func providerAttemptID(raw string) (uuid.UUID, bool) {
-	raw = strings.TrimSpace(raw)
-	if legacy, ok := strings.CutPrefix(raw, "oat_"); ok {
-		raw = "iat_" + legacy
-	}
-	id, err := billing.ParseInvoiceAttemptID(raw)
+	id, err := billing.ParseInvoiceAttemptID(strings.TrimSpace(raw))
 	if err != nil || id.IsZero() {
 		return uuid.Nil, false
 	}

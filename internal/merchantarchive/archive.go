@@ -40,9 +40,6 @@ func (e *Error) Error() string {
 	if e.Table != "" {
 		return fmt.Sprintf("merchant archive %s: %s (%d rows)", e.Code, e.Table, e.Count)
 	}
-	if errors.Is(e.Err, archivewire.ErrPriceOwnershipFormat) {
-		return "merchant archive " + e.Code + ": " + e.Err.Error()
-	}
 	return "merchant archive " + e.Code
 }
 func (e *Error) Unwrap() error { return e.Err }

@@ -28,11 +28,8 @@ type pushAuthBootstrapOptions struct {
 }
 
 type pushMerchantConfigOptions struct {
-	file      string
-	insert    bool
-	overwrite bool
-	prune     bool
-	seed      bool
+	file   string
+	insert bool
 }
 
 func newPushAuthBootstrapCmd() *cobra.Command {
@@ -63,21 +60,9 @@ func newPushMerchantConfigCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&opts.file, "file", "f", bootstrap.DefaultMerchantConfigManifestPath, "merchant config manifest YAML file")
-	addPushMutationFlags(cmd, &opts.insert, &opts.overwrite, &opts.prune,
-		"create missing merchant/config objects declared by the manifest",
-		"re-assert manifest secret/config values over existing state",
-		"delete merchant secrets that are absent from the manifest")
-	cmd.Flags().BoolVar(&opts.seed, "seed", false, "create the manifest's missing merchants")
+	// A bare command is plan-only.
+	cmd.Flags().BoolVar(&opts.insert, "insert", false, "create the manifest's missing merchants")
 	return cmd
-}
-
-// addPushMutationFlags declares the mutation classes. or#893: there is no
-// --dry-run here — a bare command is plan-only, so a hidden flag that ALSO
-// meant "plan only" could silently override an explicitly requested mutation.
-func addPushMutationFlags(cmd *cobra.Command, insert, overwrite, prune *bool, insertHelp, overwriteHelp, pruneHelp string) {
-	cmd.Flags().BoolVar(insert, "insert", false, insertHelp)
-	cmd.Flags().BoolVar(overwrite, "overwrite", false, overwriteHelp)
-	cmd.Flags().BoolVar(prune, "prune", false, pruneHelp)
 }
 
 func validateManifestFileArgs(cmd *cobra.Command, args []string, defaultPath, label string) error {
@@ -154,10 +139,7 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 		return fmt.Errorf("config not loaded; push-merchant-config requires --config")
 	}
 	// Initial provisioning is create-only; updates use explicit applications.
-	reconcileOpts, err := bootstrap.ResolvePushMerchantConfigOptions(cfg, opts.seed, opts.insert, opts.overwrite, opts.prune)
-	if err != nil {
-		return err
-	}
+	reconcileOpts := bootstrap.ReconcileOptions{Insert: opts.insert}
 
 	resources, err := openCLIControlPlane(ctx)
 	if err != nil {
@@ -298,7 +280,7 @@ func applyPushMerchantConfigManifest(ctx context.Context, cfg *billing.Config, c
 		return nil
 	}
 	if !reconcileOpts.Insert {
-		fmt.Fprintf(out, "merchants: %d declared (plan-only; --seed provisions them)\n", len(manifest.Merchants))
+		fmt.Fprintf(out, "merchants: %d declared (plan-only; --insert provisions them)\n", len(manifest.Merchants))
 		return nil
 	}
 	if err := bootstrap.ReconcileMerchantManifestData(ctx, slog.Default(), cfg, cp, manifest, reconcileOpts); err != nil {

@@ -39,9 +39,6 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			if strings.TrimSpace(slug) == "" {
 				return fmt.Errorf("--merchant is required")
 			}
-			if cmd.Flags().Changed("provider-write-mode") {
-				return fmt.Errorf("--provider-write-mode was removed: %s", hostconfig.WritePostureHint)
-			}
 			if serverURL != "" {
 				if cmd.Flags().Changed("config") {
 					return fmt.Errorf("--config is local-only and cannot be used with --server-url")

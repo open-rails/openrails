@@ -110,7 +110,7 @@ type MessageEvent struct {
 	RetryStatus      NotificationRetryStatus
 	RecoveryAction   NotificationRecoveryAction
 	CollectionMethod InvoiceCollectionMethod
-	// The ids the fact names, prefixed (ord_, pay_, sub_).
+	// The ids the fact names, prefixed (in_, pay_, sub_).
 	InvoiceID         string
 	PaymentID         string
 	RefundedPaymentID string

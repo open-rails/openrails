@@ -60,7 +60,7 @@ func (h *NMISaleIntentHandler) database() *db.DB {
 }
 
 func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
-	if h.database() == nil || h.Sale.Fulfillment == nil {
+	if h.database() == nil {
 		return intents.Parked("purchase sale service not wired")
 	}
 	current, err := intents.NewStore(h.database()).Get(ctx, in.ID)
@@ -270,7 +270,7 @@ func (h *NMISaleIntentHandler) proxyOutcome(ctx context.Context, in gen.BillingP
 func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload) (intents.Outcome, bool) {
 	err := h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		// A new card is saved by the sale itself: no method exists yet.
-		if p.NewCard && p.InvoiceID != uuid.Nil {
+		if p.NewCard {
 			return nil
 		}
 		method, err := h.database().NewWithPgxTx(tx).Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID})
@@ -296,7 +296,7 @@ func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingProv
 	// is written before the fence, so a fenced sale always carries it.
 	store := intents.NewStore(h.database())
 	if in.Rail != string(models.RailStripe) {
-		if _, err := store.RecordProgressIfAbsent(ctx, in.ID, "submitted_at", h.Sale.Fulfillment.now().UTC().Format(time.RFC3339Nano)); err != nil {
+		if _, err := store.RecordProgressIfAbsent(ctx, in.ID, "submitted_at", h.Sale.now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return intents.Ambiguous("cannot retain sale submission time: " + err.Error()), false
 		}
 	}
@@ -327,7 +327,7 @@ func (h *NMISaleIntentHandler) executeStripeSale(ctx context.Context, in gen.Bil
 }
 
 func (h *NMISaleIntentHandler) Verify(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
-	if h.database() == nil || h.Sale.Fulfillment == nil {
+	if h.database() == nil {
 		return intents.Ambiguous("sale recovery service is unavailable")
 	}
 	current, err := intents.NewStore(h.database()).Get(ctx, in.ID)
@@ -395,7 +395,7 @@ func (h *NMISaleIntentHandler) absentSale(ctx context.Context, in gen.BillingPro
 	if err != nil {
 		return intents.Ambiguous("cannot load submitted sale: " + err.Error())
 	}
-	if history, err := intents.LoadSubmissionHistory(in); err == nil && !history.Settled(h.Sale.Fulfillment.now()) {
+	if history, err := intents.LoadSubmissionHistory(in); err == nil && !history.Settled(h.Sale.now()) {
 		if receiptErr != nil {
 			return intents.Ambiguous("sale receipt read failed: " + receiptErr.Error())
 		}
@@ -428,13 +428,9 @@ func (h *NMISaleIntentHandler) absentSale(ctx context.Context, in gen.BillingPro
 // closed when the sale completes.
 func (h *NMISaleIntentHandler) unresolvedSale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload, reason string) intents.Outcome {
 	reference := payments.NMISaleOrderReference(in.ID, p.E2ERunID)
-	evidence := map[string]any{"operation_id": in.ID.String(), "customer_id": p.UserID, "order_reference": reference, "reason": reason}
-	subject := "a card sale"
-	if p.InvoiceID != uuid.Nil {
-		invoice := billing.InvoiceID(p.InvoiceID).String()
-		evidence["invoice_id"] = invoice
-		subject = "the card sale for invoice " + invoice
-	}
+	invoice := billing.InvoiceID(p.InvoiceID).String()
+	evidence := map[string]any{"operation_id": in.ID.String(), "customer_id": p.UserID, "order_reference": reference, "reason": reason, "invoice_id": invoice}
+	subject := "the card sale for invoice " + invoice
 	raw, _ := json.Marshal(evidence)
 	action := fmt.Sprintf("NMI cannot confirm %s (customer %s): %s. Nothing is resent, and the customer cannot pay for it again while this stands. Look up order reference %s at NMI, then run `openrails intents resolve --intent %s --receipt <transaction id>` if it was charged; `--not-executed` is accepted only once NMI shows the sale declined.", subject, p.UserID, reason, reference, in.ID)
 	wctx, cancel := intents.LedgerWriteContext(ctx)
@@ -447,7 +443,7 @@ func (h *NMISaleIntentHandler) unresolvedSale(ctx context.Context, in gen.Billin
 }
 
 func (h *NMISaleIntentHandler) Resolve(ctx context.Context, in gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
-	if h.database() == nil || h.Sale.Fulfillment == nil {
+	if h.database() == nil {
 		return intents.Outcome{}, intents.RejectResolution("sale recovery service is unavailable")
 	}
 	if resolution.Step != "" {
@@ -498,7 +494,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 	ctx = db.WithPSPID(ctx, *in.PspID)
 	var saved *models.PaymentMethod
 	var storageErr error
-	if p.InvoiceID != uuid.Nil && outcome.Class == intents.OutcomeSucceeded {
+	if outcome.Class == intents.OutcomeSucceeded {
 		if saved, err = h.newCardMethod(ctx, in, p, receipt); err != nil {
 			if !p.Recurring || !models.BasisTheoryCustody(p.Instrument.Custodian) {
 				return intents.Ambiguous("sale receipt retained; the new card's method is unread: " + err.Error())
@@ -506,9 +502,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 			storageErr = err
 		}
 	}
-	var declined *models.PaymentMethod
 	err = h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		declined = nil
 		d := h.database().NewWithPgxTx(tx)
 		customer, _ := uuid.Parse(p.UserID)
 		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: customer}); err != nil {
@@ -559,60 +553,12 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 			outcome.Evidence = saleResultEvidence(evidence)
 			return nil
 		}
-		purchase := h.Sale.Fulfillment.transactionBound(d)
-		now := purchase.now().UTC()
+		now := h.Sale.now().UTC()
 		if _, err := d.Gen(ctx).ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: in.MerchantID, FindingType: SaleUnresolvedFinding, SubjectKey: in.ID.String()}); err != nil {
 			return err
 		}
-		if p.InvoiceID != uuid.Nil {
-			if err := h.completeInvoice(ctx, d, in, p, customer, receipt, success, evidence, outcome, now, saved); err != nil {
-				return err
-			}
-		} else if success {
-			price := &models.Price{ID: p.PriceID, ProductID: p.ProductID, Amount: p.ListAmount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours}
-			product := &models.Product{ID: p.ProductID}
-			eligibility := &EligibilityResult{Status: EligibilityStatus(p.Eligibility), Coverage: &CoverageInfo{}}
-			if p.EntitlementStart.After(p.AcceptedAt) {
-				eligibility.Coverage = &CoverageInfo{HasCoverage: true, EndDate: &p.EntitlementStart}
-			}
-			metadata := map[string]any{"order_id": payments.NMISaleOrderReference(in.ID, p.E2ERunID)}
-			if p.E2ERunID != "" {
-				metadata["e2e_run_id"] = p.E2ERunID
-			}
-			result, err := purchase.applyPurchase(ctx, &payments.RegisterPurchaseRequest{UserID: p.UserID, PriceID: p.PriceID, Description: p.Description, Rail: in.Rail, TransactionID: receipt.TransactionID(), Amount: p.Amount, AmountProvided: true, Currency: p.Currency, PurchasedAt: &p.AcceptedAt, Metadata: metadata, AttemptKind: payments.AttemptInitial, TokenType: charge.TokenTypePSPToken}, price, product, eligibility, p.AcceptedAt, p.PaymentID, p.CreditGrant)
-			if err != nil {
-				return err
-			}
-			if err := recordSaleAttempt(ctx, d, in, p, customer, &p.PaymentMethodID, attempts.Attempt{Approved: true, TransactionID: receipt.TransactionID(), PaymentID: &result.PaymentID}, now); err != nil {
-				return err
-			}
-			if in.Rail != string(models.RailStripe) && p.Instrument.Mandate == nil {
-				if err := mandates.RecordStored(ctx, d.Gen(ctx), mandates.Stored{MerchantID: in.MerchantID, CustomerID: customer, PaymentMethodID: p.PaymentMethodID, PSPID: *in.PspID,
-					Rail: in.Rail, Currency: p.Currency, Lineage: charge.Mandate{InitialTransactionID: receipt.TransactionID()}, AcceptedAt: now}); err != nil {
-					return err
-				}
-			}
-			evidence["transaction_id"], evidence["payment_id"] = receipt.TransactionID(), result.PaymentID.String()
-			if result.DelayedStart != nil {
-				evidence["delayed_start"] = result.DelayedStart.UTC().Format(time.RFC3339Nano)
-			}
-		} else {
-			for key, value := range outcome.Evidence {
-				evidence[key] = value
-			}
-			if evidence["declined"] == true {
-				code, _ := evidence["localization_id"].(string)
-				if code == "" {
-					code, _ = evidence["decline_code"].(string)
-				}
-				avs, _ := evidence["avs_response"].(string)
-				cvv, _ := evidence["cvv_response"].(string)
-				transaction, _ := evidence["decline_transaction_id"].(string)
-				answer := decline.Evidence{Code: code, AVS: avs, CVV: cvv, CardBrand: evidenceText(evidence, "card_brand"), CardLast4: evidenceText(evidence, "card_last4")}
-				if err := recordSaleAttempt(ctx, d, in, p, customer, &p.PaymentMethodID, attempts.Attempt{Answer: answer, TransactionID: transaction}, now); err != nil {
-					return err
-				}
-			}
+		if err := h.completeInvoice(ctx, d, in, p, customer, receipt, success, evidence, outcome, now, saved); err != nil {
+			return err
 		}
 		if record := intents.OperatorResolutionRecord(ctx); record != nil {
 			evidence["operator_resolution"] = record
@@ -621,11 +567,6 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 			// The receipt already prevents another charge. Keep this intent open
 			// for card conversion while committing the invoice's paid access.
 			return nil
-		}
-		if !success && p.NewCard && p.InvoiceID == uuid.Nil {
-			if declined, err = declinedCard(ctx, d, in.MerchantID, p.PaymentMethodID); err != nil {
-				return err
-			}
 		}
 		raw, err := json.Marshal(evidence)
 		if err != nil {
@@ -648,7 +589,6 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 	if storageErr != nil {
 		return intents.Ambiguous("invoice paid; card storage pending: " + storageErr.Error())
 	}
-	discardCard(ctx, h.Log, h.Sale.RailPaymentMethodService, declined)
 	if saved != nil && saved.Custodian == models.CustodianBasisTheory {
 		h.provisionNetworkToken(ctx, in, p, saved)
 	}
@@ -696,15 +636,13 @@ func saleResultEvidence(evidence map[string]any) map[string]any {
 	return out
 }
 
-// recordSaleAttempt records the sale's answer in its completion transaction.
-// Its target is the invoice an invoice sale pays, else the price; method is the
-// card charged, nil for a new card that was not saved.
+// recordSaleAttempt records the sale's answer in its completion transaction:
+// its target is the invoice it pays; method is the card charged, nil for a
+// new card that was not saved.
 func recordSaleAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p payments.NMISalePayload, customer uuid.UUID, method *uuid.UUID, a attempts.Attempt, at time.Time) error {
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, customer, *in.PspID, in.Rail
-	a.Kind, a.At, a.Target, a.Step = attempts.Initial, at, p.PriceID.String(), "charge"
-	if p.InvoiceID != uuid.Nil {
-		a.Target, a.InvoiceID, a.NewCard = p.InvoiceID.String(), &p.InvoiceID, p.NewCard
-	}
+	a.Kind, a.At, a.Target, a.Step = attempts.Initial, at, p.InvoiceID.String(), "charge"
+	a.InvoiceID, a.NewCard = &p.InvoiceID, p.NewCard
 	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Amount, p.Currency, method, &in.ID
 	a.TokenType = saleTokenType(p)
 	a.Sent = p.Instrument.Mandate

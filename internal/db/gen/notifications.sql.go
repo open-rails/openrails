@@ -103,7 +103,7 @@ SELECT pg_advisory_xact_lock_shared(hashtextextended('openrails.notification_ord
 `
 
 // One merchant's account-notification ordering. Producers share it until they
-// commit; an adoption export or ordering restore holds it alone.
+// commit; an ordering export or restore holds it alone.
 func (q *Queries) ShareNotificationOrdering(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, shareNotificationOrdering, merchantID)
 	return err

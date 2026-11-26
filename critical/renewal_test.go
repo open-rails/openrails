@@ -28,26 +28,17 @@ func startFleet(t *testing.T, w *world) *river.Client[pgx.Tx] {
 // completion. This drives a due pass; it makes no claim about scheduler cadence.
 func runRegistered(t *testing.T, fleet *river.Client[pgx.Tx], kind string, copies int) {
 	t.Helper()
-	events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
-	defer unsubscribe()
-	waiting := map[int64]bool{}
-	for range copies {
-		job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: registeredQueue(kind)})
-		require.NoError(t, err)
-		waiting[job.Job.ID] = true
-	}
-	deadline := time.NewTimer(20 * time.Second)
-	defer deadline.Stop()
-	for len(waiting) != 0 {
-		select {
-		case event := <-events:
-			if event != nil && waiting[event.Job.ID] {
-				require.Equal(t, river.EventKindJobCompleted, event.Kind, "%s: %+v", kind, event.Job.Errors)
-				delete(waiting, event.Job.ID)
-			}
-		case <-deadline.C:
-			t.Fatalf("registered %s jobs did not complete: %v", kind, waiting)
+	finished := finishPass(t, fleet, kind, func() []int64 {
+		ids := make([]int64, 0, copies)
+		for range copies {
+			job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: registeredQueue(kind)})
+			require.NoError(t, err)
+			ids = append(ids, job.Job.ID)
 		}
+		return ids
+	})
+	for _, event := range finished {
+		require.Equal(t, river.EventKindJobCompleted, event.Kind, "%s: %+v", kind, event.Job.Errors)
 	}
 	// River uses wall time while business time is advanced independently. Make
 	// newly accepted work available through River's host API; worker admission

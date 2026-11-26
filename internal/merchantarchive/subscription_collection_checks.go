@@ -2,10 +2,8 @@ package merchantarchive
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
-	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
@@ -99,11 +97,7 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 	if payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptRenewal || payment.TokenType == nil || *payment.TokenType != payments.DefaultTokenType(op.Rail, p.Instrument.Custodian) {
 		return errors.New("engine payment lacks its recurring custody stamp")
 	}
-	limit, err := safecast.Convert[int32](len(t.Entitlements) + 2)
-	if err != nil {
-		return err
-	}
-	history, err := q.ListRenewalGrantsForArchive(ctx, gen.ListRenewalGrantsForArchiveParams{MerchantID: op.MerchantID, SubscriptionID: t.SubscriptionID, PeriodStart: t.PeriodStart, RowLimit: limit})
+	history, err := q.ListRenewalGrantsForArchive(ctx, gen.ListRenewalGrantsForArchiveParams{MerchantID: op.MerchantID, SubscriptionID: t.SubscriptionID, PeriodStart: t.PeriodStart, RowLimit: 2})
 	if err != nil {
 		return err
 	}
@@ -115,17 +109,6 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 			return errors.New("withheld engine renewal has access grants")
 		}
 		return nil
-	}
-	if len(history) == 0 && !payment.CreatedAt.Before(t.PeriodEnd) {
-		var legacy struct {
-			Renewal map[string]json.RawMessage `json:"renewal"`
-		}
-		if err := json.Unmarshal(op.Payload, &legacy); err != nil {
-			return err
-		}
-		if _, explicitAccess := legacy.Renewal["access_duration_hours"]; !explicitAccess {
-			return nil // Older writers omitted already elapsed paid windows.
-		}
 	}
 	return subscriptions.ValidateInitialMembershipHistory(op.MerchantID, accepted, history)
 }

@@ -208,16 +208,16 @@ func TestUsageLimits(t *testing.T) {
 		require.Empty(t, foreign.Items, "another merchant's catalog declares none of them")
 	})
 
-	t.Run("OR-J23-S36/a-catalog-naming-a-limits-rate-cards-is-refused-with-their-rename", func(t *testing.T) {
+	t.Run("OR-J23-S36/a-catalog-naming-an-unknown-limit-field-is-refused-and-applies-nothing", func(t *testing.T) {
 		a := newAuthorityWorld(t)
 		const document = "schema_version: 1\nmeters:\n  tokens: {event_type: chat, value_property: tokens, aggregation: sum}\nlimits:\n  weekly:\n    unit: usage_units\n    reset: {kind: lifetime}\n    rate_cards: [{meter: tokens, price: {model: per_unit, per_unit: {unit_amount: \"1\"}}}]\n"
 		_, err := catalog.ParseApplicationYAML([]byte(document))
-		require.ErrorContains(t, err, "limit rate_cards are now counts")
+		require.ErrorContains(t, err, `unknown field "rate_cards"`)
 		status, raw := a.request(t, http.MethodPost, "/v1/catalog/apply", a.alphaKey.Secret, json.RawMessage(`{"schema_version": 1,
 			"meters": {"tokens": {"event_type": "chat", "value_property": "tokens", "aggregation": "sum"}},
 			"limits": {"weekly": {"unit": "usage_units", "reset": {"kind": "lifetime"}, "rate_cards": [{"meter": "tokens", "price": {"model": "per_unit", "per_unit": {"unit_amount": "1"}}}]}}}`))
 		require.Equal(t, http.StatusBadRequest, status, string(raw))
-		require.Contains(t, string(raw), "limit rate_cards are now counts", "the refusal names the replacement")
+		require.Contains(t, string(raw), `unknown field \"rate_cards\"`, "the refusal names the field")
 		_, err = a.alphaRemote.GetLimit(t.Context(), "weekly")
 		requireCode(t, err, billing.CodeLimitNotFound)
 		meters, err := a.alphaRemote.ListMeters(t.Context(), billing.PageRequest{})

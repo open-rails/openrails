@@ -1,9 +1,6 @@
 package billing
 
-import (
-	"github.com/google/uuid"
-	"github.com/open-rails/authkit/notify"
-)
+import "github.com/google/uuid"
 
 // NotificationOrdering is source-owned ordering metadata for one exact issue.
 // It is transferred explicitly beside a billing archive, never inferred from
@@ -16,11 +13,9 @@ type NotificationOrdering struct {
 	SourceEvent *uuid.UUID `json:"source_event,omitempty"`
 }
 
-// NotificationAdoption is an explicit stopped-writer cutover artifact. Adoptions
-// rename exact retained legacy receipts; they must not replay history into a
-// new inbox. Ordering must accompany the producer if its database is relocated.
-type NotificationAdoption struct {
+// NotificationOrderingSnapshot is a merchant's notification ordering, which
+// must accompany its billing archive when the producer's database moves.
+type NotificationOrderingSnapshot struct {
 	MerchantID MerchantID             `json:"merchant_id"`
-	Adoptions  []notify.Adoption      `json:"adoptions"`
 	Ordering   []NotificationOrdering `json:"ordering"`
 }

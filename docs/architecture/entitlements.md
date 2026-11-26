@@ -224,7 +224,7 @@ Checks:
 
 Critical journeys, over real PostgreSQL, Redis and Vault:
 - **J27**, entitlements: OR-J27-S01 to S04 (window union, revocation, boundaries, archive and refund), S05 to S09 (subscription closure and repair), S10 to S12 (imported grants), S13 and S14 (the SDK cache: scoped allowed keys, cutoff, Redis sharing, live denial, a purchase seen at once), S16 (read plans at 10,000 held products).
-- **J23**, limits and the gate: OR-J23-S04, S05 (a host transaction), S07 to S18 (declarations, capacity, windows, overruns, spend caps), S19 to S22, S24, S27, S37, S38, S40, S41 (the gate: lost replies, outbox, closing, in-flight reports, the bound, offline shares and resends, idle stop, window resets), S33, S34 (a window and an accrual-rate cap in the policy's `policy_currency`), S35 (a limit counting two meters by weight), S36 (a limit's `rate_cards` refused with their rename to `counts`); OR-J25-S05 (running charges under `accrual_rate_cap`).
+- **J23**, limits and the gate: OR-J23-S04, S05 (a host transaction), S07 to S18 (declarations, capacity, windows, overruns, spend caps), S19 to S22, S24, S27, S37, S38, S40, S41 (the gate: lost replies, outbox, closing, in-flight reports, the bound, offline shares and resends, idle stop, window resets), S33, S34 (a window and an accrual-rate cap in the policy's `policy_currency`), S35 (a limit counting two meters by weight), S36 (a field a limit does not take refused); OR-J25-S05 (running charges under `accrual_rate_cap`).
 - **J24**, leases and views: OR-J24-S03, S14, S16, S18 to S20, S23 to S27, S29, S31 to S34, S37, S38, S42, S43, S45 (lease lifetime, views, limit sets, admission windows, bounded syncs, view refusals, lock order).
 - Also OR-J22-S06 and OR-J22-S50 (lapsed credit), OR-J29-S08, OR-J31-S14.
 

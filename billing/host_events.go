@@ -108,7 +108,7 @@ type ProductEntitlementsChangedEvent struct {
 }
 
 // PaymentSettledEvent is one successful rail payment. CustomerID and what it
-// paid (an invoice, a subscription's period, or a one-price sale's price) come
+// paid (an invoice or a subscription's period) come
 // from the authoritative payment row so a host can route the settlement
 // without a second read.
 type PaymentSettledEvent struct {

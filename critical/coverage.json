@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 788,
+  "scenario_count": 798,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1129,11 +1129,6 @@
       "name": "A Solana pull scheduled ahead and restored with its merchant runs on the destination at its due time"
     },
     {
-      "id": "OR-J31-S40",
-      "journey": "J31",
-      "name": "A merchant's notification adoption export holds back no other merchant and its own producers commit after its snapshot"
-    },
-    {
       "id": "OR-J31-S09",
       "journey": "J31",
       "name": "A paid Stripe hosted-page invoice exports and restores with its attempt's Checkout Session state"
@@ -1511,7 +1506,7 @@
     {
       "id": "OR-J23-S36",
       "journey": "J23",
-      "name": "A catalog naming a limit's rate_cards is refused with their rename to counts, as YAML and over HTTP, and applies nothing; the one-to-one count applies"
+      "name": "A catalog naming a field a limit does not take (rate_cards) is refused, as YAML and over HTTP, and applies nothing; the one-to-one count applies"
     },
     {
       "id": "OR-J23-S37",
@@ -1801,7 +1796,7 @@
     {
       "id": "OR-J38-S72",
       "journey": "J38",
-      "name": "Upgrade retires scheduled provider refreshes and the operator command coalesces requests and retries the same job"
+      "name": "Starting the workers queues no provider refresh; the operator command coalesces requests and retries the same job"
     },
     {
       "id": "OR-J38-S76",
@@ -2536,7 +2531,7 @@
     {
       "id": "OR-J04-S77",
       "journey": "J04",
-      "name": "A Vault merchant document naming a retired key is refused with what replaced it, as a manifest is"
+      "name": "A Vault merchant document naming an unknown key is refused, as a manifest is"
     },
     {
       "id": "OR-J25-S37",
@@ -3126,7 +3121,7 @@
     {
       "id": "OR-J53-S01",
       "journey": "J53",
-      "name": "Cash, payments, attempts, purchases and rebills by outcome or kind equal the measures they replace on one merchant's real sales, refund, won dispute, declines and missed renewal, and a removed measure is refused naming its replacement"
+      "name": "Cash, payments, attempts, purchases and rebills by outcome or kind equal the measures they replace on one merchant's real sales, refund, won dispute, declines and missed renewal, and a measure or dimension the registry does not serve is refused"
     },
     {
       "id": "OR-J53-S02",
@@ -3336,7 +3331,7 @@
     {
       "id": "OR-J45-S07",
       "journey": "J45",
-      "name": "Authorization rate, issuer-discretion decline rate and first-try rebill approval read the stored outcomes and causes: refusals and errors are in neither, missed renewals in neither; the decline mix and Visa categories, and cuts by kind, card brand, BIN, token type and whether the storing transaction's id was sent; the dimensions decline_cause renamed are refused with their new names; the overview shows them as tiles and in Payment health"
+      "name": "Authorization rate, issuer-discretion decline rate and first-try rebill approval read the stored outcomes and causes: refusals and errors are in neither, missed renewals in neither; the decline mix and Visa categories, and cuts by kind, card brand, BIN, token type and whether the storing transaction's id was sent; the overview shows them as tiles and in Payment health"
     },
     {
       "id": "OR-J45-S08",
@@ -3649,16 +3644,6 @@
       "name": "A pull that runs past one lease period keeps its lease and others still skip; a dead holder's lease lapses on its own and the next pull takes it"
     },
     {
-      "id": "OR-J06-S72",
-      "journey": "J06",
-      "name": "Retired provider write mode, engine admission hold and drain settings refuse boot and name their replacement"
-    },
-    {
-      "id": "OR-J06-S73",
-      "journey": "J06",
-      "name": "A provider_sandbox section or PROVIDER_SANDBOX_* variable refuses boot and names its replacement: no setting redirects a provider"
-    },
-    {
       "id": "OR-J06-S74",
       "journey": "J06",
       "name": "A signup under a rebill hold charges and creates its subscription; its first renewal waits with access kept and charges once after the release"
@@ -3706,7 +3691,7 @@
     {
       "id": "OR-J06-S84",
       "journey": "J06",
-      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot from the file or the environment and name what is refused; the key path alone loads"
+      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot as unknown keys from the file or the environment; the key path alone loads"
     },
     {
       "id": "OR-J06-S85",
@@ -3931,7 +3916,7 @@
     {
       "id": "OR-J47-S10",
       "journey": "J47",
-      "name": "A checkout's customer type is new on a first purchase, returning after one or while subscribed, reactivated once a subscription ended; sales and cash split by it, and subscriber_type is refused with it"
+      "name": "A checkout's customer type is new on a first purchase, returning after one or while subscribed, reactivated once a subscription ended; sales and cash split by it"
     },
     {
       "id": "OR-J47-S11",
@@ -3942,6 +3927,71 @@
       "id": "OR-J47-S12",
       "journey": "J47",
       "name": "A customer's erasure clears every attribution field of its checkouts; the checkouts stand"
+    },
+    {
+      "id": "OR-J37-S72",
+      "journey": "J37",
+      "name": "A Solana renewal pull that is confirmed and not finalized books nothing, extends nothing and is not signed again; it is booked once when it finalizes"
+    },
+    {
+      "id": "OR-J37-S73",
+      "journey": "J37",
+      "name": "A first Solana subscription payment that is confirmed and not finalized enrolls nothing and stays pending; it enrolls once when it finalizes"
+    },
+    {
+      "id": "OR-J37-S74",
+      "journey": "J37",
+      "name": "A confirmed Solana pull whose fork is dropped books nothing and is signed again only after its blockhash provably expired"
+    },
+    {
+      "id": "OR-J38-S86",
+      "journey": "J38",
+      "name": "A CCBill rebill callback stamped before the windows already read, which no DataLink read lists, raises one high pull.charge.unconfirmed finding with its payment's evidence 36 hours after it was received; the payment is kept and later refreshes do not duplicate it"
+    },
+    {
+      "id": "OR-J38-S87",
+      "journey": "J38",
+      "name": "A CCBill rebill callback whose transaction a DataLink read lists raises no finding"
+    },
+    {
+      "id": "OR-J38-S88",
+      "journey": "J38",
+      "name": "A genuine CCBill rebill DataLink lists late, in a later window and without its leading zero, raises no finding; an unconfirmed one is resolved by the read that later lists it"
+    },
+    {
+      "id": "OR-J38-S89",
+      "journey": "J38",
+      "name": "An unlisted CCBill rebill callback raises nothing for 36 hours after it was received, and is raised after"
+    },
+    {
+      "id": "OR-J38-S90",
+      "journey": "J38",
+      "name": "A CCBill failed-rebill cancel callback that cut paid access short, for a member the DataLink roster lists active, raises pull.subscription.mismatch at critical and restores nothing"
+    },
+    {
+      "id": "OR-J38-S91",
+      "journey": "J38",
+      "name": "A CCBill rebill DataLink dates hours before its callback's stamp, in an earlier window, raises no finding"
+    },
+    {
+      "id": "OR-J38-S92",
+      "journey": "J38",
+      "name": "An ordinary CCBill cancellation the roster still lists keeps the mismatch below critical until the roster still lists it 48 hours after access ended"
+    },
+    {
+      "id": "OR-J38-S93",
+      "journey": "J38",
+      "name": "A paced (live) CCBill refresh, a day of transactions an hour, raises pull.charge.unconfirmed only for the callback rebill no read lists"
+    },
+    {
+      "id": "OR-J38-S94",
+      "journey": "J38",
+      "name": "A CCBill rebill callback reusing a transaction id DataLink lists under another subscription is raised, with that listing as evidence"
+    },
+    {
+      "id": "OR-J38-S97",
+      "journey": "J38",
+      "name": "A second CCBill rebill callback inside a settled cycle, its next renewal date a day off the accepted cadence, is kept as an extra capture of that cycle, not refused with a 500"
     }
   ]
 }

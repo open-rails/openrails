@@ -10,7 +10,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,29 +37,8 @@ func TestCreditExpiry(t *testing.T) {
 		inFlight := []billing.InFlight{{CustomerID: customer, Limit: "balance", Unit: "USD", Amount: 400}}
 		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: inFlight})
 		balance(t, w.alpha, customer, 650, 400, 1050)
-		fleet := hostFleet(t, w)
-		done, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
-		defer unsubscribe()
 		w.clock.Advance(time.Hour)
-		job, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.billing_pass"}, &river.InsertOpts{Queue: openrails.QueueBilling})
-		require.NoError(t, err)
-		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
-		require.NoError(t, fleet.Start(t.Context()))
-		timer := time.NewTimer(15 * time.Second)
-		defer timer.Stop()
-		finished := false
-		for !finished {
-			select {
-			case event := <-done:
-				if event.Job.ID != job.Job.ID {
-					continue
-				}
-				require.Equal(t, river.EventKindJobCompleted, event.Kind)
-				finished = true
-			case <-timer.C:
-				t.Fatal("the billing pass did not finish")
-			}
-		}
+		runRegistered(t, startFleet(t, w), "openrails.billing_pass", 1)
 		grant, err := w.alpha.GetCreditGrant(t.Context(), expiring[0].ID)
 		require.NoError(t, err)
 		require.EqualValues(t, 450, grant.SpentAmount)

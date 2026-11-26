@@ -85,12 +85,3 @@ func CloneCreditGrantSnapshot(s *CreditGrantSnapshot) *CreditGrantSnapshot {
 	}
 	return &out
 }
-
-// SameCreditGrantPromise compares the accepted benefit independently of when it
-// was fulfilled. The persisted payment alone owns the fulfillment dates.
-func SameCreditGrantPromise(a, b *CreditGrantSnapshot) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return a.Amount == b.Amount && a.Currency == b.Currency && a.ExpiresAfterDays == b.ExpiresAfterDays
-}
