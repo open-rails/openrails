@@ -230,7 +230,7 @@ func CreateProductAccess(r *httprequest.Request) {
 		}
 		batch[i] = productaccess.Grant{
 			CustomerID: item.CustomerID.UUID(), ProductID: item.ProductID.UUID(), Hours: item.Hours,
-			Reason: reason, Note: item.Note, Actor: admin.Subject, IdempotencyKey: fmt.Sprintf("%s:%d", key, i),
+			Reason: reason, Note: item.Note, Actor: admin.Subject,
 		}
 		if item.EndsAt != nil {
 			end := item.EndsAt.UTC()
@@ -242,7 +242,7 @@ func CreateProductAccess(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeInternalError, "product access service unavailable")
 		return
 	}
-	granted, err := svc.GrantProducts(r.Request.Context(), batch)
+	granted, err := svc.GrantProducts(r.Request.Context(), key, batch)
 	if err != nil {
 		writeRefusal(r, err, "failed to grant product access")
 		return

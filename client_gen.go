@@ -458,9 +458,10 @@ func (c *Client) ListProductAccess(ctx context.Context, params billing.ProductAc
 // across any customers, all or none; the answer is in request order. Each
 // grant is a window of its product: the customer holds the product's current
 // keys while it is live. idempotencyKey is required: a retry with it replays
-// the first answer and grants nothing again. A retry after staff removed a
-// window it granted (revoked before it started) is resource_conflict; grant
-// again under a new key.
+// the first answer and grants nothing again; a retry with other items or
+// terms is idempotency_key_reused. A retry after staff removed a window it
+// granted (revoked before it started) is resource_conflict; grant again
+// under a new key.
 func (c *Client) CreateProductAccess(ctx context.Context, idempotencyKey string, items []billing.CreateProductAccessParams) ([]billing.ProductAccessGrant, error) {
 	var out billing.CreateProductAccessBatchResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/admin/product-access", idempotencyKey: idempotencyKey, body: billing.CreateProductAccessBatchParams{Items: items}}, &out); err != nil {

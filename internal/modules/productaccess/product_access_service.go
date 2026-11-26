@@ -32,8 +32,8 @@ import (
 // ErrProductNotFound: a grant names no product of the merchant.
 var ErrProductNotFound = apperr.New(http.StatusNotFound, billing.CodeResourceNotFound, "product not found")
 
-// ErrIdempotencyKeyReused: the key already granted another customer or product.
-var ErrIdempotencyKeyReused = apperr.New(http.StatusUnprocessableEntity, billing.CodeIdempotencyKeyReused, "idempotency key already granted another product or customer")
+// ErrIdempotencyKeyReused: the key was first sent with other grants.
+var ErrIdempotencyKeyReused = apperr.New(http.StatusUnprocessableEntity, billing.CodeIdempotencyKeyReused, "the Idempotency-Key was first sent with other grants")
 
 // ErrGrantedWindowRemoved: the key's granted window was removed.
 var ErrGrantedWindowRemoved = apperr.New(http.StatusConflict, billing.CodeResourceConflict, "the window granted by this Idempotency-Key was removed; a new grant needs a new key")
@@ -75,8 +75,8 @@ type Grant struct {
 }
 
 // GrantProduct records one free grant once per idempotency key, with its
-// customer's convergence. A replay returns the recorded window and
-// created=false; a removed window is a conflict.
+// customer's convergence. A replay with the same terms returns the recorded
+// window and created=false; a removed window is a conflict.
 func (s *Service) GrantProduct(ctx context.Context, g Grant) (*models.ProductAccess, bool, error) {
 	if s == nil || s.db == nil {
 		return nil, false, fmt.Errorf("product access service not initialized")
@@ -97,7 +97,7 @@ func (s *Service) GrantProduct(ctx context.Context, g Grant) (*models.ProductAcc
 	}
 	recorded, err := s.db.Gen(ctx).GetAccessGrantByIdempotencyKey(ctx, gen.GetAccessGrantByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: g.IdempotencyKey})
 	if err == nil {
-		if recorded.CustomerID != g.CustomerID || recorded.ProductID == nil || *recorded.ProductID != g.ProductID {
+		if recorded.CustomerID != g.CustomerID || recorded.ProductID == nil || *recorded.ProductID != g.ProductID || !sameGrantTerms(recorded, g) {
 			return nil, false, ErrIdempotencyKeyReused
 		}
 		window, err := s.db.Gen(ctx).GetProductAccessByGrant(ctx, gen.GetProductAccessByGrantParams{MerchantID: mid.UUID(), GrantID: recorded.ID})
@@ -144,6 +144,24 @@ func (s *Service) GrantProduct(ctx context.Context, g Grant) (*models.ProductAcc
 		return nil, false, ErrIdempotencyKeyReused
 	}
 	return window, true, convergejob.Queue(ctx, s.db, mid, g.CustomerID)
+}
+
+// sameGrantTerms reports whether g asks for the grant recorded under its key.
+func sameGrantTerms(recorded gen.BillingGrant, g Grant) bool {
+	if *recorded.GrantReason != string(g.Reason) || (recorded.Reason == nil) != (g.Note == nil) {
+		return false
+	}
+	if recorded.Reason != nil && *recorded.Reason != *g.Note {
+		return false
+	}
+	switch {
+	case g.Hours != nil:
+		return recorded.EndsAt != nil && recorded.EndsAt.Sub(recorded.StartsAt) == time.Duration(*g.Hours)*time.Hour
+	case g.EndsAt != nil:
+		return recorded.EndsAt != nil && recorded.EndsAt.Equal(g.EndsAt.Truncate(time.Microsecond))
+	default:
+		return recorded.EndsAt == nil
+	}
 }
 
 // RevokeProductAccess revokes a window on actor's behalf; a revoked window
@@ -259,9 +277,10 @@ func (s *Service) ListByIDs(ctx context.Context, ids []uuid.UUID) ([]gen.ListPro
 	return out, nil
 }
 
-// GrantProducts records free grants all or none, in one transaction, and
-// returns each window with its product and grant attribution, in order.
-func (s *Service) GrantProducts(ctx context.Context, batch []Grant) ([]gen.ListProductAccessPageRow, error) {
+// GrantProducts records free grants all or none under key, in one transaction,
+// and returns each window with its product and grant attribution, in order.
+// A replay needs the same item count and terms.
+func (s *Service) GrantProducts(ctx context.Context, key string, batch []Grant) ([]gen.ListProductAccessPageRow, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("product access service not initialized")
 	}
@@ -273,12 +292,29 @@ func (s *Service) GrantProducts(ctx context.Context, batch []Grant) ([]gen.ListP
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		bound := NewService(s.db.NewWithPgxTx(tx), s.clock)
 		ids := make([]uuid.UUID, len(batch))
+		createdCount := 0
 		for i, g := range batch {
-			window, _, err := bound.GrantProduct(ctx, g)
+			g.IdempotencyKey = fmt.Sprintf("%s:%d", key, i)
+			window, created, err := bound.GrantProduct(ctx, g)
 			if err != nil {
 				return err
 			}
+			if created {
+				createdCount++
+			}
 			ids[i] = window.ID
+		}
+		if createdCount > 0 && createdCount < len(batch) {
+			return ErrIdempotencyKeyReused
+		}
+		if createdCount == 0 {
+			_, err := gen.New(tx).GetAccessGrantByIdempotencyKey(ctx, gen.GetAccessGrantByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: fmt.Sprintf("%s:%d", key, len(batch))})
+			if err == nil {
+				return ErrIdempotencyKeyReused
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
 		}
 		views, err := gen.New(tx).ListProductAccessViews(ctx, gen.ListProductAccessViewsParams{MerchantID: mid.UUID(), Ids: ids})
 		if err != nil {

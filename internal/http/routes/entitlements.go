@@ -43,8 +43,9 @@ var entitlementsRoutes = []Route{
 		Doc: "CreateProductAccess grants 1 to billing.MaxBatchItems products free, across any customers, all or " +
 			"none; the answer is in request order. Each grant is a window of its product: the customer holds the " +
 			"product's current keys while it is live. idempotencyKey is required: a retry with it replays the " +
-			"first answer and grants nothing again. A retry after staff removed a window it granted (revoked " +
-			"before it started) is resource_conflict; grant again under a new key.",
+			"first answer and grants nothing again; a retry with other items or terms is idempotency_key_reused. " +
+			"A retry after staff removed a window it granted (revoked before it started) is resource_conflict; " +
+			"grant again under a new key.",
 		Request: billing.CreateProductAccessBatchParams{}, Responses: []Reply{{201, billing.CreateProductAccessBatchResult{}}}, Errors: codes("authentication_required", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "resource_conflict", "resource_not_found", "service_credential_customer_scope_denied"), Handler: h(handlers.CreateProductAccess)},
 	{Method: POST, Path: "/v1/admin/product-access/{id}/revoke", Group: Admin, Auth: AuthMerchant, Name: "RevokeProductAccess", Level: LevelUpdate,
 		Args: []any{billing.ProductAccessID{}},
