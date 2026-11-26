@@ -48,6 +48,14 @@ func newCreditShop(t *testing.T, configure ...func(*world)) *creditShop {
 	return &creditShop{a: a, p: p, customer: billing.CustomerID(uuid.MustParse(a.alice.ID))}
 }
 
+// newPostingShop is a credit shop whose usage posts as its day ends: the
+// clock starts a week back, so a payment is never dated ahead of the
+// database's clock.
+func newPostingShop(t *testing.T) *creditShop {
+	t.Helper()
+	return newCreditShop(t, func(w *world) { w.clock.Advance(-7 * 24 * time.Hour) })
+}
+
 // pack is a product granting credits for a price.
 func (s *creditShop) pack(t *testing.T, key string, credits, price int64, days int) billing.PriceID {
 	t.Helper()
@@ -68,16 +76,6 @@ func (s *creditShop) buy(t *testing.T, price billing.PriceID, total int64, key s
 	require.Equal(t, http.StatusCreated, status, string(raw))
 	var invoice billing.Invoice
 	require.NoError(t, json.Unmarshal(raw, &invoice))
-	if s.fleet != nil && invoice.Status == billing.InvoiceProcessing {
-		// With a fleet running, the charge completes in its job.
-		require.Eventually(t, func() bool {
-			read, err := s.a.alpha.GetInvoice(t.Context(), invoice.ID)
-			if err == nil {
-				invoice = *read
-			}
-			return err == nil && invoice.Status == billing.InvoiceComplete
-		}, 20*time.Second, 20*time.Millisecond)
-	}
 	require.Equal(t, billing.InvoiceComplete, invoice.Status)
 	require.NotNil(t, invoice.Payment.PaymentID)
 	return *invoice.Payment.PaymentID, paymentLot(t, s.a.alpha, s.customer, *invoice.Payment.PaymentID)
@@ -277,7 +275,7 @@ func creditBreakageAndReinstatement(t *testing.T) {
 // the same way; a pack's bonus repays at face too, its money at its rate and
 // promotional credit the rest.
 func giftSpendAndRepaidOwed(t *testing.T) {
-	s := newCreditShop(t)
+	s := newPostingShop(t)
 	a, w := s.a, s.a.world
 	_, err := a.alpha.UpdateCustomer(t.Context(), s.customer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 100_000_000}}})
 	require.NoError(t, err)
