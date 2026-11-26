@@ -39,6 +39,70 @@ func (q *Queries) AbsorbDisputeRefund(ctx context.Context, arg AbsorbDisputeRefu
 	return result.RowsAffected(), nil
 }
 
+const attachDisputePayment = `-- name: AttachDisputePayment :one
+UPDATE billing.disputes SET
+    payment_id = $1::uuid,
+    customer_id = $2::uuid,
+    amount = $3::bigint,
+    currency = $4::text,
+    responded_at = NULL,
+    updated_at = now()
+WHERE merchant_id = $5::uuid AND id = $6::uuid
+  AND payment_id IS NULL
+RETURNING merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, reason_code, provider_reason, amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at, reversal_payment_id, recovery_payment_id, absorbed_refund_ref, observed_via, responded_at, created_at, updated_at
+`
+
+type AttachDisputePaymentParams struct {
+	PaymentID  uuid.UUID
+	CustomerID uuid.UUID
+	Amount     int64
+	Currency   string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// An operator identifies the charge an unmatched case disputes, once.
+func (q *Queries) AttachDisputePayment(ctx context.Context, arg AttachDisputePaymentParams) (BillingDispute, error) {
+	row := q.db.QueryRow(ctx, attachDisputePayment,
+		arg.PaymentID,
+		arg.CustomerID,
+		arg.Amount,
+		arg.Currency,
+		arg.MerchantID,
+		arg.ID,
+	)
+	var i BillingDispute
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.PspID,
+		&i.Rail,
+		&i.ProviderRef,
+		&i.CustomerID,
+		&i.PaymentID,
+		&i.Kind,
+		&i.Network,
+		&i.Reason,
+		&i.ReasonCode,
+		&i.ProviderReason,
+		&i.Amount,
+		&i.Currency,
+		&i.Status,
+		&i.DisputedAt,
+		&i.ChargebackAt,
+		&i.EvidenceDueAt,
+		&i.ClosedAt,
+		&i.ReversalPaymentID,
+		&i.RecoveryPaymentID,
+		&i.AbsorbedRefundRef,
+		&i.ObservedVia,
+		&i.RespondedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const countCustomerChargebacks = `-- name: CountCustomerChargebacks :one
 SELECT count(*)::bigint FROM billing.disputes
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND kind = 'chargeback'

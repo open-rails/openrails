@@ -244,3 +244,16 @@ SELECT id FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
   AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text
 LIMIT 2;
+
+-- name: AttachDisputePayment :one
+-- An operator identifies the charge an unmatched case disputes, once.
+UPDATE billing.disputes SET
+    payment_id = sqlc.arg(payment_id)::uuid,
+    customer_id = sqlc.arg(customer_id)::uuid,
+    amount = sqlc.arg(amount)::bigint,
+    currency = sqlc.arg(currency)::text,
+    responded_at = NULL,
+    updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND payment_id IS NULL
+RETURNING *;

@@ -49,6 +49,8 @@ type LedgerRepair struct {
 	SubscriptionID    *uuid.UUID
 	Err               error
 	Metadata          map[string]any
+	// Action replaces the generic recommended action when set.
+	Action string
 }
 
 // RecordLedgerRepair raises a consistency.ledger.unbooked finding. Its subject
@@ -104,6 +106,9 @@ func RecordLedgerRepair(ctx context.Context, database *db.DB, now time.Time, rep
 	action += " was not booked to the ledger and needs a manual repair."
 	if repair.Err != nil {
 		action += " " + repair.Err.Error()
+	}
+	if repair.Action != "" {
+		action = repair.Action
 	}
 	rec, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingLedgerUnbooked, SubjectKey: subject, Severity: reconcile.SeverityCritical,

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 824,
+  "scenario_count": 826,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3262,6 +3262,16 @@
       "id": "OR-J46-S07",
       "journey": "J46",
       "name": "An actionable early fraud warning is a fraud report Visa counts once; without waiting for the merchant's destructive arming it refunds the charge in full once (fraud_warning, fraudulent at Stripe), ends what it paid for and blocks the card whatever events repeat it; one an event calls unactionable is not acted on; a charge in dispute is not refunded; a charge with nothing left to refund is still ended; recording reports only refunds nothing; below a full posture the response waits with one alerting finding and runs when the posture is raised"
+    },
+    {
+      "id": "OR-J46-S17",
+      "journey": "J46",
+      "name": "An unmatched NMI chargeback is attached by the operator"
+    },
+    {
+      "id": "OR-J46-S18",
+      "journey": "J46",
+      "name": "A chargeback of a refunded charge says to contest it"
     },
     {
       "id": "OR-J43-S08",

@@ -869,6 +869,8 @@ sale since the refund was requested that OpenRails has not recorded, with
 `--actor` and `--reason` attesting release. A refund NMI refused outright is
 released automatically.
 
+NMI chargebacks match a single charge by amount and card last four digits within ±7 days; when no single charge matches, find it at NMI and run `openrails disputes attach --merchant NAME --dispute dsp_... --payment pay_... --actor NAME --reason TEXT` to book it and end what it bought.
+
 ## Provider refresh
 
 Request a refresh for one merchant after missed webhooks, an outage or when
@@ -1040,6 +1042,7 @@ the merchant the token is bound to.
 | `openrails book status`, `openrails book arm --by NAME` | the book identity |
 | `openrails usage attach --actor NAME --reason TEXT [--discard-pending]` | record the configured ClickHouse as the event store in place of a lost one; `--discard-pending` discards usage not yet posted, recorded per merchant |
 | `openrails provider-refresh --merchant NAME` | queue a provider refresh and print its job |
+| `openrails disputes attach` | book an unmatched NMI chargeback against the charge it disputes |
 | `openrails intents`, `openrails intents resolve`, `openrails intents-log` | the provider intent ledger |
 | `openrails proposals list`, `proposals show`, `proposals approve`, `proposals dismiss`, `proposals foreign`, `proposals runs` | review what provider reads propose |
 | `openrails prune`, `openrails prune list`, `openrails undo-run` | retire what a PSP no longer lists; reverse a run |

@@ -1846,6 +1846,14 @@
     "OR-J46-S16": [
       "TestDisputes/OR-J46-S16/a-report-on-an-unknown-charge-is-answered"
     ],
+    "OR-J46-S17": [
+      "TestDisputes/OR-J46-S17/an-unmatched-nmi-chargeback-is-attached-by-the-operator"
+    ],
+    "OR-J46-S18": [
+      "TestDisputes/OR-J46-S18/a-chargeback-of-a-refunded-charge-says-to-contest-it",
+      "TestDisputes/OR-J46-S18/a-chargeback-of-a-refunded-charge-says-to-contest-it/already-refunded",
+      "TestDisputes/OR-J46-S18/a-chargeback-of-a-refunded-charge-says-to-contest-it/not-refunded"
+    ],
     "OR-J46-S12": [
       "TestDisputes/OR-J46-S12/the-dispute-metrics-equal-the-records"
     ],
