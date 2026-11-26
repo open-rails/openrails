@@ -72,6 +72,8 @@ type Node struct {
 	forgotten map[string]int
 	// drops is how many sent transactions this node acknowledges and drops.
 	drops int
+	// withheld is how many sent transactions land confirmed, not finalized.
+	withheld int
 	// gate stalls every answer until it closes (Hold); stalled names each
 	// stalled method.
 	gate    chan struct{}
@@ -101,6 +103,14 @@ type landed struct {
 	meta      map[string]any
 	blockTime time.Time
 	slot      uint64
+	// before holds the accounts it names as they were before it landed; nil
+	// for one that did not exist.
+	before snapshot
+}
+
+type snapshot struct {
+	tokens   map[string]*tokenAccount
+	accounts map[string]*account
 }
 
 // Transfer is one synthesized payment a test lands with Pay.
@@ -362,6 +372,10 @@ func (n *Node) Balance(owner, mint solanago.PublicKey) uint64 {
 // that already landed; a token move that cannot apply lands the transaction as
 // failed with no effect.
 func (n *Node) Land(tx *solanago.Transaction, blockTime time.Time) (solanago.Signature, error) {
+	return n.land(tx, blockTime, true)
+}
+
+func (n *Node) land(tx *solanago.Transaction, blockTime time.Time, finalized bool) (solanago.Signature, error) {
 	if err := tx.VerifySignatures(); err != nil {
 		return solanago.Signature{}, fmt.Errorf("solanafake: refused: %w", err)
 	}
@@ -376,6 +390,19 @@ func (n *Node) Land(tx *solanago.Transaction, blockTime time.Time) (solanago.Sig
 		return solanago.Signature{}, errors.New("solanafake: refused: already processed")
 	}
 	pre := n.tokenBalances(tx)
+	before := snapshot{tokens: map[string]*tokenAccount{}, accounts: map[string]*account{}}
+	for _, key := range tx.Message.AccountKeys {
+		addr := key.String()
+		before.tokens[addr], before.accounts[addr] = nil, nil
+		if acct := n.tokens[addr]; acct != nil {
+			saved := *acct
+			before.tokens[addr] = &saved
+		}
+		if acct, ok := n.accounts[addr]; ok {
+			acct.data = append([]byte(nil), acct.data...)
+			before.accounts[addr] = &acct
+		}
+	}
 	saved := map[string]tokenAccount{}
 	for addr, acct := range n.tokens {
 		saved[addr] = *acct
@@ -422,7 +449,8 @@ func (n *Node) Land(tx *solanago.Transaction, blockTime time.Time) (solanago.Sig
 	}
 	n.height++
 	n.txs[sig.String()] = &landed{
-		slot: n.height, blockTime: blockTime, raw: raw, v0: tx.Message.IsVersioned(), failure: failure, finalized: true,
+		slot: n.height, blockTime: blockTime, raw: raw, v0: tx.Message.IsVersioned(), failure: failure, finalized: finalized,
+		before: before,
 		meta: map[string]any{
 			"err": failure, "preBalances": []any{}, "postBalances": []any{},
 			"preTokenBalances": pre, "postTokenBalances": n.tokenBalances(tx),
@@ -439,14 +467,60 @@ func (n *Node) Land(tx *solanago.Transaction, blockTime time.Time) (solanago.Sig
 // LandConfirmed is Land for a transaction the cluster has confirmed and not
 // yet finalized: its effects apply, and finalized reads miss it until Finalize.
 func (n *Node) LandConfirmed(tx *solanago.Transaction, blockTime time.Time) (solanago.Signature, error) {
-	sig, err := n.Land(tx, blockTime)
-	if err != nil {
-		return sig, err
-	}
+	return n.land(tx, blockTime, false)
+}
+
+// WithholdFinality lands the next count sent transactions confirmed: finalized
+// reads miss them until Finalize.
+func (n *Node) WithholdFinality(count int) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.txs[sig.String()].finalized = false
-	return sig, nil
+	n.withheld = count
+}
+
+// Abandon drops a transaction that never finalized with the fork that held it:
+// no read knows it any more, and the accounts it names are as before it
+// landed. It panics when a later transaction landed, whose effects it cannot
+// tell apart.
+func (n *Node) Abandon(sig string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	tx, ok := n.txs[sig]
+	if !ok || tx.finalized {
+		return
+	}
+	for other, later := range n.txs {
+		if other != sig && later.slot > tx.slot {
+			panic("solanafake: Abandon after a later transaction landed")
+		}
+	}
+	for addr, saved := range tx.before.tokens {
+		if saved == nil {
+			delete(n.tokens, addr)
+		} else if acct := n.tokens[addr]; acct != nil {
+			*acct = *saved
+		} else {
+			restored := *saved
+			n.tokens[addr] = &restored
+		}
+	}
+	for addr, saved := range tx.before.accounts {
+		if saved == nil {
+			delete(n.accounts, addr)
+		} else {
+			n.accounts[addr] = *saved
+		}
+	}
+	delete(n.txs, sig)
+	for addr, sigs := range n.byAddr {
+		kept := sigs[:0]
+		for _, s := range sigs {
+			if s != sig {
+				kept = append(kept, s)
+			}
+		}
+		n.byAddr[addr] = kept
+	}
 }
 
 // apply executes one instruction's effect, returning the address of a program
@@ -688,11 +762,15 @@ func (n *Node) send(encoded string) (solanago.Signature, error) {
 	}
 	n.mu.Lock()
 	now := n.now
+	finalized := n.withheld == 0
+	if !finalized {
+		n.withheld--
+	}
 	n.mu.Unlock()
 	if now == nil {
 		now = time.Now
 	}
-	return n.Land(tx, now())
+	return n.land(tx, now(), finalized)
 }
 
 // Pay lands a synthesized payment and returns its signature.
@@ -988,8 +1066,8 @@ func (n *Node) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		n.mu.Unlock()
 	case "sendTransaction":
-		// The server's own submissions (recurring pulls) land at once, as a
-		// finalized transaction would; a token move that cannot apply lands failed.
+		// The server's own submissions (recurring pulls) land at once, finalized
+		// unless WithholdFinality holds them at confirmed; a token move that cannot apply lands failed.
 		var encoded string
 		if len(req.Params) > 0 {
 			_ = json.Unmarshal(req.Params[0], &encoded)

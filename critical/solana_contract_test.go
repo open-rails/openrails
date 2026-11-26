@@ -39,6 +39,7 @@ type solanaWire struct {
 	server      *httptest.Server
 	mu          sync.Mutex
 	sent        int
+	lastSent    string
 	reads       map[string]int
 	gate        *wireGate
 	historyGate *wireGate
@@ -79,6 +80,12 @@ func newSolanaWire(t *testing.T, node *solanafake.Node) *solanaWire {
 		var historyGate *wireGate
 		if rpc.Method == "sendTransaction" {
 			w.sent++
+			var encoded string
+			if len(rpc.Params) > 0 && json.Unmarshal(rpc.Params[0], &encoded) == nil {
+				if tx, err := solanago.TransactionFromBase64(encoded); err == nil && len(tx.Signatures) > 0 {
+					w.lastSent = tx.Signatures[0].String()
+				}
+			}
 		}
 		if rpc.Method == "getTransaction" && len(rpc.Params) > 0 {
 			var sig string
@@ -143,6 +150,12 @@ func newSolanaWire(t *testing.T, node *solanafake.Node) *solanaWire {
 	return w
 }
 
+func (w *solanaWire) readCount(signature string) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.reads[signature]
+}
+
 func (w *solanaWire) read(signature string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -154,6 +167,9 @@ func (w *solanaWire) historyReads(reference string) int {
 	return w.reads["reference:"+reference]
 }
 func (w *solanaWire) sends() int { w.mu.Lock(); defer w.mu.Unlock(); return w.sent }
+
+// lastSignature is the signature of the last transaction sent.
+func (w *solanaWire) lastSignature() string { w.mu.Lock(); defer w.mu.Unlock(); return w.lastSent }
 func (w *solanaWire) count(method string) int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -656,5 +672,32 @@ func TestSolanaContracts(t *testing.T) {
 			s.confirm(t, invoice, sig)
 		}
 		s.paid(t, invoice, sig)
+	})
+	t.Run("OR-J37-S73/a-first-subscription-payment-confirmed-and-not-finalized-enrolls-nothing-until-it-finalizes", func(t *testing.T) {
+		s := newSolanaWorld(t, true)
+		invoice := s.invoice(t, true)
+		tx := s.walletTransaction(t, invoice)
+		sig, err := s.node.LandConfirmed(tx, s.clock.Now())
+		require.NoError(t, err)
+		sends := s.wire.sends()
+		pending := s.confirm(t, invoice, sig.String())
+		require.NotEqual(t, billing.InvoiceComplete, pending.Status, "a confirmed transaction is landed, its settlement pending")
+		s.noAccess(t, invoice)
+		subs, err := s.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: invoice.CustomerID})
+		require.NoError(t, err)
+		require.Empty(t, subs.Items, "nothing is enrolled before finality")
+		payments, err := s.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: invoice.CustomerID})
+		require.NoError(t, err)
+		require.Empty(t, payments.Items)
+		require.Equal(t, sends, s.wire.sends(), "the server sends nothing for a pending first payment")
+
+		s.node.Finalize(sig.String())
+		s.confirm(t, invoice, sig.String())
+		s.paid(t, invoice, sig.String())
+		subs, err = s.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: invoice.CustomerID})
+		require.NoError(t, err)
+		require.Len(t, subs.Items, 1)
+		require.Equal(t, billing.SubscriptionActive, subs.Items[0].Status)
+		require.Equal(t, sends, s.wire.sends())
 	})
 }
