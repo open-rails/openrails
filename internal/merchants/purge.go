@@ -42,7 +42,7 @@ var merchantOwnedTables = []string{
 	"payment_attempts", "rebill_cycles", "payment_method_versions", "mandates", "nmi_history_months",
 	"solana_pay_receipts", "solana_pay_references",
 	"operation_log", "provider_intents",
-	"invoice_attempts", "product_access", "stripe_fee_reads", "disputes", "fraud_reports", "payments", "network_activity_daily", "subscriptions",
+	"invoice_attempts", "product_access", "stripe_fee_reads", "disputes", "fraud_reports", "payments", "customer_paid_totals", "network_activity_daily", "subscriptions",
 	"money_settings", "payment_methods", "psp_customers",
 	// The directory's copy of the merchant's customers and the tokens it
 	// pushes them with.
@@ -79,6 +79,8 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsFraudReports(ctx, id)
 	case "network_activity_daily":
 		return q.CountMerchantRowsNetworkActivity(ctx, id)
+	case "customer_paid_totals":
+		return q.CountMerchantRowsCustomerPaidTotals(ctx, id)
 	case "payment_attempts":
 		return q.CountMerchantRowsPaymentAttempts(ctx, id)
 	case "rebill_cycles":
@@ -135,6 +137,8 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsFraudReports(ctx, id)
 	case "network_activity_daily":
 		return q.PurgeMerchantRowsNetworkActivity(ctx, id)
+	case "customer_paid_totals":
+		return q.PurgeMerchantRowsCustomerPaidTotals(ctx, id)
 	case "payment_attempts":
 		return q.PurgeMerchantRowsPaymentAttempts(ctx, id)
 	case "rebill_cycles":

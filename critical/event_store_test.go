@@ -150,9 +150,8 @@ func noStoreSettings(t *testing.T) {
 	window := []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: 1_000_000, Currency: "USD"}}
 	for _, settings := range []billing.MerchantSettings{
 		{DelegatedInvokerWastedSpendLimits: window},
-		{BillingPolicies: []billing.BillingPolicy{{Name: "capped", Kind: "window_spend_cap", SpendWindows: window}}},
-		{BillingPolicies: []billing.BillingPolicy{{Name: "grace", Kind: "outstanding_cap", BadSpendWindows: window}}},
-		{BillingPolicies: []billing.BillingPolicy{{Name: "rate", Kind: "accrual_rate_cap", AccrualRateCapPerHour: 10_000_000}}},
+		{BillingPolicies: []billing.BillingPolicy{{Name: "capped", SpendWindows: window}}},
+		{BillingPolicies: []billing.BillingPolicy{{Name: "grace", BadSpendWindows: window}}},
 	} {
 		_, err := a.alphaRemote.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{MerchantSettings: &settings})
 		requireNoStore(t, err)

@@ -333,25 +333,3 @@ func (q *Queries) PostRunningCharge(ctx context.Context, arg PostRunningChargePa
 	)
 	return i, err
 }
-
-const sumRunningChargeRates = `-- name: SumRunningChargeRates :one
-SELECT COALESCE(SUM(rate_per_hour), 0)::bigint AS rate_per_hour
-FROM billing.running_charges
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-  AND currency = $3::text AND stopped_at IS NULL
-`
-
-type SumRunningChargeRatesParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-}
-
-// What a customer's running charges in a currency accrue per hour now: the
-// running part of its accrual rate (accrual_rate_cap).
-func (q *Queries) SumRunningChargeRates(ctx context.Context, arg SumRunningChargeRatesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, sumRunningChargeRates, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var rate_per_hour int64
-	err := row.Scan(&rate_per_hour)
-	return rate_per_hour, err
-}

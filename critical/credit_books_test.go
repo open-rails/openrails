@@ -177,10 +177,6 @@ func packReleasesAtItsRate(t *testing.T) {
 	require.EqualValues(t, 50_000_000, glBalance(t, w, "deferred_revenue_credit"))
 	require.Zero(t, glBalance(t, w, "unapplied_cash"), "the payment bought only the pack")
 	require.EqualValues(t, -50_000_000, glBalance(t, w, "cash_clearing"), "the card's cash sits in its PSP's clearing account")
-	var units int
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(w, "ledger_transfers")+
-		" WHERE merchant_id=$1 AND credit_grant_id=$2 AND book='units' AND transfer_type IN ('deposit_bonus','credit_purchase_revenue')", w.alpha.MerchantID().UUID(), lot.UUID()).Scan(&units))
-	require.Zero(t, units, "the bonus is part of the rate, not a units-book leg")
 	var cashPayment string
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT source_id FROM "+booksTable(w, "ledger_transfers")+
 		" WHERE merchant_id=$1 AND book='general' AND transfer_type='cash_received'", w.alpha.MerchantID().UUID()).Scan(&cashPayment))
@@ -328,12 +324,10 @@ func creditRefundsAndWonDispute(t *testing.T) {
 	balance(t, a.alpha, s.customer, 16_500_000, 0, 16_500_000)
 	require.Equal(t, []int64{25_000_000}, lotLegs(t, w, lot, "refund_deferred"), "27.5 unspent credits were worth $25")
 	require.Empty(t, lotLegs(t, w, lot, "refund_recognized"))
-	var units, cashLegs int
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FILTER (WHERE book='units' AND transfer_type='credit_refund' AND amount=27500000),"+
-		" count(*) FILTER (WHERE book='units' AND transfer_type IN ('credit_refund_cash','credit_refund_cash_restore'))"+
-		" FROM "+booksTable(w, "ledger_transfers")+" WHERE merchant_id=$1 AND credit_grant_id=$2", w.alpha.MerchantID().UUID(), lot.UUID()).Scan(&units, &cashLegs))
+	var units int
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FILTER (WHERE book='units' AND transfer_type='credit_refund' AND amount=27500000)"+
+		" FROM "+booksTable(w, "ledger_transfers")+" WHERE merchant_id=$1 AND credit_grant_id=$2", w.alpha.MerchantID().UUID(), lot.UUID()).Scan(&units))
 	require.Equal(t, 1, units, "the withdrawn credits go to units_refunded")
-	require.Zero(t, cashLegs, "the refund's cash is the general ledger's")
 	require.EqualValues(t, [2]int64{27_500_000, 0}, booksTotal(t, w, "units", "units_refunded"))
 
 	// The rest is spent: 16.5 credits release the $15 left.

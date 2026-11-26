@@ -46,6 +46,9 @@ type importWorld struct {
 	api *openrails.Client
 	// declared are the PSPs the world's fakes serve.
 	declared billing.PSPs
+	// stripeWrites are the Stripe writes a case made after the import, such
+	// as a chargeback's cancel; the import's own make none.
+	stripeWrites []stripemock.Call
 }
 
 func importNMIPSP(gateway, securityKey string, archived bool) billing.PSPConfig {
@@ -135,7 +138,7 @@ func bootImportWorldDeclaring(t *testing.T, declare bool, configure func(*world)
 			require.Empty(t, iw.nmi.Unexpected())
 		}
 		if iw.stripe != nil {
-			require.Empty(t, iw.stripe.Mutations(""), "a PSP import never writes to Stripe")
+			require.Equal(t, iw.stripeWrites, iw.stripe.Mutations(""), "a PSP import never writes to Stripe")
 		}
 		if iw.ccbill != nil {
 			require.Empty(t, iw.ccbill.Mutations(), "a PSP import never writes to CCBill")

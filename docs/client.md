@@ -734,7 +734,7 @@ Refusals are verdicts, not errors:
 |---|---|
 | `limit_reached` | the limit is spent until `resets_at` |
 | `insufficient_balance`, `insufficient_credit`, `outstanding_cap_reached` | the built-in `balance` limit: prepaid balance, credit line, unpaid arrears |
-| `budget_exceeded`, `accrual_rate_cap_reached` | a billing policy's spend window or accrual rate |
+| `budget_exceeded` | a billing policy's spend window |
 | `delinquent_unpaid_invoice` | an unpaid usage bill past grace |
 | `failure_rate_limited` | a delegated invoker's failed usage passed its limit |
 | `delegated_spend_not_allowed` | only the customer's own credential spends its balance |
@@ -810,7 +810,28 @@ gate with its own lease.
 | `AdjustCustomerLimit` | add to the current window only, idempotent on `SourceID`; a rate limit takes none |
 | `UpdateCustomer` (`Limits`) | replace a customer's capacity; `Inherit` restores its products' |
 
-**Spend limits.** A billing policy (merchant settings) caps unpaid arrears (`outstanding_cap`), spend per window (`window_spend_cap`) or the accrual rate (`accrual_rate_cap`, your usage and running charges). Its amounts, and a window without a currency, are in its `policy_currency`. Its outstanding cap and `collection_threshold_amount` bind only money in that currency, in gates' decisions and in usage billing alike; other currencies keep the account's own limits. Its windows and accrual-rate cap are converted to the request's currency; bindings choose the merchant default or a trust tier, and a customer's own `billing_policy` wins. **Delinquency**: an unpaid usage invoice past `arrears_grace_days` and above its currency's `delinquency_floor` (a policy's `delinquency_amount_floor` in its `policy_currency`) refuses requests; OpenRails never revokes access or cancels for it. Act on the `delinquency.grace`, `delinquency.entered` and `delinquency.cleared` events.
+**Spend limits.** A billing policy (merchant settings) caps what a customer may owe (`outstanding_cap_amount`), its spend per window (`spend_windows`), or both; a request past the first is refused `outstanding_cap_reached`, past a window `budget_exceeded`. A customer's credit limit is its own (`credit_limits` on `UpdateCustomer`), else its policy's `outstanding_cap_amount`, else your usage terms' `credit_limit`, and what it owes is taken from it. A policy's amounts, and a window without a currency, are in its `policy_currency`. Its outstanding cap and `collection_threshold_amount` bind only money in that currency, in gates' decisions and in usage billing alike; other currencies keep the account's own limits. Its windows are converted to the request's currency; bindings choose the merchant default or a trust tier, and a customer's own `billing_policy` wins. **Delinquency**: an unpaid usage invoice past `arrears_grace_days` and above its currency's `delinquency_floor` (a policy's `delinquency_amount_floor` in its `policy_currency`) refuses requests; OpenRails never revokes access or cancels for it. Act on the `delinquency.grace`, `delinquency.entered` and `delinquency.cleared` events.
+
+**Trust tiers.** `trust_tiers` raise a customer's tier by what it paid, as OpenAI raises usage tiers. Each tier, lowest first, asks per currency a `net_paid_amount` (settled payments less refunds and chargebacks, in whole minor units) and `days_since_first_payment`; a customer is at the highest tier whose requirement it meets in the request's currency, else at `free`. Its own `trust_levels` entry beats the rules. The tier's bound policy gives the customer's credit line, spend windows, collection threshold and delinquency grace; a request's own `TrustLevel` picks only that request's spend windows. Nothing stores the tier: it is computed wherever it is read, from totals each payment, refund and chargeback keeps, so a chargeback drops it at once; `GetCustomer` shows it with its `source` (`rule`, `explicit` or `default`) and a view's limit set carries it. Every tier needs a `billing_policy_bindings` entry, and a tier must ask more than the one below it. The days rule is the stolen-card defense: someone who buys $1,000 of credit with a stolen card can burn it before the chargeback lands a week later, so a tier that waits a week keeps a new customer under the low tier's caps until most chargebacks would have landed.
+
+```yaml guide:trust-tiers
+billing_policies:
+  - name: starter
+    spend_windows: [{key: month, window_seconds: 2592000, limit: "100000000", currency: USD}] # $100 a month
+  - name: tier-1
+    spend_windows: [{key: month, window_seconds: 2592000, limit: "500000000", currency: USD}]
+  - name: tier-2
+    spend_windows: [{key: month, window_seconds: 2592000, limit: "5000000000", currency: USD}]
+billing_policy_bindings:
+  - {policy: starter} # every customer below tier-1
+  - {policy: tier-1, tier: tier-1}
+  - {policy: tier-2, tier: tier-2}
+trust_tiers: # lowest first; amounts in native units (USD micros)
+  - name: tier-1
+    requirements: [{currency: USD, net_paid_amount: "5000000"}] # $5 paid
+  - name: tier-2
+    requirements: [{currency: USD, net_paid_amount: "50000000", days_since_first_payment: 7}] # $50 and a week
+```
 
 ## Usage and running charges
 

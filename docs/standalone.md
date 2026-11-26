@@ -50,7 +50,7 @@ The server listens on loopback (`127.0.0.1`) unless `host` names another address
 
 Vault is a development server in memory, root token `openrails-dev-root`, with KV v2 at `kv` (the server's `vault.kv_mount`) and Transit at `transit`. It forgets everything when its container restarts; the next `task dev` mounts both again and re-creates nothing else. `docker compose down -v` discards every local service's data.
 
-That operator's password is published, so the server refuses to start listening beyond loopback while the account exists, wherever the database came from. The Compose `openrails` service (`docker compose --profile openrails up -d`, followed by `docker compose logs -f openrails`) listens on `0.0.0.0` in its container and so refuses a database `task dev` seeded: start it on a fresh one (`docker compose --profile openrails down -v` removes everything, volumes included).
+Root holds that operator, so the server logs no setup link ([the first operator](#first-run)). That operator's password is published, so the server refuses to start listening beyond loopback while the account exists, wherever the database came from. The Compose `openrails` service (`docker compose --profile openrails up -d`, followed by `docker compose logs -f openrails`) listens on `0.0.0.0` in its container and so refuses a database `task dev` seeded: start it on a fresh one (`docker compose --profile openrails down -v` removes everything, volumes included).
 
 ## First run
 
@@ -119,7 +119,15 @@ The server migrates the database under an advisory lock, applies a mounted `/etc
 openrails catalog apply catalog.yaml --config config.yaml --merchant onlydemo
 ```
 
-**The first operator.** No credential is shipped or configured for production. A one-time setup link appears in the server log on first start (AuthKit: single-use, valid 24 hours, only while no operator exists); it arrives with OpenRails' adoption of that AuthKit release and is not wired yet. Until then the bootstrap manifest seeds the first operator without a usable password, and they set their own password and second factor through the console's password reset (which needs `email_smtp`):
+**The first operator.** No credential is shipped or configured. While no account holds a root role, the server logs a single-use setup link on start, at warning level ("no administrator yet"):
+
+```text
+https://billing.example.com/admin/setup#token=…
+```
+
+Open it, create the owner account (email, username and password) and enroll the second factor its first sign-in asks for. The link is valid 24 hours and only its hash is stored; a restart while it lives logs only its expiry, a start after it expires logs a new one, and once anyone holds a root role it creates nobody. The process that runs the workers logs it (`run-server`, or `run-worker` beside `run-server --no-workers`). From the server's shell, `openrails setup-link` issues a fresh one that replaces a live link and creates an owner even while operators exist: the break-glass. Both need the console, whose `/admin/setup` page opens them.
+
+An init job can seed operators instead, then no link is logged: a bootstrap manifest user holding a root role, with a password they reset through the console (which needs `email_smtp`), as a deployment with `admin_console.disabled` must:
 
 ```yaml
 users:
@@ -468,10 +476,10 @@ OpenRails builds AuthKit's configuration (`controlplane.AuthKit`) from settings 
 | tables and jobs | `<database.schema>_auth`, and the engine's River schema `<database.schema>_river` |
 | client IP | `trusted_proxies` and Cloudflare's published ranges |
 | JSON API | `/auth/v1` beneath the issuer's origin, or `/v1` beneath an issuer with a path |
-| emailed links | the console's `/admin/invite`, `/admin/reset`, `/admin/verify` and `/admin/passwordless` |
+| emailed and logged links | the console's `/admin/invite`, `/admin/reset`, `/admin/verify`, `/admin/passwordless` and `/admin/setup` |
 | keys on a private network | allowed for a loopback issuer and for the applications the operator declares (the merchant manifest's `remote_application`, the bootstrap manifest); an application registered at run time names only https key URLs on public hosts |
 
-The server's own accounts are staff. They join by invitation, need a second factor (a passkey or an authenticator app, whose secrets `totp.key` encrypts) and stay signed in for 30 days; passwords follow AuthKit's policy (8 to 128 characters, common ones refused). Every sign-in binds its session to the browser's DPoP key (RFC 9449): its access tokens go with a proof of that key and are refused as bearer tokens. Readiness fails while staff cannot enroll a second factor: with no `totp.key` the log names the file to mount. The server fixes the merchant roles, the API-key prefix, the scopes `openrails:merchant` and `openrails:self` and the console's client `openrails-console`; a token's `aud` is its issuer, and lifetimes and rate limits are AuthKit's.
+The server's own accounts are staff. The first is the owner the setup link creates ([first run](#first-run)); the rest join by invitation (registration `invite_only`). They need a second factor (a passkey or an authenticator app, whose secrets `totp.key` encrypts) and stay signed in for 30 days; passwords follow AuthKit's policy (8 to 128 characters, common ones refused). Every sign-in binds its session to the browser's DPoP key (RFC 9449): its access tokens go with a proof of that key and are refused as bearer tokens. Readiness fails while staff cannot enroll a second factor: with no `totp.key` the log names the file to mount. The server fixes the merchant roles, the API-key prefix, the scopes `openrails:merchant` and `openrails:self` and the console's client `openrails-console`; a token's `aud` is its issuer, and lifetimes and rate limits are AuthKit's.
 
 A hosted product built on `server` sets its own account policy (open registration with `MerchantCreation`, agreements, usernames, group OAuth clients, SMS countries, AuthKit's opt-in route groups) in code, with `server.Config.AuthKit`: it adjusts the derived configuration before the fixed parts apply.
 
@@ -558,6 +566,8 @@ refused on `/v1/app` (`403 application_required`).
 
 The console exchanges the session's token for one bound to the chosen merchant (RFC 8693 through the server's `openrails-console` client), refused where the person holds no role there and no root role. The session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in; a revoked session answers `401 credential_revoked` at once.
 
+Operators invite operators on **Team** (`/admin/team`): root's people, an invitation by email with a root role. Where `email_smtp` is unset the invitation is not sent and Team shows its link to share. The invitee opens it at `/admin/invite`, registers and proves the address with an emailed code (so someone new needs `email_smtp`), or accepts it into the account they hold. The console shows `/admin/setup`, `/admin/invite` and Team only where the server's AuthKit serves its people and groups (`GET /auth/v1/capabilities` `route_groups` names `groups`).
+
 The flow is in [authentication](authentication.md#standalone-the-servers-own-accounts). `admin_console.disabled` omits the console.
 
 ### Admin screens in your own site
@@ -637,7 +647,7 @@ Besides the hosts you configure (database, Redis, Vault, SMTP, trusted issuers' 
 
 Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage item is a raw event there (kept 90 days: what was reported, its identity and its priced meter cells), with the rollups limits, balances and history read (limit windows, pricing periods, minutes, and history by UTC hour, kept with no TTL and grouped into the merchant's `accounting.timezone` days as it is read). PostgreSQL keeps what the ledger took (`usage_postings`), what usage it has not taken yet costs at its provisional prices (`usage_pending`, `usage_pending_amounts`: the balance deducts it at once) and the rate cards usage was priced under (`usage_card_prints`). Usage posts once a day, after the day ends in the merchant's `accounting.timezone` (UTC by default), in the billing pass (`openrails.usage_posting`), before a usage invoice and before a credit lot's expiry, revocation or refund. The exact price of a period is read from ClickHouse when it posts: back it up nightly ([backup and restore](#backup-and-restore)).
 
-Without an event store (`clickhouse.url` empty, or the default one unreachable at boot) the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage invoices, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken starts without ClickHouse: only the store can post that usage, so each merchant with some gets a `consistency.pending_usage` finding, and the customers it belongs to read their balances, pending usage included, but their usage cannot post (`event_store_required`), so their lots cannot expire, be revoked or refunded, until the store is attached; every other customer bills as before. Replicas starting together take turns migrating ClickHouse under a PostgreSQL advisory lock.
+Without an event store (`clickhouse.url` empty, or the default one unreachable at boot) the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage invoices, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken starts without ClickHouse: only the store can post that usage, so each merchant with some gets a `consistency.pending_usage` finding, and the customers it belongs to read their balances, pending usage included, but their usage cannot post (`event_store_required`), so their lots cannot expire, be revoked or refunded, until the store is attached; every other customer bills as before. Replicas starting together take turns migrating ClickHouse under a PostgreSQL advisory lock.
 
 The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead. Where none exists, `openrails usage attach --actor NAME --reason TEXT` records the configured ClickHouse as the store; with usage pending it also needs `--discard-pending`, which deletes it and records each merchant's discard as a `usage_discard` maintenance run. While ClickHouse is out of reach, syncs answer 503 `service_unavailable` (gates spend their offline share), and pending usage cannot post; balances read and move as before.
 
@@ -1027,6 +1037,7 @@ the merchant the token is bound to.
 | `openrails migrate up`, `openrails migrate pg` | apply OpenRails', AuthKit's and River's migrations |
 | `openrails migrate status [--json]` | compare the applied ledger with the binary's; non-zero on any mismatch |
 | `openrails version` | the version, commit and build date |
+| `openrails setup-link` | print a single-use link, valid 24 hours, that creates an owner account, replacing a live one; works while operators exist (break-glass) |
 | `openrails push-auth-bootstrap [--file] [--dry-run] [--startup-only]` | create AuthKit root authority from a bootstrap manifest (`/etc/openrails/bootstrap.yaml`); `--startup-only` applies it at most once, as `run-server` does with a mounted one |
 | `openrails push-merchant-config [--file] --insert` | create the merchants a manifest names that are missing; bare, it only reports |
 | `openrails dump-merchant-config --slug NAME [--out]` | print a merchant's configuration as manifest YAML, without credentials or alert webhooks |

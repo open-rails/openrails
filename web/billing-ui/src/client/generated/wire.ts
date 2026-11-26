@@ -228,11 +228,8 @@ export type BillingImportResult = {
 
 export type BillingPolicy = {
   name: string
-  kind: string
   outstanding_cap_amount?: string
   spend_windows?: BudgetWindow[]
-  accrual_rate_cap_per_hour?: string
-  accrual_rate_window_seconds?: number
   collection_threshold_amount?: string
   delinquency_grace_days?: number
   delinquency_amount_floor?: string
@@ -640,6 +637,7 @@ export type Customer = {
   settings: CustomerSettings
   balances: Balance[]
   default_payment_methods: DefaultPaymentMethod[]
+  trust_levels: EffectiveTrustLevel[]
 }
 
 export type CustomerAccount = {
@@ -1033,6 +1031,14 @@ export type EffectiveLowBalanceLine = {
   amount: string
   runway_hours: number
   source: "customer" | "default" | "merchant"
+}
+
+export type EffectiveTrustLevel = {
+  currency: string
+  trust_level: string
+  source: "default" | "explicit" | "rule"
+  net_paid_amount: string
+  first_paid_at: string | null
 }
 
 export type EntitlementChange = {
@@ -1439,10 +1445,12 @@ export type LimitReset = {
 export type LimitSet = {
   customer_id: string
   currency: string
+  trust_level: string
+  trust_level_source: "default" | "explicit" | "rule"
   limits: string[]
   capacities: LimitCapacity[]
   credit_line: string
-  balance_deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_invoice" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
+  balance_deny_code: "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_invoice" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
   refusal: Refusal | null
 }
 
@@ -1532,6 +1540,7 @@ export type MerchantConfigurationState = {
   charge_psps?: string[]
   billing_policies?: BillingPolicy[]
   billing_policy_bindings?: BillingPolicyBinding[]
+  trust_tiers?: TrustTier[]
   delegated_invoker_wasted_spend_limits?: BudgetWindow[]
   currencies?: MerchantCurrency[]
   platform_vault: PlatformVaultState
@@ -2324,7 +2333,7 @@ export type RefundPaymentParams = {
 }
 
 export type Refusal = {
-  deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_invoice" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
+  deny_code: "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_invoice" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
   limit: string | null
   resets_at: string | null
   retry_after_seconds: number | null
@@ -2750,6 +2759,17 @@ export type TrustLevel = {
   trust_level: string
 }
 
+export type TrustTier = {
+  name: string
+  requirements: TrustTierRequirement[]
+}
+
+export type TrustTierRequirement = {
+  currency: string
+  net_paid_amount?: string
+  days_since_first_payment?: number
+}
+
 export type UpdateAlertWebhookParams = {
   name?: string | null
   url?: string | null
@@ -2787,6 +2807,7 @@ export type UpdateMerchantConfigurationParams = {
   charge_psps?: string[]
   billing_policies?: BillingPolicy[]
   billing_policy_bindings?: BillingPolicyBinding[]
+  trust_tiers?: TrustTier[]
   delegated_invoker_wasted_spend_limits?: BudgetWindow[]
   currencies?: MerchantCurrency[]
 }
