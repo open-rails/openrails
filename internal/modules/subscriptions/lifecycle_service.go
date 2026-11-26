@@ -1457,7 +1457,8 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		s.Log.ErrorContext(ctx, "Failed to apply local cancellation", logx.Err(err), "subscription_id", subscription.ID)
 		return nil, err
 	}
-	if params.RevokeAccess && subscription.CollectionPolicy == models.CollectionPolicyEngine {
+	// A late renewal charge after a revoke or a refund is refunded, not kept.
+	if (params.RevokeAccess || params.EndedReason == PremiumEndReasonRefund) && subscription.CollectionPolicy == models.CollectionPolicyEngine {
 		collection, err := txDB.Gen(ctx).GetUnresolvedSubscriptionCollection(ctx, gen.GetUnresolvedSubscriptionCollectionParams{MerchantID: subscription.MerchantID, SubscriptionID: subscription.ID})
 		if err != nil && !db.IsNotFound(err) {
 			return nil, err

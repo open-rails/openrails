@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -23,12 +24,12 @@ const FindingSubmissionUnresolved = "life.submission.unresolved"
 
 const unresolvedRenewalGraceKey = "unresolved_renewal_grace_at"
 
-// keepUnresolvedRenewalAccess opens the member's grace once a sent charge is
-// unresolved past the settle delay, under suspend only (keep already holds
+// keepUnresolvedRenewalAccess opens an active member's grace once a sent NMI
+// charge is unresolved past the settle delay, under suspend only (keep already holds
 // access). The marker and grant commit together under the completion path's
 // lock order.
 func (h *SubscriptionCollectionHandler) keepUnresolvedRenewalAccess(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) error {
-	if intents.EvidenceString(in, "submitted_at") == "" || intents.EvidenceString(in, unresolvedRenewalGraceKey) != "" {
+	if in.Rail != "nmi" || intents.EvidenceString(in, "submitted_at") == "" || intents.EvidenceString(in, unresolvedRenewalGraceKey) != "" {
 		return nil
 	}
 	sub, err := subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, p.Renewal.SubscriptionID)
@@ -49,7 +50,7 @@ func (h *SubscriptionCollectionHandler) keepUnresolvedRenewalAccess(ctx context.
 		if err != nil {
 			return err
 		}
-		if sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) {
+		if sub.Status != models.StatusActive || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) {
 			return nil
 		}
 		if policy, err := subscriptions.CasePolicy(ctx, d, sub); err != nil || !policy.SuspendWhenHeld {
