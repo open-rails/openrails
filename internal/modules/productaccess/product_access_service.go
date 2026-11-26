@@ -35,6 +35,9 @@ var ErrProductNotFound = apperr.New(http.StatusNotFound, billing.CodeResourceNot
 // ErrIdempotencyKeyReused: the key already granted another customer or product.
 var ErrIdempotencyKeyReused = apperr.New(http.StatusUnprocessableEntity, billing.CodeIdempotencyKeyReused, "idempotency key already granted another product or customer")
 
+// ErrGrantedWindowRemoved: the key's granted window was removed.
+var ErrGrantedWindowRemoved = apperr.New(http.StatusConflict, billing.CodeResourceConflict, "the window granted by this Idempotency-Key was removed; a new grant needs a new key")
+
 // Service owns free product grants and product access reads.
 type Service struct {
 	destructiveAdmissions *destructive.Admissions
@@ -73,7 +76,7 @@ type Grant struct {
 
 // GrantProduct records one free grant once per idempotency key, with its
 // customer's convergence. A replay returns the recorded window and
-// created=false.
+// created=false; a removed window is a conflict.
 func (s *Service) GrantProduct(ctx context.Context, g Grant) (*models.ProductAccess, bool, error) {
 	if s == nil || s.db == nil {
 		return nil, false, fmt.Errorf("product access service not initialized")
@@ -98,6 +101,9 @@ func (s *Service) GrantProduct(ctx context.Context, g Grant) (*models.ProductAcc
 			return nil, false, ErrIdempotencyKeyReused
 		}
 		window, err := s.db.Gen(ctx).GetProductAccessByGrant(ctx, gen.GetProductAccessByGrantParams{MerchantID: mid.UUID(), GrantID: recorded.ID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, ErrGrantedWindowRemoved
+		}
 		if err != nil {
 			return nil, false, err
 		}
