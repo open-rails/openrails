@@ -575,7 +575,7 @@ return nil
   (`409 subscription_change_cadence_unsupported`), and a named NMI plan needs a
   linked plan on the target (`409 subscription_change_requires_linked_plan`).
   CCBill upgrades redirect; downgrades are refused.
-- **Cancels.** A staff cancel of an NMI or CCBill schedule is refused `409 provider_cancel_held` while the merchant's destructive actions are disarmed: OpenRails will not cancel locally while the provider keeps charging. A customer's own cancel is never held; only the customer budget refuses it (`429 rate_limit_exceeded`). A renewal in flight refuses a cancel (`409 payment_in_progress`). A Solana cancel needs no signature.
+- **Cancels.** A staff cancel of an NMI or CCBill schedule is refused `409 provider_cancel_held` while the merchant's destructive actions are disarmed: OpenRails will not cancel locally while the provider keeps charging. A customer's own cancel is never held or refused by the customer card-removal budget. A card renewal in flight no longer blocks a cancel: the cancel is recorded at once. If its pending charge succeeds, the customer keeps that paid period; a `revoke_access` cancel refunds it instead. A submitted Solana renewal still refuses a cancel (`409 payment_in_progress`); a Solana cancel needs no signature.
 - **Dunning.** OpenRails retries the renewals it collects on a schedule sized to
   the cycle (a monthly one on days 3, 5, 7 and 10; the fifth failure cancels);
   `dunning_policy` replaces it. Stripe- and CCBill-billed subscriptions use the

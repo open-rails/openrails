@@ -327,12 +327,16 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 	}
 }
 
-// RevokeBySourceAsOf appends a revoke event to every LIVE grant of the customer
+// RevokeBySourceAsOf appends a revoke event to every live grant of the customer
 // that matches kind, one of sourceTypes and sourceID (a subscription or
 // payment id string): the ledger side of a source-keyed retraction, so derive
 // sees a terminated grant beside its retracted window. Already-terminated
-// grants are skipped. asOf is the effective instant (valid time); zero is now.
+// and ended grants are skipped. asOf is the effective instant (valid time);
+// zero is now.
 func (l *Ledger) RevokeBySourceAsOf(ctx context.Context, customer uuid.UUID, kind Kind, sourceTypes []SourceType, sourceID, reason string, asOf time.Time) error {
+	if asOf.IsZero() {
+		asOf = l.now()
+	}
 	types := make([]string, len(sourceTypes))
 	for i, st := range sourceTypes {
 		types[i] = string(st)
@@ -344,6 +348,9 @@ func (l *Ledger) RevokeBySourceAsOf(ctx context.Context, customer uuid.UUID, kin
 		return fmt.Errorf("grants: list grants for revoke-by-source: %w", err)
 	}
 	for _, g := range live {
+		if g.EndsAt != nil && !g.EndsAt.After(asOf) {
+			continue
+		}
 		if _, err := l.RevokeAsOf(ctx, g.ID, reason, "", asOf); err != nil {
 			return fmt.Errorf("grants: revoke %s by source: %w", g.ID, err)
 		}

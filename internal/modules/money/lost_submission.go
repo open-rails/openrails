@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -17,8 +19,53 @@ import (
 
 // FindingSubmissionUnresolved is a submitted engine charge the provider's
 // reads cannot settle: the read is unavailable or contradictory, or the
-// Stripe resend cap is spent. The member keeps the renewal allowance meanwhile.
+// Stripe resend cap is spent. Active subscriptions keep the renewal allowance.
 const FindingSubmissionUnresolved = "life.submission.unresolved"
+
+const unresolvedRenewalGraceKey = "unresolved_renewal_grace_at"
+
+// keepUnresolvedRenewalAccess opens an active member's grace once a sent NMI
+// charge is unresolved past the settle delay, under suspend only (keep already holds
+// access). The marker and grant commit together under the completion path's
+// lock order.
+func (h *SubscriptionCollectionHandler) keepUnresolvedRenewalAccess(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) error {
+	if in.Rail != "nmi" || intents.EvidenceString(in, "submitted_at") == "" || intents.EvidenceString(in, unresolvedRenewalGraceKey) != "" {
+		return nil
+	}
+	sub, err := subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, p.Renewal.SubscriptionID)
+	if err != nil {
+		return err
+	}
+	if sub.Status != models.StatusActive {
+		return nil
+	}
+	if policy, err := subscriptions.CasePolicy(ctx, h.DB, sub); err != nil || !policy.SuspendWhenHeld {
+		return err
+	}
+	ctx, cancel := intents.LedgerWriteContext(ctx)
+	defer cancel()
+	return h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := h.DB.NewWithPgxTx(tx)
+		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: p.Renewal.CustomerID}); err != nil {
+			return err
+		}
+		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, p.Renewal.SubscriptionID)
+		if err != nil {
+			return err
+		}
+		if sub.Status != models.StatusActive || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) {
+			return nil
+		}
+		if policy, err := subscriptions.CasePolicy(ctx, d, sub); err != nil || !policy.SuspendWhenHeld {
+			return err
+		}
+		first, err := intents.NewStore(d).RecordProgressIfAbsent(ctx, in.ID, unresolvedRenewalGraceKey, h.now().Format(time.RFC3339Nano))
+		if err != nil || !first {
+			return err
+		}
+		return h.lifecycle(d).SetSubmittedRenewalGrace(ctx, d, sub, true)
+	})
+}
 
 // lostSubmission keeps ambiguous NMI submissions pending. The Query API has
 // no documented visibility bound, and dup_seconds is processor-dependent;
@@ -110,11 +157,17 @@ func (h *SubscriptionCollectionHandler) unresolved(ctx context.Context, in gen.B
 	if history, err := intents.LoadSubmissionHistory(in); err != nil || history.Settled(h.now()) {
 		evidence, _ := json.Marshal(map[string]any{"operation_id": in.ID, "subscription_id": p.Renewal.SubscriptionID, "rail": in.Rail, "order_reference": p.OrderReference, "reason": reason})
 		action := fmt.Sprintf("a submitted renewal charge for subscription %s cannot be settled from the provider (%s). No further charge is sent while this stands; confirm the charge at the provider and resolve the operation", p.Renewal.SubscriptionID, reason)
+		if in.Rail == "nmi" {
+			action += fmt.Sprintf(": `openrails intents resolve --intent %s --receipt <transaction id>` if charged, `--not-executed` once NMI shows the order declined or empty", in.ID)
+		}
 		if _, err := h.DB.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 			MerchantID: in.MerchantID, FindingType: FindingSubmissionUnresolved, SubjectKey: in.ID.String(),
 			Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
 		}); err != nil {
 			h.Log.ErrorContext(ctx, "engine collection: could not record the unresolved-submission finding", logx.Err(err), "operation_id", in.ID)
+		}
+		if err := h.keepUnresolvedRenewalAccess(ctx, in, p); err != nil {
+			return intents.Ambiguous("keep access while the sent renewal is unresolved: " + err.Error())
 		}
 	}
 	return intents.Ambiguous(reason)
