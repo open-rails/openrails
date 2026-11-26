@@ -481,7 +481,7 @@ products:
 		balance(t, w.alpha, customer, 1000-n, n, 1000)
 
 		// Its settled number still covers it: nothing settles again.
-		out := settleUsage(t, w.alpha, lease, first...)
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: first})
 		require.Equal(t, n, out.Usage.ThroughN)
 		require.Empty(t, out.Usage.Refused)
 		require.EqualValues(t, n, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"))
