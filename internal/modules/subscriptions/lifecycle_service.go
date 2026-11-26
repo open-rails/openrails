@@ -1339,7 +1339,8 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 
 // CancelMembershipTx applies cancellation using the caller's transaction. The
 // caller owns commit/rollback; the returned facts are already persisted and become visible only
-// after a successful commit.
+// after a successful commit. Engine callers that already lock the subscription
+// must lock its customer first.
 func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, txDB *db.DB, params *CancelMembershipParams) (*CancelMembershipTxResult, error) {
 	if txDB == nil {
 		return nil, errors.New("transaction DB is required")
@@ -1350,18 +1351,36 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	notificationRepo := NewNotificationService(txDB)
 	subService := NewSubscriptionService(txDB, priceService, productService, nil, s.Clock())
 
-	var subscription *models.Subscription
+	var observed *models.Subscription
 	var err error
 	if params.SubscriptionID != nil {
-		subscription, err = subService.subscriptionRepo.GetByIDForUpdate(ctx, *params.SubscriptionID)
+		observed, err = subService.subscriptionRepo.GetByID(ctx, *params.SubscriptionID)
 	} else if params.RailSubscriptionID != nil && params.Rail != nil {
-		subscription, err = subService.subscriptionRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(*params.Rail), *params.RailSubscriptionID)
+		observed, err = subService.subscriptionRepo.GetByPSPSubscriptionID(ctx, string(*params.Rail), *params.RailSubscriptionID)
 	} else {
 		return nil, fmt.Errorf("either subscription_id or rail details must be provided")
 	}
 	if err != nil {
 		s.Log.WarnContext(ctx, "Failed to locate subscription for cancellation", logx.Err(err))
 		return nil, fmt.Errorf("subscription not found: %w", err)
+	}
+
+	if observed.CollectionPolicy == models.CollectionPolicyEngine {
+		if _, err := txDB.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: observed.MerchantID, ID: observed.CustomerID}); err != nil {
+			return nil, err
+		}
+	}
+	var subscription *models.Subscription
+	if params.SubscriptionID != nil {
+		subscription, err = subService.subscriptionRepo.GetByIDForUpdate(ctx, *params.SubscriptionID)
+	} else {
+		subscription, err = subService.subscriptionRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(*params.Rail), *params.RailSubscriptionID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("subscription not found: %w", err)
+	}
+	if subscription.CustomerID != observed.CustomerID || subscription.CollectionPolicy != observed.CollectionPolicy {
+		return nil, errors.New("cancel membership: accepted customer or collection ownership changed")
 	}
 
 	result := &CancelMembershipTxResult{
@@ -1438,9 +1457,6 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		s.Log.ErrorContext(ctx, "Failed to apply local cancellation", logx.Err(err), "subscription_id", subscription.ID)
 		return nil, err
 	}
-	if subscription.LifecycleRev == previousRevision {
-		return result, nil // the locked lifecycle already reflects this cancellation
-	}
 	if params.RevokeAccess && subscription.CollectionPolicy == models.CollectionPolicyEngine {
 		collection, err := txDB.Gen(ctx).GetUnresolvedSubscriptionCollection(ctx, gen.GetUnresolvedSubscriptionCollectionParams{MerchantID: subscription.MerchantID, SubscriptionID: subscription.ID})
 		if err != nil && !db.IsNotFound(err) {
@@ -1455,6 +1471,9 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 				return nil, err
 			}
 		}
+	}
+	if subscription.LifecycleRev == previousRevision {
+		return result, nil // the locked lifecycle already reflects this cancellation
 	}
 	s.Log.InfoContext(ctx, "Updated subscription record during cancellation", "subscription_id", subscription.ID, "user_id", subscription.CustomerID.String(), "status", subscription.Status, "ended_at", subscription.EndedAt, "period_end", subscription.CurrentPeriodEndsAt)
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -58,6 +59,90 @@ func TestCancellationCustody(t *testing.T) {
 		payments, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
 		require.NoError(t, err)
 		require.Len(t, payments.Items, 2)
+	})
+	t.Run("OR-J17-S20/engine-cancel-locks-customer-before-subscription", func(t *testing.T) {
+		for _, admin := range []bool{false, true} {
+			t.Run(fmt.Sprint(admin), func(t *testing.T) {
+				a, p, sub := nmiEngineMembership(t)
+				p.core.HideSales(1)
+				row := executeEngineRenewal(t, a, sub)
+				require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+				p.core.Reveal()
+				arrived, release := make(chan struct{}), make(chan struct{})
+				var open sync.Once
+				defer open.Do(func() { close(release) })
+				remove := failpoint.Set(func(ctx context.Context, site failpoint.Site) error {
+					if site.Point == failpoint.BeforeComplete && site.Operation == row.ID {
+						close(arrived)
+						select {
+						case <-release:
+						case <-ctx.Done():
+							return ctx.Err()
+						}
+					}
+					return nil
+				})
+				defer remove()
+				rt := embedded.Graph(a.engine).Runtime
+				verified := make(chan error, 1)
+				go func() {
+					verified <- rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+						completed, err := rt.IntentRunner().VerifyByID(ctx, row.ID)
+						if err == nil && completed.Status != intents.StatusSucceeded {
+							return fmt.Errorf("completion status: %s", completed.Status)
+						}
+						return err
+					})
+				}()
+				select {
+				case <-arrived:
+				case <-time.After(15 * time.Second):
+					t.Fatal("renewal did not reach completion")
+				}
+				holder, err := a.pool.Begin(t.Context())
+				require.NoError(t, err)
+				defer holder.Rollback(context.Background())
+				_, err = holder.Exec(t.Context(), "SELECT id FROM "+pgx.Identifier{a.schema, "customers"}.Sanitize()+" WHERE id=$1 FOR NO KEY UPDATE", sub.CustomerID.UUID())
+				require.NoError(t, err)
+				var pid int
+				require.NoError(t, holder.QueryRow(t.Context(), "SELECT pg_backend_pid()").Scan(&pid))
+				canceled := make(chan error, 1)
+				go func() {
+					path, token := "/v1/me/subscriptions/", a.aliceToken
+					if admin {
+						path, token = "/v1/admin/subscriptions/", a.alphaKey.Secret
+					}
+					status, raw, err := a.doWith(t.Context(), a.server.Client(), http.MethodPost, path+sub.ID.String()+"/cancel", token, map[string]any{"reason": "Stop future renewals"})
+					if err == nil && status != http.StatusOK {
+						err = fmt.Errorf("cancel status %d: %s", status, raw)
+					}
+					canceled <- err
+				}()
+				require.Eventually(t, func() bool {
+					var blocked bool
+					err := a.pool.QueryRow(t.Context(), "SELECT EXISTS (SELECT FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))", pid).Scan(&blocked)
+					return err == nil && blocked
+				}, 3*time.Second, 10*time.Millisecond)
+				// A cancel waiting for the customer must not hold its subscription.
+				_, err = holder.Exec(t.Context(), "SELECT id FROM "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" WHERE id=$1 FOR UPDATE NOWAIT", sub.ID.UUID())
+				require.NoError(t, err)
+				require.NoError(t, holder.Commit(t.Context()))
+				select {
+				case err := <-canceled:
+					require.NoError(t, err)
+				case <-time.After(10 * time.Second):
+					t.Fatal("cancel did not commit")
+				}
+				open.Do(func() { close(release) })
+				select {
+				case err := <-verified:
+					require.NoError(t, err)
+				case <-time.After(15 * time.Second):
+					t.Fatal("renewal did not commit")
+				}
+				subscriptionState(t, a, sub.ID, "canceled")
+			})
+		}
 	})
 }
 
@@ -152,15 +237,28 @@ func TestCanceledUnknownRenewal(t *testing.T) {
 		}
 	})
 	t.Run("OR-J17-S18/revoke-access-cancel-refunds-a-late-paid-renewal", func(t *testing.T) {
-		for _, delay := range []time.Duration{0, 8 * 24 * time.Hour} {
-			t.Run(delay.String(), func(t *testing.T) {
+		for _, tc := range []struct {
+			name           string
+			delay          time.Duration
+			periodEndFirst bool
+		}{
+			{"0s", 0, false},
+			{"192h0m0s", 8 * 24 * time.Hour, false},
+			{"period-end-then-revoke", time.Hour, true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
 				a, p, sub := nmiEngineMembership(t)
 				p.core.HideSales(1)
 				row := executeEngineRenewal(t, a, sub)
 				require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
 				accepted, err := subscriptions.DecodeSubscriptionCollectionPayload(row)
 				require.NoError(t, err)
-				a.clock.Advance(delay)
+				a.clock.Advance(tc.delay)
+				if tc.periodEndFirst {
+					status, raw := a.request(t, http.MethodPost, "/v1/admin/subscriptions/"+sub.ID.String()+"/cancel", a.alphaKey.Secret, map[string]any{"reason": "Stop future renewals"})
+					require.Equal(t, http.StatusOK, status, string(raw))
+					a.clock.Advance(time.Hour)
+				}
 				var canceled *billing.Subscription
 				// Cancel after verification read the operation, before completion
 				// locks the subscription and reloads its cancellation evidence.
@@ -169,7 +267,9 @@ func TestCanceledUnknownRenewal(t *testing.T) {
 						status, raw := a.request(t, http.MethodPost, "/v1/admin/subscriptions/"+sub.ID.String()+"/cancel", a.alphaKey.Secret, map[string]any{"reason": "Cut access immediately", "revoke_access": true})
 						require.Equal(t, http.StatusOK, status, string(raw))
 						canceled = subscriptionState(t, a, sub.ID, "canceled")
-						require.Equal(t, a.clock.Now(), *canceled.EndedAt)
+						if !tc.periodEndFirst {
+							require.Equal(t, a.clock.Now(), *canceled.EndedAt)
+						}
 						access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"nmi:engine"}})
 						require.NoError(t, err)
 						require.False(t, access.Entitlements["nmi:engine"])

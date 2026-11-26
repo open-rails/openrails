@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 837,
+  "scenario_count": 838,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -551,12 +551,17 @@
     {
       "id": "OR-J17-S18",
       "journey": "J17",
-      "name": "An immediate access revoke during an unknown card renewal refunds the late charge without restoring access"
+      "name": "An immediate access revoke during an unknown card renewal, including after a period-end cancel, refunds the late charge without restoring access"
     },
     {
       "id": "OR-J17-S19",
       "journey": "J17",
       "name": "A canceled renewal resolving declined or not executed voids its invoice without dunning"
+    },
+    {
+      "id": "OR-J17-S20",
+      "journey": "J17",
+      "name": "Engine customer and admin cancellations wait for the customer before locking the subscription and commit alongside renewal completion"
     },
     {
       "id": "OR-J18-S01",

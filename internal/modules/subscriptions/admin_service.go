@@ -209,9 +209,17 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 			return err
 		}
 		return destructive.RunLocal(ctx, s.SubscriptionService.Database(), s.destructiveAdmissions, command, func(ctx context.Context, _ pgx.Tx, txDB *db.DB) (bool, error) {
+			if subscription.CollectionPolicy == models.CollectionPolicyEngine {
+				if _, err := txDB.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: subscription.MerchantID, ID: subscription.CustomerID}); err != nil {
+					return false, err
+				}
+			}
 			current, err := s.requireLockedSubscription(ctx, txDB, subscriptionID)
 			if err != nil {
 				return false, err
+			}
+			if current.CustomerID != subscription.CustomerID || current.CollectionPolicy != subscription.CollectionPolicy {
+				return false, apperr.Conflictf("subscription changed before cancellation; retry")
 			}
 			if current.LifecycleRev != subscription.LifecycleRev {
 				return false, apperr.Conflictf("subscription changed before cancellation; retry")
