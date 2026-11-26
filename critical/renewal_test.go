@@ -8,9 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db/gen"
+	embedded "github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
@@ -101,6 +106,50 @@ func renewalSettled(t *testing.T, a *authorityWorld, p *providerLedger, sub *bil
 }
 
 func TestRenewal(t *testing.T) {
+	t.Run("OR-J14-S14/stuck-renewal-verification-slows-with-age-and-stops-at-the-cap", func(t *testing.T) {
+		a, p, sub := nmiEngineMembership(t)
+		p.core.DropSaleResponses(1)
+		p.core.HideSales(1)
+		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+		fleet := startFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		operations := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+		var id uuid.UUID
+		require.Eventually(t, func() bool {
+			return a.pool.QueryRow(t.Context(), "SELECT id FROM "+operations+" WHERE subscription_id=$1 AND intent_type='subscription_collection' AND status='unknown_needs_verify' AND lease_expires_at IS NULL", sub.ID.UUID()).Scan(&id) == nil
+		}, 20*time.Second, 20*time.Millisecond)
+		require.NoError(t, fleet.StopAndCancel(t.Context()))
+		// Match row creation to the controlled business clock.
+		created := a.clock.Now().Truncate(time.Microsecond)
+		_, err := a.pool.Exec(t.Context(), "UPDATE "+operations+" SET created_at=$1 WHERE id=$2", created, id)
+		require.NoError(t, err)
+		rt := embedded.Graph(a.engine).Runtime
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		for _, tc := range []struct{ age, delay time.Duration }{
+			{time.Minute, 2 * time.Minute},
+			{20 * time.Minute, 10 * time.Minute},
+			{time.Hour, 30 * time.Minute},
+			{4 * time.Hour, 2 * time.Hour},
+			{24 * time.Hour, 2 * time.Hour},
+		} {
+			a.clock.Advance(created.Add(tc.age).Sub(a.clock.Now()))
+			var row gen.BillingProviderIntent
+			require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+				var err error
+				row, err = rt.IntentRunner().VerifyByID(ctx, id)
+				return err
+			}))
+			require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+			require.EqualValues(t, 1, row.Attempts, "verification does not consume execution attempts")
+			require.WithinDuration(t, a.clock.Now().Add(tc.delay), row.NextAttemptAt, time.Microsecond, "operation age %s", tc.age)
+			if tc.age >= 20*time.Minute {
+				findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.submission.unresolved"})
+				require.NoError(t, err)
+				require.Len(t, findings.Items, 1)
+			}
+		}
+		p.money(t, 2, 2000)
+	})
 	t.Run("OR-J14-S01/before-boundary-workers-cannot-admit-renewal", func(t *testing.T) {
 		a, p, sub := purchasedMembership(t)
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()) - time.Microsecond)

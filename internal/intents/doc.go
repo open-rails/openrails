@@ -24,6 +24,11 @@
 // submission is provable non-execution (instrument_changed). Nothing triggers
 // a compensating cancel or refund automatically.
 //
+// Verification starts after VerifyDelay. Inconclusive reads wait the greater
+// of the handler's attempt backoff and half the operation's age since created_at,
+// with the age delay capped at DefaultBackoff.Cap (2h). Verification never
+// increments attempts; parked verification keeps ParkRetryInterval.
+//
 // An invoice collection freezes its instrument, owns its invoice while
 // unresolved and charges NMI only under the currency's active unscheduled
 // mandate. A tier change (nmi_upgrade, stripe_tier_change) is one operation

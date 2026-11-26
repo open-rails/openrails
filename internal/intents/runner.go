@@ -31,7 +31,8 @@ const (
 	// blocker lifts or relevance ends; they never escalate backoff.
 	ParkRetryInterval = 5 * time.Minute
 	// VerifyDelay schedules the verifier's first look at a fresh ambiguous
-	// outcome.
+	// outcome. Inconclusive reads then use the greater of the handler's backoff
+	// and half the operation's age, with the age delay capped at DefaultBackoff.Cap.
 	VerifyDelay = time.Minute
 	// ledgerWriteTimeout bounds one detached ledger transition (LedgerWriteContext).
 	ledgerWriteTimeout = 10 * time.Second
@@ -361,7 +362,7 @@ type terminalCommitter interface{ CommitsTerminalOutcome() bool }
 
 // apply writes one classified outcome to the ledger, detached from the
 // caller's cancellation. verifying selects how OutcomeAmbiguous is read: still
-// inconclusive (back off the next verify) or fresh (first verify soon).
+// inconclusive (back off by attempts and operation age) or fresh (first verify soon).
 func (r *Runner) apply(ctx context.Context, logEntry *slog.Logger, stats *Stats, handler Handler, intent gen.BillingProviderIntent, outcome Outcome, verifying bool) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
@@ -410,7 +411,8 @@ func (r *Runner) apply(ctx context.Context, logEntry *slog.Logger, stats *Stats,
 	case OutcomeAmbiguous:
 		delay := VerifyDelay
 		if verifying {
-			delay = handler.Backoff(intent.Attempts)
+			// Attempts do not grow while verifying; the operation's age does.
+			delay = max(handler.Backoff(intent.Attempts), min(now.Sub(intent.CreatedAt)/2, DefaultBackoff.Cap))
 		}
 		err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(delay), outcome.Reason, outcome.Evidence)
 	case OutcomeTerminal:
