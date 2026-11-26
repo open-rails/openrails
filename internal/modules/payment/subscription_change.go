@@ -66,6 +66,8 @@ type changeTarget struct {
 	priceGiven bool
 	// requested is the seats the request named.
 	requested *int
+	// paid is what the current period's charges took and kept.
+	paid PeriodPaid
 	// pending is the subscription's scheduled change, as read.
 	pending *models.ScheduledChange
 	// staff made the change at the customer's request.
@@ -344,6 +346,9 @@ func (s *PurchaseService) resolveChange(ctx context.Context, req *SubscriptionCh
 	}
 	if c.currentPrice, err = s.PriceService.GetByID(ctx, sub.PriceID); err != nil {
 		return nil, &TierChangeError{Code: billing.CodeInternalError, Message: "current price not found"}
+	}
+	if c.paid, err = periodKept(ctx, s.SubscriptionService.Database(), sub, c.currentPrice.Currency); err != nil {
+		return nil, err
 	}
 	sub.Price = c.currentPrice
 	if c.currentProduct, err = s.ProductService.GetByID(ctx, c.currentPrice.ProductID); err != nil {
