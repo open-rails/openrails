@@ -414,8 +414,11 @@ func (s *MoneyService) canCollectUsage(ctx context.Context, q *gen.Queries, row 
 
 // usageAdmissionBillingMode is the billing mode usageAdmissionCapacity admits
 // row's customer under: under usage terms arrears whenever usage can be
-// collected, even on a credit line of 0.
+// collected, even on a credit line of 0; revoked collection is prepaid.
 func (s *MoneyService) usageAdmissionBillingMode(ctx context.Context, row gen.BillingMoneySetting) (string, error) {
+	if row.CollectionRevokedAt != nil {
+		return BillingModePrepaid, nil
+	}
 	cfg, cur, err := s.usageBillingConfig(ctx, row.Currency)
 	if err != nil {
 		return "", err
