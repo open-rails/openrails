@@ -1591,9 +1591,6 @@
       "type MonitorArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tPSPID      uuid.UUID `json:\"psp_id\" river:\"unique\"`\n\tAfter      int64     `json:\"after,omitempty\" river:\"unique\"`\n}",
       "type ResponseArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tSubject    Subject   `json:\"subject\" river:\"unique\"`\n\tID         uuid.UUID `json:\"id\" river:\"unique\"`\n\tAfter      int64     `json:\"after,omitempty\" river:\"unique\"`\n}"
     ],
-    "internal/eventlog": [
-      "type cursor struct {\n\tVersion  int       `json:\"v\"`\n\tEpoch    uuid.UUID `json:\"epoch\"`\n\tMerchant string    `json:\"merchant\"`\n\tTypes    []string  `json:\"types,omitempty\"`\n\tPosition int64     `json:\"position\"`\n\tBoundary string    `json:\"boundary,omitempty\"`\n}"
-    ],
     "internal/eventstore": [
       "type UsageCharge struct {\n\tMeter    string `json:\"meter\"`\n\tCell     string `json:\"cell\"`\n\tPrint    string `json:\"print\"`\n\tQuantity int64  `json:\"quantity\"`\n\tStated   int64  `json:\"stated\"`\n}",
       "type archivedEvent struct {\n\tEventID        uuid.UUID        `json:\"event_id\"`\n\tCustomerID     uuid.UUID        `json:\"customer_id\"`\n\tCurrency       string           `json:\"currency\"`\n\tEventType      string           `json:\"event_type\"`\n\tInvoker        string           `json:\"invoker\"`\n\tInvokerType    string           `json:\"invoker_type\"`\n\tOutcome        string           `json:\"outcome\"`\n\tSource         string           `json:\"source\"`\n\tSourceID       string           `json:\"source_id\"`\n\tLeaseID        uuid.UUID        `json:\"lease_id\"`\n\tN              uint64           `json:\"n\"`\n\tOccurredAt     time.Time        `json:\"occurred_at\"`\n\tAdmittedAt     time.Time        `json:\"admitted_at\"`\n\tIngestedAt     time.Time        `json:\"ingested_at\"`\n\tPeriodStartsAt time.Time        `json:\"period_starts_at\"`\n\tDimensions     map[string]int64 `json:\"dimensions\"`\n\tMetadata       string           `json:\"metadata\"`\n\tStated         *int64           `json:\"stated\"`\n\tCharged        int64            `json:\"charged\"`\n\tForgiven       int64            `json:\"forgiven\"`\n\tCharges        []UsageCharge    `json:\"charges\"`\n}"
@@ -2781,26 +2778,6 @@
       "rivertype": "github.com/riverqueue/river/rivertype",
       "time": "time",
       "uuid": "github.com/google/uuid"
-    },
-    "internal/eventlog/log.go": {
-      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
-      "base64": "encoding/base64",
-      "billing": "github.com/open-rails/openrails/billing",
-      "bytes": "bytes",
-      "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "errors": "errors",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "http": "net/http",
-      "io": "io",
-      "json": "encoding/json",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "retention": "github.com/open-rails/openrails/internal/retention",
-      "shared": "github.com/open-rails/helpers/eventlog",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v2": "github.com/ccoveille/go-safecast/v2",
-      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/eventstore/archive.go": {
       "context": "context",

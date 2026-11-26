@@ -737,27 +737,6 @@
     "OR-J31-S06": [
       "TestBillingArchive/OR-J31-S06/nmi-receipts-naming-their-card-move-with-the-book"
     ],
-    "OR-J31-S15": [
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/moves-every-lot",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-lot-drawn-before-its-deposit",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-termination-that-is-not-a-revocation",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-paid-amount-without-a-payment",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-an-amount-on-a-grant-that-is-not-a-lot",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-transfer-naming-another-customers-lot",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/a-migrated-purchase-deposit-replays",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders"
-    ],
-    "OR-J31-S16": [
-      "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts/converts-per-unit-cards",
-      "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts/refuses-a-card-counts-cannot-express",
-      "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts"
-    ],
-    "OR-J31-S17": [
-      "TestCancellationsMigration/OR-J31-S17/an-upgrade-through-the-reporting-rollups-adopts-cancel-decisions-of-every-kind"
-    ],
-    "OR-J31-S12": [
-      "TestBaselineAdoption/OR-J31-S12/an-older-database-whose-schema-equals-the-baseline-is-accepted-and-re-stamped"
-    ],
     "OR-J31-S14": [
       "TestLimitArchive/OR-J31-S14/open-limit-windows-and-staff-adjustments-move-with-the-book"
     ],
@@ -1547,9 +1526,6 @@
     "OR-J42-S09": [
       "TestMRR/OR-J42-S09/a-bulk-import-settles-once-its-reads-growing-with-the-book"
     ],
-    "OR-J42-S10": [
-      "TestMRR/OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once"
-    ],
     "OR-J42-S11": [
       "TestMRRRisk/OR-J42-S11/a-decline-puts-mrr-at-risk-as-past-due-payment-recovers-it-exhaustion-churns-it"
     ],
@@ -2101,9 +2077,6 @@
     "OR-J45-S08": [
       "TestDeclineCauses/OR-J45-S08/nmi-history-months-carry-each-answers-outcome-and-cause"
     ],
-    "OR-J45-S09": [
-      "TestDeclineCauses/OR-J45-S09/the-migration-classifies-existing-attempts-and-history-from-their-stored-codes"
-    ],
     "OR-J45-S10": [
       "TestDeclineCauses/OR-J45-S10/the-system-errors-finding-counts-the-rails-own-errors-not-the-issuers",
       "TestDeclineCauses/OR-J45-S10/the-system-errors-finding-counts-the-rails-own-errors-not-the-issuers/an-issuers-malfunction-is-not-ours",
@@ -2135,9 +2108,6 @@
     ],
     "OR-J40-S03": [
       "TestBooks/OR-J40-S03/ledger-audit-catches-injected-counter-and-rollup-corruption"
-    ],
-    "OR-J40-S05": [
-      "TestBooksMigration/OR-J40-S05/a-ledger-from-before-the-books-migrates-with-its-rollups"
     ],
     "OR-J40-S06": [
       "TestBooks/OR-J40-S06/concurrent-top-ups-one-posting-unposted-usage-first-all-commit"
@@ -2400,9 +2370,6 @@
     ],
     "OR-J06-S81": [
       "TestMerchantControls/OR-J06-S81/unreadable-controls-deny-writes-rebills-and-destructive-actions"
-    ],
-    "OR-J06-S82": [
-      "TestMerchantControls/OR-J06-S82/the-migration-carries-postures-the-switch-and-policies-into-controls"
     ],
     "OR-J06-S83": [
       "TestFindingAlerts/OR-J06-S83/customers-own-cancellations-past-the-cap-name-the-wave-and-alert-staff-and-staff-cancels-spend-none"

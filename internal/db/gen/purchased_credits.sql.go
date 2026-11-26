@@ -253,13 +253,3 @@ func (q *Queries) RecordCreditReversalShare(ctx context.Context, arg RecordCredi
 	)
 	return err
 }
-
-const seedCreditReversalShares = `-- name: SeedCreditReversalShares :exec
-SELECT billing.seed_credit_reversal_shares($1::uuid)
-`
-
-// Records the shares of reversals an archive from before them restored.
-func (q *Queries) SeedCreditReversalShares(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, seedCreditReversalShares, merchantID)
-	return err
-}

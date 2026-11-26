@@ -246,33 +246,6 @@ func (q *Queries) QueueRestoredMRRRisk(ctx context.Context, arg QueueRestoredMRR
 	return err
 }
 
-const rebuildMRRRollups = `-- name: RebuildMRRRollups :exec
-SELECT billing.rebuild_mrr_rollups($1::uuid)
-`
-
-// An archive from before the reporting rollups lacks them: they are rebuilt
-// from what they derive from, as the migration built them.
-func (q *Queries) RebuildMRRRollups(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, rebuildMRRRollups, merchantID)
-	return err
-}
-
-const seedMRR = `-- name: SeedMRR :exec
-SELECT billing.seed_mrr($1::uuid, $2::timestamptz)
-`
-
-type SeedMRRParams struct {
-	MerchantID uuid.UUID
-	At         time.Time
-}
-
-// Adopts the subscriptions without MRR state (an archive from before MRR) as
-// opening movements at at.
-func (q *Queries) SeedMRR(ctx context.Context, arg SeedMRRParams) error {
-	_, err := q.db.Exec(ctx, seedMRR, arg.MerchantID, arg.At)
-	return err
-}
-
 const setAsideMRRRiskCustomer = `-- name: SetAsideMRRRiskCustomer :execrows
 UPDATE billing.mrr_risk_due d
 SET held_until = now() + interval '1 hour'

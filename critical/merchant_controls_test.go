@@ -5,7 +5,6 @@ package critical_test
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -271,64 +270,5 @@ func TestMerchantControls(t *testing.T) {
 		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "unreadable-controls"})
 		require.NotEqual(t, http.StatusCreated, status, string(raw))
 		require.Empty(t, p.effects(t), "nothing reaches the provider")
-	})
-	t.Run("OR-J06-S82/the-migration-carries-postures-the-switch-and-policies-into-controls", func(t *testing.T) {
-		s := newLegacySchemaBefore(t, "_merchant_controls.up.sql")
-		d := s.seed(t)
-		merchant := func(slug string) uuid.UUID {
-			id := uuid.New()
-			d.exec("INSERT INTO "+s.table("merchants")+" (id, slug, status) VALUES ($1, $2, 'active')", id, slug+"-"+id.String()[:8])
-			return id
-		}
-		pulled := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-		armed, unreviewed, stopped, plain := d.m, merchant("unreviewed"), merchant("stopped"), merchant("plain")
-		d.exec("UPDATE " + s.table("destructive_action_switch") + " SET enabled = true, updated_by = 'op', reason = 'armed'")
-		d.exec("INSERT INTO "+s.table("merchant_write_posture")+" (merchant_id, mode, reason, set_by, set_at) VALUES ($1, 'limited', 'operator', 'posture op', $2)", armed, pulled.Add(2*time.Hour))
-		d.exec("INSERT INTO "+s.table("merchant_destructive_policy")+" (merchant_id, destructive_actions_enabled, enforce_armed_at, first_pull_completed_at, updated_by, reason, updated_at) VALUES ($1, true, $2, $2, 'policy op', 'reviewed', $2)", armed, pulled)
-		d.exec("INSERT INTO "+s.table("merchant_destructive_policy")+" (merchant_id, first_pull_completed_at, updated_at) VALUES ($1, $2, $2)", unreviewed, pulled)
-		d.exec("INSERT INTO "+s.table("merchant_destructive_policy")+" (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason, updated_at) VALUES ($1, false, $2, 'rollback', 'reversing a run', $2)", stopped, pulled)
-		d.commit()
-
-		require.NoError(t, s.apply(t.Context(), s.full))
-		type row struct {
-			writes      string
-			held, armed bool
-			firstPull   *time.Time
-			by, reason  *string
-		}
-		read := func(id uuid.UUID) (row, bool) {
-			var r row
-			err := s.pool.QueryRow(t.Context(), "SELECT writes, rebills_held, destructive_armed, first_pull_completed_at, changed_by, reason FROM "+s.table("merchant_controls")+" WHERE merchant_id = $1", id).
-				Scan(&r.writes, &r.held, &r.armed, &r.firstPull, &r.by, &r.reason)
-			if errors.Is(err, pgx.ErrNoRows) {
-				return r, false
-			}
-			require.NoError(t, err)
-			return r, true
-		}
-		got, ok := read(armed)
-		require.True(t, ok)
-		require.Equal(t, "limited", got.writes)
-		require.False(t, got.held)
-		require.True(t, got.armed, "switch on, its stop off and its enforcement armed: armed")
-		require.True(t, got.firstPull.Equal(pulled))
-		require.Equal(t, "posture op", *got.by, "the newer change is the last")
-		require.Equal(t, "write posture", *got.reason)
-		got, ok = read(unreviewed)
-		require.True(t, ok)
-		require.False(t, got.armed, "a merchant never armed for enforcement stays disarmed")
-		require.True(t, got.firstPull.Equal(pulled))
-		require.Nil(t, got.by, "a pull's stamp is no change")
-		got, ok = read(stopped)
-		require.True(t, ok)
-		require.False(t, got.armed, "a stopped merchant is disarmed")
-		require.Equal(t, "rollback", *got.by)
-		_, ok = read(plain)
-		require.False(t, ok, "a merchant at the defaults keeps no row")
-		for _, gone := range []string{"merchant_write_posture", "merchant_destructive_policy", "destructive_action_switch"} {
-			var exists bool
-			require.NoError(t, s.pool.QueryRow(t.Context(), "SELECT to_regclass($1) IS NOT NULL", s.schema+"."+gone).Scan(&exists))
-			require.False(t, exists, gone)
-		}
 	})
 }

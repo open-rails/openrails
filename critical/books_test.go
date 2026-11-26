@@ -4,25 +4,19 @@ package critical_test
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
-	"os"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -31,8 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/migrate"
-	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
@@ -939,77 +931,6 @@ products:
 	})
 }
 
-// TestBooksMigration migrates a database that predates the books, with its
-// ledger, to the books.
-func TestBooksMigration(t *testing.T) {
-	t.Run("OR-J40-S05/a-ledger-from-before-the-books-migrates-with-its-rollups", func(t *testing.T) {
-		dsn := os.Getenv("OPENRAILS_CRITICAL_DSN")
-		require.NotEmpty(t, dsn, "OPENRAILS_CRITICAL_DSN must name a disposable PostgreSQL database; critical scenarios never skip")
-		pool, err := pgxpool.New(t.Context(), dsn)
-		require.NoError(t, err)
-		t.Cleanup(pool.Close)
-		schema := criticalSchema()
-		// Every migration before the books', whatever their numbers.
-		names, err := fs.Glob(postgresmigrations.FS, "*.up.sql")
-		require.NoError(t, err)
-		slices.SortFunc(names, func(a, b string) int { return cmp.Compare(migrationNumber(t, a), migrationNumber(t, b)) })
-		at := slices.IndexFunc(names, func(name string) bool { return strings.HasSuffix(name, "_books.up.sql") })
-		require.Positive(t, at)
-		before := fstest.MapFS{}
-		for _, name := range names[:at] {
-			body, err := fs.ReadFile(postgresmigrations.FS, name)
-			require.NoError(t, err)
-			before[name] = &fstest.MapFile{Data: body}
-		}
-		require.NoError(t, migrate.Apply(t.Context(), pool, migrate.Options{Schema: schema, Chain: before, Logger: slog.New(slog.DiscardHandler)}))
-		table := func(name string) string { return pgx.Identifier{schema, name}.Sanitize() }
-
-		// The ledger as it stood: a customer's deposit, a spend, and usage
-		// owed beyond the balance, posted by the triggers of the time.
-		var mid uuid.UUID
-		require.NoError(t, pool.QueryRow(t.Context(), "INSERT INTO "+table("merchants")+" (slug, status) VALUES ('alpha', 'active') RETURNING id").Scan(&mid))
-		customer := uuid.New()
-		_, err = pool.Exec(t.Context(), "INSERT INTO "+table("customers")+" (merchant_id, id) VALUES ($1, $2)", mid, customer)
-		require.NoError(t, err)
-		accounts := map[string]uuid.UUID{}
-		for _, a := range []struct {
-			typ      string
-			customer *uuid.UUID
-			floor    bool
-		}{{"customer_balance", &customer, true}, {"arrears_liability", &customer, false}, {"processor_clearing", nil, false}, {"platform_revenue", nil, false}} {
-			var id uuid.UUID
-			require.NoError(t, pool.QueryRow(t.Context(), "INSERT INTO "+table("ledger_accounts")+" (merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits, credits_must_not_exceed_debits) VALUES ($1, $2, $3, 'USD', $4, false) RETURNING id", mid, a.customer, a.typ, a.floor).Scan(&id))
-			accounts[a.typ] = id
-		}
-		for i, tr := range []struct {
-			debit, credit, typ string
-			amount             int64
-		}{{"processor_clearing", "customer_balance", "deposit", 1000}, {"customer_balance", "platform_revenue", "credit_spend", 400}, {"arrears_liability", "platform_revenue", "owed_accrual", 250}} {
-			_, err := pool.Exec(t.Context(), "INSERT INTO "+table("ledger_transfers")+" (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, operation, source, source_id, customer_id) VALUES ($1, $2, $3, $4, 'USD', $5, 0, 'critical', 'critical', $6, $7)",
-				mid, accounts[tr.debit], accounts[tr.credit], tr.amount, tr.typ, fmt.Sprint(i), customer)
-			require.NoError(t, err)
-		}
-
-		// The engine starts on it and migrates it to the books.
-		w := newWorld(t, func(w *world) {
-			w.schema = schema
-			w.cfg.Database = billing.DatabaseConfig{Schema: schema}
-		})
-		require.Equal(t, mid, w.alpha.MerchantID().UUID())
-		balance(t, w.alpha, billing.CustomerID(customer), 600, 0, 600)
-		rows, err := w.pool.Query(t.Context(), "SELECT account_type || ' ' || book || ' ' || class FROM "+table("ledger_accounts")+" WHERE merchant_id=$1", mid)
-		require.NoError(t, err)
-		renamed, err := pgx.CollectRows(rows, pgx.RowTo[string])
-		require.NoError(t, err)
-		require.ElementsMatch(t, []string{"customer_units units held", "customer_owed units owed", "units_sold units issued", "units_redeemed units retired"}, renamed)
-		require.Equal(t, [2]int64{1000, 400}, booksTotal(t, w, "units", "customer_units"))
-		require.Equal(t, [2]int64{650, 0}, booksTotal(t, w, "units", "units_redeemed"))
-		require.Equal(t, [2]int64{0, 250}, booksTotal(t, w, "units", "customer_owed"))
-		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
-		require.NotEmpty(t, archiveBytes(t, w.alpha), "the export's ledger check accepts the migrated books")
-	})
-}
-
 // booksTx runs fn in one of alpha's transactions, over the engine's queries.
 func booksTx(t *testing.T, w *world, fn func(ctx context.Context, q *gen.Queries) error) error {
 	t.Helper()
@@ -1189,11 +1110,4 @@ func booksRollup(t *testing.T, w *world, table string, merchant uuid.UUID) []str
 	require.NoError(t, err)
 	slices.Sort(out)
 	return out
-}
-
-func migrationNumber(t *testing.T, name string) int {
-	t.Helper()
-	n, err := strconv.Atoi(name[:strings.IndexByte(name, '_')])
-	require.NoError(t, err, name)
-	return n
 }

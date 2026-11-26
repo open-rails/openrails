@@ -92,7 +92,7 @@ findings 12 months.
 
 **Adding a measure.** Declare it in `declared` (`registry.go`) with its family, `Expr` or `Agg`, dimensions, group and direction. A new outcome of an existing fact is a dimension value with its expression in the family's `DimExprs` and values in `DimValues`, and its rate a ratio over slices, not a new count. Removing or renaming a measure ships a migration that drops saved widgets naming it.
 
-**Dashboard read.** `dashboard.Service.Get` reads `GetDashboardConfig` for the context's merchant. With no row it runs `GetDashboardProfile` and answers `DefaultWidgets(profile)` with the profile. Nothing is written until the merchant saves. A stored layout is decoded as saved; a row that does not decode is an error. Stored widgets are not validated again on read: the migration that retires a measure or dimension (`dashboard_retired_measures`; `decline_causes` for `category` and `first_failure_category`; `reporting_mrr` for the subscription measures, the failure rates and `status`) drops the widgets naming it, deleting a layout it leaves empty.
+**Dashboard read.** `dashboard.Service.Get` reads `GetDashboardConfig` for the context's merchant. With no row it runs `GetDashboardProfile` and answers `DefaultWidgets(profile)` with the profile. Nothing is written until the merchant saves. A stored layout is decoded as saved; a row that does not decode is an error. Stored widgets are not validated again on read: the migration that retires a measure or dimension drops the widgets naming it, deleting a layout it leaves empty.
 
 **Dashboard save.** `PUT /v1/merchant/dashboard` replaces the whole layout:
 
@@ -108,7 +108,7 @@ There is no revision check: the last save wins. Validation uses the wall clock
 
 **Draw.** The console's dashboard page (`web/billing-ui/src/admin/pages/dashboard`) reads `GET /v1/metrics/schema` once (`registry.ts`) for directions, thresholds and dimensions, runs each widget's query through `POST /v1/metrics/query` under the page's range, currency and comparison (`widgetQuery`), and adds and edits widgets (`widget-editor.tsx`) before a save. The editor and the Reports page's explorer build queries from the schema (`query-builder.tsx`), so every measure can be charted by its dimensions without console changes.
 
-**Restore.** A merchant archive carries the MRR rollups. One written before the reporting rollups lacks the streak flows, product totals, distinct customers, cancel decisions and chargeback churn flows: the restore rebuilds each from what it derives from (`billing.rebuild_mrr_rollups`, the migration's backfill), and the restore check (`billing.check_billing_restore_mrr`) proves every rollup agrees with its source.
+**Restore.** A merchant archive carries the MRR rollups, and the restore check (`billing.check_billing_restore_mrr`) proves every rollup agrees with its source.
 
 **Storage.** One table, `dashboard_configs`: `merchant_id` (primary key),
 `layout jsonb`, `updated_at`, `updated_by`.
@@ -210,7 +210,6 @@ Does not apply: the engine is read-only, and the dashboard's only write replaces
 - OR-J53-S07 checks that a card merchant's chargeback ratio tile and the VAMP and ECM charts carry the programs' levels from `disputerules.ProgramLines` with the months each is in force, and that one chargeback under VAMP's minimum count reaches no level whatever its ratio.
 - OR-J42-S30 plans every MRR measure by itself, by each of its dimensions, by two, and filtered by currency and by product, over time and not, in UTC and New York, with sequential scans off (`metrics.Statements`): no relation is scanned whole, every scan's index condition names the merchant, and a rollup kept by time is read by its time.
 - OR-J42-S32 settles MRR leaving a product, a currency and a customer (at once and at a period's end through the billing pass), the product totals and distinct customers falling to none.
-- OR-J31-S17 upgrades a database holding a cancel of every kind through the reporting rollups, adopting one cancel decision of each.
 - OR-J42-S33 ends a counted customer's subscription with a full refund that revokes access: the refund and its replay finalize, and the distinct customers fall once.
 - OR-J14-S70 (`rebills` missed), OR-J17-S01 (`mrr`, `scheduled_mrr`), OR-J23-S16 (`limits_reached`) and OR-J42-S11 to S15 (`mrr_at_risk`, `at_risk_recovery_rate`) query through the Go client over real PostgreSQL.
 - OR-J38-S85 shows credits sold in the merchant's own units at each unit's scale with its name.

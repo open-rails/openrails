@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 806,
+  "scenario_count": 798,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1129,29 +1129,9 @@
       "name": "A Solana pull scheduled ahead and restored with its merchant runs on the destination at its due time"
     },
     {
-      "id": "OR-J31-S15",
-      "journey": "J31",
-      "name": "Credit lots move out of grants with their ids and the remainders and pending-refund shares the old formulas gave (the reservation net of reversals already settled), old data the move cannot place refuses it with nothing moved, and a migrated purchase deposit replays"
-    },
-    {
-      "id": "OR-J31-S16",
-      "journey": "J31",
-      "name": "Stored limit rate cards migrate to counts: a per-unit card becomes one count and a matrix one per priced cell with its filter, the limit's field owner renames, and a card counts cannot express refuses the migration with nothing changed"
-    },
-    {
-      "id": "OR-J31-S17",
-      "journey": "J31",
-      "name": "A database written before the reporting rollups, holding a cancel of every kind a subscription records (user, merchant, expired, chargeback, upgrade, provider, abandoned), upgrades through them and adopts one cancel decision of each kind"
-    },
-    {
       "id": "OR-J31-S09",
       "journey": "J31",
       "name": "A paid Stripe hosted-page invoice exports and restores with its attempt's Checkout Session state"
-    },
-    {
-      "id": "OR-J31-S12",
-      "journey": "J31",
-      "name": "A database whose baseline record carries other content is accepted and re-stamped by the migration step with its rows intact"
     },
     {
       "id": "OR-J31-S14",
@@ -2644,11 +2624,6 @@
       "name": "A credit lot whose deposit did not post is not spendable until convergence posts it once"
     },
     {
-      "id": "OR-J40-S05",
-      "journey": "J40",
-      "name": "A ledger from before the books migrates with rollups that ledger-audit and an export accept"
-    },
-    {
       "id": "OR-J40-S06",
       "journey": "J40",
       "name": "Concurrent top-ups, one posting unposted usage first, all commit"
@@ -2727,11 +2702,6 @@
       "id": "OR-J42-S09",
       "journey": "J42",
       "name": "A bulk import of over a thousand subscriptions in one transaction settles once: reads of subscription_mrr grow with the book, not its square"
-    },
-    {
-      "id": "OR-J42-S10",
-      "journey": "J42",
-      "name": "The migration's backfill adopts a book written before MRR as backfilled openings in one settlement, its reads growing with the book"
     },
     {
       "id": "OR-J42-S11",
@@ -3394,11 +3364,6 @@
       "name": "A weekly plan whose first decline is advised past its renewal (MAC 30) stays past due with no retry, and ends at the renewal as issuer_deferred"
     },
     {
-      "id": "OR-J45-S09",
-      "journey": "J45",
-      "name": "The decline-cause migration classifies existing attempts and NMI history months from their stored codes, merges months one reason now covers, keeps each attempt's action, drops saved widgets naming a dimension it renamed, and widens saved declined and error filters to exactly what they meant"
-    },
-    {
       "id": "OR-J45-S15",
       "journey": "J45",
       "name": "A new card on a case the old card's advice deferred is not held to that advice: its plain decline keeps dunning, and the case ends as the card failed, not issuer_deferred"
@@ -3717,11 +3682,6 @@
       "id": "OR-J06-S81",
       "journey": "J06",
       "name": "Unreadable controls deny provider writes, rebills and destructive actions"
-    },
-    {
-      "id": "OR-J06-S82",
-      "journey": "J06",
-      "name": "The migration carries write postures, the destructive switch and merchant policies into merchant controls"
     },
     {
       "id": "OR-J06-S83",

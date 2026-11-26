@@ -169,6 +169,8 @@ jobs:
           family: plain
       - run: python3 scripts/check-ci-policy.py
       - run: bash scripts/check.sh guards
+      - name: Released migrations are unchanged
+        run: bash scripts/check-released-migrations.sh
       - name: Workflow lint
         run: |
           curl --fail --silent --show-error --location \
@@ -354,28 +356,6 @@ jobs:
         with:
           name: regenerated-contracts
           path: ${{ runner.temp }}/regenerated-contracts.patch
-      # A pull request that rewrites the migrations (a fold into the baseline)
-      # must build the database its base's chain builds: identical pg_dump
-      # output in billing and in a relocated schema. pg_dump 18 is the server
-      # container's. It is proven where the rewrite enters its release candidate,
-      # against the pull request's own base: a merge group or the candidate's
-      # pull request into master also carries the schema changes merged beside
-      # it, so its chain is not its base's.
-      - name: Rewritten migrations build the base's schema
-        if: ${{ !cancelled() && needs.scope.outputs.base_sha != '' && needs.scope.outputs.tier == 'light' }}
-        env:
-          BASE_SHA: ${{ needs.scope.outputs.base_sha }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          # Only added files: the chain grew, and nothing applied was rewritten.
-          if [[ -z "$(git diff --name-only --diff-filter=a "$BASE_SHA" HEAD -- internal/migrate/postgres)" ]]; then
-            echo 'No migration of the base was changed or removed.'
-            exit 0
-          fi
-          go run ./scripts/schemaproof -ref "$BASE_SHA" \
-            -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' \
-            -pg-dump 'docker exec critical-postgres pg_dump'
 
   browser:
     name: Browser build

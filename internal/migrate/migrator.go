@@ -57,10 +57,8 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	if chain == nil {
 		chain = postgresmigrations.FS
 	}
-	render := func(schema string) ([]migratekit.Migration, error) { return loadChain(chain, schema) }
-
 	logger.InfoContext(ctx, "running OpenRails migrations", "schema", schema)
-	migrations, err := render(schema)
+	migrations, err := loadChain(chain, schema)
 	if err != nil {
 		return err
 	}
@@ -70,9 +68,10 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 		return fmt.Errorf("create OpenRails migrator: %w", err)
 	}
 	defer m.Close()
-	// Strict integrity: an applied migration whose content changed is refused
-	// unless the live schema still equals a fresh build of it.
-	m.WithSchema(schema).WithStrictIntegrity().WithRender(render).WithWarnFunc(func(d migratekit.Discrepancy) {
+	// Released migrations never change: an applied migration whose file
+	// differs from this build's by a byte is refused (ErrMigrationEdited) from
+	// the ledger alone, before anything is applied.
+	m.WithSchema(schema).WithImmutableMigrations().WithWarnFunc(func(d migratekit.Discrepancy) {
 		logger.WarnContext(ctx, "migratekit: "+d.OneLine(), "kind", string(d.Kind), "migration", d.File, "key", d.Key)
 	})
 	if err := m.ApplyMigrations(ctx, migrations); err != nil {

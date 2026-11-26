@@ -181,7 +181,7 @@ The source scan found 523 named SQL statements in 95 files with an explicit qual
 | [destructive_actions.sql](../internal/db/queries/destructive_actions.sql) | 7 | `destructive_actions`, `destructive_holds`, `host_outbox`, `reconciliation_findings` |
 | [destructive_before_images.sql](../internal/db/queries/destructive_before_images.sql) | 8 | `destructive_run_before_images`, `product_access`, `provider_intents`, `reconciliation_state`, `subscriptions` |
 | [disputes.sql](../internal/db/queries/disputes.sql) | 11 | `disputes`, `fraud_reports`, `payment_methods` |
-| [event_log.sql](../internal/db/queries/event_log.sql) | 2 | `event_log`, `event_log_streams` |
+| [event_log.sql](../internal/db/queries/event_log.sql) | 2 | `eventlog_events`, `eventlog_streams` |
 | [event_store.sql](../internal/db/queries/event_store.sql) | 10 | `catalog_field_owners`, `catalog_limits`, `catalog_meters`, `catalog_product_limits`, `catalog_rate_cards`, `customer_limit_overrides`, `event_store`, `limit_adjustments`, `limit_windows` |
 | [grants.sql](../internal/db/queries/grants.sql) | 3 | `grants` |
 | [host_lifecycle_events.sql](../internal/db/queries/host_lifecycle_events.sql) | 2 | `host_outbox` |

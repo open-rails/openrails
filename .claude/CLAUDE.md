@@ -157,8 +157,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   (`billing.PSPConfig`; `merchants.<slug>.psps.<key>` in a standalone manifest), with
   credentials under `psps.<key>.secrets`. Merchant configuration is that file (read-only)
   or, with `vault.kv_mount`, Vault: one document per object
-  (`<scope_prefix>/merchants/<merchant-id>/psps/<key>`); never Postgres. The retired
-  manifest keys (`rail_merchant_accounts`, `provider_accounts`) fail loudly with a rename error.
+  (`<scope_prefix>/merchants/<merchant-id>/psps/<key>`); never Postgres.
 - Each rail names its account in its own terms (joined with `-` into the internal
   account its id and webhook path use):
   - **NMI** — `gateway_id`, the dashboard **"Gateway ID"**, which IS the merchant account
@@ -189,17 +188,13 @@ through `host-four`; these are placeholders, not customer or repository names.
   other schema is reached by one token-aware rewriter (`internal/sqlschema`) that moves
   schema references only.
 - One hand-written baseline, `internal/migrate/postgres/0001_schema.up.sql`: tables in
-  foreign-key order, each followed by its constraints, indexes and triggers. A release has
-  shipped it, so a schema change is a new numbered migration (`0002_…`, added to `sqlc.yaml`)
-  and `api/schema.txt` shows it; a schema change never edits the baseline. Rewriting the
-  baseline is a deliberate re-squash proven by CI's `scripts/schemaproof` step, because every
-  deployed database must then be settled against it; after v1.0.0 it is immutable.
-- `Migrate`/`New` settle a database that recorded a migration with other content: a schema
-  equal to a fresh build is re-stamped; any other is
-  refused with the difference. A `SkipMigrations` start (`migrate.Validate`) only checks, and
-  refuses a missing migration or one recorded with other content (`ErrMigrationsRequired`)
-  until `Migrate` has run. Only OpenRails' objects live in its schema: the comparison covers
-  all of it.
+  foreign-key order, each followed by its constraints, indexes and triggers. A released
+  migration is immutable (`scripts/check-released-migrations.sh`): a schema change is a new
+  numbered migration (`0002_…`, added to `sqlc.yaml`) and `api/schema.txt` shows it. Nothing
+  upgrades a database built before v0.284.0: rebuild it.
+- `Migrate`/`New` refuse a database whose applied migration was edited (migratekit
+  `WithImmutableMigrations`, `ErrMigrationEdited`); nothing is re-stamped, and migrations a
+  newer build applied are left alone. Only OpenRails' objects live in its schema.
 - `New` applies the migrations; the pool it runs with owns every object (another owner is
   the operator's `SET ROLE`). No grants, no runtime role.
 - There is NO row-level security: tenant isolation is the explicit `merchant_id` (or
@@ -225,10 +220,9 @@ through `host-four`; these are placeholders, not customer or repository names.
   charges its own metered price with a `running_charges` row.
 - Spellings matched against stored or provider records still say "order": NMI's `orderid`
   and order references, Stripe metadata `order_id`/`order_attempt_id`, intent payload keys,
-  River kinds (`openrails.order_expiry`, `openrails.usage_orders`), inbox issue keys, the
+  River kinds (`openrails.order_expiry`, `openrails.usage_orders`), the
   `waive_order` destructive kind, idempotency and derived-id namespaces, ledger and books
-  sources (`order`, `order_line`). Never rename them. Immutable history (notification
-  events, the event log) keeps its earlier types; readers rename them (`models.NotificationType`).
+  sources (`order`, `order_line`). Never rename them.
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
 - Usage events live in ClickHouse (`Deps.ClickHouse`, `internal/eventstore`, its own embedded
   migrations); money stays in PostgreSQL. Usage posts to the ledger at each month's end in

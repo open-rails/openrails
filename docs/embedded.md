@@ -197,8 +197,8 @@ one instance migrates, the rest wait. To migrate as a deploy step instead, run
 
 - An older build boots on a schema a newer one migrated (it leaves unknown
   migrations alone), so rolling upgrades work in both directions within v1.
-- A database that recorded a migration with other content is compared with a
-  fresh build of its recorded migrations: equal is re-stamped, different is refused with the difference.
+- Released migrations never change: a database that applied a migration whose
+  file differs from the build's by even a byte is refused, and nothing is applied.
 - Only OpenRails' objects may live in its schemas. Before v1 a release may break
   the schema in one step; its notes say so, and hosts sharing it upgrade together.
 
