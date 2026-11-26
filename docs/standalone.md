@@ -36,7 +36,21 @@ to it.
 
 `openrails version` prints the version, commit and build date.
 
-From a checkout, `docker compose up -d` starts the local dependencies: PostgreSQL, Redis (Valkey, the BSD-licensed Redis fork) and ClickHouse, each on a loopback port the defaults name. `task dev` then runs the server on `:3053` under Air and the console under Vite, with nothing to configure. `docker compose --profile openrails up -d` also runs the server in Docker, `docker compose logs -f openrails` follows it, and `docker compose --profile openrails down -v` removes everything, volumes included.
+The server listens on loopback (`127.0.0.1`) unless `host` names another address; a container sets `0.0.0.0`, and the image, the chart and Compose do. From a checkout, `task dev` runs it with every dependency ([local development](#local-development)).
+
+## Local development
+
+`task dev` starts the Compose dependencies (PostgreSQL, Redis as Valkey, ClickHouse and Vault, each on a loopback port), then the server under Air on `127.0.0.1:3053` and the console under Vite at `http://localhost:3054/admin/`. Once the server is ready it seeds a local operator and a merchant named `sandbox`, and prints the sign-in; `task dev:login` prints it again.
+
+| Sign-in | |
+|---|---|
+| email | `operator@localhost.test` |
+| password | `openrails` |
+| role | `root:owner`; the first sign-in enrolls an authenticator app |
+
+Vault is a development server in memory, root token `openrails-dev-root`, with KV v2 at `kv` (the server's `vault.kv_mount`) and Transit at `transit`. It forgets everything when its container restarts; the next `task dev` mounts both again and re-creates nothing else. `docker compose down -v` discards every local service's data.
+
+That operator's password is published, so the server refuses to start listening beyond loopback while the account exists, wherever the database came from. The Compose `openrails` service (`docker compose --profile openrails up -d`, followed by `docker compose logs -f openrails`) listens on `0.0.0.0` in its container and so refuses a database `task dev` seeded: start it on a fresh one (`docker compose --profile openrails down -v` removes everything, volumes included).
 
 ## First run
 
@@ -105,7 +119,18 @@ The server migrates the database under an advisory lock, applies a mounted `/etc
 openrails catalog apply catalog.yaml --config config.yaml --merchant onlydemo
 ```
 
-A private deployment's first run, as an init job: the bootstrap manifest seeds the first operator (a user with `root_role: root:owner`) and root's trusted applications.
+**The first operator.** No credential is shipped or configured for production. A one-time setup link appears in the server log on first start (AuthKit: single-use, valid 24 hours, only while no operator exists); it arrives with OpenRails' adoption of that AuthKit release and is not wired yet. Until then the bootstrap manifest seeds the first operator without a usable password, and they set their own password and second factor through the console's password reset (which needs `email_smtp`):
+
+```yaml
+users:
+  - email: ops@example.com
+    username: ops
+    email_verified: true
+    password: {reset_required: true}
+    root_role: root:owner
+```
+
+A private deployment's first run, as an init job: the bootstrap manifest seeds that operator and root's trusted applications.
 
 ```sh
 openrails push-auth-bootstrap --file /etc/openrails/bootstrap.yaml
@@ -157,13 +182,14 @@ merchant's document, both generated from the configuration types (`go run
 them stale). Durations
 are Go durations (`90s`, `24h`). Every key below is read at boot. The defaults
 run a server on this machine against the repository's Compose dependencies
-(`docker compose up -d`) with nothing configured but `public_url`; none relaxes a protection, and a deployment that leaves one unset fails to connect or refuses to boot. The top-level keys: `port`, `metrics_port`, `logger`, `public_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits` and `captcha`.
+(`docker compose up -d`) with nothing configured but `public_url`; none relaxes a protection, and a deployment that leaves one unset fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metrics_port`, `logger`, `public_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits` and `captcha`.
 
 **Listener and lifecycle**
 
 | Key | Default | Meaning |
 |---|---|---|
-| `port` | `3053` | the public listener, on every interface: API, console, payment page, webhooks |
+| `host` | `127.0.0.1` | the address both listeners bind (`HOST`), an IP literal. The loopback default reaches nothing off this machine; a container sets `0.0.0.0` (the image, the chart and Compose do) and its platform decides exposure. Off loopback the server refuses to start while the development operator `operator@localhost.test` exists ([local development](#local-development)) |
+| `port` | `3053` | the public listener: API, console, payment page, webhooks |
 | `metrics_port` | unset | the metrics listener: the operator's Prometheus `GET /metrics` (dependency up/down, abuse-state fallbacks, per-job-kind health), on its own port so it is never public; unset serves none, and the chart sets 9090. Not the merchant dashboard's business metrics, which are the `/v1/metrics` API on `port` |
 | `logger.level` | `info` | `debug`, `info`, `warn` or `error`; logs go to stderr, text on a terminal and JSON otherwise |
 
@@ -1063,7 +1089,7 @@ ingress:
 | `image` | `repository`, `tag` (default the chart's `vX.Y.Z`; required to render a checkout, whose appVersion is `latest`), `digest` (pins over the tag), `pullPolicy` |
 | `imagePullSecrets` | for a private registry |
 | `args` | the command, `[run-server]`; the chart appends `--config=/etc/openrails/config.yaml` |
-| `config` | `config.yaml`, rendered as written; no secrets. Policy (`rate_limits`) goes here, never in `env`. `port` and `metrics_port` are the chart's and refused here |
+| `config` | `config.yaml`, rendered as written; no secrets. Policy (`rate_limits`) goes here, never in `env`. `host` (rendered `0.0.0.0`), `port` and `metrics_port` are the chart's and refused here |
 | `files` | more files in `/etc/openrails`: `merchants.yaml` (read at every boot; without secrets), `bootstrap.yaml` (first run), `catalog.yaml` (for `openrails catalog apply`) |
 | `secrets` | `env` (one variable per Secret key), `files` (Secrets whose keys are variable names, mounted at `/vault/secrets`), `authKeys` (`keys.json` and `totp.key` at `/vault/auth`, reloaded on change), `merchantManifest` (`{name, key}`: a Secret key mounted as `/etc/openrails/merchants.yaml`, the manifest with its PSP secrets, in place of `files.merchants.yaml`) |
 | `env`, `envFrom` | further environment |

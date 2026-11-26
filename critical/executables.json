@@ -1933,6 +1933,9 @@
     "OR-J01-S32": [
       "TestStandaloneAuthSurface/OR-J01-S32/the-console-signs-staff-in-only-with-the-servers-own-accounts"
     ],
+    "OR-J01-S33": [
+      "TestStandaloneAuthSurface/OR-J01-S33/the-server-listens-on-loopback-and-refuses-the-development-operator-beyond-it"
+    ],
     "OR-J24-S42": [
       "TestLeaseSyncs/OR-J24-S42/a-view-request-is-refused-alone-and-the-sync-stands"
     ],

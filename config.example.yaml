@@ -13,7 +13,11 @@
 # writes to a merchant's providers, and whether the charges it initiates wait,
 # are the merchant's controls (`openrails merchant controls`).
 
-port: 3053 # every interface
+# The listeners' address, an IP literal: loopback by default. A container sets
+# 0.0.0.0 (the image, the Helm chart and Compose do); off loopback the server
+# refuses a database holding `task dev`'s operator@localhost.test.
+host: 127.0.0.1
+port: 3053
 # The metrics listener: the operator's Prometheus GET /metrics (dependency
 # up/down, abuse-state fallbacks, per-job-kind health), on its own port so it
 # is never public. Unset serves none; the Helm chart sets 9090. Not the

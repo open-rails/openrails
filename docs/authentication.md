@@ -165,7 +165,7 @@ staff browser (your page)            your app (the merchant's issuer)        Ope
 
 People sign in at `/admin` with the server's own AuthKit accounts, the console's only sign-in. Every account needs a second factor, a passkey or an authenticator app: a password alone gets no session until one is enrolled, and every later sign-in asks for it. Accounts join by invitation only:
 
-1. The first operator comes from `openrails push-auth-bootstrap`: a bootstrap manifest user with `root_role: root:owner`.
+1. The first operator follows a one-time setup link the server logs on first start (AuthKit; it arrives with OpenRails' adoption of that AuthKit release). Until then `openrails push-auth-bootstrap` seeds them: a bootstrap manifest user with `root_role: root:owner` and `password: {reset_required: true}`, who sets a password through the console's reset ([the first operator](standalone.md#first-run)). Locally, `task dev` seeds `operator@localhost.test` ([local development](standalone.md#local-development)).
 2. A person who manages a merchant's people (or root's) invites someone by email with a role, in the console's **Access → People**.
 3. The invitee follows the emailed link to `/admin/invite` and creates an account, or accepts with the one they hold.
 

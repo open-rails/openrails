@@ -20,13 +20,10 @@ OpenRails is a billing engine you add to an existing application. It keeps a mer
 Start a standalone server for development:
 
 ```sh
-docker compose up -d
 task dev
 ```
 
-The merchant dashboard is on localhost:3054/admin/, served by Vite for fast reloads. The API server is on localhost:3053, rebuilt by Air on every change.
-
-Login to the dashboard with the provided username and password.
+It starts PostgreSQL, Valkey, ClickHouse and Vault in Docker Compose, then the API server on 127.0.0.1:3053, rebuilt by Air on every change, and the merchant dashboard on localhost:3054/admin/, served by Vite for fast reloads. Sign in as `operator@localhost.test` with the password `openrails`; `task dev:login` prints it again. [Local development](docs/standalone.md#local-development) has the details.
 
 ## License
 

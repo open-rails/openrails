@@ -164,6 +164,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err := applyStartupBootstrap(ctx, cp); err != nil {
 		return closeOnError(fmt.Errorf("startup bootstrap: %w", err))
 	}
+	if err := refuseExposedDevOperator(ctx, cp, hostconfig.FromContext(ctx).Server.Host); err != nil {
+		return closeOnError(err)
+	}
 	// Provision the manifest's merchants; without Vault the manifest is their
 	// configuration. The conventional file is optional; an explicit manifest
 	// path must exist.
