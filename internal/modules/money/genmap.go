@@ -39,8 +39,6 @@ func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTran
 	amount := r.Amount
 	txType := r.TransferType
 	switch r.TransferType {
-	case "deposit", "deposit_bonus":
-		txType = "deposit"
 	case "credit_spend", "spend", "capture":
 		amount = -amount
 		txType = "withdrawal"
@@ -89,8 +87,6 @@ func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTran
 func balanceTransactionFromTransfer(r gen.BillingLedgerTransfer) billing.BalanceTransaction {
 	txType, amount := billing.BalanceTransactionType(r.TransferType), r.Amount
 	switch r.TransferType {
-	case "deposit_bonus":
-		txType = billing.BalanceTransactionDeposit
 	case "credit_refund":
 		txType, amount = billing.BalanceTransactionRevoke, -amount
 	case "credit_refund_restore":
