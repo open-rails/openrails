@@ -89,7 +89,7 @@ func (r *syncRun) views(ctx context.Context) error {
 			return err
 		}
 		d := r.DB.NewWithPgxTx(tx)
-		v := &viewing{run: r, ctx: ctx, q: gen.New(tx), money: r.Money.WithDatabase(d), admitter: r.Admitter.Bind(d, func() time.Time { return r.now }),
+		v := &viewing{run: r, ctx: ctx, q: gen.New(tx), money: r.Money.WithDatabase(d), admitter: r.Admitter.Bind(d),
 			builds: map[viewKey]*viewBuild{}}
 		v.usage = &storeUsage{v: v, store: r.DB.EventStore()}
 		if err := v.answer(); err != nil {

@@ -250,11 +250,8 @@ func NormalizeDeclaredBillingPolicy(in billing.BillingPolicy) (string, models.Bi
 		return "", models.BillingPolicy{}, err
 	}
 	body, err := NormalizeBillingPolicy(name, models.BillingPolicy{
-		Kind:                      models.BillingPolicyKind(in.Kind),
 		OutstandingCapAmount:      in.OutstandingCapAmount,
 		SpendWindows:              budgetWindows(in.SpendWindows),
-		AccrualRateCapPerHour:     in.AccrualRateCapPerHour,
-		AccrualRateWindowSeconds:  in.AccrualRateWindowSeconds,
 		BadSpendWindows:           budgetWindows(in.BadSpendWindows),
 		CollectionThresholdAmount: in.CollectionThresholdAmount,
 		CollectionCycleBoundary:   in.CollectionCycleBoundary,

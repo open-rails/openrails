@@ -46,8 +46,6 @@ The books migration renamed the accounts in place; no transfer moved, and every 
 | Purchased credit reversed | `customer_units`, `units_expired`, `units_revoked`, `customer_owed`, `units_redeemed` → `units_refunded` | `credit_refund`, `credit_refund_funding` | `purchasedcredits.Service.ApplyReversal` |
 | Purchased credit restored | `units_refunded` → where it was taken from | `credit_refund_restore`, `credit_refund_funding` | `purchasedcredits.Service.ApplyReversal` |
 
-`deposit_bonus`, `credit_purchase_revenue` and `credit_refund_cash(_restore)` are history: a pack's bonus is part of its rate and a refund's cash is the general ledger's. Nothing posts them.
-
 Usage reaches the units book through postings (`usage_postings`, `MoneyService.postUsageTx`): once a day, before a usage invoice, and before a credit lot's expiry, revocation or refund ([usage billing](usage-billing.md)), per pricing period the price of the period's usage in the event store less what earlier postings took, at (`usage_posting`, `usage_posting:<id>`, `1`): balance first, the rest owed. A period whose volume price fell is credited back to a new lot (`usage_reversed`, `units_redeemed` → `customer_units`, `Ledger.ReverseUsage`). A payment that settles owed points at its transfer (`payments.ledger_transfer_id`).
 
 `usage_reversed` is the one type in both books: the units book's leg is `Ledger.ReverseUsage`'s, the general ledger's `books.Books.ReverseUsage`'s (`revenue_adjustments` → `deferred_revenue_credit`, the new lot priced at face).

@@ -33,11 +33,15 @@ var registrationRouteGroups = []iam.RouteGroup{
 // AuthKit's default surface plus browser OIDC). A resource server also
 // serves its trusted issuers: the token endpoint their applications'
 // assertions are redeemed at (RFC 7523) and the directory they push users
-// to (SCIM).
-func routeGroups(mode iam.RegistrationMode, resource bool) []iam.RouteGroup {
+// to (SCIM). With the console, whose /admin/setup page opens it, AuthKit
+// logs the first owner's setup link (iam.RouteSetup).
+func routeGroups(mode iam.RegistrationMode, resource, console bool) []iam.RouteGroup {
 	out := append([]iam.RouteGroup(nil), IntentionalRouteGroups...)
 	if mode != "" && mode != iam.RegistrationModeClosed {
 		out = append([]iam.RouteGroup(nil), registrationRouteGroups...)
+	}
+	if console {
+		out = append(out, iam.RouteSetup)
 	}
 	if resource {
 		out = append(out, trustedIssuerRouteGroups...)

@@ -513,9 +513,6 @@
     "OR-J23-S33": [
       "TestLimitDecisions/OR-J23-S33/a-spend-window-that-names-no-currency-is-in-its-policys-currency"
     ],
-    "OR-J23-S34": [
-      "TestLimitDecisions/OR-J23-S34/a-policys-accrual-rate-cap-is-in-its-policy-currency"
-    ],
     "OR-J23-S35": [
       "TestLimitDecisions/OR-J23-S35/a-limit-counting-two-meters-by-weight-admits-and-refuses-at-their-weighted-total"
     ],
@@ -1459,9 +1456,6 @@
     "OR-J25-S37": [
       "TestBalanceLooks/OR-J25-S37/a-pass-that-waited-behind-a-look-leaves-the-watch-it-moved"
     ],
-    "OR-J25-S05": [
-      "TestRunningChargeContracts/OR-J25-S05/running-charges-count-toward-the-accrual-rate-cap"
-    ],
     "OR-J25-S43": [
       "TestBalanceLooks/OR-J25-S43/a-look-at-a-balance-without-pending-usage-needs-no-event-store"
     ],
@@ -1866,6 +1860,9 @@
     "OR-J23-S41": [
       "TestGate/OR-J23-S41/a-window-that-resets-between-syncs-is-decided-from-the-next-window"
     ],
+    "OR-J23-S42": [
+      "TestLimitDecisions/OR-J23-S42/one-policy-caps-what-is-owed-and-spend-per-window-and-a-customers-own-limit-overrides-its-cap"
+    ],
     "OR-J24-S37": [
       "TestLeaseSyncs/OR-J24-S37/a-batch-reporters-usage-only-sync-answers-as-before"
     ],
@@ -1938,6 +1935,21 @@
     ],
     "OR-J01-S33": [
       "TestStandaloneAuthSurface/OR-J01-S33/the-server-listens-on-loopback-and-refuses-the-development-operator-beyond-it"
+    ],
+    "OR-J01-S34": [
+      "TestStaffAccounts/OR-J01-S34/a-fresh-server-logs-one-setup-link-that-creates-the-owner-once"
+    ],
+    "OR-J01-S35": [
+      "TestStaffAccounts/OR-J01-S35/setup-link-issues-a-break-glass-owner-link-while-operators-exist"
+    ],
+    "OR-J01-S36": [
+      "TestStaffAccounts/OR-J01-S36/without-email-an-operators-invitation-answers-its-link-to-share"
+    ],
+    "OR-J01-S37": [
+      "TestStaffAccounts/OR-J01-S37/an-accepted-invitation-makes-the-invitee-an-operator"
+    ],
+    "OR-J01-S38": [
+      "TestStaffAccounts/OR-J01-S38/a-server-whose-staff-sign-in-elsewhere-advertises-no-groups-or-setup"
     ],
     "OR-J24-S42": [
       "TestLeaseSyncs/OR-J24-S42/a-view-request-is-refused-alone-and-the-sync-stands"

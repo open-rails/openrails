@@ -14,6 +14,7 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money/owed"
@@ -131,14 +132,30 @@ func (s *MoneyService) ensureUsageBillingAccount(ctx context.Context, q *gen.Que
 	})
 }
 
-func usageCreditLimit(row gen.BillingMoneySetting, cfg *billing.UsageBillingCurrency) int64 {
+// creditLimit is the arrears credit line a customer has in row's currency:
+// its own credit limit when it has one, else its policy's cap in that
+// currency, else the merchant's usage terms' (none without them).
+func creditLimit(row gen.BillingMoneySetting, policy models.BillingPolicy, cfg *billing.UsageBillingCurrency) int64 {
 	if row.CreditLimitOverride {
 		return row.CreditLimitAmount
+	}
+	if policy.OutstandingCapAmount > 0 && inPolicyCurrency(policy, row.Currency) {
+		return policy.OutstandingCapAmount
 	}
 	if cfg == nil {
 		return 0
 	}
 	return cfg.CreditLimit
+}
+
+// inPolicyCurrency reports whether a policy's amounts bind money in currency:
+// they are in its policy_currency, and one naming none is any money's, never
+// a merchant's unit.
+func inPolicyCurrency(policy models.BillingPolicy, currency string) bool {
+	if policy.PolicyCurrency == "" {
+		return !IsMerchantUnit(currency)
+	}
+	return strings.EqualFold(policy.PolicyCurrency, currency)
 }
 
 func usageMinimumInvoice(row gen.BillingMoneySetting, cfg *billing.UsageBillingCurrency) int64 {
@@ -376,20 +393,21 @@ func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer 
 	return invoice != nil, nil
 }
 
+// usageAdmissionCapacity resolves capacity's credit line (creditLimit) and,
+// under the merchant's usage_billing terms, its billing mode: arrears while
+// the customer can be collected from, else prepaid. Without terms the
+// customer's own mode stands, and a prepaid customer's line is unread.
 func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Queries, payer identity.CustomerID, currency string, capacity AdmissionCapacity) (AdmissionCapacity, error) {
-	// Usage billing is the merchant's usage_billing terms: without them a
-	// credit policy keeps its own capacity.
 	cfg, cur, err := s.usageBillingConfig(ctx, currency)
 	if err != nil {
 		return capacity, err
 	}
-	if cfg == nil {
-		return capacity, nil
-	}
-	if cur == nil {
+	if cfg != nil && cur == nil {
 		capacity.BillingMode = BillingModePrepaid
 		capacity.CreditLimit = 0
-		capacity.HardCreditLimit = true
+		return capacity, nil
+	}
+	if cfg == nil && capacity.BillingMode != BillingModeArrears {
 		return capacity, nil
 	}
 	mid, err := merchant.Require(ctx)
@@ -406,8 +424,10 @@ func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Querie
 	if err != nil {
 		return capacity, err
 	}
-	capacity.HardCreditLimit = true
 	capacity.CreditLimit = terms.creditLimit
+	if cfg == nil {
+		return capacity, nil
+	}
 	if terms.creditLimit > 0 && terms.minimum > terms.creditLimit {
 		return capacity, fmt.Errorf("usage minimum invoice exceeds the credit limit for %s", currency)
 	}
@@ -462,11 +482,13 @@ func (s *MoneyService) ValidateUsageBillingAccountTx(ctx context.Context, q *gen
 
 type usageTerms struct{ creditLimit, minimum, threshold int64 }
 
-// Resolve the account override, merchant default and any tighter hard policy
-// once. A collection threshold changes when to invoice, never how much is owed.
-// A page read passes its customers' billing policies; nil reads the customer.
+// resolveUsageTerms resolves the customer's credit line (creditLimit) under
+// its bound policy, its minimum invoice and its collection threshold once. A
+// collection threshold changes when to invoice, never how much is owed. cur
+// is nil without usage terms. A page read passes its customers' billing
+// policies; nil reads the customer.
 func (s *MoneyService) resolveUsageTerms(ctx context.Context, q *gen.Queries, row gen.BillingMoneySetting, cur *billing.UsageBillingCurrency, policies map[uuid.UUID]*string) (usageTerms, error) {
-	terms := usageTerms{creditLimit: usageCreditLimit(row, cur), minimum: usageMinimumInvoice(row, cur)}
+	terms := usageTerms{minimum: usageMinimumInvoice(row, cur)}
 	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
 	if err != nil {
 		return terms, err
@@ -493,17 +515,12 @@ func (s *MoneyService) resolveUsageTerms(ctx context.Context, q *gen.Queries, ro
 		}
 	}
 	policy := settings.Policies[name]
-	// A policy's amounts are in its policy_currency and bind usage in it; a
-	// blank one is every currency's. Usage in another keeps its own terms.
-	inPolicyCurrency := policy.PolicyCurrency == "" || strings.EqualFold(policy.PolicyCurrency, row.Currency)
-	if inPolicyCurrency && policy.OutstandingCapAmount > 0 && policy.OutstandingCapAmount < terms.creditLimit {
-		terms.creditLimit = policy.OutstandingCapAmount
-	}
+	terms.creditLimit = creditLimit(row, policy, cur)
 	terms.threshold = terms.creditLimit
 	if cur != nil && cur.CollectionThreshold != nil && *cur.CollectionThreshold > 0 && *cur.CollectionThreshold < terms.threshold {
 		terms.threshold = *cur.CollectionThreshold
 	}
-	if v := policy.CollectionThresholdAmount; inPolicyCurrency && v != nil && *v > 0 {
+	if v := policy.CollectionThresholdAmount; inPolicyCurrency(policy, row.Currency) && v != nil && *v > 0 {
 		terms.threshold = min(*v, terms.creditLimit)
 	}
 	return terms, nil
@@ -518,12 +535,15 @@ func (s *MoneyService) WakeUsageBillingTx(ctx context.Context, q *gen.Queries, c
 // a payment method currently makes that credit usable.
 func (s *MoneyService) usagePolicySettings(ctx context.Context, row gen.BillingMoneySetting, policies map[uuid.UUID]*string) (gen.BillingMoneySetting, error) {
 	cfg, cur, err := s.usageBillingConfig(ctx, row.Currency)
-	if err != nil || cfg == nil {
+	if err != nil {
 		return row, err
 	}
-	if cur == nil {
+	if cfg != nil && cur == nil {
 		row.CreditLimitAmount = 0
 		row.BillingMode = BillingModePrepaid
+		return row, nil
+	}
+	if cfg == nil && row.BillingMode != BillingModeArrears {
 		return row, nil
 	}
 	terms, err := s.resolveUsageTerms(ctx, s.db.Gen(ctx), row, cur, policies)
@@ -531,6 +551,9 @@ func (s *MoneyService) usagePolicySettings(ctx context.Context, row gen.BillingM
 		return row, err
 	}
 	row.CreditLimitAmount = terms.creditLimit
+	if cfg == nil {
+		return row, nil
+	}
 	row.BillingMode = BillingModeArrears
 	if row.CreditLimitAmount == 0 {
 		row.BillingMode = BillingModePrepaid

@@ -228,11 +228,8 @@ export type BillingImportResult = {
 
 export type BillingPolicy = {
   name: string
-  kind: string
   outstanding_cap_amount?: string
   spend_windows?: BudgetWindow[]
-  accrual_rate_cap_per_hour?: string
-  accrual_rate_window_seconds?: number
   collection_threshold_amount?: string
   delinquency_grace_days?: number
   delinquency_amount_floor?: string
@@ -1442,7 +1439,7 @@ export type LimitSet = {
   limits: string[]
   capacities: LimitCapacity[]
   credit_line: string
-  balance_deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_invoice" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
+  balance_deny_code: "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_invoice" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
   refusal: Refusal | null
 }
 
@@ -2324,7 +2321,7 @@ export type RefundPaymentParams = {
 }
 
 export type Refusal = {
-  deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_invoice" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
+  deny_code: "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_invoice" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
   limit: string | null
   resets_at: string | null
   retry_after_seconds: number | null

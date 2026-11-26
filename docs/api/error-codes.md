@@ -58,7 +58,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `embed_origins_required` | 400 | `invalid_request_error` | An embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins. |
 | `entitlement_required` | 403 | `invalid_request_error` | A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks. |
 | `event_cursor_expired` | 410 | `invalid_request_error` | The event cursor is no longer retained; resynchronize current state. |
-| `event_store_required` | 409 | `invalid_request_error` | The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off. |
+| `event_store_required` | 409 | `invalid_request_error` | The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows and usage history are off. |
 | `finding_action_failed` | 502 | `api_error` | Running the finding's recommendation failed; the finding stays open with the error in its notes. |
 | `finding_not_actionable` | 422 | `invalid_request_error` | The finding carries no recommendation to approve; ignore it or fix it out of band. |
 | `finding_requires_merchant_config` | 409 | `invalid_request_error` | The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config. |
