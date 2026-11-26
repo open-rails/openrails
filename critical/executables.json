@@ -520,7 +520,7 @@
       "TestLimitDecisions/OR-J23-S35/a-limit-counting-two-meters-by-weight-admits-and-refuses-at-their-weighted-total"
     ],
     "OR-J23-S36": [
-      "TestUsageLimits/OR-J23-S36/a-catalog-naming-a-limits-rate-cards-is-refused-with-their-rename"
+      "TestUsageLimits/OR-J23-S36/a-catalog-naming-an-unknown-limit-field-is-refused-and-applies-nothing"
     ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
@@ -736,9 +736,6 @@
     ],
     "OR-J31-S06": [
       "TestBillingArchive/OR-J31-S06/nmi-receipts-naming-their-card-move-with-the-book"
-    ],
-    "OR-J31-S40": [
-      "TestNotificationAdoptionExport/OR-J31-S40/export-holds-back-no-other-merchant-and-invoices-its-own-producers"
     ],
     "OR-J31-S15": [
       "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/moves-every-lot",
@@ -1092,7 +1089,7 @@
       "TestPSPReconcile/OR-J38-S71/proposal-cancel-holds-after-the-first-affected-target"
     ],
     "OR-J38-S72": [
-      "TestManualProviderRefresh/OR-J38-S72/operator-refresh-replaces-legacy-work-and-retries"
+      "TestManualProviderRefresh/OR-J38-S72/operator-refresh-coalesces-requests-and-retries"
     ],
     "OR-J38-S76": [
       "TestPSPImportSafeguards/OR-J38-S76/a-failed-import-is-never-applied"
@@ -1521,7 +1518,7 @@
       "TestLogging/OR-J04-S76/the-standalone-server-boots-with-every-logger-set"
     ],
     "OR-J04-S77": [
-      "TestHostDeps/OR-J04-S77/a-vault-merchant-document-with-a-retired-key-names-its-replacement"
+      "TestHostDeps/OR-J04-S77/a-vault-merchant-document-with-an-unknown-key-is-refused"
     ],
     "OR-J42-S01": [
       "TestMRR/OR-J42-S01/new-expansion-contraction-churn-reactivation-once-normalised-per-currency"
@@ -1775,7 +1772,7 @@
       "TestMerchantUnits/OR-J48-S19/a-chargeback-of-one-currencys-pack-reduces-only-that-currencys-schedule"
     ],
     "OR-J53-S01": [
-      "TestReporting/OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-a-removed-name-names-its-replacement"
+      "TestReporting/OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-an-unknown-name-is-refused"
     ],
     "OR-J53-S02": [
       "TestReporting/OR-J53-S02/the-overview-validates-for-every-profile-answers-for-an-empty-merchant-and-switches-currency"
@@ -2379,12 +2376,6 @@
     ],
     "OR-J48-S12": [
       "TestMerchantUnits/OR-J48-S12/the-first-balance-in-a-unit-takes-the-units-lock"
-    ],
-    "OR-J06-S72": [
-      "TestRetiredRuntimeSettings/OR-J06-S72/retired-settings-refuse-boot"
-    ],
-    "OR-J06-S73": [
-      "TestRetiredRuntimeSettings/OR-J06-S73/a-provider-sandbox-setting-refuses-boot"
     ],
     "OR-J06-S74": [
       "TestMerchantControls/OR-J06-S74/a-signup-under-a-rebill-hold-charges-and-its-first-renewal-waits-for-the-release"

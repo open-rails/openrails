@@ -124,23 +124,3 @@ WHERE pe.added_at <= sqlc.arg(at_time)::timestamptz
   AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
   AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
 ORDER BY k.key COLLATE "C", pa.starts_at, pa.id;
-
--- name: PermanentBenefitsCovered :one
--- A partial bundle remains useful; refuse only when every key of the product
--- is already held indefinitely. Pending invoice purchases are excluded by
--- their ownership claims at invoice admission.
-WITH wanted AS (
-    SELECT pe.entitlement FROM billing.product_entitlements pe
-    WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.product_id = sqlc.arg(product_id)::uuid AND pe.removed_at IS NULL
-)
-SELECT EXISTS (SELECT 1 FROM wanted) AND NOT EXISTS (
-    SELECT 1 FROM wanted w
-    WHERE NOT EXISTS (
-        SELECT 1 FROM billing.product_entitlements pe
-        JOIN billing.product_access pa ON pa.merchant_id = pe.merchant_id AND pa.product_id = pe.product_id
-        WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.entitlement = w.entitlement AND pe.removed_at IS NULL
-          AND pa.customer_id = sqlc.arg(customer_id)::uuid AND pa.ends_at IS NULL
-          AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
-          AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-    )
-) AS covered;

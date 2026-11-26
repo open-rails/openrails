@@ -2,8 +2,6 @@ package models
 
 import (
 	"encoding/json"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -90,66 +88,3 @@ type NotificationEvent struct {
 }
 
 func (n *NotificationEvent) DataJSONB() ([]byte, error) { return json.Marshal(n.Data) }
-
-// Facts recorded before invoices were named keep their type and data keys: the
-// rows are immutable, so readers rename them.
-var (
-	legacyNotificationTypes = map[string]NotificationEventType{
-		"order_due": NotificationInvoiceDue, "order_overdue": NotificationInvoiceOverdue, "order_collection_stopped": NotificationInvoiceCollectionStopped,
-	}
-	legacyNotificationKeys = map[string]string{"order_id": "invoice_id", "order_number": "invoice_number", "overdue_orders": "overdue_invoices"}
-)
-
-// NotificationType is a stored fact's type as it is named now.
-func NotificationType(stored string) NotificationEventType {
-	if t, ok := legacyNotificationTypes[stored]; ok {
-		return t
-	}
-	return NotificationEventType(stored)
-}
-
-// StoredNotificationTypes are the spellings facts of these types are stored
-// under, earlier ones included.
-func StoredNotificationTypes(types ...NotificationEventType) []string {
-	out := make([]string, 0, len(types))
-	for _, t := range types {
-		out = append(out, string(t))
-	}
-	for stored, t := range legacyNotificationTypes {
-		if slices.Contains(types, t) {
-			out = append(out, stored)
-		}
-	}
-	return out
-}
-
-// DecodeNotificationData reads a stored fact's data, renaming the keys of one
-// recorded before invoices were named (an order_id is ord_ prefixed).
-func DecodeNotificationData(raw []byte, into *billing.NotificationData) error {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return err
-	}
-	renamed := false
-	for stored, key := range legacyNotificationKeys {
-		v, ok := fields[stored]
-		if !ok {
-			continue
-		}
-		var id string
-		if stored == "order_id" && json.Unmarshal(v, &id) == nil {
-			if rest, ok := strings.CutPrefix(id, "ord_"); ok {
-				v, _ = json.Marshal("in_" + rest)
-			}
-		}
-		delete(fields, stored)
-		fields[key], renamed = v, true
-	}
-	if renamed {
-		var err error
-		if raw, err = json.Marshal(fields); err != nil {
-			return err
-		}
-	}
-	return json.Unmarshal(raw, into)
-}

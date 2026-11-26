@@ -222,18 +222,18 @@ func TestStandaloneAuthSurface(t *testing.T) {
 
 	t.Run("OR-J06-S84/auth-settings-beyond-the-key-path-refuse-boot", func(t *testing.T) {
 		w := newWorld(t)
-		const derived = "OpenRails derives the server's AuthKit configuration; only auth.keys.path (AUTH_KEYS_PATH) is set"
+		const unknown = "unknown configuration keys refuse boot: "
 		for _, c := range []struct {
 			name  string
 			extra map[string]any
 			env   string
-			says  []string
+			key   string
 		}{
-			{"key", map[string]any{"auth": map[string]any{"password": map[string]any{"min_length": 12}}}, "", []string{"auth.password.min_length (AUTH_PASSWORD_MIN_LENGTH)", derived}},
-			{"env", nil, "AUTH_TOKEN_ISSUER=https://billing.critical.invalid", []string{"auth.token_issuer (AUTH_TOKEN_ISSUER)", derived}},
-			{"private", nil, "AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS=true", []string{"auth.token_allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)", derived}},
-			{"local", map[string]any{"local_sign_in": true}, "", []string{"local_sign_in / LOCAL_SIGN_IN was removed"}},
-			{"console", map[string]any{"admin_console": map[string]any{"issuers": map[string]any{}}}, "", []string{"admin_console.issuers / ADMIN_CONSOLE_ISSUERS was removed", "the server's own accounts"}},
+			{"key", map[string]any{"auth": map[string]any{"password": map[string]any{"min_length": 12}}}, "", "auth.password"},
+			{"env", nil, "AUTH_TOKEN_ISSUER=https://billing.critical.invalid", "auth.token_issuer"},
+			{"private", nil, "AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS=true", "auth.token_allow_private_network_jwks"},
+			{"local", map[string]any{"local_sign_in": true}, "", "local_sign_in"},
+			{"console", map[string]any{"admin_console": map[string]any{"issuers": map[string]any{}}}, "", "admin_console.issuers"},
 		} {
 			cmd := hostCLICommand(t, w, c.extra, "book", "status")
 			if c.env != "" {
@@ -241,9 +241,7 @@ func TestStandaloneAuthSurface(t *testing.T) {
 			}
 			out, err := cmd.CombinedOutput()
 			require.Error(t, err, c.name)
-			for _, says := range c.says {
-				require.Contains(t, string(out), says, c.name)
-			}
+			require.Contains(t, string(out), unknown+c.key, c.name)
 		}
 		cmd := hostCLICommand(t, w, map[string]any{"auth": map[string]any{"keys": map[string]any{"path": t.TempDir()}}}, "book", "status")
 		out, err := cmd.CombinedOutput()

@@ -831,21 +831,3 @@ func stripeTierChangeResponse(in gen.BillingProviderIntent, priceID billing.Pric
 		return tierChangeProcessing(resp)
 	}
 }
-
-func (p *StripeTierChangePayload) UnmarshalJSON(data []byte) error {
-	type plain StripeTierChangePayload
-	var decoded plain
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	if _, present := fields["access_duration_hours"]; !present {
-		hours := int(decoded.PeriodEnd.Sub(decoded.PeriodStart) / time.Hour)
-		decoded.AccessDurationHours = &hours
-	}
-	*p = StripeTierChangePayload(decoded)
-	return nil
-}

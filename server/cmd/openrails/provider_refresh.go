@@ -51,12 +51,7 @@ inconclusive stays unverified with access kept. The hourly billing pass also
 retries these checks. Reads run in every write mode; overwrites and lifecycle
 repairs need an armed merchant, the destructive switch and a mode above
 readonly. Objects without this book's mark (NMI merchant-defined field 20,
-Stripe openrails_book) raise only evidence.quiet_foreign.
-
-Upgrading from a release that scheduled refreshes: stop the old workers on the
-River schema first. The new fleet cancels their outstanding
-openrails.provider_refresh and openrails.provider_refresh_merchant jobs,
-keeping their history; request replacements with this command.`,
+Stripe openrails_book) raise only evidence.quiet_foreign.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {

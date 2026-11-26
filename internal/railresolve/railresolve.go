@@ -270,11 +270,6 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 // downgrade to "no custody" — that would charge the card as though the gateway
 // held it, which is the wrong charge and not a degraded one.
 func (s *MerchantsSource) resolveCustody(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope) (*config.ResolvedCustodian, error) {
-	// An inline custody block on a PSP is refused here too, not only at
-	// manifest push: stored settings are an ingestion plane of their own.
-	if err := config.RejectRetiredCustodySettings(scope.Settings); err != nil {
-		return nil, fmt.Errorf("psp %s/%s: %w", scope.Rail, scope.AccountID, err)
-	}
 	if captured := db.CustodianIDFromContext(ctx); captured != uuid.Nil {
 		scope.CustodianID = &captured
 	}

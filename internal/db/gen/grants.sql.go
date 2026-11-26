@@ -96,11 +96,9 @@ WHERE g.merchant_id=$1::uuid AND g.source_type='subscription'
     WHERE i.merchant_id=g.merchant_id AND i.intent_type='subscription_collection'
       AND i.subscription_id::text=g.source_id AND i.status='succeeded'
       AND g.starts_at=(i.payload->'renewal'->>'period_start')::timestamptz
-      AND g.ends_at IS NOT DISTINCT FROM CASE
-          WHEN i.payload->'renewal' ? 'access_duration_hours' THEN
-            (i.payload->'renewal'->>'period_start')::timestamptz +
-            (i.payload->'renewal'->>'access_duration_hours')::int * interval '1 hour'
-          ELSE (i.payload->'renewal'->>'period_end')::timestamptz END)
+      AND g.ends_at IS NOT DISTINCT FROM
+          (i.payload->'renewal'->>'period_start')::timestamptz +
+          (i.payload->'renewal'->>'access_duration_hours')::int * interval '1 hour')
 `
 
 // Initial and pre-engine history precedes the first accepted engine period.
@@ -950,62 +948,6 @@ func (q *Queries) ListLiveGrantsWithRefundedPayment(ctx context.Context, arg Lis
 			&i.CustomerID,
 			&i.Kind,
 			&i.PaymentID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listOriginalPurchaseGrants = `-- name: ListOriginalPurchaseGrants :many
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, reason, created_at, actor, grant_reason, quantity, import_as_of, import_root_id FROM billing.grants
-WHERE merchant_id=$1::uuid AND source_type='purchase'
-  AND source_id=$2::uuid::text AND event='grant'
-ORDER BY id LIMIT $3::int
-`
-
-type ListOriginalPurchaseGrantsParams struct {
-	MerchantID uuid.UUID
-	PaymentID  uuid.UUID
-	RowLimit   int32
-}
-
-// Original immutable events, including later-revoked sources. Accepted purchase
-// replay validates the original windows without reopening revoked projections.
-func (q *Queries) ListOriginalPurchaseGrants(ctx context.Context, arg ListOriginalPurchaseGrantsParams) ([]BillingGrant, error) {
-	rows, err := q.db.Query(ctx, listOriginalPurchaseGrants, arg.MerchantID, arg.PaymentID, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingGrant
-	for rows.Next() {
-		var i BillingGrant
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.ProductID,
-			&i.Kind,
-			&i.SourceType,
-			&i.SourceID,
-			&i.PaymentID,
-			&i.Event,
-			&i.SupersedesID,
-			&i.SpecSnapshot,
-			&i.StartsAt,
-			&i.EndsAt,
-			&i.Reason,
-			&i.CreatedAt,
-			&i.Actor,
-			&i.GrantReason,
-			&i.Quantity,
-			&i.ImportAsOf,
-			&i.ImportRootID,
 		); err != nil {
 			return nil, err
 		}

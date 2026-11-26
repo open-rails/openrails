@@ -29,7 +29,7 @@ import (
 // The metrics measures as one measure per funnel and the health overview
 // built on them, over real purchases, refunds, disputes and renewals.
 func TestReporting(t *testing.T) {
-	t.Run("OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-a-removed-name-names-its-replacement", consolidatedMeasures)
+	t.Run("OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-an-unknown-name-is-refused", consolidatedMeasures)
 	t.Run("OR-J53-S02/the-overview-validates-for-every-profile-answers-for-an-empty-merchant-and-switches-currency", healthOverview)
 	t.Run("OR-J53-S03/money-never-sums-across-currencies", moneyPerCurrency)
 	t.Run("OR-J53-S04/a-sale-at-2330-in-the-accounting-timezone-counts-on-that-local-day", accountingDays)
@@ -209,19 +209,12 @@ func consolidatedMeasures(t *testing.T) {
 	require.InDelta(t, 0.0, fraction(t, lost["rebill_rate"]), 1e-12)
 	require.InDelta(t, 0.0, fraction(t, lost["dunning_recovery_rate"]), 1e-12)
 
-	// A removed measure is refused with what replaces it; so is attempt_kind.
-	_, err = a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"net_revenue", "rebills_missed", "nmi_history_refused",
-		"attempt_failure_rate", "purchase_failure_rate", "rebill_first_failure_rate"},
+	// A measure or dimension the registry does not serve is refused.
+	_, err = a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"net_revenue"},
 		Filters: map[string][]string{"attempt_kind": {"renewal"}}, Range: &billing.MetricsRange{Last: "30d"}})
 	refusals := metricRefusals(t, err)
-	for param, replacement := range map[string]string{"measures[0]": "cash", "measures[1]": "rebills", "measures[2]": "nmi_history_authorizations",
-		"measures[3]": "authorization_rate", "measures[4]": "purchases", "measures[5]": "first_try_rebill_approval_rate", "filters.attempt_kind": "kind"} {
-		refusal, ok := refusals[param]
-		require.True(t, ok, "%s is refused: %v", param, refusals)
-		require.Equal(t, replacement, refusal["did_you_mean"], param)
-		require.Contains(t, refusal["message"], `"`+replacement+`"`, param)
-	}
 	require.Equal(t, "unknown_measure", refusals["measures[0]"]["code"])
+	require.Equal(t, "unknown_filter_dimension", refusals["filters.attempt_kind"]["code"])
 }
 
 // decline posts an invoice the issuer declines; the 402 names the invoice it

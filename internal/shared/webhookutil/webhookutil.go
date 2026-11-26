@@ -36,31 +36,18 @@ type Prepared struct {
 	SignatureVerified bool
 }
 
-// ErrWebhookRailRetired reports a retired webhook URL rail segment.
-var ErrWebhookRailRetired = errors.New("retired webhook rail segment")
-
-// retiredRailSegments maps a retired URL segment to the canonical one. The
-// segment is the gateway kind; a PSP key is not a rail.
-var retiredRailSegments = map[string]string{
-	"mobius":       "nmi",
-	"basis_theory": "basistheory",
-}
-
 // CanonicalRail normalizes a webhook URL's rail segment to the rail (or event
 // source) it names. The segment is the gateway KIND — nmi, ccbill, stripe,
 // solana, basistheory. Which PSP on that rail sent the event comes from the
 // required :account_id segment, verified against payload identity when present,
-// never from this segment: mobius and paykings use /webhooks/nmi/{account_id}.
-func CanonicalRail(rail string) (string, error) {
+// never from this segment.
+func CanonicalRail(rail string) string {
 	rail = strings.Trim(strings.ToLower(rail), " /")
-	if canonical, retired := retiredRailSegments[rail]; retired {
-		return "", fmt.Errorf("%w: /webhooks/%s was removed — post to /webhooks/%s/{account_id}; a provider account is named by the required account_id path segment, not by the rail segment", ErrWebhookRailRetired, rail, canonical)
-	}
 	// A Basis Theory event's source is the custodian itself, not a rail.
 	if rail == "basistheory" {
-		return string(models.EventSourceBasisTheory), nil
+		return string(models.EventSourceBasisTheory)
 	}
-	return rail, nil
+	return rail
 }
 
 func PrepareCCBill(body []byte, eventType string) (Prepared, error) {

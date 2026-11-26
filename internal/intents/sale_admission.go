@@ -40,8 +40,7 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 		return row, err
 	}
 	customer, err := uuid.Parse(terms.UserID)
-	invoice := terms.InvoiceID != uuid.Nil
-	if err != nil || customer == uuid.Nil || invoice != (p.PriceID == nil) || !invoice && *p.PriceID != terms.PriceID || terms.Instrument.PSPID != target {
+	if err != nil || customer == uuid.Nil || terms.InvoiceID == uuid.Nil || p.PriceID != nil || terms.Instrument.PSPID != target {
 		return row, errors.New("sale admission coordinates contradict requested purchase")
 	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -56,7 +55,7 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 			if err != nil {
 				return err
 			}
-			if accepted.InvoiceAttemptID != terms.InvoiceAttemptID || accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
+			if accepted.InvoiceAttemptID != terms.InvoiceAttemptID || accepted.UserID != terms.UserID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
 				return apperr.Conflictf("purchase key belongs to another accepted purchase")
 			}
 			row = previous
@@ -64,9 +63,6 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
-		}
-		if !invoice {
-			return apperr.Conflictf("priced purchase creation is retired; an accepted operation must already exist")
 		}
 		// An invoice's new card is saved by the sale itself: no method exists yet.
 		if !terms.NewCard {
@@ -92,7 +88,7 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 		if err != nil {
 			return err
 		}
-		if accepted.InvoiceAttemptID != terms.InvoiceAttemptID || accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
+		if accepted.InvoiceAttemptID != terms.InvoiceAttemptID || accepted.UserID != terms.UserID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
 			return apperr.Conflictf("purchase key belongs to another accepted purchase")
 		}
 		return nil

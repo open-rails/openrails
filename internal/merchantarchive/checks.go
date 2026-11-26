@@ -29,7 +29,7 @@ var excludedTables = map[string]string{
 	"destructive_holds":             "deployment incident authority and clears; never imported or reset by merchant restore",
 	"notification_events":           "private producer deduplication journal; retained public facts and receiving applications own delivery",
 	"notification_issue_revisions":  "account-notification ordering transferred explicitly, not financial history",
-	"notification_channel_state":    "destination restore guard; cleared only by explicit notification ordering adoption",
+	"notification_channel_state":    "destination restore guard; cleared only by RestoreNotificationOrdering",
 	"merchants":                     "destination identity is explicitly provisioned",
 	"merchant_slug_aliases":         "former names are directory identity, not billing history",
 	"periodic_leases":               "deployment-wide fleet leases on periodic work",

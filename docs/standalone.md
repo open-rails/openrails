@@ -113,7 +113,7 @@ openrails push-merchant-config --file /etc/openrails/merchants.yaml --insert
 openrails catalog apply /etc/openrails/catalog.yaml --merchant your-merchant
 ```
 
-In production set an https `public_url`, mount a real signing key and `totp.key` ([secrets](#secrets)) and set `trusted_proxies` behind a proxy. Boot refuses an unknown key and a retired one (naming its replacement).
+In production set an https `public_url`, mount a real signing key and `totp.key` ([secrets](#secrets)) and set `trusted_proxies` behind a proxy. Boot refuses an unknown key.
 
 ## Configuration sources
 
@@ -213,7 +213,7 @@ costs sharing, not service ([scaling](#scaling-and-redis)).
 
 **The server's AuthKit**
 
-OpenRails derives its AuthKit's configuration ([the server's AuthKit](#the-servers-authkit)); a deployment sets only where its keys live. Any other `auth` key or `AUTH_*` variable refuses boot, naming what replaced it.
+OpenRails derives its AuthKit's configuration ([the server's AuthKit](#the-servers-authkit)); a deployment sets only where its keys live. Any other `auth` key or `AUTH_*` variable refuses boot as an unknown key.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -287,7 +287,7 @@ group holding its owner role ([trusted issuers](#trusted-issuers)).
 (an explicit path must exist), else `/etc/openrails/merchants.yaml` when present;
 none boots control-plane-only. At boot:
 
-1. The manifest parses strictly: unknown fields, retired keys (`rail_merchant_accounts`, `provider_accounts`, `api_host`, which say what became of them), settings and PSP declarations the configuration API would refuse, and secrets for an undeclared PSP refuse boot.
+1. The manifest parses strictly: unknown fields, settings and PSP declarations the configuration API would refuse, and secrets for an undeclared PSP refuse boot.
 2. Missing merchants are created and each PSP's and custodian's identity is
    recorded; PostgreSQL keeps only those identities, never configuration.
 3. A document the merchant still cannot serve is refused alone and reported (`openrails_configuration`); the merchant serves the rest.
@@ -687,12 +687,6 @@ host sharing the schema upgrades together. Migrations are never reversed.
 From v1.0.0 the Go API, the HTTP API and the schema change only by addition
 ([compatibility](../compatibility/README.md)).
 
-Upgrading from a release that scheduled provider refreshes: stop the old workers
-sharing the River schema before starting the new fleet. The new fleet cancels
-outstanding `openrails.provider_refresh` and `openrails.provider_refresh_merchant`
-jobs in that schema, keeping their history; request any refresh you still need
-with the command ([provider refresh](#provider-refresh)).
-
 ## Health and monitoring
 
 | Signal | Meaning |
@@ -1001,7 +995,7 @@ the merchant the token is bound to.
 | `openrails migrate status [--json]` | compare the applied ledger with the binary's; non-zero on any mismatch |
 | `openrails version` | the version, commit and build date |
 | `openrails push-auth-bootstrap [--file] [--dry-run] [--startup-only]` | create AuthKit root authority from a bootstrap manifest (`/etc/openrails/bootstrap.yaml`); `--startup-only` applies it at most once, as `run-server` does with a mounted one |
-| `openrails push-merchant-config [--file] --insert` | create the merchants a manifest names that are missing; bare, it only reports. `--overwrite` and `--prune` are refused |
+| `openrails push-merchant-config [--file] --insert` | create the merchants a manifest names that are missing; bare, it only reports |
 | `openrails dump-merchant-config --slug NAME [--out]` | print a merchant's configuration as manifest YAML, without credentials or alert webhooks |
 | `openrails get-merchant-config --merchant NAME` | read a merchant's configuration through the client (remote: `--server-url`, `--token-file`) |
 | `openrails apply-merchant-config --merchant NAME --file PATH` | apply configuration metadata by revision (Vault only) |
@@ -1135,7 +1129,7 @@ kubectl -n openrails exec deploy/openrails -- \
 
 | Symptom | Look at |
 |---|---|
-| boot refuses a key | its log names the key and, for a retired one, its replacement |
+| boot refuses a key | its log names the key |
 | `/health/ready` 503 | PostgreSQL, the merchants service, local workers or a missing `totp.key`: the log names it |
 | a PSP never arms | the `openrails_psp_posture` probe: the provider's verdict for its environment, or credentials of another account (`consistency.duplicate_gateway_account`) |
 | configuration not served | the `openrails_configuration` probe and `consistency.merchant_config.not_served` |

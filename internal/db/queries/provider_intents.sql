@@ -599,14 +599,6 @@ WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid
   AND intent_type IN ('nmi_upgrade','stripe_tier_change')
   AND status IN ('in_flight','unknown_needs_verify');
 
--- name: GetUnresolvedSaleForCustomerProduct :one
-SELECT * FROM billing.provider_intents
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='nmi_sale'
-  AND payload->>'user_id'=sqlc.arg(customer_id)::text
-  AND payload->>'product_id'=sqlc.arg(product_id)::text
-  AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
-ORDER BY created_at LIMIT 1;
-
 -- name: LockProviderIntentForSaleCompletion :one
 SELECT * FROM billing.provider_intents
 WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='nmi_sale'

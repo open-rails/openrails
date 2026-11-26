@@ -39,17 +39,12 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-type stripePurchaseRegistrar interface {
-	RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error)
-}
-
 type StripeWebhookService struct {
 	DB                           *db.DB
 	PriceService                 *catalog.PriceService
 	ProductService               *catalog.ProductService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
-	PurchaseRegistrar            stripePurchaseRegistrar
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
 	DeduplicationService         *DeduplicationService
