@@ -2281,6 +2281,18 @@
     "OR-J04-S85": [
       "TestHostDeps/OR-J04-S85/a-vault-login-still-under-way-is-waited-for-never-reported-as-refused"
     ],
+    "OR-J04-S86": [
+      "TestTransactionPooler/OR-J04-S86/behind-pgbouncer-each-statement-runs-as-its-merchant-and-no-setting-survives-its-transaction"
+    ],
+    "OR-J04-S87": [
+      "TestTransactionPooler/OR-J04-S87/behind-pgbouncer-river-works-through-the-pooler-and-a-direct-listener-wakes-it"
+    ],
+    "OR-J04-S88": [
+      "TestTransactionPooler/OR-J04-S88/behind-pgbouncer-session-locks-leases-and-destructive-holds-still-exclude"
+    ],
+    "OR-J04-S89": [
+      "TestTransactionPooler/OR-J04-S89/behind-pgbouncer-without-prepared-statements-no-statement-fails-and-a-preparing-pool-is-refused"
+    ],
     "OR-J38-S83": [
       "TestMerchantPullLease/OR-J38-S83/one-pull-of-a-merchant-runs-the-others-skip-and-none-holds-a-session"
     ],

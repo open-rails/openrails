@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 808,
+  "scenario_count": 812,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3607,6 +3607,26 @@
       "id": "OR-J04-S85",
       "journey": "J04",
       "name": "A host whose Vault login is still under way at New: New waits for its first token and the configuration probe never reports Vault refused; a login slower than New's wait is reported as one under way and served once it completes"
+    },
+    {
+      "id": "OR-J04-S86",
+      "journey": "J04",
+      "name": "Behind PgBouncer in transaction mode, two merchants' concurrent statements, transactions, committed custody and catalog applies each run as their own merchant, and no server connection the pooler hands to the next client keeps any openrails setting"
+    },
+    {
+      "id": "OR-J04-S87",
+      "journey": "J04",
+      "name": "Behind PgBouncer, River works through the pooler and listens on a direct session: a job queued through the pooler runs within seconds while producers poll every 30, each worker listens on a direct session, every listener whose session dies is redialed and wakes River again, and OpenRails' periodic passes complete"
+    },
+    {
+      "id": "OR-J04-S88",
+      "journey": "J04",
+      "name": "Behind PgBouncer, a usage policy lock and a billing import lock wait for their holders on direct sessions, a merchant pull lease admits one holder, and three concurrent revocations by an actor allowed two an hour admit two and hold the third"
+    },
+    {
+      "id": "OR-J04-S89",
+      "journey": "J04",
+      "name": "Behind PgBouncer with server-side prepared statements off, many concurrent reads of two merchants over four server connections fail none, and New refuses a pooled pool whose statements would be prepared"
     },
     {
       "id": "OR-J38-S83",

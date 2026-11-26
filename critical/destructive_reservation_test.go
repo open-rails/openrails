@@ -30,11 +30,11 @@ type reservationWorld struct {
 
 const reservationReason = "operator correction"
 
-func newReservationWorld(t *testing.T) *reservationWorld {
+func newReservationWorld(t *testing.T, configure ...func(*world)) *reservationWorld {
 	t.Helper()
-	a := newAuthorityWorld(t, func(w *world) {
+	a := newAuthorityWorld(t, append(configure, func(w *world) {
 		w.limits = func(l *destructive.Limits) { l.ActorPerHour = 2 }
-	})
+	})...)
 	var in []billing.CreateCreditGrantParams
 	for i := range 4 {
 		in = append(in, billing.CreateCreditGrantParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Currency: "USD", Amount: 100, Source: "critical", SourceID: "reservation-" + strconv.Itoa(i)})
