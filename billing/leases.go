@@ -215,19 +215,22 @@ type ViewWindow struct {
 }
 
 // LimitSet is what a request with a ViewParams' attributes claims after
-// policy resolution: the keys of its view's limits, in the order a refusal
-// names them (balance, spend windows, declared limits), the capacity its
-// policy gives each spend window (another policy may cap the same window
-// otherwise), the credit line it gives balance and the code balance refuses
-// with, or a Refusal whatever the request costs.
+// policy resolution: the trust tier it was resolved at and where that came
+// from, the keys of its view's limits, in the order a refusal names them
+// (balance, spend windows, declared limits), the capacity its policy gives
+// each spend window (another policy may cap the same window otherwise), the
+// credit line it gives balance and the code balance refuses with, or a
+// Refusal whatever the request costs.
 type LimitSet struct {
-	CustomerID      CustomerID       `json:"customer_id"`
-	Currency        catalog.Currency `json:"currency"`
-	Limits          []string         `json:"limits"`
-	Capacities      []LimitCapacity  `json:"capacities"`
-	CreditLine      int64            `json:"credit_line,string"`
-	BalanceDenyCode DenyCode         `json:"balance_deny_code"`
-	Refusal         *Refusal         `json:"refusal"`
+	CustomerID       CustomerID       `json:"customer_id"`
+	Currency         catalog.Currency `json:"currency"`
+	TrustLevel       string           `json:"trust_level"`
+	TrustLevelSource TrustLevelSource `json:"trust_level_source"`
+	Limits           []string         `json:"limits"`
+	Capacities       []LimitCapacity  `json:"capacities"`
+	CreditLine       int64            `json:"credit_line,string"`
+	BalanceDenyCode  DenyCode         `json:"balance_deny_code"`
+	Refusal          *Refusal         `json:"refusal"`
 }
 
 // LimitCapacity is the capacity a limit set's policy gives one spend window.

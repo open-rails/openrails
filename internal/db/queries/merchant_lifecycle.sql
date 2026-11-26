@@ -49,6 +49,12 @@ SELECT count(*) FROM billing.network_activity_daily WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsNetworkActivity :exec
 DELETE FROM billing.network_activity_daily WHERE merchant_id = $1;
 
+-- name: CountMerchantRowsCustomerPaidTotals :one
+SELECT count(*) FROM billing.customer_paid_totals WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsCustomerPaidTotals :exec
+DELETE FROM billing.customer_paid_totals WHERE merchant_id = $1;
+
 -- name: CountMerchantRowsPayments :one
 SELECT count(*) FROM billing.payments WHERE merchant_id = $1;
 

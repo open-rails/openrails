@@ -671,20 +671,26 @@ export function createMutations(
           customerId: string
           currency: string
         }) => {
-          const { settings } = await getCustomer(customerId).catch((err) => {
+          const { settings, trust_levels } = await getCustomer(
+            customerId
+          ).catch((err) => {
             if (err instanceof ApiError && err.status === 404)
               throw new Error("No customer has this ID")
             throw err
           })
           const code = currency.toUpperCase()
+          // The effective tier: explicit, by the merchant's rules, or the
+          // default; a currency none names is at the default.
+          const trust = trust_levels.find((l) => l.currency === code)
           return {
             currency: code,
             creditLimit:
               settings.credit_limits.find((l) => l.currency === code)?.amount ??
               "0",
-            trustLevel:
-              settings.trust_levels.find((l) => l.currency === code)
-                ?.trust_level ?? "",
+            trustLevel: trust?.trust_level ?? "",
+            trustSource: trust?.source ?? "default",
+            netPaid: trust?.net_paid_amount ?? "0",
+            firstPaidAt: trust?.first_paid_at ?? null,
           }
         },
       })

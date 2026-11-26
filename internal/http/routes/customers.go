@@ -15,8 +15,8 @@ var customersRoutes = []Route{
 		Errors: codes("invalid_cursor", "invalid_param", "service_unavailable"), Handler: h(handlers.ListCustomers)},
 	{Method: GET, Path: "/v1/admin/customers/{customer_id}", Group: Admin, Auth: AuthMerchant, Name: "GetCustomer", Level: LevelRead,
 		Args: []any{billing.CustomerID{}},
-		Doc: "GetCustomer reads one customer: its contact, its settings, and per currency its balance and the card " +
-			"that pays its invoices.",
+		Doc: "GetCustomer reads one customer: its contact, its settings, and per currency its balance, the card " +
+			"that pays its invoices and its effective trust tier.",
 		Responses: []Reply{{200, billing.Customer{}}}, Errors: withCustomer("customer_not_found", "service_unavailable"), Handler: h(handlers.GetCustomer)},
 	{Method: PATCH, Path: "/v1/admin/customers/{customer_id}", Group: Admin, Auth: AuthMerchant, Name: "UpdateCustomer", Level: LevelUpdate, Limit: middleware.AdminOperationGrant,
 		Args: []any{billing.CustomerID{}},

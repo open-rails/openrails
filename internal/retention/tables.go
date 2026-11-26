@@ -93,6 +93,7 @@ var Tables = map[string]Table{
 	"idempotency_keys":                {Rows, "rows are deleted at expires_at."},
 	"user_destructive_reservations":   {Rows, "rows are deleted 24 hours after reserved_at."},
 	"network_activity_daily":          {Class: State},
+	"customer_paid_totals":            {Class: State},
 	"limit_windows":                   {Rows, "rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does."},
 	"leases":                          {Rows, "rows are deleted 61 days after last_sync_at."},
 	"lease_in_flight":                 {Rows, "rows; each sync replaces its lease's rows, close clears them, and they go with the lease."},

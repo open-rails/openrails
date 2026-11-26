@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 824,
+  "scenario_count": 831,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1557,6 +1557,41 @@
       "id": "OR-J23-S42",
       "journey": "J23",
       "name": "One billing policy caps what is owed and spend per window, each refusing on its own, and a customer's own credit limit overrides the policy's cap"
+    },
+    {
+      "id": "OR-J23-S43",
+      "journey": "J23",
+      "name": "A customer graduates to the tier its net amount paid reaches, and the tier's billing policy decides its requests"
+    },
+    {
+      "id": "OR-J23-S44",
+      "journey": "J23",
+      "name": "A tier asking days since the first payment is reached only once they pass, by OpenRails' clock"
+    },
+    {
+      "id": "OR-J23-S45",
+      "journey": "J23",
+      "name": "A tier asking a net amount paid and days since the first payment is reached only when both are met"
+    },
+    {
+      "id": "OR-J23-S46",
+      "journey": "J23",
+      "name": "A chargeback or refund lowers the net amount paid and the customer's tier drops with it"
+    },
+    {
+      "id": "OR-J23-S47",
+      "journey": "J23",
+      "name": "A customer's explicit trust level beats the merchant's tier rules, and a request's own trust level beats both"
+    },
+    {
+      "id": "OR-J23-S48",
+      "journey": "J23",
+      "name": "A gate's view carries the computed trust tier, where it came from and its policy, and the gate decides on it"
+    },
+    {
+      "id": "OR-J23-S49",
+      "journey": "J23",
+      "name": "Trust tiers that are unbound, out of order, ask nothing or are not in whole minor units are refused at load and on edit, and a refused edit writes nothing"
     },
     {
       "id": "OR-J29-S07",

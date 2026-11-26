@@ -1863,6 +1863,27 @@
     "OR-J23-S42": [
       "TestLimitDecisions/OR-J23-S42/one-policy-caps-what-is-owed-and-spend-per-window-and-a-customers-own-limit-overrides-its-cap"
     ],
+    "OR-J23-S43": [
+      "TestTrustTiers/OR-J23-S43/a-customer-graduates-once-its-net-amount-paid-reaches-a-tier"
+    ],
+    "OR-J23-S44": [
+      "TestTrustTiers/OR-J23-S44/a-tier-asking-days-since-the-first-payment-is-reached-once-they-pass"
+    ],
+    "OR-J23-S45": [
+      "TestTrustTiers/OR-J23-S45/a-tier-asking-an-amount-and-days-needs-both"
+    ],
+    "OR-J23-S46": [
+      "TestTrustTiers/OR-J23-S46/a-chargeback-or-refund-lowers-the-net-amount-paid-and-the-tier-drops"
+    ],
+    "OR-J23-S47": [
+      "TestTrustTiers/OR-J23-S47/an-explicit-trust-level-beats-the-rules-and-a-requests-beats-both"
+    ],
+    "OR-J23-S48": [
+      "TestTrustTiers/OR-J23-S48/a-gates-view-carries-the-computed-tier-and-its-policy"
+    ],
+    "OR-J23-S49": [
+      "TestTrustTiers/OR-J23-S49/trust-tiers-that-cannot-be-met-in-order-are-refused"
+    ],
     "OR-J24-S37": [
       "TestLeaseSyncs/OR-J24-S37/a-batch-reporters-usage-only-sync-answers-as-before"
     ],
