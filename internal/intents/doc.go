@@ -38,8 +38,10 @@
 // with `openrails intents resolve` (Resolution): --receipt reads the named
 // provider object back and must match the frozen operation; --not-executed
 // needs the type's own non-execution proof (for NMI, a definitive decline as
-// the one transaction under the invoice; refused for submitted collections,
-// rebills and prorations) or an operation that never crossed its fence. Each
+// the one transaction under the invoice) or an operation that never crossed its
+// fence. NMI subscription_collection also accepts an operator-attested empty
+// order, admitting a new attempt under the same obligation order. Submitted
+// invoice collections, manual rebills and prorations refuse release. Each
 // resolution records its actor and reason. Unresolved outcomes raise
 // life.submission.unresolved or life.sale.unresolved.
 package intents

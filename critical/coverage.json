@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 820,
+  "scenario_count": 826,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -4102,6 +4102,36 @@
       "id": "OR-J38-S97",
       "journey": "J38",
       "name": "A second CCBill rebill callback inside a settled cycle, its next renewal date a day off the accepted cadence, is kept as an extra capture of that cycle, not refused with a 500"
+    },
+    {
+      "id": "OR-J14-S08",
+      "journey": "J14",
+      "name": "NMI engine renewal gateway refusals settle through dunning"
+    },
+    {
+      "id": "OR-J14-S09",
+      "journey": "J14",
+      "name": "Duplicate and ambiguous NMI renewals stay unknown without automatic release"
+    },
+    {
+      "id": "OR-J14-S10",
+      "journey": "J14",
+      "name": "Operator qualifies the exact NMI renewal receipt and rejects contradictory evidence"
+    },
+    {
+      "id": "OR-J14-S11",
+      "journey": "J14",
+      "name": "Operator releases an empty NMI renewal order and the next attempt catches late money"
+    },
+    {
+      "id": "OR-J14-S12",
+      "journey": "J14",
+      "name": "Operator settles an NMI renewal from its definitive order decline"
+    },
+    {
+      "id": "OR-J14-S13",
+      "journey": "J14",
+      "name": "Stripe engine renewals reject operator receipt and nonexecution resolution"
     }
   ]
 }

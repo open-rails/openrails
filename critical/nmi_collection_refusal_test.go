@@ -3,17 +3,28 @@
 package critical_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db/gen"
+	embedded "github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -110,5 +121,296 @@ func TestNMICollectionRefusal(t *testing.T) {
 				p.money(t, 1, 3000)
 			})
 		}
+	})
+}
+
+// executeEngineRenewal admits and executes the due obligation through its normal runner.
+func executeEngineRenewal(t *testing.T, a *authorityWorld, sub *billing.Subscription) gen.BillingProviderIntent {
+	t.Helper()
+	a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+	rt := embedded.Graph(a.engine).Runtime
+	var row gen.BillingProviderIntent
+	require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+		var err error
+		row, err = rt.MoneyService.AdmitDueSubscriptionCollection(ctx, sub.ID.UUID(), a.clock.Now())
+		if err != nil {
+			return err
+		}
+		row, err = rt.IntentRunner().ExecuteNowByID(ctx, row.ID)
+		return err
+	}))
+	return row
+}
+
+func TestNMIEngineRenewalRecovery(t *testing.T) {
+	t.Run("OR-J14-S08/gateway-refusals-settle-through-dunning", func(t *testing.T) {
+		for _, code := range []int{300, 410, 411, 440, 441, 460, 461} {
+			t.Run(fmt.Sprint(code), func(t *testing.T) {
+				a, p, sub := nmiEngineMembership(t)
+				reference := ""
+				if code == 410 {
+					reference = "refused-410"
+				}
+				calls := 0
+				p.core.Intercept(nmiSaleRequest, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
+					calls++
+					return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(fmt.Sprintf("response=3&response_code=%d&transactionid=%s&responsetext=Invalid+Customer+Vault+Id", code, reference)))}, nil
+				})
+				row := executeEngineRenewal(t, a, sub)
+				require.Equal(t, intents.StatusFailedTerminal, row.Status)
+				require.NoError(t, intents.ValidateSubscriptionCollectionTerminal(row))
+				refusal, found, err := intents.LoadRecurringDecline(row)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.Equal(t, code, refusal.ResponseCode)
+				require.Equal(t, reference, refusal.Reference)
+				require.Empty(t, refusal.Issuer.IssuerCode)
+				state := "past_due"
+				if code == 461 {
+					state = "awaiting_method"
+				}
+				current := subscriptionState(t, a, sub.ID, state)
+				require.NotNil(t, current.Dunning)
+				if code != 461 {
+					require.NotNil(t, current.Dunning.NextRetryAt)
+				}
+				findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.submission.unresolved"})
+				require.NoError(t, err)
+				require.Empty(t, findings.Items)
+				require.Equal(t, 1, calls)
+				p.money(t, 1, 1000)
+			})
+		}
+	})
+	t.Run("OR-J14-S09/duplicate-and-ambiguous-renewals-stay-unknown", func(t *testing.T) {
+		for _, code := range []string{"duplicate", "420", "421", "430", "transport"} {
+			t.Run(code, func(t *testing.T) {
+				a, p, sub := nmiEngineMembership(t)
+				if code == "duplicate" {
+					p.core.RefuseDuplicates(1)
+				} else if code == "transport" {
+					p.core.LoseSales(1)
+				} else {
+					p.core.Intercept(nmiSaleRequest, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
+						return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("response=3&response_code=" + code))}, nil
+					})
+				}
+				row := executeEngineRenewal(t, a, sub)
+				require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+				rt := embedded.Graph(a.engine).Runtime
+				a.clock.Advance(25 * time.Hour)
+				require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+					var err error
+					row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+					return err
+				}))
+				require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+				p.money(t, 1, 1000)
+				require.LessOrEqual(t, len(p.core.Attempts()), 2, "enrollment and at most one renewal")
+			})
+		}
+	})
+	t.Run("OR-J14-S10/operator-qualifies-the-exact-renewal-receipt", func(t *testing.T) {
+		a, p, sub := nmiEngineMembership(t)
+		p.core.HideSales(1)
+		row := executeEngineRenewal(t, a, sub)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		rt := embedded.Graph(a.engine).Runtime
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		a.clock.Advance(6 * time.Minute)
+		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			var err error
+			row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+			return err
+		}))
+		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.submission.unresolved"})
+		require.NoError(t, err)
+		require.Len(t, findings.Items, 1)
+		require.Contains(t, *findings.Items[0].RecommendedAction, "openrails intents resolve --intent "+row.ID.String())
+		before := row.ResultEvidence
+		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			for _, reference := range []string{"unknown-transaction", p.core.Sales()[0].TransactionID} {
+				_, err := rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{ProviderReference: reference, Actor: "operator", Reason: "Checked receipt"})
+				require.ErrorIs(t, err, intents.ErrResolutionRejected)
+			}
+			_, err := rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{Step: "charge", ProviderReference: p.core.LastSale().TransactionID, Actor: "operator", Reason: "Checked receipt"})
+			require.ErrorIs(t, err, intents.ErrResolutionRejected)
+			current, err := intents.NewStore(rt.DB).Get(ctx, row.ID)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, current.Status)
+			require.JSONEq(t, string(before), string(current.ResultEvidence))
+			return err
+		}))
+		p.core.Reveal()
+		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			_, err := rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Checked order"})
+			require.ErrorIs(t, err, intents.ErrResolutionRejected)
+			receipt, found, err := intents.ReadNMICollectionReceipt(ctx, row, rt.CollectionResolver, p.core.LastSale().TransactionID)
+			require.NoError(t, err)
+			require.True(t, found)
+			_, err = intents.NewStore(rt.DB).RetainCollectedReceipt(ctx, row, receipt)
+			require.NoError(t, err)
+			_, err = rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Checked order"})
+			require.ErrorIs(t, err, intents.ErrResolutionRejected)
+			row, err = rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{ProviderReference: p.core.LastSale().TransactionID, Actor: "operator", Reason: "Checked receipt"})
+			return err
+		}))
+		require.Equal(t, intents.StatusSucceeded, row.Status)
+		require.NoError(t, intents.ValidateSubscriptionCollectionTerminal(row))
+		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, *sub.CurrentPeriodEndsAt, *current.CurrentPeriodStartsAt)
+		findings, err = a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.submission.unresolved", Status: "fixed"})
+		require.NoError(t, err)
+		require.Len(t, findings.Items, 1)
+		require.Contains(t, string(row.ResultEvidence), `"operator_resolution"`)
+		p.money(t, 2, 2000)
+	})
+	t.Run("OR-J14-S11/operator-releases-empty-renewal-order-for-next-attempt", func(t *testing.T) {
+		for _, late := range []bool{false, true} {
+			t.Run(fmt.Sprint(late), func(t *testing.T) {
+				a, p, sub := nmiEngineMembership(t)
+				p.core.LoseSales(1)
+				row := executeEngineRenewal(t, a, sub)
+				require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+				accepted, err := subscriptions.DecodeSubscriptionCollectionPayload(row)
+				require.NoError(t, err)
+				rt := embedded.Graph(a.engine).Runtime
+				ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+				resolution := intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Checked empty NMI order and attest release"}
+				p.core.QueryUnavailable(true)
+				require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+					_, err := rt.IntentRunner().Resolve(ctx, row.ID, resolution)
+					require.ErrorIs(t, err, intents.ErrResolutionRejected)
+					return nil
+				}))
+				p.core.QueryUnavailable(false)
+				require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+					err := rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+						outcome := intents.TerminalWithEvidence("unproven", map[string]any{"not_executed": true, "not_executed_code": "not_executed", "declined": false})
+						return intents.NewStore(rt.DB.NewWithPgxTx(tx)).CompleteSubscriptionCollection(ctx, row, outcome, a.clock.Now())
+					})
+					require.ErrorContains(t, err, "no qualified nonexecution proof")
+					return nil
+				}))
+				require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+					var err error
+					row, err = rt.IntentRunner().Resolve(ctx, row.ID, resolution)
+					return err
+				}))
+				require.Equal(t, intents.StatusFailedTerminal, row.Status)
+				require.NoError(t, intents.ValidateSubscriptionCollectionTerminal(row))
+				unattested := row
+				var terminal map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(row.ResultEvidence, &terminal))
+				delete(terminal, "operator_resolution")
+				unattested.ResultEvidence, err = json.Marshal(terminal)
+				require.NoError(t, err)
+				require.Error(t, intents.ValidateSubscriptionCollectionTerminal(unattested))
+				var evidence struct {
+					NotExecuted bool `json:"not_executed"`
+					Operator    struct {
+						Actor       string `json:"actor"`
+						Reason      string `json:"reason"`
+						NotExecuted bool   `json:"not_executed"`
+					} `json:"operator_resolution"`
+				}
+				require.NoError(t, json.Unmarshal(row.ResultEvidence, &evidence))
+				require.True(t, evidence.NotExecuted)
+				require.True(t, evidence.Operator.NotExecuted)
+				require.Equal(t, resolution.Actor, evidence.Operator.Actor)
+				require.Equal(t, resolution.Reason, evidence.Operator.Reason)
+				invoice, err := a.alpha.GetInvoice(t.Context(), billing.InvoiceID(accepted.InvoiceID))
+				require.NoError(t, err)
+				require.Equal(t, billing.InvoiceOpen, invoice.Status)
+
+				if late {
+					p.core.AddSale(nmimock.Sale{Vault: accepted.Instrument.RailCustomerRef, OrderID: accepted.OrderReference, Amount: "10.00", At: a.clock.Now()})
+					require.NoError(t, p.persist(t.Context()))
+				}
+				fleet := hostFleet(t, a.world)
+				fleet.PeriodicJobs().Clear()
+				require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+				require.NoError(t, fleet.Start(t.Context()))
+				runRegistered(t, fleet, "openrails.billing_pass", 1)
+				require.Eventually(t, func() bool {
+					current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+					return err == nil && current.CurrentPeriodStartsAt.Equal(*sub.CurrentPeriodEndsAt)
+				}, 20*time.Second, 20*time.Millisecond)
+				var payload []byte
+				require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT payload FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+" WHERE subscription_id=$1 AND intent_type='subscription_collection' AND id<>$2", sub.ID.UUID(), row.ID).Scan(&payload))
+				var next subscriptions.SubscriptionCollectionPayload
+				require.NoError(t, json.Unmarshal(payload, &next))
+				require.Equal(t, 1, next.Attempt)
+				require.Equal(t, accepted.OrderReference, next.OrderReference)
+				p.money(t, 2, 2000)
+				attempts := 2
+				if late {
+					attempts = 1
+				}
+				require.Len(t, p.core.Attempts(), attempts, "a late charge must be recovered before another send")
+				archive := archiveBytes(t, a.alpha)
+				target, restored := archiveTarget(t, a.world)
+				_, err = restored.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+				require.NoError(t, err)
+				var restoredEvidence []byte
+				require.NoError(t, target.pool.QueryRow(t.Context(), "SELECT result_evidence FROM "+pgx.Identifier{target.schema, "provider_intents"}.Sanitize()+" WHERE id=$1", row.ID).Scan(&restoredEvidence))
+				require.JSONEq(t, string(row.ResultEvidence), string(restoredEvidence))
+			})
+		}
+	})
+	t.Run("OR-J14-S12/operator-retains-the-orders-definitive-decline", func(t *testing.T) {
+		a, p, sub := nmiEngineMembership(t)
+		p.core.SetDecline("4242", "202")
+		p.core.Intercept(nmiSaleRequest, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
+			response := serve()
+			response.StatusCode = http.StatusBadGateway
+			p.core.QueryUnavailable(true)
+			return response, nil
+		})
+		row := executeEngineRenewal(t, a, sub)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		p.core.QueryUnavailable(false)
+		rt := embedded.Graph(a.engine).Runtime
+		require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+			p.core.EditSale(p.core.LastDecline().TransactionID, func(s *nmimock.Sale) { s.Condition = "pending" })
+			_, err := rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Unsettled order"})
+			require.ErrorIs(t, err, intents.ErrResolutionRejected)
+			p.core.EditSale(p.core.LastDecline().TransactionID, func(s *nmimock.Sale) { s.Condition = "" })
+			row, err = rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Confirmed NMI decline"})
+			return err
+		}))
+		require.Equal(t, intents.StatusFailedTerminal, row.Status)
+		require.NoError(t, intents.ValidateSubscriptionCollectionTerminal(row))
+		refusal, found, err := intents.LoadRecurringDecline(row)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, 202, refusal.ResponseCode)
+		require.Contains(t, string(row.ResultEvidence), `"operator_resolution"`)
+		current := subscriptionState(t, a, sub.ID, "past_due")
+		require.NotNil(t, current.Dunning.NextRetryAt)
+		p.money(t, 1, 1000)
+	})
+
+	t.Run("OR-J14-S13/stripe-engine-renewals-reject-operator-resolution", func(t *testing.T) {
+		a, p, sub := purchasedMembership(t)
+		p.unavailableEvidence(true)
+		row := executeEngineRenewal(t, a, sub)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		before := row.ResultEvidence
+		rt := embedded.Graph(a.engine).Runtime
+		require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+			for _, resolution := range []intents.Resolution{
+				{ProviderReference: "pi_unknown", Actor: "operator", Reason: "Checked receipt"},
+				{NotExecuted: true, Actor: "operator", Reason: "Checked order"},
+			} {
+				_, err := rt.IntentRunner().Resolve(ctx, row.ID, resolution)
+				require.ErrorIs(t, err, intents.ErrResolutionRejected)
+			}
+			current, err := intents.NewStore(rt.DB).Get(ctx, row.ID)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, current.Status)
+			require.JSONEq(t, string(before), string(current.ResultEvidence))
+			return err
+		}))
+		require.Len(t, p.effects(t), 1)
 	})
 }

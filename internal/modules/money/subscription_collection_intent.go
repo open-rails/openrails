@@ -197,6 +197,14 @@ func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.
 		}
 		return intents.Ambiguous("NMI refused the renewal as a duplicate of a recent charge; verifying whether that charge paid this period")
 	}
+	var rejected *nmi.CustomerVaultError
+	if errors.Is(err, nmi.ErrSaleRefused) && errors.As(err, &rejected) {
+		declined := intents.RecurringDecline{ResponseCode: rejected.ResponseCode, Reference: rejected.TransactionID, At: h.now()}
+		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, declined); err != nil {
+			return intents.Ambiguous("retain engine refusal: " + err.Error())
+		}
+		return h.Verify(ctx, in)
+	}
 	if err != nil {
 		return intents.Ambiguous("engine submission requires exact receipt recovery: " + err.Error())
 	}
@@ -397,6 +405,53 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Billi
 	}
 	return h.lostSubmission(ctx, in, p)
 }
+
+// Resolve qualifies operator evidence through the renewal's normal completion paths.
+func (h *SubscriptionCollectionHandler) Resolve(ctx context.Context, in gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
+	if in.Rail != "nmi" {
+		return intents.Outcome{}, intents.RejectResolution("only NMI engine renewals accept operator resolution")
+	}
+	if resolution.Step != "" {
+		return intents.Outcome{}, intents.RejectResolution("engine renewal has no steps")
+	}
+	p, err := subscriptions.DecodeSubscriptionCollectionPayload(in)
+	if err != nil {
+		return intents.Outcome{}, err
+	}
+	if !resolution.NotExecuted {
+		receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, h.Resolver, resolution.ProviderReference)
+		if err != nil || !found {
+			return intents.Outcome{}, intents.RejectResolution("exact renewal receipt is unavailable or contradicts accepted terms")
+		}
+		return h.completePaid(ctx, in, p, receipt), nil
+	}
+	if _, paid, err := intents.LoadCollectedReceipt(in); err != nil {
+		return intents.Outcome{}, intents.RejectResolution("cannot read retained renewal receipt: %v", err)
+	} else if paid {
+		return intents.Outcome{}, intents.RejectResolution("renewal has a collected receipt; use --receipt")
+	}
+	if _, paid, err := intents.ReadNMICollectionReceipt(ctx, in, h.Resolver, ""); err != nil {
+		return intents.Outcome{}, intents.RejectResolution("NMI renewal receipt search is inconclusive: %v", err)
+	} else if paid {
+		return intents.Outcome{}, intents.RejectResolution("NMI shows a collected renewal; use --receipt")
+	}
+	order, err := intents.ReadNMIOrderAttempts(ctx, in, h.Resolver)
+	if err != nil {
+		return intents.Outcome{}, intents.RejectResolution("NMI order search is unavailable: %v", err)
+	}
+	if order.Declined {
+		refusal := intents.RecurringDecline{ResponseCode: order.DeclineCode, Reference: order.DeclineTransactionID, Issuer: order.DeclineIssuer, At: order.DeclineAt}
+		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, refusal); err != nil {
+			return intents.Outcome{}, err
+		}
+		return h.completeDeclined(ctx, in, p, refusal), nil
+	}
+	if order.Transactions != 0 {
+		return intents.Outcome{}, intents.RejectResolution("NMI order holds transactions without one definitive decline; use --receipt for a collected renewal")
+	}
+	return h.completeNotExecuted(ctx, in, p, "not_executed", "operator attested release after NMI order search showed zero transactions"), nil
+}
+
 func (h *SubscriptionCollectionHandler) completeEvidence(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
 	if receipt, found, err := intents.LoadCollectedReceipt(in); err != nil {
 		return intents.Ambiguous(err.Error()), true
@@ -591,6 +646,7 @@ func (h *SubscriptionCollectionHandler) completeNotExecuted(ctx context.Context,
 }
 
 var _ intents.Handler = (*SubscriptionCollectionHandler)(nil)
+var _ intents.OperatorResolver = (*SubscriptionCollectionHandler)(nil)
 
 // recordEngineAttempt records an engine charge's answer for its rebill cycle
 // (#1111) in the completion transaction.

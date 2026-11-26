@@ -859,7 +859,13 @@ order search also allows release with an actor and reason attesting release
 without proof of nonexecution. Such sales release automatically after 24 hours
 from submission when the order search is empty. Both raise a high finding for
 later reconciliation; the terminal intent cannot accept a later receipt. It never
-resends. Webhooks are at-least-once and handlers idempotent;
+resends. NMI engine renewals (`subscription_collection`) accept an exact receipt
+or `--not-executed` when the order shows one definitive decline or is empty
+with operator attestation. A decline enters dunning; an empty-order release
+reopens the renewal invoice for the next attempt under the same obligation order,
+whose pre-submission read catches a late charge. Renewals never release
+automatically. Stripe engine renewals do not accept operator resolution.
+Webhooks are at-least-once and handlers idempotent;
 there is no local inbound queue, so a long outage is backfilled with a provider
 refresh.
 

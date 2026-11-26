@@ -30,8 +30,10 @@
 //
 // Exactly once: every attempt to pay one period shares one order id, read
 // before any send. An engine renewal with no receipt is never re-sent: it
-// stays pending until a read settles it (only Stripe replays a lost
-// submission); the executor re-reads its claim just before each charge. Keep
+// stays pending until a read or operator resolution settles it (only Stripe
+// replays a lost submission). An operator may supply an exact receipt or attest
+// release once the order is declined or empty. Renewals never release on time
+// alone. The executor re-reads its claim just before each charge. Keep
 // NMI's duplicate check on: it is the only fence against a stalled replica.
 // An empty search never proves non-execution.
 //

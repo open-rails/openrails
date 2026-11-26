@@ -110,6 +110,9 @@ func (h *SubscriptionCollectionHandler) unresolved(ctx context.Context, in gen.B
 	if history, err := intents.LoadSubmissionHistory(in); err != nil || history.Settled(h.now()) {
 		evidence, _ := json.Marshal(map[string]any{"operation_id": in.ID, "subscription_id": p.Renewal.SubscriptionID, "rail": in.Rail, "order_reference": p.OrderReference, "reason": reason})
 		action := fmt.Sprintf("a submitted renewal charge for subscription %s cannot be settled from the provider (%s). No further charge is sent while this stands; confirm the charge at the provider and resolve the operation", p.Renewal.SubscriptionID, reason)
+		if in.Rail == "nmi" {
+			action += fmt.Sprintf(": `openrails intents resolve --intent %s --receipt <transaction id>` if charged, `--not-executed` once NMI shows the order declined or empty", in.ID)
+		}
 		if _, err := h.DB.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 			MerchantID: in.MerchantID, FindingType: FindingSubmissionUnresolved, SubjectKey: in.ID.String(),
 			Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
