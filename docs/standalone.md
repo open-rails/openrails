@@ -677,8 +677,8 @@ applied ledger with the binary's chain and exits non-zero on any mismatch. With 
 The schema is one baseline migration and numbered migrations after it, each an
 addition, so the previous build runs on a schema the next one migrated and
 rolling upgrades are safe. Released migrations never change: a database that
-recorded a migration with other content than the binary's is refused, and
-nothing is applied. Before v1 a release
+applied a migration whose file differs from the binary's by even a byte is
+refused, and nothing is applied. Before v1 a release
 may break the schema in one step: its release notes say so, the previous build
 does not run on the migrated schema, there is no rollback past it, and every
 host sharing the schema upgrades together. Migrations are never reversed.
