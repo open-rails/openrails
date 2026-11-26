@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 826,
+  "scenario_count": 828,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -537,6 +537,11 @@
       "id": "OR-J17-S15",
       "journey": "J17",
       "name": "Over the merchant's customer cancellation budget, a customer's own cancel of an NMI or CCBill schedule is refused 429, queues nothing and reaches no provider, and the subscription stays live; the accepted cancels before it reach the provider"
+    },
+    {
+      "id": "OR-J17-S16",
+      "journey": "J17",
+      "name": "An admin revoke leaves ended paid periods unrevoked without excess grant effects"
     },
     {
       "id": "OR-J18-S01",
@@ -2572,6 +2577,11 @@
       "id": "OR-J18-S07",
       "journey": "J18",
       "name": "An upgrade in the microsecond its membership started ends the superseded period after it starts"
+    },
+    {
+      "id": "OR-J18-S08",
+      "journey": "J18",
+      "name": "An upgrade leaves ended paid periods unrevoked without excess grant effects"
     },
     {
       "id": "OR-J19-S07",

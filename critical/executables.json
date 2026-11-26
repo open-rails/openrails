@@ -381,6 +381,9 @@
       "TestUnarmedCancels/OR-J17-S15/over-the-customer-budget-a-customers-own-cancel-reaches-no-provider/nmi",
       "TestUnarmedCancels/OR-J17-S15/over-the-customer-budget-a-customers-own-cancel-reaches-no-provider/ccbill"
     ],
+    "OR-J17-S16": [
+      "TestSubscriptionGrantRevocations/OR-J17-S16/admin-revoke-leaves-ended-paid-periods-unrevoked"
+    ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
     ],
@@ -1440,6 +1443,9 @@
     ],
     "OR-J18-S07": [
       "TestSubscriptionChangeContracts/OR-J18-S07/an-upgrade-in-the-microsecond-the-membership-started-ends-its-period-validly"
+    ],
+    "OR-J18-S08": [
+      "TestSubscriptionGrantRevocations/OR-J18-S08/upgrade-leaves-ended-paid-periods-unrevoked"
     ],
     "OR-J19-S07": [
       "TestPriceMigrationContracts/OR-J19-S07/stripe-push-keeps-the-seats-and-replays-a-lost-schedule-create"
