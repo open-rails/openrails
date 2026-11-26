@@ -1,15 +1,5 @@
 import * as React from "react"
 import { cn } from "cn"
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
-
 import type { BillingAppearance } from "#orck/appearance"
 import type { UsageGroupBy, UsageInterval } from "#orck/client/client"
 import type { UsageSeries } from "#orck/client/types"
@@ -22,6 +12,10 @@ import { useUsageSeries } from "#orck/react/hooks"
 import { useUiSettings } from "#orck/scope-context"
 import { formatMoney } from "./format"
 import { EmptyState, ErrorState, ListSkeleton, Section } from "./section"
+import type { UsagePoint } from "./usage-chart"
+
+// The chart library loads with the first chart, not with the package.
+const UsageChart = React.lazy(() => import("./usage-chart"))
 
 export interface UsagePanelProps {
   /** The currency (or merchant unit) usage is shown in. */
@@ -83,14 +77,6 @@ const labelFormats: Record<UsageInterval, Intl.DateTimeFormatOptions> = {
   month: { month: "short", year: "numeric" },
 }
 
-interface Point {
-  startsAt: string
-  label: string
-  value: number
-  amount: string
-  requests: number
-}
-
 // points are a series' buckets as chart values: each bucket's cost less its
 // volume discount, in major units.
 function points(
@@ -99,7 +85,7 @@ function points(
   zone: string,
   decimals: number | undefined,
   locale: string | undefined
-): Point[] {
+): UsagePoint[] {
   let format: Intl.DateTimeFormat
   try {
     format = new Intl.DateTimeFormat(locale, {
@@ -212,51 +198,13 @@ export function UsagePanel({
           aria-busy={state.loading || undefined}
           data-testid="usage-chart"
         >
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
+          <React.Suspense fallback={null}>
+            <UsageChart
               data={data}
-              margin={{ left: 0, right: 8, top: 8, bottom: 0 }}
-            >
-              <CartesianGrid vertical={false} stroke="var(--color-border)" />
-              <XAxis
-                dataKey="label"
-                tickLine={false}
-                axisLine={false}
-                minTickGap={16}
-                tick={{ fill: "var(--color-muted-foreground)" }}
-              />
-              <YAxis
-                width={56}
-                tickLine={false}
-                axisLine={false}
-                tick={{ fill: "var(--color-muted-foreground)" }}
-              />
-              <Tooltip
-                cursor={{ fill: "var(--color-muted)" }}
-                content={({ active, payload }) => {
-                  const p = active
-                    ? (payload?.[0]?.payload as Point | undefined)
-                    : undefined
-                  if (!p) return null
-                  return (
-                    <div className="grid gap-0.5 rounded-md border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md">
-                      <span className="font-medium">{p.label}</span>
-                      <span className="tabular-nums">{money(p.amount)}</span>
-                      <span className="text-muted-foreground tabular-nums">
-                        {t("usage.requests")}: {p.requests}
-                      </span>
-                    </div>
-                  )
-                }}
-              />
-              <Bar
-                dataKey="value"
-                fill="var(--color-primary)"
-                radius={[3, 3, 0, 0]}
-                isAnimationActive={false}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+              money={money}
+              requestsLabel={t("usage.requests")}
+            />
+          </React.Suspense>
         </div>
       </div>
     )

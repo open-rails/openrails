@@ -224,11 +224,11 @@ func TestUsageSeries(t *testing.T) {
 		require.Equal(t, [2]int64{300, 1}, [2]int64{amount, events})
 
 		// Staff read the customer's series as the customer does; a customer
-		// cannot read staff's.
+		// who is not staff cannot (alice owns the merchant, bob does not).
 		staff, err := a.alphaRemote.GetUsageSeries(t.Context(), bob, billing.GetUsageSeriesParams{Currency: "USD", Interval: billing.UsageByDay})
 		require.NoError(t, err)
 		require.Equal(t, theirs.Buckets, staff.Buckets)
-		status, raw := a.request(t, http.MethodGet, "/v1/admin/customers/"+bob.String()+"/usage/series?currency=USD&interval=day", a.aliceToken, nil)
+		status, raw := a.request(t, http.MethodGet, "/v1/admin/customers/"+alice.String()+"/usage/series?currency=USD&interval=day", a.bobToken, nil)
 		require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, string(raw))
 	})
 
@@ -284,7 +284,7 @@ func TestUsageSeries(t *testing.T) {
 		require.EqualValues(t, 1, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"), "one row for the bucket's events")
 		require.EqualValues(t, 2, storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"))
 		require.EqualValues(t, 1, storeCount(t, w, "SELECT toUInt64(sum(failed_requests)) FROM {db}.usage_history WHERE merchant_id = {m}"))
-		require.EqualValues(t, 70, storeCount(t, w, "SELECT toUInt64(sum(forgiven)) FROM {db}.usage_history WHERE merchant_id = {m}"), "no grace window: forgiven")
+		require.Zero(t, storeCount(t, w, "SELECT toUInt64(sum(failed_amount)) FROM {db}.usage_history WHERE merchant_id = {m}"), "no grace window: nothing charged")
 
 		now := w.clock.Now()
 		report, err := w.alpha.GetUsage(t.Context(), customer, billing.GetUsageParams{Currency: "USD", From: now.Add(-time.Hour), To: now.Add(time.Hour)})

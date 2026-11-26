@@ -1,4 +1,3 @@
-import { lazy, Suspense } from "react"
 import { cn } from "cn"
 
 import type { BillingAppearance } from "#orck/appearance"
@@ -6,15 +5,11 @@ import type { SendSolanaTransaction } from "#orck/client/client"
 import { BillingUiRoot } from "#orck/scope"
 import { PaymentHistory } from "./payment-history"
 import { PaymentMethodsPanel } from "./payment-methods-panel"
+import { UsagePanel } from "./usage-panel"
 import {
   SubscriptionsPanel,
   type SubscriptionsPanelProps,
 } from "./subscriptions-panel"
-
-// The chart loads only where usage is shown.
-const UsagePanel = lazy(() =>
-  import("./usage-panel").then((m) => ({ default: m.UsagePanel }))
-)
 
 export interface AccountBillingProps {
   /**
@@ -65,9 +60,7 @@ export function AccountBilling({
       />
       <PaymentHistory pageSize={historyPageSize} appearance={appearance} />
       {usageCurrency ? (
-        <Suspense fallback={null}>
-          <UsagePanel currency={usageCurrency} appearance={appearance} />
-        </Suspense>
+        <UsagePanel currency={usageCurrency} appearance={appearance} />
       ) : null}
     </BillingUiRoot>
   )

@@ -228,7 +228,12 @@ type DeleteLimitWindowsBeforeParams struct {
 // after reached_cutoff, any other after cutoff; a row another writer holds
 // waits for a later pass.
 func (q *Queries) DeleteLimitWindowsBefore(ctx context.Context, arg DeleteLimitWindowsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteLimitWindowsBefore, arg.MerchantID, arg.Cutoff, arg.ReachedCutoff, arg.RowLimit)
+	result, err := q.db.Exec(ctx, deleteLimitWindowsBefore,
+		arg.MerchantID,
+		arg.Cutoff,
+		arg.ReachedCutoff,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return 0, err
 	}
