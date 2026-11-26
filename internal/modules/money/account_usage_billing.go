@@ -184,7 +184,7 @@ func (s *MoneyService) requestUsageBilling(ctx context.Context, q *gen.Queries, 
 	if err != nil {
 		return err
 	}
-	terms, err := s.resolveUsageTerms(ctx, q, row, cur)
+	terms, err := s.resolveUsageTerms(ctx, q, row, cur, nil)
 	if err != nil {
 		return err
 	}
@@ -296,7 +296,7 @@ func (s *MoneyService) BillDueUsageAccount(ctx context.Context, customer uuid.UU
 			return err
 		}
 		due := row.UsageNextBillAt != nil && !row.UsageNextBillAt.After(now)
-		terms, err := s.resolveUsageTerms(ctx, q, row, cur)
+		terms, err := s.resolveUsageTerms(ctx, q, row, cur, nil)
 		if err != nil {
 			return err
 		}
@@ -402,7 +402,7 @@ func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Querie
 	} else if err != nil {
 		return capacity, err
 	}
-	terms, err := s.resolveUsageTerms(ctx, q, row, cur)
+	terms, err := s.resolveUsageTerms(ctx, q, row, cur, nil)
 	if err != nil {
 		return capacity, err
 	}
@@ -450,7 +450,7 @@ func (s *MoneyService) ValidateUsageBillingAccountTx(ctx context.Context, q *gen
 	if err != nil {
 		return err
 	}
-	terms, err := s.resolveUsageTerms(ctx, q, row, cur)
+	terms, err := s.resolveUsageTerms(ctx, q, row, cur, nil)
 	if err != nil {
 		return err
 	}
@@ -464,7 +464,8 @@ type usageTerms struct{ creditLimit, minimum, threshold int64 }
 
 // Resolve the account override, merchant default and any tighter hard policy
 // once. A collection threshold changes when to invoice, never how much is owed.
-func (s *MoneyService) resolveUsageTerms(ctx context.Context, q *gen.Queries, row gen.BillingMoneySetting, cur *billing.UsageBillingCurrency) (usageTerms, error) {
+// A page read passes its customers' billing policies; nil reads the customer.
+func (s *MoneyService) resolveUsageTerms(ctx context.Context, q *gen.Queries, row gen.BillingMoneySetting, cur *billing.UsageBillingCurrency, policies map[uuid.UUID]*string) (usageTerms, error) {
 	terms := usageTerms{creditLimit: usageCreditLimit(row, cur), minimum: usageMinimumInvoice(row, cur)}
 	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
 	if err != nil {
@@ -476,13 +477,19 @@ func (s *MoneyService) resolveUsageTerms(ctx context.Context, q *gen.Queries, ro
 			name = n
 		}
 	}
-	customer, err := q.GetCustomer(ctx, gen.GetCustomerParams{MerchantID: row.MerchantID, ID: row.CustomerID})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return terms, err
+	policyName := policies[row.CustomerID]
+	if policies == nil {
+		customer, err := q.GetCustomer(ctx, gen.GetCustomerParams{MerchantID: row.MerchantID, ID: row.CustomerID})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return terms, err
+		}
+		if err == nil {
+			policyName = customer.BillingPolicy
+		}
 	}
-	if err == nil && customer.BillingPolicy != nil {
-		if _, ok := settings.Policies[*customer.BillingPolicy]; ok {
-			name = *customer.BillingPolicy
+	if policyName != nil {
+		if _, ok := settings.Policies[*policyName]; ok {
+			name = *policyName
 		}
 	}
 	policy := settings.Policies[name]
@@ -509,7 +516,7 @@ func (s *MoneyService) WakeUsageBillingTx(ctx context.Context, q *gen.Queries, c
 
 // usagePolicySettings resolves the configured policy, independently of whether
 // a payment method currently makes that credit usable.
-func (s *MoneyService) usagePolicySettings(ctx context.Context, row gen.BillingMoneySetting) (gen.BillingMoneySetting, error) {
+func (s *MoneyService) usagePolicySettings(ctx context.Context, row gen.BillingMoneySetting, policies map[uuid.UUID]*string) (gen.BillingMoneySetting, error) {
 	cfg, cur, err := s.usageBillingConfig(ctx, row.Currency)
 	if err != nil || cfg == nil {
 		return row, err
@@ -519,7 +526,7 @@ func (s *MoneyService) usagePolicySettings(ctx context.Context, row gen.BillingM
 		row.BillingMode = BillingModePrepaid
 		return row, nil
 	}
-	terms, err := s.resolveUsageTerms(ctx, s.db.Gen(ctx), row, cur)
+	terms, err := s.resolveUsageTerms(ctx, s.db.Gen(ctx), row, cur, policies)
 	if err != nil {
 		return row, err
 	}

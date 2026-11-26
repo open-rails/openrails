@@ -52,14 +52,14 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Cu
 		MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
 	})
 	if err == nil {
-		row, err = s.usagePolicySettings(ctx, row)
+		row, err = s.usagePolicySettings(ctx, row, nil)
 		if err != nil {
 			return nil, err
 		}
 		return settingsFromGen(row), nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
-		row, err := s.usagePolicySettings(ctx, gen.BillingMoneySetting{MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur, BillingMode: BillingModePrepaid})
+		row, err := s.usagePolicySettings(ctx, gen.BillingMoneySetting{MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur, BillingMode: BillingModePrepaid}, nil)
 		if err != nil {
 			return nil, err
 		}

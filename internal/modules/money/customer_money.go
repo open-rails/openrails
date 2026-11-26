@@ -80,6 +80,21 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 				m.Defaults = append(m.Defaults, billing.DefaultPaymentMethod{Currency: catalog.Currency(row.Currency), PaymentMethodID: billing.PaymentMethodID(*row.DefaultPaymentMethodID)})
 			}
 		}
+		cfg, _, err := s.usageBillingConfig(ctx, "")
+		if err != nil {
+			return err
+		}
+		var policies map[uuid.UUID]*string
+		if cfg != nil {
+			customerRows, err := q.ListCustomersByIDs(ctx, gen.ListCustomersByIDsParams{MerchantID: mid.UUID(), Ids: customers})
+			if err != nil {
+				return err
+			}
+			policies = make(map[uuid.UUID]*string, len(customerRows))
+			for _, customer := range customerRows {
+				policies[customer.ID] = customer.BillingPolicy
+			}
+		}
 		now := instant(s.now())
 		for _, c := range currencies {
 			k := key{c.CustomerID, c.Currency}
@@ -97,7 +112,7 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 				if !ok {
 					row = gen.BillingMoneySetting{MerchantID: mid.UUID(), CustomerID: k.customer, Currency: k.currency, BillingMode: BillingModePrepaid}
 				}
-				row, err = s.usagePolicySettings(ctx, row)
+				row, err = s.usagePolicySettings(ctx, row, policies)
 				if err != nil {
 					return err
 				}
