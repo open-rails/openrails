@@ -376,10 +376,18 @@ func (s *Server) Routes() ([]openrails.Route, error) {
 func (s *Server) RiverJobs() riverhelpers.Contribution { return s.engine.RiverJobs() }
 
 // Start starts the background work, AuthKit's jobs included, on the engine's
-// own River or, with openrails.WithRiverClient, the host's fleet. Close stops
-// it.
+// own River or, with openrails.WithRiverClient, the host's fleet, then the
+// rest of AuthKit's: while no account holds a root role it logs the first
+// owner's setup link. Close stops it.
 func (s *Server) Start(ctx context.Context, opts ...openrails.StartOption) error {
-	return s.engine.Start(ctx, opts...)
+	if err := s.engine.Start(ctx, opts...); err != nil {
+		return err
+	}
+	if err := s.cp.Core().Start(ctx, authkit.WithRiverClient(s.graph.Runtime.Fleet())); err != nil {
+		return fmt.Errorf("server: start AuthKit: %w", err)
+	}
+	s.log.InfoContext(ctx, "OpenRails background work running")
+	return nil
 }
 
 // Run serves Handler at Config's Host and Port and runs the background work until ctx
