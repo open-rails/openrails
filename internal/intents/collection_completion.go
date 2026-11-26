@@ -159,7 +159,7 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.BillingProv
 		}
 	}
 	if current.IntentType == subscriptions.TypeSubscriptionCollection {
-		for _, key := range []string{"submitted_at", qualifiedCollectionNonexecutionKey, collectionCandidateKey} {
+		for _, key := range []string{"submitted_at", "cancel_revoked_access_at", qualifiedCollectionNonexecutionKey, collectionCandidateKey} {
 			if value, ok := existing[key]; ok {
 				evidence[key] = value
 			}

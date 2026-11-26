@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 833,
+  "scenario_count": 837,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -542,6 +542,21 @@
       "id": "OR-J17-S16",
       "journey": "J17",
       "name": "An admin revoke leaves ended paid periods unrevoked without excess grant effects"
+    },
+    {
+      "id": "OR-J17-S17",
+      "journey": "J17",
+      "name": "A period-end cancel during an unknown card renewal keeps the paid period without resuming or granting grace"
+    },
+    {
+      "id": "OR-J17-S18",
+      "journey": "J17",
+      "name": "An immediate access revoke during an unknown card renewal refunds the late charge without restoring access"
+    },
+    {
+      "id": "OR-J17-S19",
+      "journey": "J17",
+      "name": "A canceled renewal resolving declined or not executed voids its invoice without dunning"
     },
     {
       "id": "OR-J18-S01",
@@ -1142,6 +1157,11 @@
       "id": "OR-J31-S14",
       "journey": "J31",
       "name": "Open limit windows and staff adjustments move with the book: lifetime and current-window usage and adjustments survive a round trip"
+    },
+    {
+      "id": "OR-J31-S15",
+      "journey": "J31",
+      "name": "A canceled unresolved renewal retains its access revocation evidence through terminal completion and archive restore"
     },
     {
       "id": "OR-J32-S01",

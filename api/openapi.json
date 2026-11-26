@@ -9524,7 +9524,6 @@
         "x-openrails-errors": [
           "cancel_unsupported_on_rail",
           "invalid_param",
-          "payment_in_progress",
           "resource_not_found",
           "service_unavailable",
           "subscription_not_active"

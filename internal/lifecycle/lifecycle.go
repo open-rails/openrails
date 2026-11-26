@@ -96,7 +96,11 @@ type InitialPaid struct{ PeriodStart, PeriodEnd time.Time }
 type InitialFailed struct{ At time.Time }
 
 // RenewalPaid is a payment fact for the period [PeriodStart, PeriodEnd).
-type RenewalPaid struct{ PeriodStart, PeriodEnd time.Time }
+type RenewalPaid struct {
+	PeriodStart, PeriodEnd time.Time
+	// KeepCanceled applies an accepted engine charge after a period-end cancel.
+	KeepCanceled bool
+}
 
 // RenewalDeclined is a decline fact, observed at At, for the period starting
 // at PeriodStart.
@@ -282,6 +286,14 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 			return s, nil, nil // already paid through this period
 		}
 		if s.Status == Canceled {
+			if ev.KeepCanceled && s.Owner == Engine && (s.CancelKind == CancelUser || s.CancelKind == CancelMerchant) && !s.EndedAt.Before(s.PaidThrough) {
+				s.PaidThrough = ev.PeriodEnd
+				// A stuck period may already have ended before cancellation.
+				if ev.PeriodEnd.After(s.EndedAt) {
+					s.EndedAt = ev.PeriodEnd
+				}
+				return s, []Effect{GrantPeriod{ev.PeriodStart, ev.PeriodEnd}, CloseDunning{}, Notify{NoticeRenewed}}, nil
+			}
 			if s.CancelKind != CancelExpired {
 				return s, nil, ErrTerminal
 			}

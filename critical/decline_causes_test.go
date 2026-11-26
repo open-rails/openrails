@@ -726,10 +726,17 @@ func awaitDeferredToRenewal(t *testing.T, a *authorityWorld, fleet *river.Client
 // card the gateway vaults: OpenRails collects its renewals.
 func nmiEngineMembership(t *testing.T, configure ...func(*world)) (*authorityWorld, *nmiJournal, *billing.Subscription) {
 	t.Helper()
+	return nmiEngineMembershipFor(t, 7*24, configure...)
+}
+
+// nmiEngineMembershipFor is nmiEngineMembership with its paid access lasting
+// accessHours of each weekly period.
+func nmiEngineMembershipFor(t *testing.T, accessHours int, configure ...func(*world)) (*authorityWorld, *nmiJournal, *billing.Subscription) {
+	t.Helper()
 	a, p := newNMIWorld(t, configure...)
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-engine-membership", DisplayName: "NMI engine membership", Entitlements: []string{"nmi:engine"}})
 	require.NoError(t, err)
-	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "nmi-engine-weekly", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(7 * 24)})
+	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "nmi-engine-weekly", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(7 * 24), AccessDurationHours: ptr(accessHours)})
 	require.NoError(t, err)
 	token := p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"})
 	input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: token, BillingDetails: billedTo("US", "10001")}}

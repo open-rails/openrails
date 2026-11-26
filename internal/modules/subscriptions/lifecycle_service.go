@@ -856,8 +856,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			providerPayment = recorded.Payment
 		}
 
-		if err := s.assertActiveTransitionAllowed(ctx, subscription, "renewal", params.AllowTerminalReactivation); err != nil {
-			return err
+		if !params.KeepCanceled {
+			if err := s.assertActiveTransitionAllowed(ctx, subscription, "renewal", params.AllowTerminalReactivation); err != nil {
+				return err
+			}
 		}
 
 		var price *models.Price
@@ -1074,7 +1076,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			PeriodStart: periodStartsAt, PeriodEnd: periodEndsAt,
 			Downgrade: applyingDowngrade, ProductName: productName,
 			FromProductID: fromProductID, FromProductName: fromProductName,
-			PreserveLifecycle: preserveLifecycle, Reinstate: params.AllowTerminalReactivation,
+			PreserveLifecycle: preserveLifecycle, Reinstate: params.AllowTerminalReactivation, KeepCanceled: params.KeepCanceled,
 			SeatsChanged: !SameQuantity(subscription.Quantity, fromQuantity),
 		})
 		if err != nil {
@@ -1384,15 +1386,6 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		return result, nil
 	}
 
-	// A cancel never races a renewal charge already sent: the charge could land
-	// and buy nothing. An admitted renewal not yet sent is released by its own
-	// fence, which takes this same lock and refuses a canceled membership.
-	if params.RefuseOwnedRenewal && subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status != models.StatusCanceled {
-		if err := refuseSubmittedRenewal(ctx, txDB, subscription); err != nil {
-			return nil, err
-		}
-	}
-
 	if params.RefuseOwnedRenewal && subscription.Rail == models.RailSolana && subscription.Status != models.StatusCanceled {
 		submitted, err := txDB.Gen(ctx).HasSubmittedSolanaPull(ctx, gen.HasSubmittedSolanaPullParams{MerchantID: subscription.MerchantID, SubscriptionID: subscription.ID})
 		if err != nil {
@@ -1447,6 +1440,21 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	}
 	if subscription.LifecycleRev == previousRevision {
 		return result, nil // the locked lifecycle already reflects this cancellation
+	}
+	if params.RevokeAccess && subscription.CollectionPolicy == models.CollectionPolicyEngine {
+		collection, err := txDB.Gen(ctx).GetUnresolvedSubscriptionCollection(ctx, gen.GetUnresolvedSubscriptionCollectionParams{MerchantID: subscription.MerchantID, SubscriptionID: subscription.ID})
+		if err != nil && !db.IsNotFound(err) {
+			return nil, err
+		}
+		if err == nil {
+			at, err := json.Marshal(now.UTC().Format(time.RFC3339Nano))
+			if err != nil {
+				return nil, err
+			}
+			if _, err := txDB.Gen(ctx).RecordProviderIntentProgressIfAbsent(ctx, gen.RecordProviderIntentProgressIfAbsentParams{MerchantID: subscription.MerchantID, ID: collection.ID, Key: "cancel_revoked_access_at", Value: at}); err != nil {
+				return nil, err
+			}
+		}
 	}
 	s.Log.InfoContext(ctx, "Updated subscription record during cancellation", "subscription_id", subscription.ID, "user_id", subscription.CustomerID.String(), "status", subscription.Status, "ended_at", subscription.EndedAt, "period_end", subscription.CurrentPeriodEndsAt)
 

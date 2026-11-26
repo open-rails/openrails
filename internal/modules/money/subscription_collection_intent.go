@@ -482,7 +482,7 @@ func (h *SubscriptionCollectionHandler) lifecycle(d *db.DB) *subscriptions.Subsc
 	lc.SetConfig(h.Config)
 	return lc
 }
-func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, outcome intents.Outcome, apply func(context.Context, *db.DB, *models.Subscription) error) intents.Outcome {
+func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, outcome intents.Outcome, apply func(context.Context, *db.DB, *models.Subscription, gen.BillingProviderIntent) error) intents.Outcome {
 	if err := h.hit(ctx, in, failpoint.BeforeComplete); err != nil {
 		return intents.Ambiguous(err.Error())
 	}
@@ -502,7 +502,7 @@ func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.B
 			return err
 		}
 		if current.Status != intents.StatusSucceeded && current.Status != intents.StatusFailedTerminal {
-			if err := apply(ctx, d, sub); err != nil {
+			if err := apply(ctx, d, sub, current); err != nil {
 				return err
 			}
 		}
@@ -538,11 +538,11 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 		}
 	}
 	outcome := intents.Succeeded(map[string]any{"transaction_id": retained.TransactionID(), "rail": in.Rail, "verified_existing": true})
-	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
-		if err := h.renewMembership(ctx, d, in, p, retained, params, sub); err != nil {
+	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription, current gen.BillingProviderIntent) error {
+		if err := h.renewMembership(ctx, d, current, p, retained, params, sub); err != nil {
 			return err
 		}
-		return h.renewalInvoicePaid(ctx, d, in, p, retained.TransactionID())
+		return h.renewalInvoicePaid(ctx, d, in, p, retained.TransactionID(), params.KeepCanceled)
 	})
 }
 
@@ -566,7 +566,10 @@ func (h *SubscriptionCollectionHandler) renewMembership(ctx context.Context, d *
 			}
 			return nil
 		}
-		if sub.Status == models.StatusCanceled || (!current && !replay) {
+		if current && sub.Status == models.StatusCanceled && sub.CanceledAt != nil && sub.EndedAt != nil && !sub.EndedAt.Before(p.PreviousPeriodEnd) && sub.CancelType != nil && (*sub.CancelType == models.CancelTypeUser || *sub.CancelType == models.CancelTypeMerchant) {
+			params.KeepCanceled = intents.EvidenceString(in, "cancel_revoked_access_at") == ""
+		}
+		if sub.Status == models.StatusCanceled && !params.KeepCanceled || (!current && !replay) {
 			params.PaymentMetadata = map[string]any{"refund_review": "accepted engine charge completed after lifecycle changed"}
 			if err := h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params); err != nil || sub.Status != models.StatusCanceled {
 				return err
@@ -594,7 +597,7 @@ func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in 
 	if declined.IsZero() {
 		declined = h.now()
 	}
-	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
+	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription, _ gen.BillingProviderIntent) error {
 		if err := recordEngineAttempt(ctx, d, in, p, attempts.Attempt{Answer: answer, TransactionID: reference}, declined); err != nil {
 			return err
 		}
@@ -640,11 +643,7 @@ func (h *SubscriptionCollectionHandler) completeNotExecuted(ctx context.Context,
 		}
 	}
 	outcome := intents.TerminalWithEvidence(reason, map[string]any{"not_executed": true, "declined": false, "not_executed_code": code})
-	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
-		current, err := intents.NewStore(d).Get(ctx, in.ID)
-		if err != nil {
-			return err
-		}
+	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription, current gen.BillingProviderIntent) error {
 		if intents.EvidenceString(current, unresolvedRenewalGraceKey) != "" && sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) {
 			if err := h.lifecycle(d).SetSubmittedRenewalGrace(ctx, d, sub, false); err != nil {
 				return err

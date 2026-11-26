@@ -384,6 +384,24 @@
     "OR-J17-S16": [
       "TestSubscriptionGrantRevocations/OR-J17-S16/admin-revoke-leaves-ended-paid-periods-unrevoked"
     ],
+    "OR-J17-S17": [
+      "TestCanceledUnknownRenewal/OR-J17-S17/period-end-cancel-keeps-a-late-paid-renewal",
+      "TestCanceledUnknownRenewal/OR-J17-S17/period-end-cancel-keeps-a-late-paid-renewal/customer",
+      "TestCanceledUnknownRenewal/OR-J17-S17/period-end-cancel-keeps-a-late-paid-renewal/admin",
+      "TestCanceledUnknownRenewal/OR-J17-S17/period-end-cancel-keeps-a-late-paid-renewal/customer-expired-period",
+      "TestCanceledUnknownRenewal/OR-J17-S17/period-end-cancel-keeps-a-late-paid-renewal/admin-expired-period",
+      "TestCanceledUnknownRenewal/OR-J17-S17/period-end-cancel-keeps-a-late-paid-renewal/customer-expired-long-access"
+    ],
+    "OR-J17-S18": [
+      "TestCanceledUnknownRenewal/OR-J17-S18/revoke-access-cancel-refunds-a-late-paid-renewal",
+      "TestCanceledUnknownRenewal/OR-J17-S18/revoke-access-cancel-refunds-a-late-paid-renewal/0s",
+      "TestCanceledUnknownRenewal/OR-J17-S18/revoke-access-cancel-refunds-a-late-paid-renewal/192h0m0s"
+    ],
+    "OR-J17-S19": [
+      "TestCanceledUnknownRenewal/OR-J17-S19/canceled-unpaid-renewal-voids-its-invoice",
+      "TestCanceledUnknownRenewal/OR-J17-S19/canceled-unpaid-renewal-voids-its-invoice/false",
+      "TestCanceledUnknownRenewal/OR-J17-S19/canceled-unpaid-renewal-voids-its-invoice/true"
+    ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
     ],
@@ -742,6 +760,9 @@
     ],
     "OR-J31-S14": [
       "TestLimitArchive/OR-J31-S14/open-limit-windows-and-staff-adjustments-move-with-the-book"
+    ],
+    "OR-J31-S15": [
+      "TestBillingArchive/OR-J31-S15/canceled-renewal-retains-revocation-evidence-through-restore"
     ],
     "OR-J32-S01": [
       "TestMerchantHost/OR-J32-S01/provision-find-list-rename-retains-identity"
