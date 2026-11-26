@@ -3851,7 +3851,7 @@
     {
       "id": "OR-J26-S65",
       "journey": "J26",
-      "name": "A customer without money settings reads arrears from the admin balance and its own summary under the merchant's usage terms"
+      "name": "A customer's admin balance and own summary show the billing mode the gate admits it under: prepaid without a card, arrears with one under the merchant's usage terms"
     },
     {
       "id": "OR-J24-S66",

@@ -201,7 +201,7 @@ func (s *MoneyService) requestUsageBilling(ctx context.Context, q *gen.Queries, 
 	if err != nil {
 		return err
 	}
-	terms, err := s.resolveUsageTerms(ctx, q, row, cur, nil)
+	terms, err := s.resolveUsageTerms(ctx, q, row, cur)
 	if err != nil {
 		return err
 	}
@@ -313,7 +313,7 @@ func (s *MoneyService) BillDueUsageAccount(ctx context.Context, customer uuid.UU
 			return err
 		}
 		due := row.UsageNextBillAt != nil && !row.UsageNextBillAt.After(now)
-		terms, err := s.resolveUsageTerms(ctx, q, row, cur, nil)
+		terms, err := s.resolveUsageTerms(ctx, q, row, cur)
 		if err != nil {
 			return err
 		}
@@ -393,6 +393,73 @@ func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer 
 	return invoice != nil, nil
 }
 
+// canCollectUsage reports whether usage can be collected from row's customer:
+// collection is not revoked and its default card is chargeable under a live
+// unscheduled mandate.
+func (s *MoneyService) canCollectUsage(ctx context.Context, q *gen.Queries, row gen.BillingMoneySetting) (bool, error) {
+	if row.CollectionRevokedAt != nil || row.DefaultPaymentMethodID == nil {
+		return false, nil
+	}
+	method, err := s.collectionMethodFor(ctx, q, row.MerchantID, row.CustomerID, row.Currency, usageCollectionEnqueue{
+		paymentMethodID: row.DefaultPaymentMethodID, initiator: charge.InitiatorMerchant, read: true,
+	})
+	if errors.Is(err, ErrDefaultPaymentMethodInvalid) || errors.Is(err, ErrDefaultPaymentMethodRequired) || errors.Is(err, charge.ErrAgreementRequired) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return method != nil, nil
+}
+
+// usageAdmissionBillingMode is the billing mode usageAdmissionCapacity admits
+// row's customer under: under usage terms arrears whenever usage can be
+// collected, even on a credit line of 0.
+func (s *MoneyService) usageAdmissionBillingMode(ctx context.Context, row gen.BillingMoneySetting) (string, error) {
+	cfg, cur, err := s.usageBillingConfig(ctx, row.Currency)
+	if err != nil {
+		return "", err
+	}
+	if cfg == nil {
+		return row.BillingMode, nil
+	}
+	if cur == nil {
+		return BillingModePrepaid, nil
+	}
+	collectible, err := s.canCollectUsage(ctx, s.db.Gen(ctx), row)
+	if err != nil {
+		return "", err
+	}
+	if collectible {
+		return BillingModeArrears, nil
+	}
+	return BillingModePrepaid, nil
+}
+
+// GetAdmissionBillingMode returns the billing mode the spend gate admits under.
+func (s *MoneyService) GetAdmissionBillingMode(ctx context.Context, payer identity.CustomerID, currency string) (string, error) {
+	cur := normalizeCurrency(currency)
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return "", err
+	}
+	if IsMerchantUnit(cur) {
+		return BillingModePrepaid, nil
+	}
+	if err := RequireBillingCurrency(cur); err != nil {
+		return "", err
+	}
+	row, err := s.db.Gen(ctx).GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{
+		MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: cur,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		row = gen.BillingMoneySetting{MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: cur, BillingMode: BillingModePrepaid}
+	} else if err != nil {
+		return "", err
+	}
+	return s.usageAdmissionBillingMode(ctx, row)
+}
+
 // usageAdmissionCapacity resolves capacity's credit line (creditLimit) and,
 // under the merchant's usage_billing terms, its billing mode: arrears while
 // the customer can be collected from, else prepaid. Without terms the
@@ -420,7 +487,7 @@ func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Querie
 	} else if err != nil {
 		return capacity, err
 	}
-	terms, err := s.resolveUsageTerms(ctx, q, row, cur, nil)
+	terms, err := s.resolveUsageTerms(ctx, q, row, cur)
 	if err != nil {
 		return capacity, err
 	}
@@ -432,20 +499,11 @@ func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Querie
 		return capacity, fmt.Errorf("usage minimum invoice exceeds the credit limit for %s", currency)
 	}
 	capacity.BillingMode = BillingModeArrears
-	if row.CollectionRevokedAt != nil {
-		capacity.CreditLimit = 0
-		capacity.BillingMode = BillingModePrepaid
-		return capacity, nil
-	}
-	method, err := s.collectionMethodFor(ctx, q, mid.UUID(), payer.UUID(), currency, usageCollectionEnqueue{initiator: charge.InitiatorMerchant, read: true})
-	if errors.Is(err, ErrDefaultPaymentMethodInvalid) || errors.Is(err, ErrDefaultPaymentMethodRequired) || errors.Is(err, charge.ErrAgreementRequired) {
-		method = nil
-		err = nil
-	}
+	collectible, err := s.canCollectUsage(ctx, q, row)
 	if err != nil {
 		return capacity, err
 	}
-	if method == nil {
+	if !collectible {
 		capacity.CreditLimit = 0
 		capacity.BillingMode = BillingModePrepaid
 	}
@@ -470,7 +528,7 @@ func (s *MoneyService) ValidateUsageBillingAccountTx(ctx context.Context, q *gen
 	if err != nil {
 		return err
 	}
-	terms, err := s.resolveUsageTerms(ctx, q, row, cur, nil)
+	terms, err := s.resolveUsageTerms(ctx, q, row, cur)
 	if err != nil {
 		return err
 	}
@@ -485,9 +543,8 @@ type usageTerms struct{ creditLimit, minimum, threshold int64 }
 // resolveUsageTerms resolves the customer's credit line (creditLimit) under
 // its bound policy, its minimum invoice and its collection threshold once. A
 // collection threshold changes when to invoice, never how much is owed. cur
-// is nil without usage terms. A page read passes its customers' billing
-// policies; nil reads the customer.
-func (s *MoneyService) resolveUsageTerms(ctx context.Context, q *gen.Queries, row gen.BillingMoneySetting, cur *billing.UsageBillingCurrency, policies map[uuid.UUID]*string) (usageTerms, error) {
+// is nil without usage terms.
+func (s *MoneyService) resolveUsageTerms(ctx context.Context, q *gen.Queries, row gen.BillingMoneySetting, cur *billing.UsageBillingCurrency) (usageTerms, error) {
 	terms := usageTerms{minimum: usageMinimumInvoice(row, cur)}
 	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
 	if err != nil {
@@ -499,19 +556,13 @@ func (s *MoneyService) resolveUsageTerms(ctx context.Context, q *gen.Queries, ro
 			name = n
 		}
 	}
-	policyName := policies[row.CustomerID]
-	if policies == nil {
-		customer, err := q.GetCustomer(ctx, gen.GetCustomerParams{MerchantID: row.MerchantID, ID: row.CustomerID})
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return terms, err
-		}
-		if err == nil {
-			policyName = customer.BillingPolicy
-		}
+	customer, err := q.GetCustomer(ctx, gen.GetCustomerParams{MerchantID: row.MerchantID, ID: row.CustomerID})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return terms, err
 	}
-	if policyName != nil {
-		if _, ok := settings.Policies[*policyName]; ok {
-			name = *policyName
+	if err == nil && customer.BillingPolicy != nil {
+		if _, ok := settings.Policies[*customer.BillingPolicy]; ok {
+			name = *customer.BillingPolicy
 		}
 	}
 	policy := settings.Policies[name]
@@ -533,7 +584,7 @@ func (s *MoneyService) WakeUsageBillingTx(ctx context.Context, q *gen.Queries, c
 
 // usagePolicySettings resolves the configured policy, independently of whether
 // a payment method currently makes that credit usable.
-func (s *MoneyService) usagePolicySettings(ctx context.Context, row gen.BillingMoneySetting, policies map[uuid.UUID]*string) (gen.BillingMoneySetting, error) {
+func (s *MoneyService) usagePolicySettings(ctx context.Context, row gen.BillingMoneySetting) (gen.BillingMoneySetting, error) {
 	cfg, cur, err := s.usageBillingConfig(ctx, row.Currency)
 	if err != nil {
 		return row, err
@@ -546,7 +597,7 @@ func (s *MoneyService) usagePolicySettings(ctx context.Context, row gen.BillingM
 	if cfg == nil && row.BillingMode != BillingModeArrears {
 		return row, nil
 	}
-	terms, err := s.resolveUsageTerms(ctx, s.db.Gen(ctx), row, cur, policies)
+	terms, err := s.resolveUsageTerms(ctx, s.db.Gen(ctx), row, cur)
 	if err != nil {
 		return row, err
 	}

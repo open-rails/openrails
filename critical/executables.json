@@ -2481,7 +2481,7 @@
       "TestUsageBillingContracts/OR-J26-S64/running-charges-bill-on-the-merchants-usage-terms-without-clickhouse"
     ],
     "OR-J26-S65": [
-      "TestUsageBillingContracts/OR-J26-S65/a-customer-without-money-settings-reads-the-merchants-usage-mode"
+      "TestUsageBillingContracts/OR-J26-S65/customer-balances-show-the-admitted-mode-prepaid-without-a-card-and-arrears-with-one"
     ],
     "OR-J24-S66": [
       "TestEventStore/OR-J24-S66/two-engines-migrating-one-fresh-clickhouse-database-together-both-start"
