@@ -21,8 +21,8 @@ args: [run-server]
 
 # config.yaml, rendered as is (config.example.yaml lists every key). Keep
 # secrets out: they come from `secrets`, as environment variables or files
-# named like them (database.url is DATABASE_URL). port and metrics_port are the
-# chart's (ports.http, metrics.port).
+# named like them (database.url is DATABASE_URL). host, port and metrics_port
+# are the chart's: host is 0.0.0.0, the others ports.http and metrics.port.
 config:
   # public_url: https://billing.example.com # required: the server's AuthKit issuer and resource
   # Optional, no default; more than one replica needs it.

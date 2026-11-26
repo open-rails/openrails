@@ -121,6 +121,8 @@ ENV TZ=UTC
 # public_url it generates development keys beneath XDG_STATE_HOME, so a
 # volume there keeps them across restarts.
 ENV XDG_STATE_HOME=/vault/auth
+# A container listens on every interface; its platform decides exposure.
+ENV HOST=0.0.0.0
 
 # Expose the single public port. Server-to-server calls use OpenRails-issued
 # API keys on this same port; there is no separate private/mTLS service port (#222).

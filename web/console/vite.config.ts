@@ -25,6 +25,7 @@ export default defineConfig(({ command }) => ({
   },
   build: { outDir: "dist", emptyOutDir: true },
   // `task dev` makes this origin the API's public URL, so the port is fixed.
+  // The API listens on loopback IPv4 only.
   server: {
     port: 3054,
     strictPort: true,
@@ -37,7 +38,7 @@ export default defineConfig(({ command }) => ({
         "/health",
         "/admin/config.json",
         "/admin/merchants",
-      ].map((p) => [p, "http://localhost:3053"])
+      ].map((p) => [p, "http://127.0.0.1:3053"])
     ),
   },
 }))

@@ -12,6 +12,12 @@ vars:
   # checksum-verifies the upstream release). Local dev needs no setup and keeps
   # the `go run` default.
   SQLC: '{{if .SQLC_BIN}}{{.SQLC_BIN}}{{else}}go run github.com/sqlc-dev/sqlc/cmd/sqlc@{{.SQLC_VERSION}}{{end}}'
+  # The local login `task dev` seeds. Published: run-server refuses to listen
+  # beyond loopback while this account exists.
+  DEV_OPERATOR_EMAIL: operator@localhost.test
+  DEV_OPERATOR_PASSWORD: openrails
+  # The Compose Vault's root token (docker-compose.yaml).
+  DEV_VAULT_TOKEN: openrails-dev-root
 
 tasks:
   default:
@@ -48,68 +54,78 @@ tasks:
       - ./{{.BIN_DIR}}/{{.BINARY_NAME}} run-server
 
   dev:
-    desc: "Hot reload: the API under Air on :3053 and the merchant console under Vite at http://localhost:3054/admin/; Ctrl+C stops both"
+    desc: "Hot reload: the Compose dependencies (PostgreSQL, Valkey, ClickHouse, Vault), the API under Air on 127.0.0.1:3053 and the console under Vite at http://localhost:3054/admin/, with the local operator and a sandbox merchant; Ctrl+C stops the API and console"
+    cmds:
+      - task: dev:services
+      - task: dev:run
+
+  dev:run:
+    internal: true
     deps:
       # The browser's origin is Vite's, which proxies the API: it is the public URL sign-in checks.
       - task: dev:api
         vars: { PUBLIC_URL: "http://localhost:3054" }
       - dev:console
-      - task: dev:operator
+      - task: dev:seed
         vars: { PUBLIC_URL: "http://localhost:3054" }
 
+  dev:services:
+    desc: Start the Compose dependencies (PostgreSQL, Valkey, ClickHouse, Vault) and mount Vault's engines; `docker compose down -v` discards them
+    cmds:
+      - docker compose up -d --wait postgres valkey clickhouse vault
+      - docker compose run --rm vault-init
+
   dev:api:
-    desc: The API server under Air, rebuilt on every Go change
-    env:
-      # The one setting without a default; the rest are the Compose dependencies'.
+    desc: The API server under Air on 127.0.0.1:3053 (the default host), rebuilt on every Go change
+    env: &dev-env
       PUBLIC_URL: '{{.PUBLIC_URL | default "http://localhost:3053"}}'
+      # The Compose dependencies without a default: PostgreSQL and ClickHouse
+      # are the defaults already.
+      REDIS_URL: redis://127.0.0.1:6380
+      VAULT_ADDR: http://127.0.0.1:8200
+      VAULT_TOKEN: "{{.DEV_VAULT_TOKEN}}"
+      VAULT_KV_MOUNT: kv
     cmds:
       - air -c .air.toml
 
-  dev:operator:
-    desc: Seed this machine's dashboard operator (root:owner, random password kept in ~/.config/openrails-dev/operator.txt) once the local API is ready; refuses anything but localhost
+  dev:seed:
+    desc: "Once the local API is ready: the local operator (operator@localhost.test, password openrails, root:owner) and the sandbox merchant; refuses anything but localhost"
     silent: true
-    env:
-      PUBLIC_URL: '{{.PUBLIC_URL | default "http://localhost:3053"}}'
+    env: *dev-env
     cmds:
       - cmd: |
           bash <<'BASH'
           set -euo pipefail
           loopback() { [[ "$1" =~ ^[a-z+]*://([^@/]*@)?(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/|$) ]]; }
-          loopback "$PUBLIC_URL" || { echo "dev:operator: PUBLIC_URL is not localhost; refusing to seed an operator" >&2; exit 1; }
+          loopback "$PUBLIC_URL" || { echo "dev:seed: PUBLIC_URL is not localhost; refusing to seed the local operator" >&2; exit 1; }
           if [[ -n "${DATABASE_URL:-}" ]] && ! loopback "$DATABASE_URL"; then
-            echo "dev:operator: DATABASE_URL is not localhost; refusing to seed an operator" >&2; exit 1
+            echo "dev:seed: DATABASE_URL is not localhost; refusing to seed the local operator" >&2; exit 1
           fi
-          dir="${XDG_CONFIG_HOME:-$HOME/.config}/openrails-dev"
-          umask 077
-          mkdir -p "$dir"
-          if [[ ! -s "$dir/operator.txt" ]]; then
-            printf 'email: operator@localhost.test\npassword: %s\n' "$(openssl rand -hex 16)" >"$dir/operator.txt"
-          fi
-          password="$(sed -n 's/^password: //p' "$dir/operator.txt")"
-          cat >"$dir/bootstrap.yaml" <<EOF
+          for _ in $(seq 180); do curl -fsS -o /dev/null http://127.0.0.1:3053/health/ready 2>/dev/null && break; sleep 1; done
+          # enforce resets a password an earlier checkout chose at random.
+          ./tmp/openrails push-auth-bootstrap --file /dev/stdin >/dev/null <<EOF
           users:
-            - email: operator@localhost.test
+            - email: {{.DEV_OPERATOR_EMAIL}}
               username: operator
               email_verified: true
-              password: { plaintext: "$password" }
+              password: { plaintext: "{{.DEV_OPERATOR_PASSWORD}}", enforce: true }
               root_role: root:owner
           EOF
-          for _ in $(seq 180); do curl -fsS -o /dev/null http://localhost:3053/health/ready 2>/dev/null && break; sleep 1; done
-          ./tmp/openrails push-auth-bootstrap --file "$dir/bootstrap.yaml" >/dev/null
-          printf '\n========================================\n OpenRails dashboard  %s/admin/\n email     operator@localhost.test\n password  %s\n========================================\n(task dev:login prints this again)\n\n' "$PUBLIC_URL" "$password"
+          if ! out="$(./tmp/openrails merchants create sandbox --display-name Sandbox 2>&1 >/dev/null)"; then
+            echo "dev:seed: the sandbox merchant: $out" >&2; exit 1
+          fi
+          "{{.TASK_EXE}}" dev:login
           BASH
+        # A failed seed leaves the API and console running.
         ignore_error: true
 
   dev:login:
-    desc: Print this machine's local dashboard sign-in
+    desc: Print the local dashboard sign-in
     silent: true
-    env:
+    vars:
       PUBLIC_URL: '{{.PUBLIC_URL | default "http://localhost:3054"}}'
     cmds:
-      - |
-        f="${XDG_CONFIG_HOME:-$HOME/.config}/openrails-dev/operator.txt"
-        [ -s "$f" ] || { echo "No local operator yet: run task dev." >&2; exit 1; }
-        printf '\n========================================\n OpenRails dashboard  %s/admin/\n email     operator@localhost.test\n password  %s\n========================================\n\n' "$PUBLIC_URL" "$(sed -n 's/^password: //p' "$f")"
+      - printf '\n========================================\n OpenRails dashboard  %s/admin/\n email     %s\n password  %s\n merchant  sandbox\n The first sign-in enrolls an authenticator app.\n========================================\n(task dev:login prints this again)\n\n' "{{.PUBLIC_URL}}" "{{.DEV_OPERATOR_EMAIL}}" "{{.DEV_OPERATOR_PASSWORD}}"
 
   dev:console:
     desc: The merchant console's Vite dev server on :3054, proxying the API on :3053 (builds billing-ui first; `task dev:billing-ui` rebuilds it live)

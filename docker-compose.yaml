@@ -90,6 +90,47 @@ services:
     networks:
       - local-openrails
 
+  # Vault holds merchant configuration (vault.kv_mount): a dev server, in
+  # memory, unsealed, on loopback, the image and token CI's critical suite runs.
+  vault:
+    image: hashicorp/vault@sha256:47f14a6acb98f48d798a07df7c83f23a6e636e1cf724c5f8ff165cb32667a1e2 # 2.1.1
+    restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 512m
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: openrails-dev-root # development only (Taskfile.yaml's DEV_VAULT_TOKEN)
+      VAULT_ADDR: http://127.0.0.1:8200 # the healthcheck's CLI
+    ports:
+      - "127.0.0.1:${VAULT_HOST_PORT:-8200}:8200"
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+    networks:
+      - local-openrails
+
+  # Mounts what OpenRails reads: KV v2 at kv (VAULT_KV_MOUNT=kv) and Transit
+  # at transit, the default vault.transit_mount. In memory, Vault forgets them
+  # on restart: `task dev` runs this again; existing mounts are kept.
+  vault-init:
+    image: hashicorp/vault@sha256:47f14a6acb98f48d798a07df7c83f23a6e636e1cf724c5f8ff165cb32667a1e2 # 2.1.1
+    restart: "no"
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: openrails-dev-root
+    entrypoint: ["sh", "-ec"]
+    command:
+      - |
+        vault secrets list -format=json > /tmp/mounts
+        grep -q '"kv/"' /tmp/mounts || vault secrets enable -path=kv kv-v2
+        grep -q '"transit/"' /tmp/mounts || vault secrets enable transit
+    depends_on:
+      vault:
+        condition: service_healthy
+    networks:
+      - local-openrails
+
   # OpenRails service (HTTP server only)
   openrails:
     profiles: ["openrails"]
@@ -105,6 +146,8 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
     ports:
       # Single public API surface. Server-to-server callers authenticate with
       # generated API keys or first-party service JWTs on this same port
@@ -113,10 +156,17 @@ services:
     environment:
       # Service wiring only; the loader supplies every other default
       # (docs/standalone.md, configuration reference).
+      # Every interface in the container; the port above is published on
+      # loopback only. Off loopback the server refuses a database holding
+      # `task dev`'s operator.
+      HOST: 0.0.0.0
       PUBLIC_URL: "http://localhost:${PORT:-3053}"
       DATABASE_URL: "postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app_password}@postgres:5432/openrails_db?sslmode=disable"
       REDIS_URL: "redis://valkey:6379"
       CLICKHOUSE_URL: "clickhouse://clickhouse:9000/openrails"
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: openrails-dev-root
+      VAULT_KV_MOUNT: kv
     command: ["run-server"]
     volumes:
       # AuthKit writes development keys (keys.json, totp.key) to the volume,
