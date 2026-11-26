@@ -5,7 +5,6 @@ package critical_test
 import (
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"maps"
 	"math"
 	"net/http"
@@ -15,13 +14,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
-	"github.com/open-rails/openrails/internal/sqlschema"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +25,7 @@ import (
 // The metrics measures as one measure per funnel and the health overview
 // built on them, over real purchases, refunds, disputes and renewals.
 func TestReporting(t *testing.T) {
-	t.Run("OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-a-removed-name-names-its-replacement", consolidatedMeasures)
+	t.Run("OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-an-unknown-name-is-refused", consolidatedMeasures)
 	t.Run("OR-J53-S02/the-overview-validates-for-every-profile-answers-for-an-empty-merchant-and-switches-currency", healthOverview)
 	t.Run("OR-J53-S03/money-never-sums-across-currencies", moneyPerCurrency)
 	t.Run("OR-J53-S04/a-sale-at-2330-in-the-accounting-timezone-counts-on-that-local-day", accountingDays)
@@ -209,19 +205,12 @@ func consolidatedMeasures(t *testing.T) {
 	require.InDelta(t, 0.0, fraction(t, lost["rebill_rate"]), 1e-12)
 	require.InDelta(t, 0.0, fraction(t, lost["dunning_recovery_rate"]), 1e-12)
 
-	// A removed measure is refused with what replaces it; so is attempt_kind.
-	_, err = a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"net_revenue", "rebills_missed", "nmi_history_refused",
-		"attempt_failure_rate", "purchase_failure_rate", "rebill_first_failure_rate"},
+	// A measure or dimension the registry does not serve is refused.
+	_, err = a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"net_revenue"},
 		Filters: map[string][]string{"attempt_kind": {"renewal"}}, Range: &billing.MetricsRange{Last: "30d"}})
 	refusals := metricRefusals(t, err)
-	for param, replacement := range map[string]string{"measures[0]": "cash", "measures[1]": "rebills", "measures[2]": "nmi_history_authorizations",
-		"measures[3]": "authorization_rate", "measures[4]": "purchases", "measures[5]": "first_try_rebill_approval_rate", "filters.attempt_kind": "kind"} {
-		refusal, ok := refusals[param]
-		require.True(t, ok, "%s is refused: %v", param, refusals)
-		require.Equal(t, replacement, refusal["did_you_mean"], param)
-		require.Contains(t, refusal["message"], `"`+replacement+`"`, param)
-	}
 	require.Equal(t, "unknown_measure", refusals["measures[0]"]["code"])
+	require.Equal(t, "unknown_filter_dimension", refusals["filters.attempt_kind"]["code"])
 }
 
 // decline posts an invoice the issuer declines; the 402 names the invoice it
@@ -306,57 +295,17 @@ func healthOverview(t *testing.T) {
 	require.Len(t, saved.Widgets, len(dashboard.DefaultWidgets(all)))
 	overviewAnswers(t, a.beta, saved.Widgets, "")
 
-	// Nothing saves a removed measure, and the migrations that retired them
-	// drop the widgets that named one; a layout left empty is deleted.
+	// Nothing saves a removed measure.
 	stale := billing.DashboardWidget{ID: "net", Title: "Net revenue", Viz: "stat", Grid: billing.DashboardGrid{W: 3, H: 2},
 		Query: billing.QueryMetricsParams{Measures: []string{"net_revenue"}, Range: &billing.MetricsRange{Last: "30d"}}}
 	_, err = a.beta.SetDashboard(t.Context(), billing.SetDashboardParams{Widgets: []billing.DashboardWidget{stale}})
 	var refusal *billing.StatusError
 	require.ErrorAs(t, err, &refusal)
 	require.Equal(t, billing.CodeDashboardInvalid, refusal.Code)
-	kept := board.Widgets[0]
-	byKind := billing.DashboardWidget{ID: "renewals", Title: "Renewals", Viz: "bar", Grid: billing.DashboardGrid{W: 6, H: 4},
-		Query: billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"time", "attempt_kind"}, Grain: "day", Range: &billing.MetricsRange{Last: "30d"}}}
-	churn := billing.DashboardWidget{ID: "churn", Title: "Churn", Viz: "line", Grid: billing.DashboardGrid{W: 6, H: 4},
-		Query: billing.QueryMetricsParams{Measures: []string{"churn_rate"}, By: []string{"time"}, Grain: "month", Range: &billing.MetricsRange{Last: "6m"}}}
-	byStatus := billing.DashboardWidget{ID: "by-status", Title: "Subscriptions by status", Viz: "bar", Grid: billing.DashboardGrid{W: 6, H: 4},
-		Query: billing.QueryMetricsParams{Measures: []string{"mrr"}, By: []string{"time", "status"}, Grain: "day", Range: &billing.MetricsRange{Last: "30d"}}}
-	mrrByPSP := billing.DashboardWidget{ID: "mrr-by-psp", Title: "MRR by PSP", Viz: "bar", Grid: billing.DashboardGrid{W: 6, H: 4},
-		Query: billing.QueryMetricsParams{Measures: []string{"mrr"}, By: []string{"time", "psp"}, Grain: "day", Range: &billing.MetricsRange{Last: "30d"}}}
-	storeLayout(t, a, a.alpha.MerchantID(), stale, kept, byKind, churn, byStatus, mrrByPSP)
-	storeLayout(t, a, a.beta.MerchantID(), stale, churn)
-	names, err := fs.Glob(postgresmigrations.FS, "*_dashboard_retired_*measures.up.sql")
-	require.NoError(t, err)
-	require.Len(t, names, 2, "the consolidation's and the MRR measures'")
-	for _, name := range names {
-		migration, err := fs.ReadFile(postgresmigrations.FS, name)
-		require.NoError(t, err)
-		relocated, err := sqlschema.Rewrite(string(migration), a.schema)
-		require.NoError(t, err)
-		_, err = a.pool.Exec(t.Context(), relocated)
-		require.NoError(t, err, name)
-	}
-	cleaned, err := a.alpha.GetDashboard(t.Context())
-	require.NoError(t, err)
-	require.False(t, cleaned.IsDefault)
-	require.Equal(t, []billing.DashboardWidget{kept}, cleaned.Widgets)
-	reset, err := a.beta.GetDashboard(t.Context())
-	require.NoError(t, err)
-	require.True(t, reset.IsDefault, "the layout that named only removed measures is gone")
 }
 
 // cashWidgets are the overview's widgets over cash alone.
 var cashWidgets = []string{"kpi-cash", "cash-by-kind", "cash-by-psp"}
-
-// storeLayout writes a saved layout as an older release stored it.
-func storeLayout(t *testing.T, a *authorityWorld, merchant billing.MerchantID, widgets ...billing.DashboardWidget) {
-	t.Helper()
-	layout, err := json.Marshal(widgets)
-	require.NoError(t, err)
-	_, err = a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "dashboard_configs"}.Sanitize()+" (merchant_id, layout) VALUES ($1, $2::jsonb)"+
-		" ON CONFLICT (merchant_id) DO UPDATE SET layout = EXCLUDED.layout", merchant.UUID(), string(layout))
-	require.NoError(t, err)
-}
 
 // overviewAnswers runs every widget as the console draws it: under the
 // page's currency where all its measures take one, a kpi with its sparkline

@@ -114,7 +114,7 @@ an optional section is on once set.
 | `ClickHouse` | `billing.ClickHouseConfig`: `Database`, the event store's ClickHouse database (default `openrails`), a plain identifier ([event store](#event-store)). |
 | `Merchants` | The merchants this engine serves ([merchants](#merchants)); code only. |
 | `PublicURL` | The external billing prefix without `/v1` (`https://shop.example/billing`), for provider callbacks and billing links. |
-| `TrustedProxies` | Your own load-balancer CIDRs; `X-Forwarded-For` is walked right to left past them. Cloudflare's published ranges are built in and trusted too, and only their peers are believed for `CF-IPCountry`. Unset, the socket peer is the client, so every client behind a proxy shares one rate-limit bucket. |
+| `TrustedProxies` | Your own load-balancer CIDRs; `X-Forwarded-For` is walked right to left past them. Cloudflare's published ranges are built in and trusted too, and only their peers are believed for `CF-IPCountry`. Unset, the socket peer is the client, so every client behind a proxy shares one rate-limit bucket. It also decides the sender address a CCBill webhook is checked against: list only your proxy itself, never a network other workloads share. |
 | `CheckoutOrigin` | Needed only to serve OpenRails' own hosted pay page: its separate origin ([checkout page](#checkout-page)). Leave it empty with the embedded checkout or your own card form; pay URLs then answer `pay_url_unavailable`. |
 | `RateLimits` | `billing.RateLimitsConfig`, one `*billing.RateLimit` per bucket: `Purchase` (10 a minute), `Payment` (40), `Subscribe` (20), `Webhook` (1200). Nil takes the default; `&billing.RateLimit{}` (`RequestsPerMinute` 0) leaves the bucket unlimited, so a host fronting billing with its own limiter sets every bucket to it. |
 | `Captcha` | `billing.CaptchaAccount`: `SiteKey`, `SecretKey`, `Provider` (`turnstile`, `recaptcha-v3`, `hcaptcha`); both keys turn it on. It challenges a subject at 3× a bucket's limit. |
@@ -197,8 +197,8 @@ one instance migrates, the rest wait. To migrate as a deploy step instead, run
 
 - An older build boots on a schema a newer one migrated (it leaves unknown
   migrations alone), so rolling upgrades work in both directions within v1.
-- A database that recorded a migration with other content is compared with a
-  fresh build of its recorded migrations: equal is re-stamped, different is refused with the difference.
+- Released migrations never change: a database that applied a migration whose
+  file differs from the build's by even a byte is refused, and nothing is applied.
 - Only OpenRails' objects may live in its schemas. Before v1 a release may break
   the schema in one step; its notes say so, and hosts sharing it upgrade together.
 
@@ -227,10 +227,6 @@ if err := bill.Start(ctx, openrails.WithRiverClient(fleet)); err != nil {
 ```
 
 `RiverJobs` adds the `billing` (20 workers), `psp_import` (2), `provider_refresh` (4) and `nmi_history` (1) queues when missing and sets `RescueStuckJobsAfter` to 10 minutes, or the fleet's `JobTimeout` if longer, when unset; each worker declares its own timeout. The fleet must be in `DatabaseConfig.RiverSchema`, run on every replica, and is yours to start and stop. `Start` without `WithRiverClient` after `RiverJobs` went to a fleet is refused. AuthKit joins the same fleet when its River schema matches. Every kind, queue and schedule: [River jobs](river-jobs.md).
-
-Replacing a fleet that ran an older release's scheduled provider refresh: stop
-the old workers first; the new fleet cancels the retired refresh jobs in that
-schema and keeps their history ([provider refresh](standalone.md#provider-refresh)).
 
 ## Several instances
 
@@ -303,7 +299,7 @@ whose permissions `Auth` knows. The mount strips ambient cookies: browsers send
 credentials in `Authorization`. Customer and public routes answer any origin
 without credentials; staff routes send no CORS headers. In-process `Client`
 calls pass through none of this and count against no rate limit. Point each
-PSP's webhooks at `{Prefix}/v1/webhooks/{rail}/{account_id}`.
+PSP's webhooks at `{Prefix}/v1/webhooks/{rail}/{account_id}`, or a CCBill PSP's with a webhook token at `{Prefix}/v1/webhooks/ccbill/{account_id}/{token}` ([CCBill](client.md#ccbill)); keep that path out of your own request logs.
 
 ## Auth
 
@@ -410,10 +406,10 @@ inbox in the billing transaction: unexpected payment failures, required card
 updates or authentication, stopped collection, access loss and applied
 downgrades, each withdrawn when resolved. The `adapters/authkit` module's
 `Notifications(publisher, merchantID, issuer)` builds the channel from AuthKit's
-producer. To adopt an existing inbox, stop billing writers, call
-`LocalClient.ExportNotificationAdoption` and pass its adoptions to AuthKit's
-`AdoptNotifications`; after a billing-archive restore, call
-`RestoreNotificationOrdering` with the matching snapshot before enabling delivery.
+producer. A billing-archive move carries the inbox ordering beside the archive:
+`LocalClient.ExportNotificationOrdering` on the source, then
+`RestoreNotificationOrdering` with that snapshot on the destination before it
+delivers again.
 
 ## Browser configuration
 

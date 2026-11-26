@@ -506,30 +506,6 @@ type BillingDispute struct {
 	UpdatedAt   time.Time
 }
 
-type BillingEventLog struct {
-	MerchantID  *uuid.UUID
-	Position    int64
-	ID          string
-	Source      string
-	EventType   string
-	Version     int32
-	OccurredAt  time.Time
-	RecordedAt  time.Time
-	SubjectType string
-	SubjectID   string
-	Data        []byte
-}
-
-type BillingEventLogStream struct {
-	MerchantID    *uuid.UUID
-	Epoch         uuid.UUID
-	Position      int64
-	HeadID        string
-	PrunedThrough int64
-	PrunedID      string
-	RecordedAt    time.Time
-}
-
 // Global by design, one row: the identity of the ClickHouse event store this database's usage lives in, recorded when one first attaches. New refuses a store with another identity: an empty or different ClickHouse.
 type BillingEventStore struct {
 	Singleton  bool
@@ -652,7 +628,7 @@ type BillingGrant struct {
 	ImportRootID *uuid.UUID
 }
 
-// Internal typed financial emission and deduplication journal; the public feed is event_log. Retention: rows are deleted after at least 90 days from recorded_at and never earlier than the configured event retention, independently of readers.
+// Internal typed financial emission and deduplication journal; the public feed is eventlog_events, read through GET /v1/app/events. Retention: rows are deleted after at least 90 days from recorded_at and never earlier than the configured event retention, independently of readers.
 type BillingHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -1183,7 +1159,7 @@ type BillingMrrFlow struct {
 	Logos      int64
 }
 
-// One change of a customer's MRR in one currency, written once at the commit of the transaction that made it: new (first MRR), reactivation (MRR again after none), expansion, contraction, churn (to none; voluntary for a customer's or merchant's cancel), opening (an import or backfill adopting subscriptions) or correction (a prune or an undo). Retention: permanent, never pruned.
+// One change of a customer's MRR in one currency, written once at the commit of the transaction that made it: new (first MRR), reactivation (MRR again after none), expansion, contraction, churn (to none; voluntary for a customer's or merchant's cancel), opening (an import adopting subscriptions) or correction (a prune or an undo). Retention: permanent, never pruned.
 type BillingMrrMovement struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
@@ -1199,8 +1175,6 @@ type BillingMrrMovement struct {
 	CohortAt  time.Time
 	Cause     string
 	Voluntary *bool
-	// Written by a backfill from current state, not when the change happened.
-	Backfilled bool
 	// The business instant of the change: its writer's, or the end a scheduled churn took effect at.
 	OccurredAt time.Time
 	CreatedAt  time.Time
@@ -1255,8 +1229,6 @@ type BillingMrrRiskCase struct {
 	// The MRR recovered, or the MRR at risk when it churned.
 	MrrAtExit *int64
 	Voluntary *bool
-	// Opened from current state by a backfill: opened_at is when its delinquency or unverified state began where the book records it, else the backfill.
-	Backfilled bool
 }
 
 // Changes outside a subscription row that may change the risk of its customer's subscriptions: a card, a default card, a provider's decline or delinquency. Each change appends its own row, so no writer waits on another's; the MRR risk worker claims rows no other worker holds, deletes them and re-evaluates each customer's subscriptions, locking them in id order. changed_at dates the change; a claimed row is deleted.
@@ -1399,13 +1371,13 @@ type BillingNmiHistoryRead struct {
 	DueAt time.Time
 }
 
-// Financial archive restore blocks inbox publication until explicit notification ordering-state adoption. No implicit revision reset.
+// Whether a financial archive restore still blocks the merchant's inbox publication: the restore sets restore_required, and only restoring the source's notification ordering clears it. No revision is reset implicitly.
 type BillingNotificationChannelState struct {
 	MerchantID      uuid.UUID
 	RestoreRequired bool
 }
 
-// Internal notification emission and deduplication journal; the public feed is event_log. Retention: rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers.
+// Internal notification emission and deduplication journal; the public feed is eventlog_events, read through GET /v1/app/events. Retention: rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers.
 type BillingNotificationEvent struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
@@ -1981,6 +1953,16 @@ type BillingProviderIntent struct {
 	DestructiveActionID *uuid.UUID
 	// The attempt the destructive-volume breaker last admitted to the provider, set under its lock before the call. An in_flight intent counts against the breaker's budget only while this is its current attempt: a claim alone sends nothing.
 	SentAttempt *int32
+}
+
+// Provider observations: each rebill a CCBill DataLink read listed, first listed at listed_at: its transaction id and subscription id without leading zeros, and the amount as DataLink states it. A callback-recorded rebill no read lists under its subscription is raised as pull.charge.unconfirmed. Retention: rows are deleted 90 days after listed_at.
+type BillingProviderListedRebill struct {
+	MerchantID      uuid.UUID
+	PspID           uuid.UUID
+	TransactionKey  string
+	SubscriptionKey string
+	Amount          *string
+	ListedAt        time.Time
 }
 
 // Immutable accepted provider schedule versions: first due instant, cadence and the accepted bill a provider-run renewal must match. Retention: permanent, never pruned.

@@ -139,7 +139,7 @@ SELECT pg_advisory_xact_lock(hashtextextended('openrails.usage_activity:' || sql
 FROM (SELECT DISTINCT unnest(sqlc.arg(event_types)::text[]) AS event_type ORDER BY 1) e;
 
 -- name: ShareUsageEventTypes :exec
--- An intake's fence on the event types it takes in, in the invoice
+-- An intake's fence on the event types it takes in, in the order
 -- LockUsageEventTypes takes them.
 SELECT pg_advisory_xact_lock_shared(hashtextextended('openrails.usage_activity:' || sqlc.arg(merchant_id)::uuid::text || ':' || e.event_type, 0))
 FROM (SELECT DISTINCT unnest(sqlc.arg(event_types)::text[]) AS event_type ORDER BY 1) e;

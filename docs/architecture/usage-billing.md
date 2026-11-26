@@ -169,8 +169,7 @@ Checks:
 ### 5. Contracts match the code
 The running-charge types are in `api/go.txt`, the routes in the route catalog and
 `api/openapi.json`, the tables in `api/schema.txt` and `api/clickhouse.txt`. Before
-v1.0.0 a release may still break them: `0025_usage_on_event_store` dropped the
-usage accruals and rollups.
+v1.0.0 a release may still break them.
 Checks:
 - `go run ./scripts/contracts` leaves the snapshots unchanged.
 - `LocalClient`'s only running-charge methods in `api/go.txt` are the two `…Tx`

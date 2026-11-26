@@ -41,8 +41,8 @@ import (
 )
 
 // Invoices are paid by invoice attempts (mode invoice) whose charge is the sale
-// intent: the same admission, submission fence, receipt and verification as a
-// one-price sale, settling the invoice's own lines.
+// intent: its admission, submission fence, receipt and verification, settling
+// the invoice's own lines.
 
 // invoiceAttemptTTL bounds one attempt; the invoice's own expiry bounds it too.
 const invoiceAttemptTTL = 24 * time.Hour
@@ -612,7 +612,7 @@ func (s *InvoiceAttemptService) payInvoice(ctx context.Context, in InvoicePayInp
 			InvoiceCaptchaSubjects: intents.InvoiceCaptchaSubjects(ctx),
 			InvoiceAttemptID:       attemptID, RequestFingerprint: fingerprint, Provider: target.Rail, PSP: target.PSP,
 			Amount: current.Total, ListAmount: current.Total, Currency: current.Currency, Description: "Invoice " + billing.InvoiceID(invoice.ID).String(),
-			UserID: invoice.CustomerID.String(), PaymentID: uuidutil.NewV7(), AcceptedAt: now, Eligibility: string(EligibilityAllowed), InvoiceID: invoice.ID, Recurring: invoice.HasRecurring(),
+			UserID: invoice.CustomerID.String(), PaymentID: uuidutil.NewV7(), AcceptedAt: now, InvoiceID: invoice.ID, Recurring: invoice.HasRecurring(),
 		}
 		var charged *uuid.UUID
 		if card != nil {

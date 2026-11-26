@@ -61,27 +61,6 @@ func (s *EntitlementService) ledger(q *gen.Queries, merchantID uuid.UUID) *grant
 	return l
 }
 
-// ProductCoverage reports, across the customer's live windows of the products
-// at at, whether one is indefinite and otherwise the latest end.
-func (s *EntitlementService) ProductCoverage(ctx context.Context, userID string, products []uuid.UUID, at time.Time) (bool, *time.Time, error) {
-	customer, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return false, nil, err
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return false, nil, err
-	}
-	row, err := s.db.Gen(ctx).ProductAccessCoverage(ctx, gen.ProductAccessCoverageParams{MerchantID: mid.UUID(), CustomerID: customer, ProductIds: products, At: at})
-	if err != nil {
-		return false, nil, err
-	}
-	if row.Indefinite || row.LatestEndAt.Year() <= 1 {
-		return row.Indefinite, nil, nil
-	}
-	return false, &row.LatestEndAt, nil
-}
-
 // GetAccessByID reads one window.
 func (s *EntitlementService) GetAccessByID(ctx context.Context, id uuid.UUID) (*models.ProductAccess, error) {
 	mid, err := merchant.Require(ctx)

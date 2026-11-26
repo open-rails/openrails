@@ -22,7 +22,7 @@ route's documentation; this page is about the tasks.
 |---|---|---|
 | `*Engine` | `openrails.New` | the embedded engine: workers, routes, every declared merchant ([embedded.md](embedded.md)) |
 | `*Client` | `Engine.Merchant(id)`, `Remote.Merchant(id)` | one merchant's operations, in process or over HTTP |
-| `*LocalClient` | `Engine.LocalMerchant(id)` | what only an engine in the same process can do: the `*Tx` methods that commit with your own rows, and notification adoption |
+| `*LocalClient` | `Engine.LocalMerchant(id)` | what only an engine in the same process can do: the `*Tx` methods that commit with your own rows, and the account inbox's ordering for an archive move |
 | `*Remote` | `openrails.NewRemote(url, opts)` | the HTTP transport for one or more merchants, each with its credential |
 | `*Gate`, `*Ticket` | `openrails.NewGate` | in-process admission against usage limits ([the Gate](#limits-and-the-gate)) |
 
@@ -239,11 +239,11 @@ psps:
     treasury: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu # where every payment lands
 ```
 
-`openrails.ParseMerchantDocument` reads one, with its required `slug`. Unknown or duplicate fields, several documents, anchors and tags are refused, and so are the retired keys `rail_merchant_accounts`, `provider_accounts` and `api_host`. Keep secrets out of the committed file: Vault, or a file mounted from a secret, supplies them ([standalone.md](standalone.md#configuration-reference)).
+`openrails.ParseMerchantDocument` reads one, with its required `slug`. Unknown or duplicate fields, several documents, anchors and tags are refused. Keep secrets out of the committed file: Vault, or a file mounted from a secret, supplies them ([standalone.md](standalone.md#configuration-reference)).
 
 **Environments.** Each PSP declares whether it moves real money; omitted, it is the rail's real-money one, so production declares none. NMI: `live`, `test` (an account in test mode), `sandbox` (sandbox.nmi.com). Stripe: `live`, `test` (key prefixes must agree). CCBill: `live`, `sandbox`. Solana: `mainnet`, `devnet`, `testnet`. A merchant may mix them. OpenRails asks the provider before arming a PSP: NMI's `test_mode_status` and Solana's genesis hash on every RPC endpoint, again once that proof is an hour old; Stripe's `api.stripe.com/v1/account` against `account_id`, plus `api.stripe.com/v1/balance` for a test key, once per key and account. A PSP whose answer disagrees stays disarmed: reads work, writes fail before any byte is sent, and the `openrails_psp_posture` probe reports it. CCBill's sandbox has no signal, so its writes are always refused.
 
-**Webhooks.** Each provider posts to `/v1/webhooks/{rail}/{account_id}` (beneath the mount when embedded). `{rail}` is `nmi`, `stripe`, `ccbill` or `basistheory`, never a PSP key, and `{account_id}` is the PSP's account fields joined with `-`. The account resolves the merchant, its own secret verifies the delivery, and the payload's account must agree. Rotating a signing secret keeps the old one for 24 hours; `retire_webhook_overlap` on `UpdatePSP` refuses it at once.
+**Webhooks.** Each provider posts to `/v1/webhooks/{rail}/{account_id}` (beneath the mount when embedded). `{rail}` is `nmi`, `stripe`, `ccbill` or `basistheory`, never a PSP key, and `{account_id}` is the PSP's account fields joined with `-`. The account resolves the merchant, its own secret verifies the delivery, and the payload's account must agree. A CCBill PSP with a webhook token takes `/v1/webhooks/ccbill/{account_id}/{token}` ([CCBill](#ccbill)). Rotating a signing secret keeps the old one for 24 hours; `retire_webhook_overlap` on `UpdatePSP` refuses it at once.
 
 A card PSP (NMI, Stripe, CCBill) may declare `dispute_ratio_limit`, its
 acquirer's limit on a month's chargebacks over settled sales as a percentage
@@ -298,10 +298,25 @@ The PSP key and rail are both `ccbill`. Declare `client_accnum` and
 without which merchant cancels and reads cannot run. CCBill owns the vault and the
 rebill schedule. Each price links a FlexForm (`flex_id` and
 `recurring_billing_option_id` in the catalog's `provider_prices`); an invoice sells
-it by redirect. Point CCBill's webhooks at `/v1/webhooks/ccbill/{account_id}`,
-the account being `client_accnum-client_subacc`. CCBill signs nothing:
-deliveries are admitted from its published source ranges, and the payload's
-account must match. Refunds go through CCBill's own admin (`refund_unsupported`).
+it by redirect. CCBill signs nothing, so declare a `webhook_token` secret (32 or
+more of `A-Z`, `a-z`, `0-9`, `_` and `-`) and register
+`/v1/webhooks/ccbill/{account_id}/{token}` as the Webhook URL in CCBill's admin,
+the account being `client_accnum-client_subacc`; CCBill appends its own query,
+so the token is the path's last segment. A delivery must come from CCBill's
+published source ranges and carry the token, and the payload's account must
+match; a missing or wrong token is `401 authentication_required`. Without a
+token the PSP takes only `/v1/webhooks/ccbill/{account_id}`, as before, and
+refuses the token URL. To add one to a PSP CCBill already calls: declare the
+token with the setting `require_webhook_token: false` (deliveries to the old URL
+are then still admitted, each logged as a warning), change the URL in CCBill,
+then remove the setting. Without a token, or with `require_webhook_token: false`, the source-address check is all that stands, and anything that can set `X-Forwarded-For` through a trusted hop can forge it (Cloudflare's published ranges are trusted by default, so a request sent through Cloudflare may name a CCBill address): keep the transition short. Your proxy, ingress and CDN access logs record the full path: mask the token segment there too, since only OpenRails' own request log masks it. A tokenless delivery is refused
+when any PSP of the account requires a token, so a live and a sandbox PSP
+sharing an account each declare their own, even when they belong to different
+merchants. While a PSP runs with `require_webhook_token: false` beside a
+token-less PSP on the same account, a tokenless delivery verifies for both and
+is refused 500 until one of them requires its token. A rotated token keeps the old one for 24 hours, like a
+signing secret; in a file, declare the old one as `webhook_token_previous` with
+`webhook_overlap_expires_at`. Refunds go through CCBill's own admin (`refund_unsupported`).
 A card checkout can keep CCBill back as a fallback ([invoices](#invoices-and-checkout)).
 
 ### Solana
@@ -1042,7 +1057,7 @@ return shop.QueryMetrics(ctx, billing.QueryMetricsParams{
 
 A fact is one measure split by its outcome or kind: `cash` by `cash_kind`, `payments` by `payment_kind`, `attempts`, `purchases` and `rebills` by `outcome`, `mrr_movements` and `subscriber_movements` by `movement`; rates such as `refund_rate` and `rebill_rate` divide its slices. Recurring measures (`mrr`, `subscribers`, `subscriber_churn_rate`, `nrr`, `grr`, `cohort_retention`, `arpa`, `ltv`, `scheduled_mrr`) read the MRR rollups; `subscriber_churn_rate` is the period's own churn as a monthly rate at any grain, `ltv` divides ARPA by the monthly churn of the trailing three months, NRR and GRR read monthly with grain `month`, `subscribers` without a currency counts each customer once, and `scheduled_mrr` looks ahead with `range.next` (`{"next": "12w"}`). `grain: "auto"` picks day, week or month from the range, and `compare` is `previous_period` or `previous_year`. Money is split by currency unless one is named.
 
-An unknown measure or a bad combination is a `400` naming what is wrong and what is allowed, so a caller (an agent included) can correct itself; a removed measure's error names its replacement.
+An unknown measure or a bad combination is a `400` naming what is wrong and what is allowed, so a caller (an agent included) can correct itself.
 
 ## Alerts
 

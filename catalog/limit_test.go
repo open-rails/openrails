@@ -29,7 +29,7 @@ limits:
 	require.Equal(t, []LimitCount{{Meter: "tokens"}, {Meter: "tokens", Weight: 5, Per: 1000, Filter: map[string][]string{"model": {"large"}}}}, app.Limits["weekly"].Counts.Value)
 
 	_, err = ParseApplicationYAML([]byte("schema_version: 1\nlimits:\n  weekly:\n    unit: usage_units\n    reset: {kind: lifetime}\n    rate_cards: [{meter: tokens, price: {model: per_unit, per_unit: {unit_amount: \"1\"}}}]\n"))
-	require.ErrorContains(t, err, "limit rate_cards are now counts")
+	require.ErrorContains(t, err, `unknown field "rate_cards"`)
 
 	_, err = ParseApplicationYAML([]byte("schema_version: 1\nlimits:\n  spend: {unit: USD, reset: {kind: lifetime}, counts: [{meter: tokens}]}\n"))
 	require.ErrorContains(t, err, "a currency limit counts the rated amount and has no counts")

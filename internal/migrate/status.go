@@ -12,7 +12,8 @@ import (
 )
 
 // PostgresStatus reports the embedded chain against the database's ledger:
-// applied, pending, and every discrepancy, as migratekit reports them.
+// applied, pending, and every discrepancy, as migratekit reports them; an
+// edited migration is an error, as Apply refuses it.
 func PostgresStatus(ctx context.Context, pool *pgxpool.Pool, schema string) (status migratekit.Status, err error) {
 	if pool == nil {
 		return status, errors.New("migration status needs a pool")
@@ -23,5 +24,5 @@ func PostgresStatus(ctx context.Context, pool *pgxpool.Pool, schema string) (sta
 	}
 	sqlDB := stdlib.OpenDBFromPool(pool)
 	defer func() { err = errors.Join(err, sqlDB.Close()) }()
-	return migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(schema).Status(ctx, migrations)
+	return migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(schema).WithImmutableMigrations().Status(ctx, migrations)
 }

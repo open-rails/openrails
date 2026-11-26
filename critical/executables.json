@@ -520,7 +520,7 @@
       "TestLimitDecisions/OR-J23-S35/a-limit-counting-two-meters-by-weight-admits-and-refuses-at-their-weighted-total"
     ],
     "OR-J23-S36": [
-      "TestUsageLimits/OR-J23-S36/a-catalog-naming-a-limits-rate-cards-is-refused-with-their-rename"
+      "TestUsageLimits/OR-J23-S36/a-catalog-naming-an-unknown-limit-field-is-refused-and-applies-nothing"
     ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
@@ -736,30 +736,6 @@
     ],
     "OR-J31-S06": [
       "TestBillingArchive/OR-J31-S06/nmi-receipts-naming-their-card-move-with-the-book"
-    ],
-    "OR-J31-S40": [
-      "TestNotificationAdoptionExport/OR-J31-S40/export-holds-back-no-other-merchant-and-invoices-its-own-producers"
-    ],
-    "OR-J31-S15": [
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/moves-every-lot",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-lot-drawn-before-its-deposit",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-termination-that-is-not-a-revocation",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-paid-amount-without-a-payment",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-an-amount-on-a-grant-that-is-not-a-lot",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-transfer-naming-another-customers-lot",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/a-migrated-purchase-deposit-replays",
-      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders"
-    ],
-    "OR-J31-S16": [
-      "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts/converts-per-unit-cards",
-      "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts/refuses-a-card-counts-cannot-express",
-      "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts"
-    ],
-    "OR-J31-S17": [
-      "TestCancellationsMigration/OR-J31-S17/an-upgrade-through-the-reporting-rollups-adopts-cancel-decisions-of-every-kind"
-    ],
-    "OR-J31-S12": [
-      "TestBaselineAdoption/OR-J31-S12/an-older-database-whose-schema-equals-the-baseline-is-accepted-and-re-stamped"
     ],
     "OR-J31-S14": [
       "TestLimitArchive/OR-J31-S14/open-limit-windows-and-staff-adjustments-move-with-the-book"
@@ -1092,7 +1068,7 @@
       "TestPSPReconcile/OR-J38-S71/proposal-cancel-holds-after-the-first-affected-target"
     ],
     "OR-J38-S72": [
-      "TestManualProviderRefresh/OR-J38-S72/operator-refresh-replaces-legacy-work-and-retries"
+      "TestManualProviderRefresh/OR-J38-S72/operator-refresh-coalesces-requests-and-retries"
     ],
     "OR-J38-S76": [
       "TestPSPImportSafeguards/OR-J38-S76/a-failed-import-is-never-applied"
@@ -1521,7 +1497,7 @@
       "TestLogging/OR-J04-S76/the-standalone-server-boots-with-every-logger-set"
     ],
     "OR-J04-S77": [
-      "TestHostDeps/OR-J04-S77/a-vault-merchant-document-with-a-retired-key-names-its-replacement"
+      "TestHostDeps/OR-J04-S77/a-vault-merchant-document-with-an-unknown-key-is-refused"
     ],
     "OR-J42-S01": [
       "TestMRR/OR-J42-S01/new-expansion-contraction-churn-reactivation-once-normalised-per-currency"
@@ -1549,9 +1525,6 @@
     ],
     "OR-J42-S09": [
       "TestMRR/OR-J42-S09/a-bulk-import-settles-once-its-reads-growing-with-the-book"
-    ],
-    "OR-J42-S10": [
-      "TestMRR/OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once"
     ],
     "OR-J42-S11": [
       "TestMRRRisk/OR-J42-S11/a-decline-puts-mrr-at-risk-as-past-due-payment-recovers-it-exhaustion-churns-it"
@@ -1754,7 +1727,7 @@
       "TestMerchantUnits/OR-J48-S19/a-chargeback-of-one-currencys-pack-reduces-only-that-currencys-schedule"
     ],
     "OR-J53-S01": [
-      "TestReporting/OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-a-removed-name-names-its-replacement"
+      "TestReporting/OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-an-unknown-name-is-refused"
     ],
     "OR-J53-S02": [
       "TestReporting/OR-J53-S02/the-overview-validates-for-every-profile-answers-for-an-empty-merchant-and-switches-currency"
@@ -2083,9 +2056,6 @@
     "OR-J45-S08": [
       "TestDeclineCauses/OR-J45-S08/nmi-history-months-carry-each-answers-outcome-and-cause"
     ],
-    "OR-J45-S09": [
-      "TestDeclineCauses/OR-J45-S09/the-migration-classifies-existing-attempts-and-history-from-their-stored-codes"
-    ],
     "OR-J45-S10": [
       "TestDeclineCauses/OR-J45-S10/the-system-errors-finding-counts-the-rails-own-errors-not-the-issuers",
       "TestDeclineCauses/OR-J45-S10/the-system-errors-finding-counts-the-rails-own-errors-not-the-issuers/an-issuers-malfunction-is-not-ours",
@@ -2117,9 +2087,6 @@
     ],
     "OR-J40-S03": [
       "TestBooks/OR-J40-S03/ledger-audit-catches-injected-counter-and-rollup-corruption"
-    ],
-    "OR-J40-S05": [
-      "TestBooksMigration/OR-J40-S05/a-ledger-from-before-the-books-migrates-with-its-rollups"
     ],
     "OR-J40-S06": [
       "TestBooks/OR-J40-S06/concurrent-top-ups-one-posting-unposted-usage-first-all-commit"
@@ -2359,12 +2326,6 @@
     "OR-J48-S12": [
       "TestMerchantUnits/OR-J48-S12/the-first-balance-in-a-unit-takes-the-units-lock"
     ],
-    "OR-J06-S72": [
-      "TestRetiredRuntimeSettings/OR-J06-S72/retired-settings-refuse-boot"
-    ],
-    "OR-J06-S73": [
-      "TestRetiredRuntimeSettings/OR-J06-S73/a-provider-sandbox-setting-refuses-boot"
-    ],
     "OR-J06-S74": [
       "TestMerchantControls/OR-J06-S74/a-signup-under-a-rebill-hold-charges-and-its-first-renewal-waits-for-the-release"
     ],
@@ -2388,9 +2349,6 @@
     ],
     "OR-J06-S81": [
       "TestMerchantControls/OR-J06-S81/unreadable-controls-deny-writes-rebills-and-destructive-actions"
-    ],
-    "OR-J06-S82": [
-      "TestMerchantControls/OR-J06-S82/the-migration-carries-postures-the-switch-and-policies-into-controls"
     ],
     "OR-J06-S83": [
       "TestFindingAlerts/OR-J06-S83/customers-own-cancellations-past-the-cap-name-the-wave-and-alert-staff-and-staff-cancels-spend-none"
@@ -2578,6 +2536,66 @@
     ],
     "OR-J09-S76": [
       "TestCheckoutBoundaries/OR-J09-S76/vault-read-failure-keeps-paid-access-and-retries-storage"
+    ],
+    "OR-J28-S17": [
+      "TestCCBillWebhookToken/OR-J28-S17/a-declared-webhook-token-is-required-and-the-source-address-still-is"
+    ],
+    "OR-J28-S18": [
+      "TestCCBillWebhookToken/OR-J28-S18/a-rotated-out-webhook-token-verifies-only-inside-its-overlap"
+    ],
+    "OR-J28-S19": [
+      "TestCCBillWebhookToken/OR-J28-S19/without-a-declared-token-the-tokenless-url-works-and-the-token-url-is-refused"
+    ],
+    "OR-J28-S20": [
+      "TestCCBillWebhookToken/OR-J28-S20/require-webhook-token-false-admits-a-tokenless-delivery-never-a-wrong-token"
+    ],
+    "OR-J28-S21": [
+      "TestCCBillWebhookToken/OR-J28-S21/the-token-url-exists-only-for-ccbill"
+    ],
+    "OR-J28-S22": [
+      "TestCCBillWebhookToken/OR-J28-S22/a-tokenless-delivery-is-never-handed-to-a-sibling-psp-without-a-token"
+    ],
+    "OR-J28-S23": [
+      "TestCCBillWebhookToken/OR-J28-S23/rotating-the-webhook-token-over-the-api-keeps-the-old-one-for-its-overlap"
+    ],
+    "OR-J37-S72": [
+      "TestSolanaPulls/OR-J37-S72/a-pull-confirmed-and-not-finalized-books-nothing-and-is-not-signed-again"
+    ],
+    "OR-J37-S73": [
+      "TestSolanaContracts/OR-J37-S73/a-first-subscription-payment-confirmed-and-not-finalized-enrolls-nothing-until-it-finalizes"
+    ],
+    "OR-J37-S74": [
+      "TestSolanaPulls/OR-J37-S74/a-confirmed-pull-its-fork-drops-books-nothing-and-is-signed-again-only-after-its-blockhash-expires"
+    ],
+    "OR-J38-S86": [
+      "TestCCBillCallbackEvidence/OR-J38-S86/a-back-dated-rebill-callback-no-read-lists-is-raised-once-after-36-hours"
+    ],
+    "OR-J38-S87": [
+      "TestCCBillCallbackEvidence/OR-J38-S87/a-rebill-callback-a-read-lists-raises-nothing"
+    ],
+    "OR-J38-S88": [
+      "TestCCBillCallbackEvidence/OR-J38-S88/a-rebill-listed-late-raises-nothing-and-a-listing-resolves-a-raised-one"
+    ],
+    "OR-J38-S89": [
+      "TestCCBillCallbackEvidence/OR-J38-S89/an-unlisted-rebill-callback-waits-36-hours"
+    ],
+    "OR-J38-S90": [
+      "TestCCBillCallbackEvidence/OR-J38-S90/a-failed-rebill-cancel-callback-of-a-member-the-roster-lists-is-critical"
+    ],
+    "OR-J38-S91": [
+      "TestCCBillCallbackEvidence/OR-J38-S91/a-rebill-datalink-dates-before-its-callback-raises-nothing"
+    ],
+    "OR-J38-S92": [
+      "TestCCBillCallbackEvidence/OR-J38-S92/an-ordinary-ccbill-cancellation-the-roster-still-lists-is-not-critical"
+    ],
+    "OR-J38-S93": [
+      "TestCCBillCallbackEvidence/OR-J38-S93/a-paced-ccbill-refresh-raises-only-the-rebill-no-read-lists"
+    ],
+    "OR-J38-S94": [
+      "TestCCBillCallbackEvidence/OR-J38-S94/a-rebill-callback-reusing-another-subscriptions-transaction-is-raised"
+    ],
+    "OR-J38-S97": [
+      "TestCCBillIdentity/OR-J38-S97/a-second-rebill-past-the-cycles-billing-day-is-an-extra-capture"
     ]
   }
 }

@@ -122,6 +122,12 @@ FROM (
       WHERE (sqlc.narg(after)::uuid IS NULL OR cm.merchant_id > sqlc.narg(after)::uuid)
         AND cm.created_at < sqlc.arg(message_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT lr.merchant_id AS mid
+       FROM billing.provider_listed_rebills lr
+      WHERE (sqlc.narg(after)::uuid IS NULL OR lr.merchant_id > sqlc.narg(after)::uuid)
+        AND lr.listed_at < sqlc.arg(listed_rebill_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
 ) q
 ORDER BY q.mid
 LIMIT sqlc.arg(merchant_limit)::int;
@@ -301,6 +307,15 @@ WHERE ctid IN (
     SELECT e.ctid FROM billing.webhook_health_daily e
     WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.day_at < sqlc.arg(cutoff)::timestamptz
     ORDER BY e.day_at
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- name: DeleteProviderListedRebillsBefore :execrows
+DELETE FROM billing.provider_listed_rebills
+WHERE ctid IN (
+    SELECT e.ctid FROM billing.provider_listed_rebills e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.listed_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.listed_at
     LIMIT sqlc.arg(row_limit)::int
 );
 

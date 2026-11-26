@@ -180,8 +180,8 @@ github.com/open-rails/authkit v1.57.0 h1:Y6yebJW11Js5wFXTrX8GmXj458ECtM3KHKkNO4S
 github.com/open-rails/authkit v1.57.0/go.mod h1:G4gfpS95panM0Il2eZd3IxtMDvmjRlTjE5ut92vF7NI=
 github.com/open-rails/helpers v1.22.1 h1:TGSebGApvAiWwiSkmjv1RFP4ToX/hsJBeT4u/cuOklI=
 github.com/open-rails/helpers v1.22.1/go.mod h1:zYjaT7bwVqSiLYgXw+qvqw2hgLxnIFNzsEjEvscK4xw=
-github.com/open-rails/migratekit v1.11.4 h1:68sOEfsOg1954+qGKjXI7XvrVIA44x1G7uJeAzeixnM=
-github.com/open-rails/migratekit v1.11.4/go.mod h1:ONDMUycRcwAB+eKlPvho6mnNAZf9gf9+yqwCKDRuO9g=
+github.com/open-rails/migratekit v1.13.0 h1:9IYOZpvbszlWewiXTdD4MjuJ5beDwjdecw72xomUUog=
+github.com/open-rails/migratekit v1.13.0/go.mod h1:ONDMUycRcwAB+eKlPvho6mnNAZf9gf9+yqwCKDRuO9g=
 github.com/paulmach/orb v0.14.0 h1:GE96348pAD+JkRTp8z5YMiPd1lqUEcFIFGi20C2n5uM=
 github.com/paulmach/orb v0.14.0/go.mod h1:6scRWINywA2Jf05dcjOfLfxrUIMECvTSG2MVbRLxu/k=
 github.com/philhofer/fwd v1.2.0 h1:e6DnBTl7vGY+Gz322/ASL4Gyp1FspeMvx1RNDoToZuM=

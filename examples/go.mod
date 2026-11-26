@@ -85,7 +85,7 @@ require (
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/nyaruka/phonenumbers v1.8.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
-	github.com/open-rails/migratekit v1.11.4 // indirect
+	github.com/open-rails/migratekit v1.13.0 // indirect
 	github.com/paulmach/orb v0.14.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect

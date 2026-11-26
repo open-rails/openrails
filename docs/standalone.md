@@ -113,7 +113,7 @@ openrails push-merchant-config --file /etc/openrails/merchants.yaml --insert
 openrails catalog apply /etc/openrails/catalog.yaml --merchant your-merchant
 ```
 
-In production set an https `public_url`, mount a real signing key and `totp.key` ([secrets](#secrets)) and set `trusted_proxies` behind a proxy. Boot refuses an unknown key and a retired one (naming its replacement).
+In production set an https `public_url`, mount a real signing key and `totp.key` ([secrets](#secrets)) and set `trusted_proxies` behind a proxy. Boot refuses an unknown key.
 
 ## Configuration sources
 
@@ -177,7 +177,7 @@ Every route group is served: public, customer (`/v1/me`), payment and webhook ro
 |---|---|---|
 | `public_url` | none: boot refuses without it | where browsers and PSPs reach the server, without `/v1` (`http://localhost:3053` locally). Provider callbacks and billing links are built on it; Stripe webhook registration needs it public https |
 | `checkout_origin` | none | needed only to serve OpenRails' own hosted pay page: its separate origin ([the payment page](#the-payment-page)). Leave it unset with the embedded checkout or your own card form; pay URLs then answer `pay_url_unavailable` |
-| `trusted_proxies` | none | CIDRs of your own proxies, whose `X-Forwarded-For` is walked; Cloudflare's published ranges are trusted too ([proxies](#tls-proxies-cors-and-webhooks)) |
+| `trusted_proxies` | none | CIDRs of your own proxies, whose `X-Forwarded-For` is walked; Cloudflare's published ranges are trusted too ([proxies](#tls-proxies-cors-and-webhooks)). It also decides the sender address a CCBill webhook is checked against, so list only the proxy itself |
 
 A return URL (a pay URL's `success_url` and `cancel_url`, a hosted payment's `return_url`, the Stripe billing portal's return) may name only the billing origin, the origin of the merchant's issuer, or one of its `checkout.embed_origins`, so one merchant's checkout never returns to another's site.
 
@@ -213,7 +213,7 @@ costs sharing, not service ([scaling](#scaling-and-redis)).
 
 **The server's AuthKit**
 
-OpenRails derives its AuthKit's configuration ([the server's AuthKit](#the-servers-authkit)); a deployment sets only where its keys live. Any other `auth` key or `AUTH_*` variable refuses boot, naming what replaced it.
+OpenRails derives its AuthKit's configuration ([the server's AuthKit](#the-servers-authkit)); a deployment sets only where its keys live. Any other `auth` key or `AUTH_*` variable refuses boot as an unknown key.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -287,7 +287,7 @@ group holding its owner role ([trusted issuers](#trusted-issuers)).
 (an explicit path must exist), else `/etc/openrails/merchants.yaml` when present;
 none boots control-plane-only. At boot:
 
-1. The manifest parses strictly: unknown fields, retired keys (`rail_merchant_accounts`, `provider_accounts`, `api_host`, which say what became of them), settings and PSP declarations the configuration API would refuse, and secrets for an undeclared PSP refuse boot.
+1. The manifest parses strictly: unknown fields, settings and PSP declarations the configuration API would refuse, and secrets for an undeclared PSP refuse boot.
 2. Missing merchants are created and each PSP's and custodian's identity is
    recorded; PostgreSQL keeps only those identities, never configuration.
 3. A document the merchant still cannot serve is refused alone and reported (`openrails_configuration`); the merchant serves the rest.
@@ -572,7 +572,7 @@ TLS ends at your proxy or ingress. Every path goes to the server: the API, the
 console at `/admin`, `/v1/webhooks/{rail}/{account_id}` for provider webhooks and
 the checkout origin. Give one public origin to `public_url`, which is also the server's issuer and resource, and another to `checkout_origin`.
 
-- **Client IP.** The client is the socket peer unless `trusted_proxies` lists the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted hops. Without it rate limits, abuse tracking, request logs and webhook source addresses all see the proxy. AuthKit takes the same proxies. Cloudflare's published ranges are built in and trusted like `trusted_proxies`, and their peers alone are believed for `CF-Connecting-IP` (AuthKit's client IP) and `CF-IPCountry` (the checkout's country); Cloudflare overwrites both, so this holds also where it does not front the origin.
+- **Client IP.** The client is the socket peer unless `trusted_proxies` lists the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted hops. Without it rate limits, abuse tracking, request logs and webhook source addresses all see the proxy. `trusted_proxies` also decides which sender address a CCBill webhook is checked against: any peer it lists can name any address in `X-Forwarded-For`, CCBill's included. List only the proxy itself, never a pod or node network other workloads share. AuthKit takes the same proxies. Cloudflare's published ranges are built in and trusted like `trusted_proxies`, and their peers alone are believed for `CF-Connecting-IP` (AuthKit's client IP) and `CF-IPCountry` (the checkout's country); Cloudflare overwrites both, so this holds also where it does not front the origin.
 - **Body size.** Requests are capped at 1 MiB (`413 request_body_too_large`),
   but a billing archive import (`POST /v1/merchant/billing-archive`) streams up
   to 1 GiB: raise the proxy's limit if you import over HTTP.
@@ -584,7 +584,9 @@ the checkout origin. Give one public origin to `public_url`, which is also the s
   (`nmi`, `stripe`, `ccbill`, `basistheory`), never a PSP key, and the PSP's
   account id. The account resolves the merchant and its own secret verifies the
   request. NMI and Stripe sign; CCBill signs nothing and is accepted only from
-  its published ranges. Stripe endpoints are registered automatically once
+  its published ranges, and, when its PSP declares a `webhook_token`, only at
+  `/v1/webhooks/ccbill/{account_id}/{token}` ([CCBill](client.md#ccbill)).
+  Request logs show that path's token as `{token}`. Your proxy, ingress and CDN access logs record the full path: mask the token segment there too, since only OpenRails' own request log masks it. Without a token, or with `require_webhook_token: false`, the source-address check is all that stands, and anything that can set `X-Forwarded-For` through a trusted hop can forge it (Cloudflare's published ranges are trusted by default, so a request sent through Cloudflare may name a CCBill address): keep the transition short. Stripe endpoints are registered automatically once
   `public_url` is public https and provider writes are allowed.
   Per-rail setup: [PSPs](client.md#merchant-configuration-and-psps).
 
@@ -674,22 +676,15 @@ applied ledger with the binary's chain and exits non-zero on any mismatch. With 
 
 The schema is one baseline migration and numbered migrations after it, each an
 addition, so the previous build runs on a schema the next one migrated and
-rolling upgrades are safe. A database that recorded a migration with other
-content is compared with a fresh build of the migrations it records: equal, it
-is re-stamped and the change audited;
-different, the migration stops and reports the difference. Before v1 a release
+rolling upgrades are safe. Released migrations never change: a database that
+applied a migration whose file differs from the binary's by even a byte is
+refused, and nothing is applied. Before v1 a release
 may break the schema in one step: its release notes say so, the previous build
 does not run on the migrated schema, there is no rollback past it, and every
 host sharing the schema upgrades together. Migrations are never reversed.
 
 From v1.0.0 the Go API, the HTTP API and the schema change only by addition
 ([compatibility](../compatibility/README.md)).
-
-Upgrading from a release that scheduled provider refreshes: stop the old workers
-sharing the River schema before starting the new fleet. The new fleet cancels
-outstanding `openrails.provider_refresh` and `openrails.provider_refresh_merchant`
-jobs in that schema, keeping their history; request any refresh you still need
-with the command ([provider refresh](#provider-refresh)).
 
 ## Health and monitoring
 
@@ -1003,7 +998,7 @@ the merchant the token is bound to.
 | `openrails migrate status [--json]` | compare the applied ledger with the binary's; non-zero on any mismatch |
 | `openrails version` | the version, commit and build date |
 | `openrails push-auth-bootstrap [--file] [--dry-run] [--startup-only]` | create AuthKit root authority from a bootstrap manifest (`/etc/openrails/bootstrap.yaml`); `--startup-only` applies it at most once, as `run-server` does with a mounted one |
-| `openrails push-merchant-config [--file] --insert` | create the merchants a manifest names that are missing; bare, it only reports. `--overwrite` and `--prune` are refused |
+| `openrails push-merchant-config [--file] --insert` | create the merchants a manifest names that are missing; bare, it only reports |
 | `openrails dump-merchant-config --slug NAME [--out]` | print a merchant's configuration as manifest YAML, without credentials or alert webhooks |
 | `openrails get-merchant-config --merchant NAME` | read a merchant's configuration through the client (remote: `--server-url`, `--token-file`) |
 | `openrails apply-merchant-config --merchant NAME --file PATH` | apply configuration metadata by revision (Vault only) |
@@ -1043,7 +1038,7 @@ config:
   public_url: https://billing.example.com
   redis: {url: redis://redis:6379}
   email_smtp: {host: smtp.example.com, port: 587, username: openrails, from: "Billing <billing@example.com>"}
-  trusted_proxies: [10.244.0.0/16]   # the pod CIDR the ingress controller runs in
+  trusted_proxies: [10.244.250.0/28]   # only the ingress controller's addresses (a range kept for it), never the shared pod CIDR
 files:
   merchants.yaml:
     version: 1
@@ -1137,7 +1132,7 @@ kubectl -n openrails exec deploy/openrails -- \
 
 | Symptom | Look at |
 |---|---|
-| boot refuses a key | its log names the key and, for a retired one, its replacement |
+| boot refuses a key | its log names the key |
 | `/health/ready` 503 | PostgreSQL, the merchants service, local workers or a missing `totp.key`: the log names it |
 | a PSP never arms | the `openrails_psp_posture` probe: the provider's verdict for its environment, or credentials of another account (`consistency.duplicate_gateway_account`) |
 | configuration not served | the `openrails_configuration` probe and `consistency.merchant_config.not_served` |
@@ -1145,7 +1140,7 @@ kubectl -n openrails exec deploy/openrails -- \
 | `403 merchant_unresolved` | the credential is bound to no live merchant: fix the credential, nothing in the request changes it |
 | 403 with a permission code | the role behind the key or the issuer's application lacks the route's permission |
 | every client shares one rate limit | `trusted_proxies` is unset behind a proxy |
-| webhooks refused | the URL's rail and account id, the PSP's signing secret, CCBill's source address |
+| webhooks refused | the URL's rail and account id, the PSP's signing secret, CCBill's source address and webhook token |
 | `400 pay_url_unavailable` | `checkout_origin` is unset |
 | renewals not charging | `openrails merchant controls` (writes, rebills), `openrails book status`, `openrails intents` |
 | staff cancels refused with `provider_cancel_held` | the merchant's destructive arming (`openrails merchant controls`) |

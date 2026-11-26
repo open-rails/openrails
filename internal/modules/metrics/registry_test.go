@@ -24,11 +24,6 @@ func TestRegistry(t *testing.T) {
 	if !slices.Equal(ops, want) {
 		t.Fatalf("ops measures = %v, want %v", ops, want)
 	}
-	for name, r := range Removed {
-		if r.Measure != "" && (measureByName[r.Measure] == nil || measureByName[r.Measure].Internal) {
-			t.Errorf("%s is replaced by %q, which is no public measure", name, r.Measure)
-		}
-	}
 	for _, name := range Deferred {
 		if measureByName[name] != nil {
 			t.Errorf("%s is deferred and live", name)
@@ -43,27 +38,25 @@ func TestRegistry(t *testing.T) {
 	}
 }
 
-func TestRemovedNamesNameTheirReplacement(t *testing.T) {
+// A name the registry does not serve is refused; a planned one says so.
+func TestUnknownNames(t *testing.T) {
 	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
-	_, verr := ValidateAt(&Query{Measures: []string{"net_revenue", "nmi_history_refused", "trials"}, Range: &QueryRange{Last: "30d"},
+	_, verr := ValidateAt(&Query{Measures: []string{"net_revenue", "trials"}, Range: &QueryRange{Last: "30d"},
 		Filters: map[string][]string{"attempt_kind": {"renewal"}}}, now)
 	if verr == nil {
-		t.Fatal("removed names were accepted")
+		t.Fatal("unknown names were accepted")
 	}
 	got := map[string]FieldError{}
 	for _, fe := range verr.Errors {
 		got[fe.Param] = fe
 	}
-	if fe := got["measures[0]"]; fe.Code != "unknown_measure" || fe.DidYouMean != "cash" {
+	if fe := got["measures[0]"]; fe.Code != "unknown_measure" {
 		t.Errorf("net_revenue: %+v", fe)
 	}
-	if fe := got["measures[1]"]; fe.DidYouMean != "nmi_history_authorizations" || !strings.Contains(fe.Message, "outcome") {
-		t.Errorf("nmi_history_refused: %+v", fe)
-	}
-	if fe := got["measures[2]"]; !strings.Contains(fe.Message, "planned") {
+	if fe := got["measures[1]"]; !strings.Contains(fe.Message, "planned") {
 		t.Errorf("trials: %+v", fe)
 	}
-	if fe := got["filters.attempt_kind"]; fe.DidYouMean != "kind" {
+	if fe := got["filters.attempt_kind"]; fe.Code != "unknown_filter_dimension" {
 		t.Errorf("attempt_kind: %+v", fe)
 	}
 }

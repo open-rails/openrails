@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -92,6 +93,19 @@ func ValidatePSPKeys(psp string, p billing.PSPConfig) error {
 			return fmt.Errorf("psps.%s: %w", psp, err)
 		}
 	}
+	if raw, ok := p.Settings[RequireWebhookTokenKey]; ok && raw != "" {
+		if _, isBool := raw.(bool); !isBool {
+			return fmt.Errorf("psps.%s.settings.%s must be true or false", psp, RequireWebhookTokenKey)
+		}
+	}
+	for name, value := range p.Secrets {
+		value = strings.TrimSpace(value)
+		if key := strings.ToLower(strings.TrimSpace(name)); d.Rail == models.RailCCBill && value != "" && (key == "webhook_token" || key == "webhook_token_previous") {
+			if err := ValidateCCBillWebhookToken(value); err != nil {
+				return fmt.Errorf("psps.%s.secrets.%s %w", psp, key, err)
+			}
+		}
+	}
 	secrets := make([]string, 0, len(d.CredentialKeys))
 	for _, k := range d.CredentialKeys {
 		secrets = append(secrets, k.Name)
@@ -115,28 +129,19 @@ func ValidatePSPKeys(psp string, p billing.PSPConfig) error {
 	return fmt.Errorf("psps.%s.secrets: unknown %s %s (%s takes %s)", psp, field, strings.Join(unknown, ", "), d.Rail, takes)
 }
 
-// retiredDeclarationKeys are the keys a merchant declaration no longer takes
-// and what became of each.
-var retiredDeclarationKeys = []struct{ key, fate string }{
-	{"rail_merchant_accounts", "was renamed to psps"},
-	{"provider_accounts", "was renamed to psps"},
-	{"api_host", "was removed: a request names its merchant by its credential, never by its host"},
-	{"arrears_delinquency_floor", "was replaced by usage_billing.currencies[].delinquency_floor, one per currency"},
-	{"monthly_floor", "was replaced by usage_billing.currencies[].delinquency_floor, one per currency"},
-	{"collection_threshold", "was replaced by usage_billing.currencies[].collection_threshold, one per currency"},
-	{"usage_gate_safe_spend", "was removed: while OpenRails is unreachable a gate spends its share of each view's remaining"},
-}
+// RequireWebhookTokenKey is the CCBill PSP setting that, false, still admits
+// a delivery to the tokenless webhook URL; unset or "" is true.
+const RequireWebhookTokenKey = "require_webhook_token"
 
-// RetiredDeclarationKey is the first retired key doc sets, with what became
-// of it. The strict parser would refuse it as an unknown field, which reads
-// like a typo.
-func RetiredDeclarationKey(doc map[string]any) (string, bool) {
-	for _, retired := range retiredDeclarationKeys {
-		if _, ok := doc[retired.key]; ok {
-			return retired.key + " " + retired.fate, true
-		}
+var ccbillWebhookTokenShape = regexp.MustCompile(`^[A-Za-z0-9_-]{32,}$`)
+
+// ValidateCCBillWebhookToken refuses a webhook token shorter than 32
+// characters or with any but A-Z, a-z, 0-9, _ and -.
+func ValidateCCBillWebhookToken(token string) error {
+	if !ccbillWebhookTokenShape.MatchString(token) {
+		return errors.New("must be at least 32 characters of A-Z, a-z, 0-9, _ and -")
 	}
-	return "", false
+	return nil
 }
 
 // ParseMerchantDocument parses one merchant YAML document, which names its
@@ -145,9 +150,6 @@ func RetiredDeclarationKey(doc map[string]any) (string, bool) {
 func ParseMerchantDocument(raw []byte) (billing.MerchantDocument, error) {
 	var probe map[string]any
 	if yaml.Unmarshal(raw, &probe) == nil {
-		if retired, ok := RetiredDeclarationKey(probe); ok {
-			return billing.MerchantDocument{}, fmt.Errorf("parse merchant document: %s", retired)
-		}
 		if _, ok := probe["issuer"]; ok {
 			return billing.MerchantDocument{}, fmt.Errorf("parse merchant document: issuer is not a document's: each host sets MerchantDeclaration.Issuer in its own code")
 		}

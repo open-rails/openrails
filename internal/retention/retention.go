@@ -62,6 +62,9 @@ const (
 	ResolvedFindings = 366 * Day
 	// ReleasedParks keeps a released park 90 days past its release.
 	ReleasedParks = 90 * Day
+	// ListedRebills keeps a rebill a CCBill read listed 90 days, past the
+	// 30 days a callback rebill is checked against it.
+	ListedRebills = 90 * Day
 	// CustomerMessages keeps a customer message's delivery record two years,
 	// the evidence a dispute response cites.
 	CustomerMessages = 731 * Day

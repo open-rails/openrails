@@ -13,8 +13,8 @@ import (
 )
 
 const advanceEventLogFloor = `-- name: AdvanceEventLogFloor :exec
-UPDATE billing.event_log_streams SET pruned_through=$1::bigint,pruned_id=$2::text
-WHERE merchant_id=$3::uuid AND pruned_through<$1::bigint
+UPDATE billing.eventlog_streams SET pruned_through=$1::bigint,pruned_id=$2::text
+WHERE source='openrails' AND merchant_id=$3::uuid AND pruned_through<$1::bigint
 `
 
 type AdvanceEventLogFloorParams struct {
@@ -29,8 +29,8 @@ func (q *Queries) AdvanceEventLogFloor(ctx context.Context, arg AdvanceEventLogF
 }
 
 const getEventLogBoundary = `-- name: GetEventLogBoundary :one
-SELECT id FROM billing.event_log
-WHERE merchant_id=$1::uuid AND position=$2::bigint
+SELECT id FROM billing.eventlog_events
+WHERE source='openrails' AND merchant_id=$1::uuid AND position=$2::bigint
 `
 
 type GetEventLogBoundaryParams struct {
@@ -46,8 +46,8 @@ func (q *Queries) GetEventLogBoundary(ctx context.Context, arg GetEventLogBounda
 }
 
 const getEventLogStream = `-- name: GetEventLogStream :one
-SELECT epoch,position,head_id,pruned_through,pruned_id FROM billing.event_log_streams
-WHERE merchant_id=$1::uuid
+SELECT epoch::uuid AS epoch,position,head_id,pruned_through,pruned_id FROM billing.eventlog_streams
+WHERE source='openrails' AND merchant_id=$1::uuid
 `
 
 type GetEventLogStreamRow struct {
@@ -72,8 +72,8 @@ func (q *Queries) GetEventLogStream(ctx context.Context, merchantID uuid.UUID) (
 }
 
 const getExpiredEventLogBoundary = `-- name: GetExpiredEventLogBoundary :one
-SELECT position,id FROM billing.event_log
-WHERE merchant_id=$1::uuid AND recorded_at<$2::timestamptz
+SELECT position,id FROM billing.eventlog_events
+WHERE source='openrails' AND merchant_id=$1::uuid AND recorded_at<$2::timestamptz
 ORDER BY recorded_at DESC,position DESC LIMIT 1
 `
 
@@ -95,9 +95,9 @@ func (q *Queries) GetExpiredEventLogBoundary(ctx context.Context, arg GetExpired
 }
 
 const listEventLog = `-- name: ListEventLog :many
-SELECT position,id,source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data
-FROM billing.event_log
-WHERE merchant_id=$1::uuid AND position>$2::bigint
+SELECT position,id,event_source AS source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data
+FROM billing.eventlog_events
+WHERE source='openrails' AND merchant_id=$1::uuid AND position>$2::bigint
 ORDER BY position LIMIT $3::int
 `
 
@@ -152,9 +152,9 @@ func (q *Queries) ListEventLog(ctx context.Context, arg ListEventLogParams) ([]L
 }
 
 const listEventLogByTypes = `-- name: ListEventLogByTypes :many
-SELECT position,id,source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data
-FROM billing.event_log
-WHERE merchant_id=$1::uuid AND position>$2::bigint
+SELECT position,id,event_source AS source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data
+FROM billing.eventlog_events
+WHERE source='openrails' AND merchant_id=$1::uuid AND position>$2::bigint
 AND event_type=ANY($3::text[])
 ORDER BY position LIMIT $4::int
 `
@@ -216,8 +216,8 @@ func (q *Queries) ListEventLogByTypes(ctx context.Context, arg ListEventLogByTyp
 }
 
 const listExpiredEventLogMerchants = `-- name: ListExpiredEventLogMerchants :many
-SELECT merchant_id FROM billing.event_log
-WHERE recorded_at<$1::timestamptz
+SELECT merchant_id FROM billing.eventlog_events
+WHERE source='openrails' AND recorded_at<$1::timestamptz
 GROUP BY merchant_id ORDER BY min(recorded_at),merchant_id LIMIT $2::int
 `
 
@@ -248,7 +248,7 @@ func (q *Queries) ListExpiredEventLogMerchants(ctx context.Context, arg ListExpi
 }
 
 const lockEventLogStream = `-- name: LockEventLogStream :exec
-SELECT 1 FROM billing.event_log_streams WHERE merchant_id=$1::uuid FOR UPDATE
+SELECT 1 FROM billing.eventlog_streams WHERE source='openrails' AND merchant_id=$1::uuid FOR UPDATE
 `
 
 func (q *Queries) LockEventLogStream(ctx context.Context, merchantID uuid.UUID) error {
@@ -258,8 +258,8 @@ func (q *Queries) LockEventLogStream(ctx context.Context, merchantID uuid.UUID) 
 
 const pruneEventLog = `-- name: PruneEventLog :one
 WITH gone AS (
-    DELETE FROM billing.event_log WHERE merchant_id=$1::uuid AND position IN (
-        SELECT position FROM billing.event_log WHERE merchant_id=$1::uuid
+    DELETE FROM billing.eventlog_events WHERE source='openrails' AND merchant_id=$1::uuid AND position IN (
+        SELECT position FROM billing.eventlog_events WHERE source='openrails' AND merchant_id=$1::uuid
         AND recorded_at<$2::timestamptz ORDER BY position LIMIT $3::int
     ) RETURNING position,id
 )

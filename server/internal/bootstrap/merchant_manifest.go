@@ -353,6 +353,3 @@ func lockMerchantManifestBootstrap(ctx context.Context, cp *controlplane.Control
 
 const merchantManifestAdvisoryLock = int64(734252042137424)
 const DefaultMerchantConfigManifestPath = merchantbootstrap.DefaultMerchantConfigManifestPath
-
-type PSPConfig = billing.PSPConfig
-type CustodianConfig = billing.CustodianConfig

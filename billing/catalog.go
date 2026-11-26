@@ -23,7 +23,7 @@ type Product struct {
 	// Entitlements are opaque access keys granted by the purchased price.
 	// The price defines their access duration; keys have no separate duration.
 	Entitlements []string `json:"entitlements"`
-	// RequiredEntitlements are the keys a customer must already hold to invoice
+	// RequiredEntitlements are the keys a customer must already hold to buy
 	// the product; empty sells it to anyone.
 	RequiredEntitlements []string                 `json:"required_entitlements"`
 	CreditGrant          *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
@@ -48,7 +48,7 @@ type CreateProductParams struct {
 	DisplayName  string   `json:"display_name"`
 	Description  string   `json:"description,omitempty"`
 	Entitlements []string `json:"entitlements,omitempty"`
-	// RequiredEntitlements are the keys a customer must already hold to invoice
+	// RequiredEntitlements are the keys a customer must already hold to buy
 	// the product.
 	RequiredEntitlements []string                 `json:"required_entitlements,omitempty"`
 	CreditGrant          *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
@@ -69,7 +69,7 @@ type UpdateProductParams struct {
 	Description  catalog.Field[string]   `json:"description,omitzero"`
 	Entitlements catalog.Field[[]string] `json:"entitlements,omitzero"`
 	// RequiredEntitlements are the keys a customer must already hold to
-	// invoice the product.
+	// buy the product.
 	RequiredEntitlements catalog.Field[[]string]                `json:"required_entitlements,omitzero"`
 	CreditGrant          catalog.Field[catalog.CreditGrantSpec] `json:"credit_grant,omitzero"`
 	TierGroup            catalog.Field[string]                  `json:"tier_group,omitzero"`

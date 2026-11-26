@@ -1388,59 +1388,6 @@ var declared = []Measure{
 		Dims:        []string{"entitlement", "product_id"}},
 }
 
-// Retired is what replaces a removed measure: Measure to request instead
-// (empty when only a planned one does) and How to ask it.
-type Retired struct{ Measure, How string }
-
-// Removed names each retired measure's replacement; a query naming one is
-// refused with it. Pre-launch there are no aliases.
-var Removed = map[string]Retired{
-	"gross_revenue":                 {"cash", "with by cash_kind: payment"},
-	"net_revenue":                   {"cash", "its total"},
-	"refunds":                       {"cash", "with by cash_kind: refund, signed negative"},
-	"chargebacks":                   {"cash", "with by cash_kind: chargeback and dispute_won, signed"},
-	"payment_count":                 {"payments", "with by payment_kind: sale"},
-	"refund_count":                  {"payments", "with by payment_kind: refund"},
-	"chargeback_count":              {"payments", "with by payment_kind: chargeback"},
-	"unique_rebilled_customers":     {"rebills", "renewal cycles by outcome"},
-	"realized_revenue_per_customer": {"arpa", "with ltv"},
-	"avg_membership_duration_days":  {"cohort_retention", "with ltv"},
-	"approved_attempts":             {"attempts", "with filters outcome: approved"},
-	"failed_attempts":               {"attempts", "with filters outcome: declined, refused, error"},
-	"failed_purchases":              {"purchases", "with filters outcome: failed"},
-	"purchase_recovery_rate":        {"purchases", "by outcome: recovered against approved, recovered and failed"},
-	"attempts_per_purchase":         {"attempts", "divided by purchases"},
-	"rebills_due":                   {"rebills", "its total"},
-	"rebills_open":                  {"rebills", "with filters outcome: open"},
-	"rebills_attempted":             {"rebills", "with filters first_outcome: approved, declined, refused, error, missed"},
-	"rebill_first_failures":         {"rebills", "with filters first_outcome: declined, refused, error, missed"},
-	"rebills_missed":                {"rebills", "with filters first_outcome: missed, by miss_reason"},
-	"dunning_recovered":             {"rebills", "with filters outcome: recovered"},
-	"rebill_collection_rate":        {"rebill_rate", "renamed"},
-	"rebill_missed_rate":            {"rebills", "with filters first_outcome: missed, by miss_reason (the ops view)"},
-	"rebill_loss_rate":              {"rebill_rate", "1 - rebill_rate"},
-	"nmi_history_approved":          {"nmi_history_authorizations", "with filters outcome: approved"},
-	"nmi_history_refused":           {"nmi_history_authorizations", "with filters outcome: declined, refused, error"},
-	"nmi_history_refusal_rate":      {"nmi_history_authorizations", "by outcome"},
-	"usage_revenue":                 {"usage_charged", "with filters charge: charged"},
-	"forgiven_usage":                {"usage_charged", "with filters charge: forgiven"},
-	"credit_utilization":            {"usage_charged", "beside credits_sold"},
-	"billable_subscriptions":        {"subscribers", "less scheduled_mrr by movement churn"},
-	"subscriptions":                 {"subscribers", "customers with MRR; by product_id, the product's subscriptions; mrr_at_risk by risk_reason for the ones in trouble"},
-	"new_subscriptions":             {"subscriber_movements", "with filters movement: new, reactivation"},
-	"net_new_subscriptions":         {"subscriber_movements", "its total"},
-	"churn_rate":                    {"subscriber_churn_rate", "customers whose MRR went to none / customers with MRR at the start"},
-	"attempt_failure_rate":          {"authorization_rate", "1 - authorization_rate; declines by decline_cause"},
-	"purchase_failure_rate":         {"purchases", "with by outcome: failed against approved, recovered and failed; authorization_rate"},
-	"rebill_first_failure_rate":     {"first_try_rebill_approval_rate", "1 - first_try_rebill_approval_rate"},
-	"orphaned_members":              {"open_findings", "with filters finding_group: orphaned"},
-	"freeloaders":                   {"open_findings", "with filters finding_group: freeloader"},
-	"duplicate_coverage":            {"open_findings", "with filters finding_group: duplicate_coverage"},
-}
-
-// RemovedDimensions names each retired dimension's replacement.
-var RemovedDimensions = map[string]string{"attempt_kind": "kind", "category": "decline_cause", "first_failure_category": "first_decline_cause", "status": "risk_reason", "subscriber_type": "customer_type"}
-
 // Deferred names the measures later phases build (MRR movements, retention,
 // the books, trials); naming one is refused as planned.
 var Deferred = []string{
@@ -1483,9 +1430,6 @@ func registry(declared []Measure) []Measure {
 		}
 		if !m.Internal && m.Direction == "" {
 			panic("metrics: measure " + m.Name + " declares no direction")
-		}
-		if _, gone := Removed[m.Name]; gone {
-			panic("metrics: measure " + m.Name + " is both live and removed")
 		}
 	}
 	var parts []Measure

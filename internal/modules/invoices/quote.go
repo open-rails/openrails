@@ -2,14 +2,12 @@ package invoices
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
@@ -430,18 +428,10 @@ func lapsedHolders(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, cl
 }
 
 // pendingPurchase reports another purchase of the product or its tier group
-// whose payment is unresolved: a membership enrollment or Solana subscribe,
-// or a one-time purchase or sale.
+// whose payment is unresolved: a membership enrollment or Solana subscribe.
 func pendingPurchase(ctx context.Context, q *gen.Queries, merchantID, customerID, productID uuid.UUID, at time.Time) (bool, error) {
 	reason, err := intents.MembershipSlot{MerchantID: merchantID, CustomerID: customerID, ProductID: productID, At: at}.Pending(ctx, q)
-	if err != nil || reason != "" {
-		return reason != "", err
-	}
-	_, err = q.GetUnresolvedSaleForCustomerProduct(ctx, gen.GetUnresolvedSaleForCustomerProductParams{MerchantID: merchantID, CustomerID: customerID.String(), ProductID: productID.String()})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	return err == nil, err
+	return reason != "", err
 }
 
 func owned(by string, hint *string, message string) *billing.InvoiceLineRefusal {

@@ -76,7 +76,3 @@ SELECT EXISTS (
 -- decision fails.
 INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, origin_id, cash, units)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(reversal_id)::uuid, sqlc.arg(credit_grant_id)::uuid, sqlc.arg(origin_id)::uuid, sqlc.arg(cash)::bigint, sqlc.arg(units)::bigint);
-
--- name: SeedCreditReversalShares :exec
--- Records the shares of reversals an archive from before them restored.
-SELECT billing.seed_credit_reversal_shares(sqlc.arg(merchant_id)::uuid);

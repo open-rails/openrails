@@ -5,23 +5,17 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/notify"
 	notifypg "github.com/open-rails/authkit/notify/postgres"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -120,16 +114,15 @@ func TestAccountNotificationChannel(t *testing.T) {
 		items := accountNotices(t, inbox, a.alice.ID)
 		require.Len(t, items, 1)
 		require.Equal(t, item.ID, items[0].ID, "retry before the due time must not duplicate the receipt")
-		adoption, err := a.local.ExportNotificationAdoption(t.Context())
+		open, err := a.local.ExportNotificationOrdering(t.Context())
 		require.NoError(t, err)
-		require.Len(t, adoption.Adoptions, 1)
-		require.Equal(t, item.Origin, adoption.Adoptions[0].Current.Origin)
-		require.False(t, adoption.Adoptions[0].Current.Withdrawn)
-		assertAdoptionPublisherReplay(t, a, adoption)
-		require.Len(t, adoption.Adoptions[0].Previous, 1)
-		repeated, err := a.local.ExportNotificationAdoption(t.Context())
+		require.Len(t, open.Ordering, 1)
+		require.Equal(t, item.Origin.ID, open.Ordering[0].Key)
+		require.False(t, open.Ordering[0].Withdrawn)
+		require.NotNil(t, open.Ordering[0].SourceEvent)
+		repeated, err := a.local.ExportNotificationOrdering(t.Context())
 		require.NoError(t, err)
-		require.Equal(t, adoption, repeated, "stopped source export must not manufacture new revisions")
+		require.Equal(t, open, repeated, "an export must not manufacture new revisions")
 		p.core.SetDecline("4242", "")
 		a.clock.Advance(24 * time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 2)
@@ -140,16 +133,16 @@ func TestAccountNotificationChannel(t *testing.T) {
 		facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment_method_failed"}, Limit: 100})
 		require.NoError(t, err)
 		require.Len(t, facts.Events, 1, "withdrawing the inbox item must preserve the general billing fact")
-		require.Equal(t, facts.Events[0].ID, adoption.Adoptions[0].Previous[0].ID)
-		resolved, err := a.local.ExportNotificationAdoption(t.Context())
+		require.Equal(t, facts.Events[0].ID, "ntf_"+open.Ordering[0].SourceEvent.String(), "the issue was published from the billing fact")
+		resolved, err := a.local.ExportNotificationOrdering(t.Context())
 		require.NoError(t, err)
-		require.Len(t, resolved.Adoptions, 1)
-		require.True(t, resolved.Adoptions[0].Current.Withdrawn)
-		require.Greater(t, resolved.Adoptions[0].Current.Revision, adoption.Adoptions[0].Current.Revision)
+		require.Len(t, resolved.Ordering, 1)
+		require.True(t, resolved.Ordering[0].Withdrawn)
+		require.Greater(t, resolved.Ordering[0].Revision, open.Ordering[0].Revision)
 		require.NoError(t, a.local.RestoreNotificationOrdering(t.Context(), resolved))
 		require.NoError(t, a.local.RestoreNotificationOrdering(t.Context(), resolved), "identical source snapshot replay is safe")
-		require.Error(t, a.local.RestoreNotificationOrdering(t.Context(), adoption), "old ordering cannot replace a newer resolution")
-		afterRestore, err := a.local.ExportNotificationAdoption(t.Context())
+		require.Error(t, a.local.RestoreNotificationOrdering(t.Context(), open), "old ordering cannot replace a newer resolution")
+		afterRestore, err := a.local.ExportNotificationOrdering(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, resolved, afterRestore)
 	})
@@ -206,16 +199,16 @@ func TestAccountNotificationChannel(t *testing.T) {
 			facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{tc.kind}, Limit: 100})
 			require.NoError(t, err)
 			require.Len(t, facts.Events, 1)
-			adoption, err := a.local.ExportNotificationAdoption(t.Context())
+			ordering, err := a.local.ExportNotificationOrdering(t.Context())
 			require.NoError(t, err)
 			found := false
-			for _, adopted := range adoption.Adoptions {
-				if adopted.Current.Kind == tc.kind {
+			for _, record := range ordering.Ordering {
+				if record.Key == items[0].Origin.ID {
 					found = true
-					require.True(t, adopted.Current.Withdrawn, "migration must not revive a canceled request for an unrepaired method")
+					require.True(t, record.Withdrawn, "the ordering keeps the canceled request withdrawn")
 				}
 			}
-			require.True(t, found, "source export must account for the retained payment fact")
+			require.True(t, found, "the ordering holds the request it published")
 		})
 	}
 
@@ -235,174 +228,13 @@ func TestAccountNotificationChannel(t *testing.T) {
 		require.Eventually(t, func() bool {
 			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.terminal_outcome.held"})
 			return err == nil && len(findings.Items) == 1
-		}, 20*time.Second, 20*time.Millisecond, "the new provider outcome must commit before adoption")
+		}, 20*time.Second, 20*time.Millisecond, "the new provider outcome must commit before the export")
 		subscriptionState(t, a, sub.ID, "past_due")
-		adoption, err := a.local.ExportNotificationAdoption(t.Context())
+		ordering, err := a.local.ExportNotificationOrdering(t.Context())
 		require.NoError(t, err)
-		require.Len(t, adoption.Adoptions, 1)
-		require.False(t, adoption.Adoptions[0].Current.Withdrawn, "uncertain provider state is not recovery evidence")
+		require.Len(t, ordering.Ordering, 1)
+		require.False(t, ordering.Ordering[0].Withdrawn, "uncertain provider state is not recovery evidence")
 		require.Len(t, accountNotices(t, inbox, a.alice.ID), 1)
-	})
-}
-
-// recipientGate parks the next host recipient lookup until opened.
-type recipientGate struct {
-	armed   atomic.Bool
-	entered chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func (g *recipientGate) wrap(w *world) {
-	next := w.deps.Notifications.Recipient
-	w.deps.Notifications.Recipient = func(ctx context.Context, source openrails.NotificationRecipient) (string, bool, error) {
-		if g.armed.CompareAndSwap(true, false) {
-			close(g.entered)
-			<-g.release
-		}
-		return next(ctx, source)
-	}
-}
-
-func (g *recipientGate) open() { g.once.Do(func() { close(g.release) }) }
-
-func TestNotificationAdoptionExport(t *testing.T) {
-	t.Run("OR-J31-S40/export-holds-back-no-other-merchant-and-invoices-its-own-producers", func(t *testing.T) {
-		var inbox *notifypg.Store
-		lookup := &recipientGate{entered: make(chan struct{}), release: make(chan struct{})}
-		defer lookup.open()
-		a, p, sub := purchasedMembershipWith(t, 7*24, accountInbox(t, &inbox), lookup.wrap)
-		p.core.SetDecline("4242", "insufficient_funds")
-		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
-		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.billing_pass", 2)
-		subscriptionState(t, a, sub.ID, "past_due")
-		require.Eventually(t, func() bool { return len(accountNotices(t, inbox, a.alice.ID)) == 1 }, 20*time.Second, 20*time.Millisecond)
-		request := accountNotices(t, inbox, a.alice.ID)[0]
-		require.Equal(t, "payment_method_failed", request.Kind)
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
-		defer cancel()
-		sale := func(client *openrails.Client) billing.PriceID {
-			product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "sale", DisplayName: "Sale", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"sale:owned"}})
-			require.NoError(t, err)
-			price, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "sale", UnitAmount: 30_000_000, Currency: "USD"})
-			require.NoError(t, err)
-			return price.ID
-		}
-		alphaSale, betaSale := sale(a.alpha), sale(a.beta)
-		paid := func(client *openrails.Client, customer string, price billing.PriceID, key string) func() error {
-			return func() error {
-				invoice, err := client.CreateInvoice(ctx, key, billing.CreateInvoiceParams{CustomerID: billing.CustomerID(uuid.MustParse(customer)), Lines: []billing.InvoiceLineParams{{PriceID: price}}})
-				if err != nil {
-					return err
-				}
-				_, err = client.RecordExternalPayment(ctx, billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 30_000_000, TransactionID: key})
-				return err
-			}
-		}
-		// committed reports whether a write lands while the export is held; a
-		// write still waiting at the deadline lands after release.
-		committed := func(write func() error, release func()) bool {
-			done := make(chan error, 1)
-			go func() { done <- write() }()
-			select {
-			case err := <-done:
-				require.NoError(t, err)
-				return true
-			case <-time.After(30 * time.Second):
-				release()
-				require.NoError(t, <-done)
-				return false
-			}
-		}
-		type exportResult struct {
-			adoption billing.NotificationAdoption
-			err      error
-		}
-		exported := make(chan exportResult, 1)
-		export := func() {
-			adoption, err := a.local.ExportNotificationAdoption(ctx)
-			exported <- exportResult{adoption, err}
-		}
-
-		// Host recipient lookups hold nothing: the merchant's own invoice lands.
-		lookup.armed.Store(true)
-		go export()
-		select {
-		case <-lookup.entered:
-		case <-time.After(30 * time.Second):
-			t.Fatal("the export never looked up its recipient")
-		}
-		if !committed(paid(a.alpha, a.alice.ID, alphaSale, "alpha-during-lookups"), lookup.open) {
-			t.Error("the merchant's own invoice waited behind the export's host recipient lookups")
-		}
-		lookup.open()
-		first := <-exported
-		require.NoError(t, first.err)
-		require.Len(t, first.adoption.Adoptions, 1)
-		require.False(t, first.adoption.Adoptions[0].Current.Withdrawn)
-		revision := first.adoption.Adoptions[0].Current.Revision
-
-		// Hold the export inside its snapshot, at its revision write.
-		hold, err := a.pool.Begin(ctx)
-		require.NoError(t, err)
-		release := func() { _ = hold.Rollback(context.Background()) }
-		defer release()
-		var holder, exporter int
-		require.NoError(t, hold.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&holder))
-		_, err = hold.Exec(ctx, "SELECT 1 FROM "+pgx.Identifier{a.schema, "notification_issue_revisions"}.Sanitize()+" WHERE merchant_id=$1 FOR UPDATE", a.alpha.MerchantID().UUID())
-		require.NoError(t, err)
-		go export()
-		require.Eventually(t, func() bool {
-			return a.pool.QueryRow(ctx, "SELECT pid FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))", holder).Scan(&exporter) == nil
-		}, 30*time.Second, 20*time.Millisecond, "the export must reach its revision write")
-		if !committed(paid(a.beta, a.bob.ID, betaSale, "beta-during-export"), release) {
-			t.Error("another merchant's invoice waited behind this merchant's export")
-			require.NoError(t, (<-exported).err)
-			return
-		}
-
-		// The merchant's own producer waits and lands after the snapshot.
-		canceled := make(chan error, 1)
-		go func() {
-			status, raw, err := a.do(ctx, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", a.aliceToken, map[string]any{"reason": "Stop renewal after the failed charge"})
-			if err == nil && status != http.StatusOK {
-				err = fmt.Errorf("cancel: %d %s", status, raw)
-			}
-			canceled <- err
-		}()
-		require.Eventually(t, func() bool {
-			var waiting bool
-			return a.pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)))", exporter).Scan(&waiting) == nil && waiting
-		}, 30*time.Second, 20*time.Millisecond, "the merchant's own cancellation must wait for its export")
-		select {
-		case err := <-canceled:
-			t.Fatalf("the merchant's own cancellation committed inside its export: %v", err)
-		default:
-		}
-		require.NoError(t, hold.Rollback(ctx))
-		held := <-exported
-		require.NoError(t, held.err)
-		require.Len(t, held.adoption.Adoptions, 1)
-		require.False(t, held.adoption.Adoptions[0].Current.Withdrawn, "the snapshot predates the waiting cancellation")
-		require.Equal(t, revision, held.adoption.Adoptions[0].Current.Revision)
-		require.NoError(t, <-canceled)
-		subscriptionState(t, a, sub.ID, "canceled")
-		// The cancellation ends access, so the inbox now holds the ended notice instead.
-		_, err = inbox.Get(ctx, notify.Recipient{Audience: notify.AudienceUser, ID: a.alice.ID}, request.ID)
-		require.ErrorIs(t, err, notify.ErrNotFound, "the cancellation withdraws the request after the export")
-		after, err := a.local.ExportNotificationAdoption(ctx)
-		require.NoError(t, err)
-		var withdrawn *notify.Adoption
-		for i := range after.Adoptions {
-			if after.Adoptions[i].Current.Kind == "payment_method_failed" {
-				require.Nil(t, withdrawn, "one adoption per issue")
-				withdrawn = &after.Adoptions[i]
-			}
-		}
-		require.NotNil(t, withdrawn)
-		require.True(t, withdrawn.Current.Withdrawn)
-		require.Greater(t, withdrawn.Current.Revision, revision, "the later withdrawal invoices after the exported revision")
 	})
 }
 
@@ -421,7 +253,7 @@ func TestInvoiceNotificationRecovery(t *testing.T) {
 			require.Eventually(t, func() bool { return len(accountNotices(t, inbox, a.alice.ID)) == 1 }, 20*time.Second, 20*time.Millisecond)
 			item := accountNotices(t, inbox, a.alice.ID)[0]
 			invoice := oneUsageInvoice(t, a, customer)
-			require.Equal(t, "order:"+invoice.ID.UUID().String()+":"+item.Kind, item.Origin.ID)
+			require.Equal(t, "invoice:"+invoice.ID.UUID().String()+":"+item.Kind, item.Origin.ID)
 			require.Nil(t, item.ReadAt)
 			var err error
 			switch disposition {
@@ -487,38 +319,4 @@ func TestInvoiceNotificationRecovery(t *testing.T) {
 		require.Empty(t, accountNotices(t, inbox, a.alice.ID))
 		require.Len(t, p.effects(t), 2, "only enrollment and confirmed renewal charge money")
 	})
-}
-
-// A legacy receipt may carry source-subject and workflow fields that are not
-// producer inputs in the scoped API. Explicit adoption must canonicalize them
-// before an unchanged source revision is retried through the real publisher.
-func assertAdoptionPublisherReplay(t *testing.T, a *authorityWorld, snapshot billing.NotificationAdoption) {
-	t.Helper()
-	// AuthKit's inbox, in its own schema: the producer registers in the
-	// tenant, and a raw store on the same scope plays the legacy writer.
-	accounts := a.auth
-	publisher, err := accounts.Notifications(authkit.NotificationProducer{Name: "openrails", Origin: notify.OriginScope{System: "openrails", Scope: a.alpha.MerchantID().String()}, Visibility: notify.VisibilityTenant})
-	require.NoError(t, err)
-	scope, err := accounts.NotificationScope()
-	require.NoError(t, err)
-	raw, err := notifypg.New(a.pool, notifypg.Config{Schema: a.schema + "_auth", Scope: scope})
-	require.NoError(t, err)
-	adoption := snapshot.Adoptions[0]
-	legacy := adoption.Current.Input
-	legacy.Origin = adoption.Previous[0]
-	legacy.Origin.Subject = a.alice.ID
-	legacy.Status = notify.StatusOpen
-	prior, err := raw.Publish(t.Context(), legacy)
-	require.NoError(t, err)
-	_, err = raw.SetRead(t.Context(), legacy.Recipient, prior.ID, true)
-	require.NoError(t, err)
-	require.NoError(t, accounts.AdoptNotifications(t.Context(), "openrails", []notify.Adoption{adoption}))
-	before, err := accounts.GetNotification(t.Context(), a.alice.ID, prior.ID)
-	require.NoError(t, err)
-	require.NotNil(t, before.ReadAt)
-	m := adoption.Current
-	require.NoError(t, publisher.Publish(t.Context(), []notify.Publication{{RecipientID: m.Recipient.ID, ID: m.Origin.ID, Revision: m.Revision, Kind: m.Kind, Data: m.Data, CreatedAt: m.CreatedAt, ActionRequested: m.ActionRequested, Severity: m.Severity}}))
-	after, err := accounts.GetNotification(t.Context(), a.alice.ID, prior.ID)
-	require.NoError(t, err)
-	require.Equal(t, before, after, "same-revision scoped publisher replay preserves adopted receipt ID/read state and hash")
 }

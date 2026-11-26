@@ -757,40 +757,4 @@ func TestMRR(t *testing.T) {
 		require.Less(t, reads, int64(100*members), "reads of subscription_mrr grow with the book, not its square: before %s; after %s",
 			scans, subscriptionMRRScans(t, a.world, a.pool, false))
 	})
-
-	t.Run("OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once", func(t *testing.T) {
-		a := ccbillWebhookWorld(t)
-		price := ccbillMemberPrice(t, a.alpha)
-		// The book's request body stays under the 1 MiB cap: some 700 bytes a member.
-		const members = 1200
-		subscriptions := pgx.Identifier{a.schema, "subscriptions"}.Sanitize()
-		// A book written before MRR existed: no trigger recorded it.
-		_, err := a.pool.Exec(t.Context(), "ALTER TABLE "+subscriptions+" DISABLE TRIGGER trg_subscriptions_track_mrr")
-		require.NoError(t, err)
-		res, err := a.alpha.ImportBilling(t.Context(), ccbillBook(price, a.clock.Now().UTC().Truncate(time.Second), 0, members))
-		require.NoError(t, err)
-		require.Len(t, res.Imported, members, "%v", res.Reasons)
-		_, err = a.pool.Exec(t.Context(), "ALTER TABLE "+subscriptions+" ENABLE TRIGGER trg_subscriptions_track_mrr")
-		require.NoError(t, err)
-
-		// The migration's statement in one transaction; its deferred
-		// settlement runs before commit, so the transaction counts its reads.
-		tx, err := a.pool.Begin(t.Context())
-		require.NoError(t, err)
-		defer func() { _ = tx.Rollback(t.Context()) }()
-		_, err = tx.Exec(t.Context(), "SELECT "+pgx.Identifier{a.schema, "seed_mrr"}.Sanitize()+"(id, now()) FROM "+pgx.Identifier{a.schema, "merchants"}.Sanitize()+" ORDER BY id")
-		require.NoError(t, err)
-		_, err = tx.Exec(t.Context(), "SET CONSTRAINTS ALL IMMEDIATE")
-		require.NoError(t, err)
-		require.Less(t, subscriptionMRRReads(t, a.world, tx, true), int64(100*members), "reads of subscription_mrr grow with the book, not its square: %s",
-			subscriptionMRRScans(t, a.world, tx, true))
-		require.NoError(t, tx.Commit(t.Context()))
-
-		require.Equal(t, [3]int64{members * ccbillMemberMRR, members, members}, mrrTotals(t, a.world, a.alpha, "USD"))
-		require.Equal(t, map[string]int64{"opening": members}, mrrFlows(t, a.world, a.alpha, "USD"))
-		var backfilled int64
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "mrr_movements"}.Sanitize()+
-			" WHERE merchant_id = $1 AND kind = 'opening' AND cause = 'backfill' AND backfilled", a.alpha.MerchantID().UUID()).Scan(&backfilled))
-		require.EqualValues(t, members, backfilled, "every adopted subscription opens as a backfill")
-	})
 }

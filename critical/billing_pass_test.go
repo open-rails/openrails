@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -76,25 +77,88 @@ func runHistory(t *testing.T, fleet *river.Client[pgx.Tx]) bool {
 	return runOnce(t, fleet, nmiHistoryJob{})
 }
 
-// runOnce queues one job and reports whether it failed.
+// runOnce queues one job until it runs and reports whether it failed.
 func runOnce(t *testing.T, fleet *river.Client[pgx.Tx], args river.JobArgs) bool {
+	t.Helper()
+	finished := finishPass(t, fleet, args.Kind(), func() []int64 {
+		job, err := fleet.Insert(t.Context(), args, nil)
+		require.NoError(t, err)
+		return []int64{job.Job.ID}
+	})
+	return finished[0].Kind == river.EventKindJobFailed
+}
+
+// passExits runs one billing pass and requires it to exit: another run holds
+// the pass's lease.
+func passExits(t *testing.T, fleet *river.Client[pgx.Tx]) {
+	t.Helper()
+	finished := finishJobs(t, fleet, func() []int64 {
+		job, err := fleet.Insert(t.Context(), billingPass{}, nil)
+		require.NoError(t, err)
+		return []int64{job.Job.ID}
+	})
+	require.Equal(t, river.EventKindJobCompleted, finished[0].Kind)
+	require.False(t, passRan(t, fleet, finished[0]), "it exits without its report")
+}
+
+// leasedPasses exit while another run of their kind holds its lease: one
+// that ran records its report, one that exited none.
+var leasedPasses = map[string]bool{"openrails.billing_pass": true, "openrails.nmi_history": true}
+
+// finishPass queues rounds of jobs with insert until one of a round ran, and
+// returns that round's finishes. A fleet's own pass, such as the one it runs
+// on start, can hold the lease while a round starts; that round exits and is
+// queued again. Any other kind's first round is its answer.
+func finishPass(t *testing.T, fleet *river.Client[pgx.Tx], kind string, insert func() []int64) []*river.Event {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		finished := finishJobs(t, fleet, insert)
+		if !leasedPasses[kind] || slices.ContainsFunc(finished, func(e *river.Event) bool { return passRan(t, fleet, e) }) {
+			return finished
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("every %s exited: another run kept its lease", kind)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// finishJobs queues one round of jobs with insert and returns their finishes.
+func finishJobs(t *testing.T, fleet *river.Client[pgx.Tx], insert func() []int64) []*river.Event {
 	t.Helper()
 	events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
 	defer unsubscribe()
-	job, err := fleet.Insert(t.Context(), args, nil)
-	require.NoError(t, err)
+	waiting := map[int64]bool{}
+	for _, id := range insert() {
+		waiting[id] = true
+	}
 	deadline := time.NewTimer(60 * time.Second)
 	defer deadline.Stop()
-	for {
+	var finished []*river.Event
+	for len(waiting) != 0 {
 		select {
 		case event := <-events:
-			if event != nil && event.Job.ID == job.Job.ID {
-				return event.Kind == river.EventKindJobFailed
+			if event != nil && waiting[event.Job.ID] {
+				finished = append(finished, event)
+				delete(waiting, event.Job.ID)
 			}
 		case <-deadline.C:
-			t.Fatalf("%s did not finish", args.Kind())
+			t.Fatalf("jobs did not finish: %v", waiting)
 		}
 	}
+	return finished
+}
+
+// passRan reports whether a finished leased pass ran rather than exited.
+func passRan(t *testing.T, fleet *river.Client[pgx.Tx], event *river.Event) bool {
+	t.Helper()
+	if event.Kind == river.EventKindJobFailed {
+		return true
+	}
+	job, err := fleet.JobGet(t.Context(), event.Job.ID)
+	require.NoError(t, err)
+	return job.Output() != nil
 }
 
 // isHistoryRead is NMI's transaction report as the history job reads it: a
@@ -396,7 +460,7 @@ func TestBillingPass(t *testing.T) {
 		first, err := fleet.Insert(t.Context(), billingPass{}, nil)
 		require.NoError(t, err)
 		require.Eventually(t, func() bool { return blockedBy(t, a.world, holder) > 0 }, 30*time.Second, 20*time.Millisecond)
-		require.False(t, runPass(t, fleet), "the second pass exits while the first runs")
+		passExits(t, fleet)
 		require.Equal(t, 1, openInvoices(t, a.world), "it ran no scan")
 		require.NoError(t, tx.Rollback(t.Context()))
 		deadline := time.NewTimer(60 * time.Second)
@@ -461,7 +525,7 @@ func TestBillingPass(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, dead)
 		die()
-		require.False(t, runPass(t, fleet), "a pass under a live lease exits")
+		passExits(t, fleet)
 		require.Equal(t, 1, openInvoices(t, a.world), "and runs no scan")
 		require.Eventually(t, func() bool { return liveLeases(t, a.world, "periodic_leases", "openrails.billing_pass.run") == 0 }, 20*time.Second, 100*time.Millisecond, "the dead pass's lease lapses")
 		require.False(t, runPass(t, fleet))

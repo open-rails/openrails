@@ -4,27 +4,19 @@ package critical_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
-	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/migrate"
-	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
@@ -77,149 +69,6 @@ func TestDeclineCauses(t *testing.T) {
 				}
 			})
 		}
-	})
-	t.Run("OR-J45-S09/the-migration-classifies-existing-attempts-and-history-from-their-stored-codes", func(t *testing.T) {
-		ctx := t.Context()
-		pool, err := pgxpool.New(ctx, os.Getenv("OPENRAILS_CRITICAL_DSN"))
-		require.NoError(t, err)
-		defer pool.Close()
-		schema := "backfill_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-		defer func() {
-			_, err := pool.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
-			require.NoError(t, err)
-		}()
-		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-		// The schema as it stood before decline causes.
-		before := fstest.MapFS{}
-		entries, err := fs.ReadDir(postgresmigrations.FS, ".")
-		require.NoError(t, err)
-		for _, e := range entries {
-			if !strings.HasSuffix(e.Name(), "_decline_causes.up.sql") {
-				raw, err := fs.ReadFile(postgresmigrations.FS, e.Name())
-				require.NoError(t, err)
-				before[e.Name()] = &fstest.MapFile{Data: raw}
-			}
-		}
-		require.NoError(t, migrate.Apply(ctx, pool, migrate.Options{Schema: schema, Chain: before, Logger: logger}))
-		table := func(name string) string { return pgx.Identifier{schema, name}.Sanitize() }
-		// Rows without their parents: the foreign keys are not under test.
-		_, err = pool.Exec(ctx, `DO $$ DECLARE c record; BEGIN
-			FOR c IN SELECT conrelid::regclass AS t, conname FROM pg_constraint WHERE contype = 'f' AND connamespace = '`+schema+`'::regnamespace
-				AND conrelid::regclass::text LIKE ANY (ARRAY['%payment_attempts', '%nmi_history_months', '%dashboard_configs'])
-			LOOP EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', c.t, c.conname); END LOOP; END $$`)
-		require.NoError(t, err)
-		merchant, customer, psp := uuid.New(), uuid.New(), uuid.New()
-		type old struct{ rail, category, reason, action, code, issuer string }
-		rows := map[string]old{
-			"approved":        {"stripe", "approved", "", "", "", ""},
-			"nmi-461":         {"nmi", "issuer_hard", "card_not_supported", "fix_payment_method", "461", ""},
-			"stripe-new-code": {"stripe", "unknown", "unknown", "retry", "new_account_information_available", ""},
-			"issuer-51":       {"nmi", "issuer_soft", "generic_decline", "retry", "200", "51"},
-			"issuer-05":       {"nmi", "issuer_soft", "do_not_honor", "retry", "201", "05"},
-			"processing":      {"stripe", "system_error", "processing_error", "retry", "processing_error", ""},
-			// A postal-code mismatch read as the cause of NMI's 200; the issuer's
-			// code says what it was, unless it says no more than do not honor.
-			"zip-issuer-51": {"nmi", "card_data", "incorrect_zip", "fix_payment_method", "200", "51"},
-			"zip-issuer-05": {"nmi", "card_data", "incorrect_zip", "fix_payment_method", "200", "05"},
-		}
-		ids := map[string]uuid.UUID{}
-		for step, r := range rows {
-			ids[step] = uuid.New()
-			_, err := pool.Exec(ctx, `INSERT INTO `+table("payment_attempts")+` (id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via,
-				category, reason, action, response_code, issuer_code, amount, currency, attempted_at, step)
-				VALUES ($1, $2, $3, $4, $5, 'initial', 'none', 'new', 'openrails', 'response', $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), 1000000, 'USD', now(), $11)`,
-				ids[step], merchant, customer, psp, r.rail, r.category, r.reason, r.action, r.code, r.issuer, step)
-			require.NoError(t, err)
-		}
-		month := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-		for _, h := range []struct {
-			kind, category, reason string
-			n                      int
-		}{{"one_off_sale", "approved", "", 5}, {"one_off_sale", "issuer_soft", "generic_decline", 2}, {"one_off_sale", "issuer_hard", "generic_decline", 3}, {"scheduled_rebill", "issuer_hard", "card_not_supported", 1}} {
-			_, err := pool.Exec(ctx, `INSERT INTO `+table("nmi_history_months")+` (merchant_id, psp_id, month_at, kind, category, reason, authorizations) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-				merchant, psp, month, h.kind, h.category, h.reason, h.n)
-			require.NoError(t, err)
-		}
-		// Saved dashboards naming a dimension decline_cause renamed, or
-		// filtering on what declined meant before refused and error.
-		widget := func(id string, q billing.QueryMetricsParams) billing.DashboardWidget {
-			return billing.DashboardWidget{ID: id, Title: id, Viz: "line", Grid: billing.DashboardGrid{W: 6, H: 4}, Query: q}
-		}
-		kept := widget("cash", billing.QueryMetricsParams{Measures: []string{"cash"}})
-		failed := func(filters map[string][]string) billing.DashboardWidget {
-			return widget("failed", billing.QueryMetricsParams{Measures: []string{"attempts"}, Filters: filters})
-		}
-		firstFailed := func(id string, filters map[string][]string) billing.DashboardWidget {
-			return widget(id, billing.QueryMetricsParams{Measures: []string{"rebills"}, Filters: filters})
-		}
-		emptied := uuid.New()
-		for owner, widgets := range map[uuid.UUID][]billing.DashboardWidget{
-			merchant: {widget("by-category", billing.QueryMetricsParams{Measures: []string{"attempts"}, By: []string{"category"}}), kept,
-				widget("first-category", billing.QueryMetricsParams{Measures: []string{"rebills"}, Filters: map[string][]string{"first_failure_category": {"issuer_hard"}}}),
-				failed(map[string][]string{"outcome": {"declined"}, "psp": {"psp_a"}}),
-				firstFailed("first-failed", map[string][]string{"first_outcome": {"declined", "error"}}),
-				firstFailed("first-errored", map[string][]string{"first_outcome": {"approved", "error"}}),
-				firstFailed("first-declined", map[string][]string{"first_outcome": {"declined"}, "first_failure_reason": {"do_not_honor", "invalid_request"}}),
-				firstFailed("both", map[string][]string{"outcome": {"declined"}, "first_outcome": {"declined", "error"}})},
-			emptied: {widget("by-first-category", billing.QueryMetricsParams{Measures: []string{"rebills"}, By: []string{"time", "first_failure_category"}})},
-		} {
-			layout, err := json.Marshal(widgets)
-			require.NoError(t, err)
-			_, err = pool.Exec(ctx, `INSERT INTO `+table("dashboard_configs")+` (merchant_id, layout) VALUES ($1, $2::jsonb)`, owner, string(layout))
-			require.NoError(t, err)
-		}
-
-		require.NoError(t, migrate.Apply(ctx, pool, migrate.Options{Schema: schema, Logger: logger}))
-		var layout []byte
-		require.NoError(t, pool.QueryRow(ctx, `SELECT layout FROM `+table("dashboard_configs")+` WHERE merchant_id = $1`, merchant).Scan(&layout))
-		var left []billing.DashboardWidget
-		require.NoError(t, json.Unmarshal(layout, &left))
-		// Declined and error together are every failure; either alone keeps its
-		// reasons: error the old system errors, three of them refused now.
-		errored := []string{"", "communication_error", "duplicate_transaction", "invalid_request", "issuer_unavailable", "merchant_config", "processing_error"}
-		require.Equal(t, []billing.DashboardWidget{kept,
-			failed(map[string][]string{"outcome": {"declined", "error", "refused"}, "psp": {"psp_a"}}),
-			firstFailed("first-failed", map[string][]string{"first_outcome": {"declined", "error", "refused"}}),
-			firstFailed("first-errored", map[string][]string{"first_outcome": {"approved", "error", "refused"}, "first_failure_reason": errored}),
-			firstFailed("first-declined", map[string][]string{"first_outcome": {"declined", "refused"}, "first_failure_reason": {"do_not_honor"}}),
-			firstFailed("both", map[string][]string{"outcome": {"declined", "error", "refused"}, "first_outcome": {"declined", "error", "refused"}}),
-		}, left, "the widgets naming a renamed dimension are dropped; a declined or error filter keeps what it meant")
-		var layouts int
-		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM `+table("dashboard_configs")+` WHERE merchant_id = $1`, emptied).Scan(&layouts))
-		require.Zero(t, layouts, "a layout left empty is deleted")
-		for step, want := range map[string]struct{ outcome, cause, reason, action string }{
-			"approved":        {"approved", "", "", ""},
-			"nmi-461":         {"refused", "merchant", "brand_not_accepted", "fix_payment_method"},
-			"stripe-new-code": {"declined", "customer", "update_cardholder_data", "retry"},
-			"issuer-51":       {"declined", "customer", "insufficient_funds", "retry"},
-			"issuer-05":       {"declined", "issuer", "do_not_honor", "retry"},
-			"processing":      {"error", "processing", "processing_error", "retry"},
-			"zip-issuer-51":   {"declined", "customer", "insufficient_funds", "fix_payment_method"},
-			"zip-issuer-05":   {"declined", "customer", "incorrect_zip", "fix_payment_method"},
-		} {
-			var outcome, cause, reason, action string
-			require.NoError(t, pool.QueryRow(ctx, `SELECT outcome, COALESCE(decline_cause, ''), COALESCE(reason, ''), COALESCE(action, '') FROM `+table("payment_attempts")+` WHERE id = $1`,
-				ids[step]).Scan(&outcome, &cause, &reason, &action), step)
-			require.Equal(t, want.outcome, outcome, step)
-			require.Equal(t, want.cause, cause, step)
-			require.Equal(t, want.reason, reason, step)
-			require.Equal(t, want.action, action, "%s: the action dunning took then is kept", step)
-		}
-		history := map[string]int{}
-		got, err := pool.Query(ctx, `SELECT kind || '/' || reason || '/' || outcome || '/' || COALESCE(decline_cause, ''), authorizations FROM `+table("nmi_history_months"))
-		require.NoError(t, err)
-		for got.Next() {
-			var key string
-			var n int
-			require.NoError(t, got.Scan(&key, &n))
-			history[key] = n
-		}
-		require.NoError(t, got.Err())
-		require.Equal(t, map[string]int{
-			"one_off_sale//approved/":                              5,
-			"one_off_sale/generic_decline/declined/issuer":         5, // two categories, one reason: one count
-			"scheduled_rebill/brand_not_accepted/refused/merchant": 1,
-		}, history)
 	})
 	t.Run("OR-J45-S10/the-system-errors-finding-counts-the-rails-own-errors-not-the-issuers", func(t *testing.T) {
 		for _, tc := range []struct {
@@ -793,12 +642,6 @@ func TestDeclineCauses(t *testing.T) {
 			rates(query([]string{"first_try_rebill_approval_rate"}, nil, "card_brand"), "card_brand", "first_try_rebill_approval_rate"))
 		near(map[string]float64{"sent": 2.0 / 3, "missing": 0.5},
 			rates(query([]string{"first_try_rebill_approval_rate"}, nil, "network_transaction_id"), "network_transaction_id", "first_try_rebill_approval_rate"))
-
-		// The dimensions decline_cause renamed are refused with it.
-		_, err = a.alpha.QueryMetrics(ctx, billing.QueryMetricsParams{Measures: []string{"rebills"}, By: []string{"first_failure_category"}, Range: window})
-		require.Equal(t, "first_decline_cause", metricRefusals(t, err)["by[0]"]["did_you_mean"])
-		_, err = a.alpha.QueryMetrics(ctx, billing.QueryMetricsParams{Measures: []string{"attempts"}, Filters: map[string][]string{"category": {"issuer_soft"}}, Range: window})
-		require.Equal(t, "decline_cause", metricRefusals(t, err)["filters.category"]["did_you_mean"])
 
 		// The overview shows them: the rates as tiles, the decline mix and the
 		// cuts in Payment health, every one answering.

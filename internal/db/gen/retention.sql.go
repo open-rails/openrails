@@ -284,6 +284,30 @@ func (q *Queries) DeleteOrphanPeriodicLeases(ctx context.Context, arg DeleteOrph
 	return result.RowsAffected(), nil
 }
 
+const deleteProviderListedRebillsBefore = `-- name: DeleteProviderListedRebillsBefore :execrows
+DELETE FROM billing.provider_listed_rebills
+WHERE ctid IN (
+    SELECT e.ctid FROM billing.provider_listed_rebills e
+    WHERE e.merchant_id = $1::uuid AND e.listed_at < $2::timestamptz
+    ORDER BY e.listed_at
+    LIMIT $3::int
+)
+`
+
+type DeleteProviderListedRebillsBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+func (q *Queries) DeleteProviderListedRebillsBefore(ctx context.Context, arg DeleteProviderListedRebillsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteProviderListedRebillsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteReleasedParksBefore = `-- name: DeleteReleasedParksBefore :execrows
 DELETE FROM billing.parked_provider_subscriptions
 WHERE merchant_id = $1::uuid
@@ -535,6 +559,12 @@ FROM (
       WHERE ($1::uuid IS NULL OR cm.merchant_id > $1::uuid)
         AND cm.created_at < $15::timestamptz
       ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT lr.merchant_id AS mid
+       FROM billing.provider_listed_rebills lr
+      WHERE ($1::uuid IS NULL OR lr.merchant_id > $1::uuid)
+        AND lr.listed_at < $16::timestamptz
+      ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid
 LIMIT $3::int
@@ -556,6 +586,7 @@ type ListRetentionWorkMerchantsParams struct {
 	LimitWindowCutoff    time.Time
 	ReplayCutoff         time.Time
 	MessageCutoff        time.Time
+	ListedRebillCutoff   time.Time
 }
 
 // Retention sweep: due-work discovery.
@@ -579,6 +610,7 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.LimitWindowCutoff,
 		arg.ReplayCutoff,
 		arg.MessageCutoff,
+		arg.ListedRebillCutoff,
 	)
 	if err != nil {
 		return nil, err

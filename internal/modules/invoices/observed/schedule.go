@@ -369,12 +369,15 @@ func approvedReceiptCycle(schedule gen.BillingProviderSchedule, unpaid int, rece
 	if err != nil {
 		// No boundary on the accepted cadence (the schedule ended, or the
 		// announced date is not one of its billing days): the charge settles
-		// the unpaid cycle only inside that cycle's own window.
-		due, end := scheduleBoundary(first, hours, months, offset+unpaid), scheduleBoundary(first, hours, months, offset+unpaid+1)
-		if day.Before(due.Truncate(24*time.Hour)) || !day.Before(end.Truncate(24*time.Hour)) {
-			return time.Time{}, errNoCycle
+		// the unpaid cycle only inside that cycle's own window, and inside the
+		// newest settled cycle's window it is an extra capture of that one.
+		for _, cycle := range []int{offset + unpaid, offset + unpaid - 1} {
+			due, end := scheduleBoundary(first, hours, months, cycle), scheduleBoundary(first, hours, months, cycle+1)
+			if cycle >= offset && !day.Before(due.Truncate(24*time.Hour)) && day.Before(end.Truncate(24*time.Hour)) {
+				return due, nil
+			}
 		}
-		return due, nil
+		return time.Time{}, errNoCycle
 	}
 	if next < offset+1 {
 		return time.Time{}, errNoCycle

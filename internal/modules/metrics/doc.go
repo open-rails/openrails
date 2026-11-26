@@ -11,7 +11,7 @@
 //
 // A query takes measures and range (required), by, grain (auto picks day, week
 // or month from the range), filters (OR within a dimension, AND across),
-// invoice, limit and compare (previous_period or previous_year); any other key
+// order, limit and compare (previous_period or previous_year); any other key
 // is refused. range is
 // {from, to} as inclusive days in the merchant's accounting timezone or an
 // RFC 3339 half-open interval, or {last: "7d"} ending today there on the
@@ -26,7 +26,7 @@
 // Validation answers 400 metrics_query_invalid with every error at once in
 // metadata.errors, each with its code (unknown_measure, ...), param,
 // did_you_mean and the valid names for that slot, so one corrected retry
-// succeeds; a removed measure's error names its replacement. Each measure is
+// succeeds. Each measure is
 // in the business or the ops group and says which way a change is good.
 // Funnels (attempts, purchases, rebills, payments) are one measure with an
 // outcome or kind dimension and rates over its slices. nmi_history_authorizations

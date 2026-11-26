@@ -17,42 +17,8 @@ func isolate(t *testing.T) (configPath, secrets string) {
 	return filepath.Join(dir, "config.yaml"), secrets
 }
 
-// A retired setting refuses the load and names its replacement, whether a
-// key, the environment or a mounted secret file sets it.
-func TestRetiredSettingsRefuseTheLoad(t *testing.T) {
-	for _, retired := range retiredSettings {
-		want := retired.key + " / " + retired.env + " was removed: " + retired.now
-		variable := strings.Replace(retired.env, "*", "NMI_GATEWAY_URL", 1)
-		yaml := retired.key + ": x\n"
-		if variable != retired.env {
-			yaml = retired.key + ":\n  nmi_gateway_url: x\n"
-		}
-		for source, set := range map[string]func(t *testing.T, configPath, secrets string){
-			"key": func(t *testing.T, configPath, _ string) {
-				if err := os.WriteFile(configPath, []byte(yaml), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			},
-			"env": func(t *testing.T, _, _ string) { t.Setenv(variable, "x") },
-			"secret": func(t *testing.T, _, secrets string) {
-				if err := os.WriteFile(filepath.Join(secrets, variable), []byte("x"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			},
-		} {
-			t.Run(retired.key+"/"+source, func(t *testing.T) {
-				configPath, secrets := isolate(t)
-				set(t, configPath, secrets)
-				if _, err := Load(configPath); err == nil || !strings.Contains(err.Error(), want) {
-					t.Fatalf("load: %v, want %q", err, want)
-				}
-			})
-		}
-	}
-}
-
 // One database section holds the connection and the engine's schemas; a key
-// neither reads refuses the load, as does the former db section.
+// neither reads refuses the load.
 func TestOneDatabaseSection(t *testing.T) {
 	write := func(t *testing.T, yaml string) string {
 		configPath, _ := isolate(t)
@@ -71,28 +37,23 @@ func TestOneDatabaseSection(t *testing.T) {
 	if e := cfg.Server.Engine; cfg.Database.URL != "postgres://u:p@db.internal:5432/x" || e.Database.Schema != "shop" || e.Database.RiverSchema != "shop_river" {
 		t.Fatalf("connection %+v, engine %+v", cfg.Database, e.Database)
 	}
+	const unknown = "unknown configuration keys refuse boot: "
 	for yaml, want := range map[string]string{
-		"database:\n  urll: x\n":                       "unknown configuration keys refuse boot: database.urll",
-		"redis:\n  adr: x\n":                           "unknown configuration keys refuse boot: redis.adr",
-		"auth:\n  tokn: {}\n":                          "removed auth settings refuse boot: auth.tokn (AUTH_TOKN)",
-		"database:\n  sqltrace: true\n":                "unknown configuration keys refuse boot: database.sqltrace",
-		"clickhouse:\n  url: http://events.internal\n": "clickhouse.url (CLICKHOUSE_URL) must be clickhouse://",
-		"host: 127.0.0.1\n":                            "host was removed",
-		"db:\n  url: x\n":                              "db was merged into database",
-		"auth:\n  default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11\n": "auth.default_tenant_id (AUTH_DEFAULT_TENANT_ID)",
-		"auth:\n  keys:\n    allow_ephemeral_dev_keys: true\n":               "auth.keys.allow_ephemeral_dev_keys (AUTH_KEYS_ALLOW_EPHEMERAL_DEV_KEYS)",
-		"auth:\n  token:\n    issuer: https://billing.example\n":             "auth.token.issuer (AUTH_TOKEN_ISSUER): set public_url",
-		"local_sign_in: true\n":           "local_sign_in / LOCAL_SIGN_IN was removed",
-		"admin_console:\n  issuers: {}\n": "admin_console.issuers / ADMIN_CONSOLE_ISSUERS was removed",
+		"database:\n  urll: x\n":                                 unknown + "database.urll",
+		"redis:\n  adr: x\n":                                     unknown + "redis.adr",
+		"auth:\n  tokn: {}\n":                                    unknown + "auth.tokn",
+		"database:\n  sqltrace: true\n":                          unknown + "database.sqltrace",
+		"clickhouse:\n  url: http://events.internal\n":           "clickhouse.url (CLICKHOUSE_URL) must be clickhouse://",
+		"host: 127.0.0.1\n":                                      unknown + "host",
+		"db:\n  url: x\n":                                        unknown + "db",
+		"auth:\n  keys:\n    allow_ephemeral_dev_keys: true\n":   unknown + "auth.keys.allow_ephemeral_dev_keys",
+		"auth:\n  token:\n    issuer: https://billing.example\n": unknown + "auth.token",
+		"local_sign_in: true\n":                                  unknown + "local_sign_in",
+		"admin_console:\n  issuers: {}\n":                        unknown + "admin_console.issuers",
 	} {
 		if _, err := Load(write(t, yaml)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v, want %q", yaml, err, want)
 		}
-	}
-	configPath, _ := isolate(t)
-	t.Setenv("DB_URL", "postgres://u:p@db.internal:5432/x")
-	if _, err := Load(configPath); err == nil || !strings.Contains(err.Error(), "db was merged into database") {
-		t.Errorf("DB_URL: %v", err)
 	}
 }
 
@@ -136,14 +97,15 @@ func TestOnlyTheKeyPathIsAnAuthSetting(t *testing.T) {
 	if cfg.Auth.Keys.Path != "/etc/openrails/auth" {
 		t.Fatalf("AUTH_KEYS_PATH reads auth.keys.path: %+v", cfg.Auth)
 	}
-	for env, want := range map[string]string{
-		"AUTH_PASSWORD_MIN_LENGTH":              "auth.password_min_length (AUTH_PASSWORD_MIN_LENGTH)",
-		"AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS": "auth.token_allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)",
-		"AUTH_ISSUERS":                          "auth.issuers (AUTH_ISSUERS)",
+	for env, key := range map[string]string{
+		"AUTH_PASSWORD_MIN_LENGTH":              "auth.password_min_length",
+		"AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS": "auth.token_allow_private_network_jwks",
+		"AUTH_ISSUERS":                          "auth.issuers",
 	} {
 		t.Run(env, func(t *testing.T) {
 			configPath, _ := isolate(t)
 			t.Setenv(env, "true")
+			want := "unknown configuration keys refuse boot: " + key
 			if _, err := Load(configPath); err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("load: %v, want %q", err, want)
 			}

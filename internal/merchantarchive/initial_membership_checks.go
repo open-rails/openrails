@@ -46,7 +46,6 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 	var evidence struct {
 		TransactionID          string `json:"transaction_id"`
 		ProviderSubscriptionID string `json:"provider_subscription_id"`
-		Declined               bool   `json:"declined"`
 	}
 	if err := json.Unmarshal(op.ResultEvidence, &evidence); err != nil {
 		return err
@@ -71,17 +70,14 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 		if p.Terms.PaymentID == uuid.Nil {
 			return nil
 		}
-		// A refused or unsent enrollment moved no money (a decline is a payment
-		// attempt); only an older writer's decline record may carry its id.
-		payment, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: p.Terms.PaymentID})
+		// A refused or unsent enrollment moved no money: a decline is a
+		// payment attempt, never a payment.
+		_, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: p.Terms.PaymentID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
-		}
-		if evidence.Declined && declineRecord(payment) {
-			return nil
 		}
 		return errors.New("refused initial enrollment has a payment")
 	}

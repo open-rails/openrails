@@ -25,6 +25,10 @@ test("OR-HOSTED-01: only the expected origin frame and invoice can complete", as
     if (host === "127.0.0.1" || host === "localhost") await route.continue()
     else await route.abort()
   })
+  // The real payment page reads the invoice its path names.
+  const read = page.waitForResponse((response) =>
+    /^\/v1\/me\/invoices\/[^/]+$/.test(new URL(response.url()).pathname)
+  )
   await page.goto("/")
   await expect(page.locator("body")).toHaveAttribute("data-ready", "true")
   const fixture = await page.evaluate(() => window.hostedFixture)
@@ -34,6 +38,9 @@ test("OR-HOSTED-01: only the expected origin frame and invoice can complete", as
   let frame = await element!.contentFrame()
   expect(frame).not.toBeNull()
   await expect.poll(() => frame!.url()).toContain("/pay/" + fixture.invoices[0])
+  const response = await read
+  expect(new URL(response.url()).pathname).toBe("/v1/me/invoices/" + fixture.invoices[0])
+  expect(response.status()).toBe(200)
   const src = new URL((await locator.getAttribute("src")) ?? "")
   expect(src.search).toBe("")
   const params = new URLSearchParams(src.hash.split("&").slice(1).join("&"))
