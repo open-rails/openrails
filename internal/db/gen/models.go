@@ -1371,7 +1371,7 @@ type BillingNmiHistoryRead struct {
 	DueAt time.Time
 }
 
-// Financial archive restore blocks inbox publication until explicit notification ordering-state adoption. No implicit revision reset.
+// Whether a financial archive restore still blocks the merchant's inbox publication: the restore sets restore_required, and only restoring the source's notification ordering clears it. No revision is reset implicitly.
 type BillingNotificationChannelState struct {
 	MerchantID      uuid.UUID
 	RestoreRequired bool

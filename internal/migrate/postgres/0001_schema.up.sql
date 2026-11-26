@@ -1340,8 +1340,9 @@ BEGIN
     IF TG_OP='DELETE' THEN mid := OLD.merchant_id; ELSE mid := NEW.merchant_id; END IF;
     IF current_setting('openrails.catalog_batch_merchant_id',true) IS DISTINCT FROM mid::text
         AND NOT (mid::text = ANY(string_to_array(COALESCE(current_setting('openrails.catalog_revision_merchant_ids',true),''),','))) THEN
-        -- A legacy raw writer may already hold a child-row lock. Do not wait
-        -- behind a merchant-first transaction while holding that child: refuse
+        -- A writer that did not lock the merchant first (a direct import or a
+        -- module write) may already hold a child-row lock. Rather than wait
+        -- behind a merchant-first transaction while holding it, it is refused
         -- with a retryable serialization conflict instead of deadlocking.
         BEGIN
             PERFORM id FROM billing.merchants WHERE id=mid FOR NO KEY UPDATE NOWAIT;
@@ -5861,7 +5862,7 @@ CREATE TABLE billing.notification_channel_state (
     restore_required boolean NOT NULL DEFAULT false,
     PRIMARY KEY (merchant_id)
 );
-COMMENT ON TABLE billing.notification_channel_state IS 'Financial archive restore blocks inbox publication until explicit notification ordering-state adoption. No implicit revision reset.';
+COMMENT ON TABLE billing.notification_channel_state IS 'Whether a financial archive restore still blocks the merchant''s inbox publication: the restore sets restore_required, and only restoring the source''s notification ordering clears it. No revision is reset implicitly.';
 
 CREATE TABLE billing.host_outbox (
     id uuid NOT NULL DEFAULT uuidv7(),

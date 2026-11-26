@@ -92,7 +92,7 @@ findings 12 months.
 
 **Adding a measure.** Declare it in `declared` (`registry.go`) with its family, `Expr` or `Agg`, dimensions, group and direction. A new outcome of an existing fact is a dimension value with its expression in the family's `DimExprs` and values in `DimValues`, and its rate a ratio over slices, not a new count. Removing or renaming a measure adds it to `Removed` and ships a migration that drops saved widgets naming it.
 
-**Dashboard read.** `dashboard.Service.Get` reads `GetDashboardConfig` for the context's merchant. With no row it runs `GetDashboardProfile` and answers `DefaultWidgets(profile)` with the profile. Nothing is written until the merchant saves. A stored layout is decoded as saved; a row that does not decode is an error. Stored widgets are not validated again on read: the migration that retires a measure or dimension (`dashboard_retired_measures`; `decline_causes` for `category` and `first_failure_category`; `reporting_mrr` for the subscription measures, the failure rates and `status`) drops the widgets naming it, deleting a layout it leaves empty.
+**Dashboard read.** `dashboard.Service.Get` reads `GetDashboardConfig` for the context's merchant. With no row it runs `GetDashboardProfile` and answers `DefaultWidgets(profile)` with the profile. Nothing is written until the merchant saves. A stored layout is decoded as saved; a row that does not decode is an error. Stored widgets are not validated again on read: the migration that retires a measure or dimension drops the widgets naming it, deleting a layout it leaves empty.
 
 **Dashboard save.** `PUT /v1/merchant/dashboard` replaces the whole layout:
 
