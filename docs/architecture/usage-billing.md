@@ -30,10 +30,16 @@ Usage billing decides what usage costs and bills it in arrears. Usage lives in t
 [entitlements and limits](entitlements.md)). Items are numbered per lease: a resend
 answers from the sync's receipts, a changed item is `idempotency_key_reused`, a
 gap `usage_out_of_order`. A sync settles the new items it carries in order, up to a
-gap, in chunks of at most `leases.UsageChunkCustomers` customers (and 250 items), each one insert, and
+gap, in chunks of at most `leases.UsageChunkCustomers` customers (and `leases.UsageChunkItems` items), each one insert, and
 starts no chunk after the first once `leases.UsageBudget` of it has passed: `through_n`
 is the last item it settled, and the gate sends the rest again at once (OR-J24-S34,
-OR-J24-S70). A gate never reports the balance in flight: a sync refuses an
+OR-J24-S70). Each lease number settles once, in the transaction that advances
+`through_n`, which adds its item's provisional price to pending whether or not
+the store already held its event; a resend at or below `through_n` settles
+nothing again, its receipt kept or not (OR-J24-S72, OR-J24-S75). Events a sync
+inserted before it failed stay unsettled: no posting takes them
+(`unsettledUsage`), and the resend settles them, priced as if the failed sync
+never ran (OR-J24-S73, OR-J24-S74). A gate never reports the balance in flight: a sync refuses an
 `in_flight` line naming it. Intake reads and writes a
 chunk's customers together: their rows, balance accounts, posting queue rows, period
 anchors, trust levels and billing policies. While ClickHouse is out of reach a sync
@@ -113,10 +119,7 @@ usage postings above (`postRunningChargesThrough`).
 between, about four sync intervals (`limits.SyncInterval`, one second): other
 gates' new usage counts once it settles, and the balance is never reported in
 flight. Spending past zero in that window posts as owed, or is forgiven in a
-merchant's unit (OR-J24-S71). Pending usage is exact as of its intake: usage
-whose sync inserted it and then failed is posted when found, and its gate's
-resend adds its price to pending again, so pending can stay high by it until
-the next posting.
+merchant's unit (OR-J24-S71). Pending usage is exact as of its intake.
 
 **Books.** Every owed accrual is usage revenue receivable in the general ledger as it posts, and every way the units book settles owed settles the receivable: a collection by card, remittance or observed provider payment, a repayment from credit, a waiver. An uncollectible usage invoice carries an allowance for doubtful accounts while it stays uncollectible; a chargeback of a usage invoice's payment owes again what it paid, billed at once on a usage invoice whatever its minimum or usage terms (in a currency whose terms are gone, that invoice bills all its pending owed, since nothing else would), and a won dispute's cash beyond what is still owed and the chargeback's loss is the customer's credit. See [books](books.md).
 

@@ -383,11 +383,11 @@ products:
 		require.Zero(t, customerLimit(t, w.alpha, customer, "rolling").Used, "the rolling window passed")
 	})
 
-	t.Run("OR-J24-S52/a-database-with-unposted-usage-starts-without-its-store-and-opens-a-finding", func(t *testing.T) {
+	t.Run("OR-J24-S52/a-database-with-pending-usage-starts-without-its-store-and-opens-a-finding", func(t *testing.T) {
 		w := newWorld(t)
 		usageMeter(t, w.alpha, 100)
 		customer, _ := fundedCustomer(t, w)
-		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "unposted", 2))...)
+		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "pending", 2))...)
 		other := billing.CustomerID(uuid.New())
 		fund(t, w.alpha, other, "funded", 500)
 		ctx := t.Context()
@@ -404,9 +404,9 @@ products:
 		require.NoError(t, err)
 		client, err := declaredMerchant(degraded, "alpha")
 		require.NoError(t, err)
-		findings, err := client.ListFindings(ctx, billing.FindingListParams{Type: "consistency.unposted_usage"})
+		findings, err := client.ListFindings(ctx, billing.FindingListParams{Type: "consistency.pending_usage"})
 		require.NoError(t, err)
-		require.Len(t, findings.Items, 1, "the merchant's unposted usage is a finding")
+		require.Len(t, findings.Items, 1, "the merchant's pending usage is a finding")
 		_, err = client.SyncLeases(ctx, billing.SyncLeasesParams{LeaseID: newLease(), Usage: numbered(1, usageInput(other, "metered", 1))})
 		requireNoStore(t, err)
 		balance(t, client, customer, 800, 200, 1000)
@@ -416,15 +416,15 @@ products:
 		require.NoError(t, degraded.Close(context.Background()))
 
 		// A lost store: an empty one is refused, and attaching it discards the
-		// unposted usage only when told to, on the record.
+		// pending usage only when told to, on the record.
 		emptied := w.cfg
 		emptied.ClickHouse.Database = w.schema + "_replacement"
 		require.ErrorContains(t, openrailsNewErr(ctx, emptied, w.deps), "empty or different ClickHouse")
 		attach := map[string]any{"clickhouse": map[string]string{"url": "clickhouse://" + os.Getenv("OPENRAILS_CRITICAL_CLICKHOUSE_ADDR") + "/" + emptied.ClickHouse.Database}}
 		out, err := hostCLICommand(t, w, attach, "usage", "attach", "--actor", "critical", "--reason", "drill").CombinedOutput()
 		require.Error(t, err)
-		require.Contains(t, string(out), "--discard-unposted")
-		out, err = hostCLICommand(t, w, attach, "usage", "attach", "--actor", "critical", "--reason", "drill", "--discard-unposted").CombinedOutput()
+		require.Contains(t, string(out), "--discard-pending")
+		out, err = hostCLICommand(t, w, attach, "usage", "attach", "--actor", "critical", "--reason", "drill", "--discard-pending").CombinedOutput()
 		require.NoError(t, err, string(out))
 		require.Contains(t, string(out), w.alpha.MerchantID().String())
 		t.Cleanup(func() {

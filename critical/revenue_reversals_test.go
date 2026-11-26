@@ -812,7 +812,58 @@ func TestRevenueReversals(t *testing.T) {
 		require.Equal(t, "cash_returned", legs[0].Type)
 		require.EqualValues(t, 20_000_000, legs[0].Amount)
 		require.Zero(t, unappliedCash(t, w, "USD"))
-		found, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.credit.unbooked_unit_pack"})
+		found, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.credit.unbooked"})
+		require.NoError(t, err)
+		require.Len(t, found.Items, 1)
+		require.Equal(t, "credit_grant:"+lot.String(), found.Items[0].SubjectKey)
+		booksAudited(t, w)
+	})
+
+	t.Run("OR-J41-S38/an-unbooked-money-lots-refund-withdraws-its-units-and-books-its-cash-against-the-payment", func(t *testing.T) {
+		a, p := newPaymentWorld(t)
+		w := a.world
+		shop := &creditShop{a: a, p: p, customer: billing.CustomerID(uuid.MustParse(a.alice.ID))}
+		gift, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: shop.customer, Currency: "USD", Amount: 1_000_000, Source: "critical", SourceID: "gift"}})
+		require.NoError(t, err)
+
+		// A $20 lot whose payment the books received and whose price they
+		// never deferred: its units deposited, its cash not applied to it.
+		payment := shop.cardPayment(t, 20_000_000, models.MoneyMovementRail, "unbooked-usd")
+		lot := uuid.New()
+		table := booksTable(w, "credit_grants")
+		tx, err := w.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		_, err = tx.Exec(t.Context(), "ALTER TABLE "+table+" DISABLE TRIGGER credit_grants_require_books")
+		require.NoError(t, err)
+		_, err = tx.Exec(t.Context(), "INSERT INTO "+table+" (merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, starts_at, payment_id)"+
+			" SELECT merchant_id, $3, customer_id, account_id, unit, 20000000, 'purchase', 20000000, 'USD', 'pack_purchase', $5, invoker, starts_at, $4 FROM "+table+" WHERE merchant_id = $1 AND id = $2",
+			w.alpha.MerchantID().UUID(), gift[0].ID.UUID(), lot, payment, payment.String())
+		require.NoError(t, err)
+		_, err = tx.Exec(t.Context(), "ALTER TABLE "+table+" ENABLE TRIGGER credit_grants_require_books")
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit(t.Context()))
+		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+			_, err := ledger.New(q, w.alpha.MerchantID().UUID()).DepositFrom(ctx, ledger.UnitsSold, shop.customer.UUID(), "USD", 20_000_000,
+				ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: lot.String()}, lot)
+			return err
+		}))
+		balance(t, a.alpha, shop.customer, 21_000_000, 0, 21_000_000)
+
+		// Refunded whole: its units leave for units_refunded, as a booked
+		// lot's do, and its $20 leaves the payment's unapplied cash.
+		ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
+		refund, err := payments.NewPaymentService(configuredDB(t, w), w.clock).Refund(ctx, payment, "unbooked-usd-refund", 20_000_000, payments.ReversalRefund)
+		require.NoError(t, err)
+		balance(t, a.alpha, shop.customer, 1_000_000, 0, 1_000_000)
+		require.Equal(t, [2]int64{20_000_000, 20_000_000}, lotShare(t, w, refund.ID))
+		require.EqualValues(t, 20_000_000, systemBalance(t, a, "USD", ledger.UnitsRefunded))
+		legs := glFor(t, w, "payment", refund.ID.String())
+		require.Len(t, legs, 1)
+		require.Equal(t, "cash_returned", legs[0].Type)
+		require.EqualValues(t, 20_000_000, legs[0].Amount)
+		require.Zero(t, unappliedCash(t, w, "USD"))
+		found, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.credit.unbooked"})
 		require.NoError(t, err)
 		require.Len(t, found.Items, 1)
 		require.Equal(t, "credit_grant:"+lot.String(), found.Items[0].SubjectKey)

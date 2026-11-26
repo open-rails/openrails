@@ -22,11 +22,10 @@ type Class string
 
 const (
 	// Units book.
-	Held     Class = "held"     // units a customer holds
-	Owed     Class = "owed"     // units a customer owes
-	Issued   Class = "issued"   // where units come from
-	Retired  Class = "retired"  // where units go
-	Clearing Class = "clearing" // a purchased-credit refund's units in transit, and its loss
+	Held    Class = "held"    // units a customer holds
+	Owed    Class = "owed"    // units a customer owes
+	Issued  Class = "issued"  // where units come from
+	Retired Class = "retired" // where units go
 
 	// General ledger.
 	Asset         Class = "asset"
@@ -46,14 +45,11 @@ const (
 	Credit Side = "credit"
 )
 
-// Normal is the side the class's balances are normally on; "" for clearing,
-// which has none.
+// Normal is the side the class's balances are normally on.
 func (c Class) Normal() Side {
 	switch c {
 	case Owed, Issued, Asset, ContraRevenue, Expense:
 		return Debit
-	case Clearing:
-		return ""
 	}
 	return Credit
 }
@@ -72,16 +68,14 @@ type AccountType string
 
 // The units book's accounts.
 const (
-	CustomerUnits       AccountType = "customer_units"
-	CustomerOwed        AccountType = "customer_owed"
-	UnitsSold           AccountType = "units_sold"
-	UnitsGranted        AccountType = "units_granted"
-	UnitsRedeemed       AccountType = "units_redeemed"
-	UnitsExpired        AccountType = "units_expired"
-	UnitsRevoked        AccountType = "units_revoked"
-	UnitsRefunded       AccountType = "units_refunded"
-	UnitsRefundClearing AccountType = "units_refund_clearing"
-	UnitsRefundLoss     AccountType = "units_refund_loss"
+	CustomerUnits AccountType = "customer_units"
+	CustomerOwed  AccountType = "customer_owed"
+	UnitsSold     AccountType = "units_sold"
+	UnitsGranted  AccountType = "units_granted"
+	UnitsRedeemed AccountType = "units_redeemed"
+	UnitsExpired  AccountType = "units_expired"
+	UnitsRevoked  AccountType = "units_revoked"
+	UnitsRefunded AccountType = "units_refunded"
 )
 
 // The general ledger's accounts.
@@ -135,8 +129,6 @@ var chart = []Account{
 	{Type: UnitsExpired, Book: Units, Class: Retired, Scope: System},
 	{Type: UnitsRevoked, Book: Units, Class: Retired, Scope: System},
 	{Type: UnitsRefunded, Book: Units, Class: Retired, Scope: System},
-	{Type: UnitsRefundClearing, Book: Units, Class: Clearing, Scope: System},
-	{Type: UnitsRefundLoss, Book: Units, Class: Clearing, Scope: System},
 
 	{Type: CashClearing, Book: General, Class: Asset, Scope: PSP},
 	{Type: ExternalReceipts, Book: General, Class: Asset, Scope: System},

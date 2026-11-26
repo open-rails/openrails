@@ -67,16 +67,15 @@ const (
 	// lockBudget is how long a sync's statement may wait for a lock: a
 	// posting holding a customer's queue row, or a customer whose window opens.
 	lockBudget = workBudget - 500*time.Millisecond
-	// usageChunkItems is the most items one chunk of usage takes in.
-	usageChunkItems = 250
 )
 
-// A sync settles its new usage in chunks of at most UsageChunkCustomers
-// customers, each one intake, and starts no chunk after the first once
-// UsageBudget of it has passed: the rest is left for the next sync. A chunk
-// takes well under commitMargin.
+// A sync settles its new usage in chunks of at most UsageChunkItems items
+// naming at most UsageChunkCustomers customers, each one intake, and starts
+// no chunk after the first once UsageBudget of it has passed: the rest is
+// left for the next sync. A chunk takes well under commitMargin.
 const (
 	UsageBudget         = 2 * time.Second
+	UsageChunkItems     = 250
 	UsageChunkCustomers = 100
 )
 
@@ -649,11 +648,11 @@ func request(u billing.LeaseUsage, currency string) admission.AdmitRequest {
 }
 
 // chunkEnd is where the chunk of the prefix from start ends: at most
-// usageChunkItems items naming at most UsageChunkCustomers customers.
+// UsageChunkItems items naming at most UsageChunkCustomers customers.
 func (r *syncRun) chunkEnd(start int) int {
 	seen := map[billing.CustomerID]bool{}
 	i := start
-	for ; i < r.prefix.end && i-start < usageChunkItems; i++ {
+	for ; i < r.prefix.end && i-start < UsageChunkItems; i++ {
 		if c := r.p.Usage[i].CustomerID; !seen[c] {
 			if len(seen) == UsageChunkCustomers {
 				break

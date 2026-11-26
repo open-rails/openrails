@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 815,
+  "scenario_count": 820,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -881,7 +881,7 @@
     {
       "id": "OR-J24-S52",
       "journey": "J24",
-      "name": "A database with pending usage starts without its store: the merchant's usage is refused and named in a finding, balances read from PostgreSQL, and other customers and running charges bill; an empty store is refused, and usage attach discards the pending usage only with --discard-unposted, on the record"
+      "name": "A database with pending usage starts without its store: the merchant's usage is refused and named in a finding, balances read from PostgreSQL, and other customers and running charges bill; an empty store is refused, and usage attach discards the pending usage only with --discard-pending, on the record"
     },
     {
       "id": "OR-J24-S53",
@@ -3526,7 +3526,12 @@
     {
       "id": "OR-J41-S37",
       "journey": "J41",
-      "name": "A refund of a pack of a merchant's unit the books never booked withdraws its units at once, records its share, books its cash against the payment and raises books.credit.unbooked_unit_pack"
+      "name": "A refund of a pack of a merchant's unit the books never booked withdraws its units at once, records its share, books its cash against the payment and raises books.credit.unbooked"
+    },
+    {
+      "id": "OR-J41-S38",
+      "journey": "J41",
+      "name": "A refund of a money lot the books never booked withdraws its units to units_refunded at once, records its share, books its cash against the payment and raises books.credit.unbooked"
     },
     {
       "id": "OR-J40-S10",
@@ -3847,6 +3852,26 @@
       "id": "OR-J24-S71",
       "journey": "J24",
       "name": "Usage settled past the balance is pending, then posts the balance and leaves the rest owed"
+    },
+    {
+      "id": "OR-J24-S72",
+      "journey": "J24",
+      "name": "A resend after a lost reply is answered from the lease's receipts and adds nothing to pending"
+    },
+    {
+      "id": "OR-J24-S73",
+      "journey": "J24",
+      "name": "A sync that failed after inserting its first chunk leaves that usage unsettled; the resend adds each item to pending once, priced from the period's start"
+    },
+    {
+      "id": "OR-J24-S74",
+      "journey": "J24",
+      "name": "A posting before the resend leaves usage a failed sync inserted to the resend, which adds it to pending once; the next posting takes it once"
+    },
+    {
+      "id": "OR-J24-S75",
+      "journey": "J24",
+      "name": "A resend older than the lease's kept receipts is covered by its settled number and settles nothing again"
     },
     {
       "id": "OR-J40-S20",

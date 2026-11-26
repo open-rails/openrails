@@ -167,11 +167,11 @@ const (
 	DormantFindingSubject = "usage_catalog"
 )
 
-// The finding a merchant's unposted usage opens on a deployment without an
+// The finding a merchant's pending usage opens on a deployment without an
 // event store: its customers' balances wait for the store.
 const (
-	UnpostedFindingType    = "consistency.unposted_usage"
-	UnpostedFindingSubject = "event_store"
+	PendingFindingType    = "consistency.pending_usage"
+	PendingFindingSubject = "event_store"
 )
 
 // Required is the refusal of what needs the event store, on a deployment

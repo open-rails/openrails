@@ -122,16 +122,17 @@ func (s *MoneyService) PostUsage(ctx context.Context, q *gen.Queries, merchantID
 }
 
 // postUsageTx is the one choke point usage reaches the ledger through. Under
-// the customer's lock and its queue row's, it posts each period's price
-// before cut less what the period took, credits a period whose price fell
-// once its late window closed, and leaves the queue row at what is left. A
-// zero cut takes everything: no intake can be inserting while the row is
-// locked, so every usage the store holds is in what was pending and nothing
-// else is, and the pending amounts go. A cut before one already posted takes
-// that one's: usage before it is posted. Of the usage an earlier posting may
-// have read, a line is priced at no less than what posted: usage the store no
-// longer holds is never read as a price that fell, and usage ingested since
-// is priced on top.
+// the customer's lock and its queue row's, it posts each period's settled
+// usage's price before cut less what the period took, credits a period whose
+// price fell once its late window closed, and leaves the queue row at what is
+// left. Usage a sync inserted and never settled is left to the resend that
+// settles it and adds it to pending. A zero cut takes everything: no intake
+// can be settling while the row is locked, so the settled usage the store
+// holds is what was pending and nothing else is, and the pending amounts go.
+// A cut before one already posted takes that one's: usage before it is
+// posted. Of the usage an earlier posting may have read, a line is priced at
+// no less than what posted: usage the store no longer holds is never read as
+// a price that fell, and usage ingested since is priced on top.
 func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, cut time.Time, reason string) (bool, error) {
 	key := gen.GetUsagePendingParams{MerchantID: merchantID, CustomerID: customer, Currency: currency}
 	if _, err := q.GetUsagePending(ctx, key); errors.Is(err, pgx.ErrNoRows) {
@@ -170,7 +171,11 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 	// Lots live just before the cut asked for are drawn, and none past now.
 	liveAt := earlier(cut, now)
 	cut = later(cut, prior.Cut)
-	rows, err := store.PostingQuantities(ctx, billing.CustomerID(customer), currency, row.SinceAt, cut, prior)
+	unsettled, err := unsettledUsage(ctx, q, store, merchantID, customer, currency, row.SinceAt)
+	if err != nil {
+		return false, err
+	}
+	rows, err := store.PostingQuantities(ctx, billing.CustomerID(customer), currency, row.SinceAt, cut, prior, unsettled)
 	if err != nil {
 		return false, err
 	}
@@ -299,6 +304,40 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 	}
 	return moved, q.SetUsagePending(ctx, gen.SetUsagePendingParams{SinceAt: since, DueAt: later(due, since.Add(time.Microsecond)), Now: now,
 		MerchantID: merchantID, CustomerID: customer, Currency: currency})
+}
+
+// unsettledUsage is the customer's usage in a currency from one period start
+// on that the store holds and PostgreSQL never settled: a lease's items past
+// its settled number, or a lease with no row.
+func unsettledUsage(ctx context.Context, q *gen.Queries, store *eventstore.Store, merchantID, customer uuid.UUID, currency string, from time.Time) ([]eventstore.Unsettled, error) {
+	reached, err := store.UsageLeases(ctx, billing.CustomerID(customer), currency, from)
+	if err != nil || len(reached) == 0 {
+		return nil, err
+	}
+	ids := make([]uuid.UUID, 0, len(reached))
+	for id := range reached {
+		ids = append(ids, id)
+	}
+	slices.SortFunc(ids, compareUUID)
+	rows, err := q.ListLeaseSettlements(ctx, gen.ListLeaseSettlementsParams{MerchantID: merchantID, Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	settled := make(map[uuid.UUID]int64, len(rows))
+	for _, r := range rows {
+		settled[r.ID] = r.SettledThroughN
+	}
+	var out []eventstore.Unsettled
+	for _, id := range ids {
+		through, ok := settled[id]
+		switch {
+		case !ok:
+			out = append(out, eventstore.Unsettled{LeaseID: id, ThroughN: -1})
+		case reached[id] > through:
+			out = append(out, eventstore.Unsettled{LeaseID: id, ThroughN: through})
+		}
+	}
+	return out, nil
 }
 
 // earliestLater is the earliest pricing period with usage at or after a

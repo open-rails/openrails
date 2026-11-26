@@ -1967,7 +1967,7 @@
       "TestUsageStore/OR-J24-S51/every-limit-kind-reads-its-use-from-the-event-store"
     ],
     "OR-J24-S52": [
-      "TestUsageStore/OR-J24-S52/a-database-with-unposted-usage-starts-without-its-store-and-opens-a-finding"
+      "TestUsageStore/OR-J24-S52/a-database-with-pending-usage-starts-without-its-store-and-opens-a-finding"
     ],
     "OR-J24-S53": [
       "TestUsageStore/OR-J24-S53/erasure-clears-invoker-and-metadata-and-keeps-quantities-and-money"
@@ -2269,6 +2269,9 @@
     "OR-J41-S37": [
       "TestRevenueReversals/OR-J41-S37/an-unbooked-unit-packs-refund-withdraws-its-units-and-books-its-cash-against-the-payment"
     ],
+    "OR-J41-S38": [
+      "TestRevenueReversals/OR-J41-S38/an-unbooked-money-lots-refund-withdraws-its-units-and-books-its-cash-against-the-payment"
+    ],
     "OR-J04-S80": [
       "TestBillingPass/OR-J04-S80/two-passes-started-together-one-scans-the-other-exits-and-neither-holds-a-session"
     ],
@@ -2473,6 +2476,18 @@
     ],
     "OR-J24-S71": [
       "TestLeaseSyncs/OR-J24-S71/usage-past-the-balance-is-pending-and-posts-as-owed"
+    ],
+    "OR-J24-S72": [
+      "TestUsageRecovery/OR-J24-S72/a-resend-after-a-lost-reply-adds-nothing-to-pending"
+    ],
+    "OR-J24-S73": [
+      "TestUsageRecovery/OR-J24-S73/a-sync-that-failed-after-its-insert-leaves-its-usage-unsettled-and-the-resend-adds-it-once"
+    ],
+    "OR-J24-S74": [
+      "TestUsageRecovery/OR-J24-S74/a-posting-before-the-resend-leaves-unsettled-usage-to-it"
+    ],
+    "OR-J24-S75": [
+      "TestUsageRecovery/OR-J24-S75/a-resend-older-than-the-kept-receipts-settles-nothing-again"
     ],
     "OR-J40-S20": [
       "TestUsageReceivable/OR-J40-S20/usage-beyond-the-balance-is-receivable-collected-by-card-and-by-remittance/card",

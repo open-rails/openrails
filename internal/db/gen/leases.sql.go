@@ -244,6 +244,42 @@ func (q *Queries) ListLeaseInFlight(ctx context.Context, arg ListLeaseInFlightPa
 	return items, nil
 }
 
+const listLeaseSettlements = `-- name: ListLeaseSettlements :many
+SELECT id, settled_through_n FROM billing.leases
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+`
+
+type ListLeaseSettlementsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+type ListLeaseSettlementsRow struct {
+	ID              uuid.UUID
+	SettledThroughN int64
+}
+
+// How far some leases settled: a posting takes only settled usage.
+func (q *Queries) ListLeaseSettlements(ctx context.Context, arg ListLeaseSettlementsParams) ([]ListLeaseSettlementsRow, error) {
+	rows, err := q.db.Query(ctx, listLeaseSettlements, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLeaseSettlementsRow
+	for rows.Next() {
+		var i ListLeaseSettlementsRow
+		if err := rows.Scan(&i.ID, &i.SettledThroughN); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunningRatesOf = `-- name: ListRunningRatesOf :many
 SELECT customer_id, currency, SUM(rate_per_hour)::bigint AS rate_per_hour FROM billing.running_charges
 WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[]) AND stopped_at IS NULL

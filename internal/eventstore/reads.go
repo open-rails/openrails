@@ -186,10 +186,58 @@ type PostingWatermark struct {
 	Cut, Ingested time.Time
 }
 
+// Unsettled is a lease's usage that PostgreSQL never settled: its items
+// numbered past ThroughN, or all of them when ThroughN is negative (no lease
+// row). A sync that inserted them and failed left them; a resend settles them.
+type Unsettled struct {
+	LeaseID  uuid.UUID
+	ThroughN int64
+}
+
+// UsageLeases are the leases a customer's usage in a currency of the pricing
+// periods from one start on came through, each with the highest item number
+// the store holds.
+func (s *Store) UsageLeases(ctx context.Context, customer billing.CustomerID, currency string, from time.Time) (map[uuid.UUID]int64, error) {
+	mid, err := s.merchant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sql := fmt.Sprintf(`SELECT lease_id, toInt64(max(n)) FROM {database}.usage_events
+WHERE merchant_id = %s AND customer_id = %s AND currency = %s AND occurred_at >= %s AND period_starts_at >= %s
+GROUP BY lease_id`, mid, uuidLiteral(uuid.UUID(customer)), stringLiteral(currency), timeLiteral(from), timeLiteral(from))
+	out := map[uuid.UUID]int64{}
+	err = s.query(ctx, "read usage leases", sql, func(rows interface{ Scan(...any) error }) error {
+		var lease uuid.UUID
+		var n int64
+		if err := rows.Scan(&lease, &n); err != nil {
+			return err
+		}
+		out[lease] = n
+		return nil
+	})
+	return out, err
+}
+
+// settledOnly is the condition that leaves out unsettled usage.
+func settledOnly(unsettled []Unsettled) string {
+	if len(unsettled) == 0 {
+		return ""
+	}
+	terms := make([]string, 0, len(unsettled))
+	for _, u := range unsettled {
+		if u.ThroughN < 0 {
+			terms = append(terms, "lease_id = "+uuidLiteral(u.LeaseID))
+			continue
+		}
+		terms = append(terms, fmt.Sprintf("(lease_id = %s AND n > %d)", uuidLiteral(u.LeaseID), u.ThroughN))
+	}
+	return " AND NOT (" + strings.Join(terms, " OR ") + ")"
+}
+
 // PostingQuantities are a customer's deduplicated quantities in a currency of
 // the pricing periods from one start on, split at an earlier posting's
-// watermark: what a posting cut at cut takes.
-func (s *Store) PostingQuantities(ctx context.Context, customer billing.CustomerID, currency string, from, cut time.Time, prior PostingWatermark) ([]PostingQuantity, error) {
+// watermark, less its unsettled usage: what a posting cut at cut takes.
+func (s *Store) PostingQuantities(ctx context.Context, customer billing.CustomerID, currency string, from, cut time.Time, prior PostingWatermark, unsettled []Unsettled) ([]PostingQuantity, error) {
 	mid, err := s.merchant(ctx)
 	if err != nil {
 		return nil, err
@@ -204,8 +252,8 @@ func (s *Store) PostingQuantities(ctx context.Context, customer billing.Customer
        sumIf(charges.quantity, %[1]s AND NOT (%[2]s)), sumIf(charges.stated, %[1]s AND NOT (%[2]s)), toInt64(countIf(%[1]s AND NOT (%[2]s))),
        toInt64(countIf(NOT (%[1]s))), maxIf(ingested_at, %[1]s)
 FROM {database}.usage_events FINAL ARRAY JOIN charges
-WHERE merchant_id = %[3]s AND customer_id = %[4]s AND currency = %[5]s AND occurred_at >= %[6]s AND period_starts_at >= %[6]s
-GROUP BY period_starts_at, charges.meter, charges.cell, charges.print`, before, read, mid, uuidLiteral(uuid.UUID(customer)), stringLiteral(currency), timeLiteral(from))
+WHERE merchant_id = %[3]s AND customer_id = %[4]s AND currency = %[5]s AND occurred_at >= %[6]s AND period_starts_at >= %[6]s%[7]s
+GROUP BY period_starts_at, charges.meter, charges.cell, charges.print`, before, read, mid, uuidLiteral(uuid.UUID(customer)), stringLiteral(currency), timeLiteral(from), settledOnly(unsettled))
 	var out []PostingQuantity
 	err = s.query(ctx, "read usage quantities", sql, func(rows interface{ Scan(...any) error }) error {
 		var q PostingQuantity

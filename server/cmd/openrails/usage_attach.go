@@ -26,7 +26,7 @@ this database's event store, creating its tables, when the database recorded
 another: an empty or different ClickHouse that New refuses.
 
 Usage the ledger has not taken lives only in the recorded store. With any,
-attach refuses unless --discard-unposted: then each merchant's unposted
+attach refuses unless --discard-pending: then each merchant's pending
 usage is deleted and recorded as a usage_discard maintenance run, with the
 operator and reason, in the transaction that records the new store. The
 discard is one-way; restore the recorded store's backup instead where one
@@ -44,7 +44,7 @@ exists.`,
 				return printJSON(cmd.OutOrStdout(), map[string]any{"store": store.ID(), "discarded": discarded})
 			})
 		}}
-	attach.Flags().BoolVar(&discard, "discard-unposted", false, "discard usage the ledger has not taken (one-way)")
+	attach.Flags().BoolVar(&discard, "discard-pending", false, "discard usage the ledger has not taken (one-way)")
 	attach.Flags().StringVar(&actor, "actor", "", "operator recorded with the attach")
 	attach.Flags().StringVar(&reason, "reason", "", "why the recorded store is replaced")
 	cmd.AddCommand(attach)

@@ -6,7 +6,7 @@ OpenRails keeps two double-entry books in the same tables, `ledger_accounts` and
 
 - **Native units**: an amount at the currency's scale, `Units.Decimals` in `internal/currency/registry.go`: 10^6 per unit for two-decimal fiat (micros for USD), 10^4 per yen for JPY and KRW, on-chain precision for SOL and stablecoins. **Minor units** are what a card rail settles in (`MinorDecimals`); `NativeShift` is the difference.
 - **Chart** (`books.Chart`): every account type with its book, class, scope (system, customer or PSP) and sign rules. A merchant-wide general-ledger account (system or PSP scope) keeps no counters: its balance is its `ledger_type_totals` row, checked against its sign rule at commit. `ledger_accounts_type_check` and `ledger_accounts_scope_check` hold the same chart.
-- **Class**: sets an account's normal side. Units book: `held`, `owed`, `issued`, `retired`, `clearing`. General ledger: `asset`, `contra_asset`, `liability`, `revenue`, `contra_revenue`, `expense`, `equity`. Every stored balance is `credits_posted - debits_posted`.
+- **Class**: sets an account's normal side. Units book: `held`, `owed`, `issued`, `retired`. General ledger: `asset`, `contra_asset`, `liability`, `revenue`, `contra_revenue`, `expense`, `equity`. Every stored balance is `credits_posted - debits_posted`.
 - **Transfer** (`ledger_transfers`): an immutable movement of a positive amount from a debit account to a credit account in one book. `transfer_type` is a closed vocabulary per book: the units book's `ledger.AllTransferTypes`, the general ledger's `books.GeneralTransferTypes`. `usage_reversed` alone is in both.
 - **Dates**: `effective_at` is when a transfer takes effect. A units-book transfer takes effect when it posts; a general-ledger posting names its own instant. Nothing in the books stores a zone: a reader groups `ledger_daily`'s 15-minute UTC buckets into days and months of the merchant's `accounting.timezone`, passing the zone as a query parameter (every zone's offset is a whole number of quarter hours).
 - **Dimensions**: `customer_id`, `invoice_id`, `invoice_line_id`, `product_id` and `revenue_schedule_id` attribute a transfer, with no foreign keys; `credit_grant_id` names its lot.
@@ -28,7 +28,6 @@ OpenRails keeps two double-entry books in the same tables, `ledger_accounts` and
 | `units_redeemed` | `platform_revenue` | system | retired | none |
 | `units_expired`, `units_revoked` | `expired_credits`, `revoked_credits` | system | retired | none |
 | `units_refunded` | (new) | system | retired | none |
-| `units_refund_clearing`, `units_refund_loss` | `credit_refund_clearing`, `credit_refund_loss` | system | clearing | none |
 
 The books migration renamed the accounts in place; no transfer moved, and every transfer type keeps its stored name.
 
@@ -47,7 +46,7 @@ The books migration renamed the accounts in place; no transfer moved, and every 
 | Purchased credit reversed | `customer_units`, `units_expired`, `units_revoked`, `customer_owed`, `units_redeemed` → `units_refunded` | `credit_refund`, `credit_refund_funding` | `purchasedcredits.Service.ApplyReversal` |
 | Purchased credit restored | `units_refunded` → where it was taken from | `credit_refund_restore`, `credit_refund_funding` | `purchasedcredits.Service.ApplyReversal` |
 
-`deposit_bonus`, `credit_purchase_revenue`, `credit_refund_cash(_restore)` and the promotion and revenue `credit_refund_funding` legs through `units_refund_clearing` are history: a pack's bonus is part of its rate and a refund's cash is the general ledger's. Reversals of a paid lot from before the credit books still post them until the books are rebuilt.
+`deposit_bonus`, `credit_purchase_revenue` and `credit_refund_cash(_restore)` are history: a pack's bonus is part of its rate and a refund's cash is the general ledger's. Nothing posts them.
 
 Usage reaches the units book through postings (`usage_postings`, `MoneyService.postUsageTx`): once a day, before a usage invoice, and before a credit lot's expiry, revocation or refund ([usage billing](usage-billing.md)), per pricing period the price of the period's usage in the event store less what earlier postings took, at (`usage_posting`, `usage_posting:<id>`, `1`): balance first, the rest owed. A period whose volume price fell is credited back to a new lot (`usage_reversed`, `units_redeemed` → `customer_units`, `Ledger.ReverseUsage`). A payment that settles owed points at its transfer (`payments.ledger_transfer_id`).
 
@@ -289,7 +288,8 @@ Journeys J05 (money arithmetic), J22 (credits), J40 (books) and J41 (revenue rec
 - OR-J41-S34: a refund after an early end takes the forfeit first, and the end undone reinstates only what is left (`TestRevenueReversals`).
 - OR-J41-S35: a recovery naming no chargeback commits and restores the chargeback that occurred first (`TestRevenueReversals`).
 - OR-J41-S36: a provider's discount on a bill with a credit line reduces the other lines alone (`TestRevenueReversals`).
-- OR-J41-S37: a refund of an unbooked pack of a merchant's unit withdraws its units, books its cash against the payment and raises `books.credit.unbooked_unit_pack` (`TestRevenueReversals`).
+- OR-J41-S37: a refund of an unbooked pack of a merchant's unit withdraws its units, books its cash against the payment and raises `books.credit.unbooked` (`TestRevenueReversals`).
+- OR-J41-S38: a refund of an unbooked money lot does the same (`TestRevenueReversals`).
 - `TestMonthStartWhereMidnightIsSkipped`, `TestMonthStartWhereMidnightRepeats`, `TestScheduleEnds` and `TestRecognitionBoundaries` pin the boundaries (a midnight that never happens or happens twice, DST, leap years, a zone change), a schedule ended before its start, an end undone, and the allocation; `TestApplicationsStayWithinReceipts` a second application's; `TestReversalAdjustments`, `TestReversalDrawsFromItsPayment` and `TestPaymentBooksFromLegs` a reversal's.
 - OR-J31-S01, OR-J31-S02: a restore preserves the books, and a corrupt one is refused at commit (`TestBillingArchive`, `TestLedgerMaintenance`).
 - OR-J23-S05: a host transaction rollback leaves no charge (`TestHostTransactions`).

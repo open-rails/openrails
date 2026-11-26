@@ -1,6 +1,8 @@
 -- The balance is the customer's ledger account less pending usage: intake adds
 -- each item's provisional price per lease, and postings (daily, before a usage
--- invoice, before a credit lot's expiry, revocation or refund) take it.
+-- invoice, before a credit lot's expiry, revocation or refund) take it. A
+-- paid lot the general ledger never booked is reversed like any other: the
+-- units book's refund clearing accounts go.
 
 ALTER TABLE billing.usage_unposted RENAME TO usage_pending;
 ALTER TABLE billing.usage_pending RENAME CONSTRAINT usage_unposted_pkey TO usage_pending_pkey;
@@ -257,3 +259,27 @@ BEGIN
     RETURN NEW;
 END;
 $_$;
+
+-- Refund clearing held the units of reversals of lots from before the credit
+-- books; a database that posted any is rebuilt, not migrated.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM billing.ledger_accounts WHERE account_type IN ('units_refund_clearing', 'units_refund_loss')) THEN
+        RAISE EXCEPTION 'ledger_accounts holds units_refund_clearing or units_refund_loss accounts: reversals of credit lots from before the credit books are no longer kept; rebuild this database'
+            USING ERRCODE = '23514';
+    END IF;
+END;
+$$;
+ALTER TABLE billing.ledger_accounts DROP CONSTRAINT ledger_accounts_type_check;
+ALTER TABLE billing.ledger_accounts ADD CONSTRAINT ledger_accounts_type_check CHECK (
+    book = 'units' AND class = 'held' AND account_type = 'customer_units'
+    OR book = 'units' AND class = 'owed' AND account_type = 'customer_owed'
+    OR book = 'units' AND class = 'issued' AND account_type IN ('units_sold', 'units_granted')
+    OR book = 'units' AND class = 'retired' AND account_type IN ('units_redeemed', 'units_expired', 'units_revoked', 'units_refunded')
+    OR book = 'general' AND class = 'asset' AND account_type IN ('cash_clearing', 'external_receipts', 'usage_receivable')
+    OR book = 'general' AND class = 'contra_asset' AND account_type = 'allowance_doubtful'
+    OR book = 'general' AND class = 'liability' AND account_type IN ('unapplied_cash', 'deferred_revenue', 'deferred_revenue_credit', 'tax_payable')
+    OR book = 'general' AND class = 'revenue' AND account_type IN ('subscription_revenue', 'one_time_revenue', 'usage_revenue', 'breakage_revenue')
+    OR book = 'general' AND class = 'contra_revenue' AND account_type IN ('refunds', 'chargebacks', 'revenue_adjustments', 'promotional_credit')
+    OR book = 'general' AND class = 'expense' AND account_type IN ('processor_fees', 'chargeback_fees', 'bad_debt')
+    OR book = 'general' AND class = 'equity' AND account_type = 'opening_balance_equity');

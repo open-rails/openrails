@@ -505,7 +505,15 @@ func (s *MoneyService) priceItems(ctx context.Context, q *gen.Queries, b *UsageI
 		if position[g.account] == nil {
 			position[g.account] = map[cellKey]int64{}
 		}
+		// What an earlier attempt inserted is in the store's position, not
+		// yet settled: it is priced as if that attempt never ran.
 		before := position[g.account][g.key]
+		for _, m := range g.members {
+			if _, ok := b.existing[b.items[m.item].EventID]; ok {
+				before -= m.quantity
+			}
+		}
+		before = max(before, 0)
 		shares := make([]int64, len(g.members))
 		if g.card.Price.Model == catalog.ModelDynamic {
 			for j, m := range g.members {
@@ -853,10 +861,13 @@ func (b *UsageIntake) event(i int, it UsageItem, p pricedItem) *eventstore.Usage
 // posting and holds its queue rows, inserts the batch's events the store does
 // not hold and waits until they read back, adds their provisional prices to
 // the lease's pending amounts, records the card prints, opens the session and
-// first-use windows and posts what failed items charge. Should the
-// transaction not commit, a resend finds the events and redoes only this
-// side, which is idempotent. Changed names the balances the usage moved, for
-// the caller to watch (watchUsageTx, WatchUsage).
+// first-use windows and posts what failed items charge. The caller settles
+// each lease number once, in this transaction, so each item's price is
+// pending once, whether or not the store held its event. Should the
+// transaction not commit, the events stay unsettled, which no posting takes,
+// and a resend finds them and redoes only this side. Changed names the
+// balances the usage moved, for the caller to watch (watchUsageTx,
+// WatchUsage).
 func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *UsageIntake) error {
 	if b == nil {
 		return nil
