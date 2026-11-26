@@ -493,7 +493,7 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 				transaction = receipt.TransactionID()
 			}
 			evidence["subscription_id"], evidence["provider_subscription_id"], evidence["transaction_id"], evidence["status"] = p.Terms.SubscriptionID.String(), "", transaction, "success"
-			evidence["message"] = fmt.Sprintf("Now %d seats", p.Terms.Quantity)
+			evidence["message"] = fmt.Sprintf("Now %d seats", *p.Terms.Quantity)
 			if receipt.ReversalKind() != "" {
 				// The provider already reversed the charge: no seats were bought.
 				evidence["message"] = "Payment reversed by the provider; seats unchanged"

@@ -694,6 +694,9 @@ func newCardVault(b *payments.NewCardBilling) *nmi.CreateCustomerVaultData {
 
 // nmiSaleDeclineEvidence is a sale's refusal as NMI's order search shows it.
 func nmiSaleDeclineEvidence(order nmi.OrderAttempts) map[string]any {
+	if nmi.IsSaleRefusalCode(order.DeclineCode) {
+		return map[string]any{"request_refused": true, "gateway_refused": true, "response_code": order.DeclineCode, "localization_id": decline.NMILocalizationID(order.DeclineCode)}
+	}
 	return map[string]any{"declined": true, "response_code": order.DeclineCode, "localization_id": decline.NMILocalizationID(order.DeclineCode), "decline_transaction_id": order.DeclineTransactionID, "card_brand": order.DeclineCardBrand, "card_last4": order.DeclineCardLast4}
 }
 

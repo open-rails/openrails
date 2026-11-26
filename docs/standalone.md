@@ -300,7 +300,7 @@ A merchant renames at most every 72 hours, and a former name forwards and stays 
 | `rate_limits.subscribe.requests_per_minute` | `20` | a customer's subscription changes |
 | `rate_limits.webhook.requests_per_minute` | `1200` | provider callbacks |
 | `captcha.provider`, `captcha.site_key`, `captcha.secret_key` | `turnstile` | both keys set turn captcha on; `turnstile`, `recaptcha-v3` or `hcaptcha` |
-A bucket set to 0 is unlimited: a deployment whose gateway limits sets every bucket to 0. Captcha is on only with its keys. The customers' own cancellations and card removals, and staff destructive actions, have fixed limits ([abuse limits](#abuse-limits), [destructive holds](#destructive-holds)). The example file sets the shipped limits explicitly:
+A bucket set to 0 is unlimited: a deployment whose gateway limits sets every bucket to 0. Captcha is on only with its keys. Customers' own card removals and staff destructive actions have fixed limits ([abuse limits](#abuse-limits), [destructive holds](#destructive-holds)). The example file sets the shipped limits explicitly:
 
 ```yaml
 rate_limits:
@@ -792,7 +792,7 @@ openrails merchant destructive arm --merchant shop --by you --reason "reviewed f
 openrails merchant destructive disarm --all-merchants --by you --reason "incident: mass cancellation observed"
 ```
 
-A held cancel logs `convergence cancel held; the subscription keeps its access`. Every destructive act reads the control first, so a change reaches every instance at its next check. Until the merchant is armed a staff cancel of an NMI- or CCBill-owned membership is `409 provider_cancel_held`: OpenRails will not cancel locally while the provider would keep charging. A customer's own cancel is never held: the provider stops billing and the subscription ends at period end, refused only by the [customer budget](#abuse-limits).
+A held cancel logs `convergence cancel held; the subscription keeps its access`. Every destructive act reads the control first, so a change reaches every instance at its next check. Until the merchant is armed a staff cancel of an NMI- or CCBill-owned membership is `409 provider_cancel_held`: OpenRails will not cancel locally while the provider would keep charging. A customer's own cancel is never held or refused by the [customer budget](#abuse-limits): the provider stops billing and the subscription ends at period end.
 
 **Cancellation caps.** A provider read, or a billing import's cancels of subscriptions it did not create, may cancel at most `min(25, max(3, 5% of the PSP's live linked book))` subscriptions per PSP, or the whole book when it has at most 5. Over that it cancels none, halts the merchant's pass and raises `pull.cancellation.capped`; a held import cancel keeps the subscription `unverified` with access. The usual causes are a misdeclared `account_id`, a credential rotated onto a sibling sub-account, or a provider returning a short page.
 
@@ -842,7 +842,7 @@ Counting is per minute, per bucket and per client IP; a request over the limit i
 
 - **Captcha.** With captcha on, a subject reaching three times a purchase, payment or subscribe limit in a window is challenged for 15 minutes: `403 captcha_required` with `X-Captcha-Required: true` until it sends a valid `X-Captcha-Token`. Staff, console and server-to-server routes never see a captcha.
 - **Card testing.** A decline counts against the customer and the client address (IPv6: the /64). Before any provider call, a card save or payment is refused (`429 card_attempts_blocked`) when its customer or its address has 6 declines in 15 minutes (blocked for the window) or 10 in 24 hours (for the day): a customer with no declines of its own is refused from a blocked address. 100 declines in 24 hours from at least 25 customers and 25 addresses is attack mode for the merchant: with captcha on, every request to its card routes must solve one, and a single decline in the last 15 minutes, by the customer or from its address, refuses the attempt, so a customer without a recent decline is still refused from an address that has one.
-- **Customers' own cancellations and card removals** share one merchant-wide budget, enforced even with every `rate_limits` bucket at 0: per rolling day the larger of 10 customers or 1 % of customers who paid in the last 30 days, per rolling hour the larger of 5 or one per 400 paying customers. Staff and host cancellations count under the [destructive holds](#destructive-holds) instead. A refusal is 429 with the wait, changes nothing, and records a finding that alerts staff, naming the wave's cancellations, card removals and start.
+- **Customers' own card removals** have a merchant-wide budget, enforced even with every `rate_limits` bucket at 0: per rolling day the larger of 10 customers or 1 % of customers who paid in the last 30 days, per rolling hour the larger of 5 or one per 400 paying customers. Customers' own cancellations never spend this budget and are never refused by it. Staff and host cancellations count under the [destructive holds](#destructive-holds) instead. A refused card removal is 429 with the wait, changes nothing, and records a finding that alerts staff, naming the wave's card removals and start.
 - **Admin lockouts.** A person making more than 100 staff grants in a minute, counted by item (credits, access, limit adjustments, customer updates), or more than 10 off-channel changes (recorded payments, subscription changes) is locked out of them for an hour; `openrails admin-lockouts unlock <user-id>` ends one (with Redis; without it a lockout lives in the serving process).
 
 ## Provider intents
@@ -869,7 +869,13 @@ order search also allows release with an actor and reason attesting release
 without proof of nonexecution. Such sales release automatically after 24 hours
 from submission when the order search is empty. Both raise a high finding for
 later reconciliation; the terminal intent cannot accept a later receipt. It never
-resends. Webhooks are at-least-once and handlers idempotent;
+resends. NMI engine renewals (`subscription_collection`) accept an exact receipt
+or `--not-executed` when the order shows one definitive decline or is empty
+with operator attestation. A decline enters dunning; an empty-order release
+reopens the renewal invoice for the next attempt under the same obligation order,
+whose pre-submission read catches a late charge. Renewals never release
+automatically. Stripe engine renewals do not accept operator resolution.
+Webhooks are at-least-once and handlers idempotent;
 there is no local inbound queue, so a long outage is backfilled with a provider
 refresh.
 

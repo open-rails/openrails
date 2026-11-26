@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 841,
+  "scenario_count": 863,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -536,7 +536,37 @@
     {
       "id": "OR-J17-S15",
       "journey": "J17",
-      "name": "Over the merchant's customer cancellation budget, a customer's own cancel of an NMI or CCBill schedule is refused 429, queues nothing and reaches no provider, and the subscription stays live; the accepted cancels before it reach the provider"
+      "name": "Six distinct customers can cancel NMI or CCBill schedules within an hour without card-removal reservations or a wave finding; all provider stops execute on a disarmed merchant"
+    },
+    {
+      "id": "OR-J17-S16",
+      "journey": "J17",
+      "name": "An admin revoke leaves ended paid periods unrevoked without excess grant effects"
+    },
+    {
+      "id": "OR-J17-S17",
+      "journey": "J17",
+      "name": "A period-end cancel during an unknown card renewal keeps the paid period and accepted access duration without resuming or granting grace, and permits archive export"
+    },
+    {
+      "id": "OR-J17-S18",
+      "journey": "J17",
+      "name": "An immediate access revoke during an unknown card renewal, including after a period-end cancel, refunds the late charge without restoring access"
+    },
+    {
+      "id": "OR-J17-S19",
+      "journey": "J17",
+      "name": "A canceled renewal resolving declined or not executed voids its invoice without dunning"
+    },
+    {
+      "id": "OR-J17-S20",
+      "journey": "J17",
+      "name": "Engine customer and admin cancellations wait for the customer before locking the subscription and commit alongside renewal completion"
+    },
+    {
+      "id": "OR-J17-S21",
+      "journey": "J17",
+      "name": "A replacement membership of the same product or tier group refunds a canceled subscription's late renewal charge without another period or changes to the replacement"
     },
     {
       "id": "OR-J18-S01",
@@ -1137,6 +1167,11 @@
       "id": "OR-J31-S14",
       "journey": "J31",
       "name": "Open limit windows and staff adjustments move with the book: lifetime and current-window usage and adjustments survive a round trip"
+    },
+    {
+      "id": "OR-J31-S15",
+      "journey": "J31",
+      "name": "A canceled unresolved renewal retains its access revocation evidence through terminal completion and archive restore"
     },
     {
       "id": "OR-J32-S01",
@@ -2634,6 +2669,11 @@
       "name": "An upgrade in the microsecond its membership started ends the superseded period after it starts"
     },
     {
+      "id": "OR-J18-S08",
+      "journey": "J18",
+      "name": "An upgrade leaves ended paid periods unrevoked without excess grant effects"
+    },
+    {
       "id": "OR-J19-S07",
       "journey": "J19",
       "name": "A Stripe migration push keeps the subscription's seats, and a retry after a lost schedule create replays it"
@@ -3756,7 +3796,7 @@
     {
       "id": "OR-J06-S83",
       "journey": "J06",
-      "name": "Customers' own cancellations past the merchant's cap wait with the time to wait; the finding names the wave and alerts staff once; staff cancellations spend none of the cap"
+      "name": "Six distinct customers can cancel within an hour without a wave finding; card removals past the merchant cap are refused 429 and alert staff once; another customer can still cancel after that cap is exhausted"
     },
     {
       "id": "OR-J06-S84",
@@ -4206,7 +4246,80 @@
     {
       "id": "OR-J25-S44",
       "journey": "J25",
-      "name": "The balance watch's burn rate reads usage history's quarter hours once each has ended: a look inside the quarter hour sees none of it, the next look all of it, once"
+      "name": "The balance watch's burn rate reads usage history's quarter hours once each has ended: a look inside the quarter hour sees none of it, the next look all of it, once",
+      "id": "OR-J14-S08",
+      "journey": "J14",
+      "name": "NMI engine renewal gateway refusals settle through dunning"
+    },
+    {
+      "id": "OR-J14-S09",
+      "journey": "J14",
+      "name": "Duplicate and ambiguous NMI renewals stay unknown without automatic release; reported duplicate refusals permit operator-attested release"
+    },
+    {
+      "id": "OR-J14-S10",
+      "journey": "J14",
+      "name": "Operator qualifies the exact NMI renewal receipt and rejects contradictory evidence"
+    },
+    {
+      "id": "OR-J14-S11",
+      "journey": "J14",
+      "name": "Operator releases an empty NMI renewal order and the next attempt catches late money"
+    },
+    {
+      "id": "OR-J14-S12",
+      "journey": "J14",
+      "name": "Operator settles an NMI renewal from its definitive order decline"
+    },
+    {
+      "id": "OR-J14-S13",
+      "journey": "J14",
+      "name": "Stripe engine renewals reject operator receipt and nonexecution resolution"
+    },
+    {
+      "id": "OR-J14-S14",
+      "journey": "J14",
+      "name": "Stuck renewal verification grows with submission age up to two hours without consuming execution attempts"
+    },
+    {
+      "id": "OR-J14-S15",
+      "journey": "J14",
+      "name": "A renewal submitted long after admission starts verification with the handler backoff"
+    },
+    {
+      "id": "OR-J04-S90",
+      "journey": "J04",
+      "name": "A submitted renewal with an unknown answer keeps access under suspend, including a late submission, then follows payment or dunning"
+    },
+    {
+      "id": "OR-J04-S91",
+      "journey": "J04",
+      "name": "Operator release of an unanswered renewal restores bounded suspend access while rebills are held"
+    },
+    {
+      "id": "OR-J04-S92",
+      "journey": "J04",
+      "name": "Held renewals and pre-submission read failures suspend access at the renewal allowance"
+    },
+    {
+      "id": "OR-J04-S93",
+      "journey": "J04",
+      "name": "A normal successful renewal adds only its existing three grant rows and two product access rows"
+    },
+    {
+      "id": "OR-J04-S94",
+      "journey": "J04",
+      "name": "An unanswered dunning retry keeps access suspended and verifies without customer or subscription locks"
+    },
+    {
+      "id": "OR-J04-S95",
+      "journey": "J04",
+      "name": "An unresolved renewal finding survives a grace write failure"
+    },
+    {
+      "id": "OR-J04-S96",
+      "journey": "J04",
+      "name": "Keep-policy verification does not lock the membership"
     }
   ]
 }

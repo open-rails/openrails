@@ -44,13 +44,18 @@ Per rail ([provider uncertainty](../standalone.md#provider-intents) has the full
 
 - **NMI** has no idempotency key. Local refusals and dial failures before a
   connection is obtained return `nmi.ErrNotDispatched`. Lost answers and
-  non-200 responses stay ambiguous. Checkout recognizes `response=3` refusal
-  codes 300, 410, 411, 440, 441, 460 and 461 through `nmi.ErrSaleRefused`;
-  other callers keep verifying them. A charge settles only from the exact
+  non-200 responses stay ambiguous. Checkout and engine renewals recognize
+  `response=3` refusal codes 300, 410, 411, 440, 441, 460 and 461 through
+  `nmi.ErrSaleRefused`; engine renewals take the normal decline/dunning path.
+  A charge settles only from the exact
   receipt under its invoice id, which every attempt for one period shares; an
   empty search proves nothing. Checkout sales release after 24 hours with an empty
   order search, or earlier on operator attestation, raising a high finding for
-  reconciliation if money later appears. NMI is never resent
+  reconciliation if money later appears. Engine renewals accept operator resolution
+  from an exact receipt, a definitive decline, or an attested empty order; they
+  never release automatically. An empty-order release admits the next attempt
+  under the same obligation order, read before submission to catch late money.
+  An unresolved NMI submission is never resent
   (`Store.ArmLostSubmissionResend` refuses any rail but Stripe).
 - **Stripe** requests carry an `Idempotency-Key` rooted in the operation id
   (`stripeapi.SetIdempotencyKey`). A lost renewal may replay it after
