@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -69,6 +70,7 @@ func owed(t *testing.T, client *openrails.Client, customer billing.CustomerID) i
 type downConn struct {
 	driver.Conn
 	down atomic.Bool
+	slow atomic.Bool
 }
 
 var errStoreDown = errors.New("critical: ClickHouse is out of reach")
@@ -97,6 +99,9 @@ func (c *downConn) Exec(ctx context.Context, query string, args ...any) error {
 func (c *downConn) PrepareBatch(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
 	if c.down.Load() {
 		return nil, errStoreDown
+	}
+	if c.slow.Load() {
+		time.Sleep(limits.SyncTimeout + 100*time.Millisecond)
 	}
 	return c.Conn.PrepareBatch(ctx, query, opts...)
 }
@@ -167,6 +172,12 @@ func TestUsageStore(t *testing.T) {
 		balance(t, w.alpha, other, 1500, 0, 1500)
 
 		conn.down.Store(false)
+		conn.slow.Store(true)
+		_, err = w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(2, usageInput(user, "during", 2))})
+		requireUnavailable(t, err)
+		require.Equal(t, "the sync ran too long to commit; retry it", requireCode(t, err, billing.CodeServiceUnavailable).Message)
+		balance(t, w.alpha, user, 1400, 100, 1500)
+		conn.slow.Store(false)
 		out := settleUsage(t, w.alpha, lease, numbered(2, usageInput(user, "during", 2))...)
 		require.EqualValues(t, 2, out.Usage.ThroughN)
 		balance(t, w.alpha, user, 1200, 300, 1500)
