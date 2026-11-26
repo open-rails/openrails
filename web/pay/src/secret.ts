@@ -7,7 +7,7 @@ import { readPaymentFragment, type PaymentFallbacks } from "@openrails/billing-u
 const storageKey = (invoice: string) => `openrails.payment.${invoice}`
 
 export function invoiceIdFromPath(path = window.location.pathname): string | null {
-  const match = /^\/pay\/(ord_[0-9a-f-]{36})\/?$/.exec(path)
+  const match = /^\/pay\/(in_[0-9a-f-]{36})\/?$/.exec(path)
   return match ? match[1] : null
 }
 

@@ -55,7 +55,18 @@ Per rail ([provider uncertainty](../standalone.md#provider-intents) has the full
   read first; refunds are refused (`refund_unsupported`).
 - **Solana** pulls (`solana_pull`) record the signature and its blockhash's last
   valid height before sending, and are re-signed only once the chain proves the
-  pull never landed.
+  pull never landed: the finalized block height is past that last valid height
+  and a history-searching status read does not know the signature
+  (`RPCClient.NeverLanded`). A signature the chain reports at any commitment,
+  confirmed included, counts as landed.
+- **Solana subscription receipts settle at finalized.** A first payment, a plan
+  change and a renewal pull are booked, and access extended, only from a
+  transaction read at finalized commitment (`ChainReader.GetFinalizedTransaction`),
+  and a pull's revert is classified only from a finalized read. A transaction
+  that is only confirmed is landed with its settlement pending: its operation
+  waits for the verifier to read again, and is never failed, re-signed or
+  canceled for it. One-off
+  purchases read references at finalized too.
 
 Money-moving types include `nmi_sale`, `subscription_collection`,
 `manual_rebill`, `order_collection`, `stripe_tier_change`, `nmi_refund` and
@@ -291,7 +302,7 @@ Critical scenarios:
 - J15: OR-J15-S01 to S04 (`TestNMIRecovery`), S06, S07 (`TestVerificationBinding`), S08 to S21 (`TestProviderTrailing`), S30 (`TestBackgroundJobs`), S70, S72 (`TestDueWork`), S71 (`TestNMIRoster`).
 - J28: OR-J28-S01 to S05, S08 (`TestCallbackContracts`), S06, S07 (`TestWebhookAccountClasses`), S17 to S23 (`TestCCBillWebhookToken`).
 - J29: OR-J29-S01, S04 (`TestProcessRecovery`), S02, S05, S06 (`TestUnresolvedMoneyContracts`), S07, S08, S40, S41 (`TestBackgroundJobs`), S37, S70 to S73 (`TestDueWork`).
-- J37: OR-J37-S01 to S05, S63 (`TestSolanaContracts`), S07, S09, S60 to S62 (`TestSolanaPulls`), S64 to S68 (`TestSolanaPlanChanges`), S06 (`TestBackgroundJobs`), S10 (`TestFXRates`), S70 (`TestInvoiceExpiryClock`).
+- J37: OR-J37-S01 to S05, S63, S73 (`TestSolanaContracts`), S07, S09, S60 to S62, S72, S74 (`TestSolanaPulls`), S64 to S68 (`TestSolanaPlanChanges`), S06 (`TestBackgroundJobs`), S10 (`TestFXRates`), S70 (`TestInvoiceExpiryClock`).
 - Elsewhere: OR-J09-S05, S06 (lost and partial NMI sales), OR-J16-S04, OR-J20-S03, S70, OR-J26-S55, OR-J31-S03, S04 (copied book, export with open work), OR-J34-S05, OR-J04-S43.
 
 Provider fakes: `nmimock`, `stripemock`, `ccbillmock`, `solanafake`. The only package tests here are `internal/reconcile/solana_discovery_test.go` and the fake's own `openrailstest/nmimock/nmimock_test.go`.

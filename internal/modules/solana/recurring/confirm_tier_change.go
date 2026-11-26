@@ -28,7 +28,7 @@ type tierChangeTransactor interface {
 	MerchantTx(ctx context.Context, fn func(context.Context, pgx.Tx) error) error
 }
 
-// ConfirmTierChangeInput describes a confirmed on-chain tier change to mirror.
+// ConfirmTierChangeInput describes a finalized on-chain tier change to mirror.
 // The OLD on-chain identifiers are loaded from the stored solana_subscriptions
 // row; the NEW terms are the canonical server-resolved values from the new
 // price's plan config (never client-supplied).
@@ -148,7 +148,7 @@ func NewConfirmTierChangeService(logger *slog.Logger, chain solanaint.ChainReade
 }
 
 // Confirm verifies the landed transaction is this tier change and mirrors it.
-// Anything short of a successful, confirmed transaction proving the switch
+// Anything short of a successful, finalized transaction proving the switch
 // returns an error and leaves the DB untouched.
 func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierChangeInput) (*ConfirmTierChangeResult, error) {
 	if in.OldSubscriptionID == uuid.Nil {

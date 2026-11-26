@@ -80,7 +80,7 @@ func parseHeader(line []byte) (Header, error) {
 // Read verifies the complete stream, invoking callbacks while it reads. Callers
 // performing writes MUST roll back when Read returns any error, including a
 // missing footer or trailing bytes. Record callbacks receive table and row records;
-// storage-specific table invoice, row widths and values belong to the caller.
+// storage-specific table order, row widths and values belong to the caller.
 // Callbacks do not receive unrecognized fields.
 func Read(src io.Reader, header func(Header) error, record func(Record) error) (Info, error) {
 	return read(src, nil, header, record)
