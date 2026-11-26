@@ -227,14 +227,11 @@ func newSaleError(rawResponse string, output url.Values, sale bool) error {
 	}
 	if strings.TrimSpace(output.Get("response")) != "2" {
 		unknown := ambiguous(fmt.Errorf("NMI outcome requires verification (response code %d)", responseCode))
-		if duplicateRefusal(output, responseCode) {
+		if strings.TrimSpace(output.Get("response")) == "3" && duplicateRefusal(responseCode, output.Get("responsetext")) {
 			return errors.Join(ErrDuplicateTransaction, unknown)
 		}
-		if sale && strings.TrimSpace(output.Get("response")) == "3" {
-			switch responseCode {
-			case 300, 410, 411, 440, 441, 460, 461:
-				return errors.Join(ErrSaleRefused, ambiguous(rejection))
-			}
+		if sale && strings.TrimSpace(output.Get("response")) == "3" && IsSaleRefusalCode(responseCode) {
+			return errors.Join(ErrSaleRefused, ambiguous(rejection))
 		}
 		return unknown
 	}
@@ -251,9 +248,18 @@ var ErrDuplicateTransaction = errors.New("nmi: gateway refused a duplicate trans
 // Checkout may release its unique order; other callers still verify.
 var ErrSaleRefused = errors.New("nmi: gateway refused the sale without processing it")
 
-func duplicateRefusal(output url.Values, responseCode int) bool {
-	return strings.TrimSpace(output.Get("response")) == "3" && responseCode == 300 &&
-		strings.HasPrefix(strings.ToLower(strings.TrimSpace(output.Get("responsetext"))), "duplicate transaction")
+// IsSaleRefusalCode reports a gateway refusal that did not process the sale.
+func IsSaleRefusalCode(code int) bool {
+	switch code {
+	case 300, 410, 411, 440, 441, 460, 461:
+		return true
+	default:
+		return false
+	}
+}
+
+func duplicateRefusal(responseCode int, responseText string) bool {
+	return responseCode == 300 && strings.HasPrefix(strings.ToLower(strings.TrimSpace(responseText)), "duplicate transaction")
 }
 
 func parseMobiusResponseCode(output url.Values) int {

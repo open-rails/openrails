@@ -1480,6 +1480,17 @@
     "OR-J20-S06": [
       "TestRefunds/OR-J20-S06/a-won-dispute-gives-back-what-its-chargeback-took"
     ],
+    "OR-J20-S07": [
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held",
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/already-refunded",
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/gateway-refusal",
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/duplicate"
+    ],
+    "OR-J20-S08": [
+      "TestRefundRecovery/OR-J20-S08/an-unresolved-nmi-refund-is-named-and-closed-by-the-operator",
+      "TestRefundRecovery/OR-J20-S08/an-unresolved-nmi-refund-is-named-and-closed-by-the-operator/lost-response",
+      "TestRefundRecovery/OR-J20-S08/an-unresolved-nmi-refund-is-named-and-closed-by-the-operator/lost-request"
+    ],
     "OR-J04-S71": [
       "TestBillingPass/OR-J04-S71/a-failed-nmi-history-read-fails-its-own-job-and-the-next-hours-reads-it"
     ],

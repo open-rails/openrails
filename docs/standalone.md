@@ -863,6 +863,12 @@ resends. Webhooks are at-least-once and handlers idempotent;
 there is no local inbound queue, so a long outage is backfilled with a provider
 refresh.
 
+An unresolved NMI refund raises `life.refund.unresolved`. It accepts
+`--not-executed` when NMI's transaction report shows no refund of the original
+sale since the refund was requested that OpenRails has not recorded, with
+`--actor` and `--reason` attesting release. A refund NMI refused outright is
+released automatically.
+
 ## Provider refresh
 
 Request a refresh for one merchant after missed webhooks, an outage or when
