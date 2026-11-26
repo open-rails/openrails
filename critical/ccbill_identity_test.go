@@ -360,6 +360,42 @@ func TestCCBillIdentity(t *testing.T) {
 		require.Equal(t, billing.FindingStatus("requires_review"), review.Items[0].Status)
 	})
 
+	t.Run("OR-J38-S97/a-second-rebill-past-the-cycles-billing-day-is-an-extra-capture", func(t *testing.T) {
+		// One in the morning UTC, in the past: the cycle fell due the evening
+		// before, so CCBill's next renewal date is a day off the cadence.
+		a := ccbillWebhookWorld(t, func(w *world) {
+			now := w.clock.Now().UTC()
+			at := now.Truncate(24 * time.Hour).Add(time.Hour)
+			if at.After(now) {
+				at = at.Add(-24 * time.Hour)
+			}
+			w.clock.Advance(at.Sub(now))
+		})
+		price := ccbillMemberPrice(t, a.alpha)
+		alice := customerOf(a.alice)
+		now := a.clock.Now().UTC()
+		importLegacyCCBill(t, a.alpha, now)(legacyCCBillMember(alice, price, ccbillStored, "0812233445566778801", now.Add(-3*time.Hour)))
+		rebill := func(txn string, at time.Time) {
+			t.Helper()
+			status, body := ccbillNotice(t, a, "RenewalSuccess", map[string]any{"subscriptionId": ccbillProvider, "transactionId": txn,
+				"billedAmount": "10.00", "billedCurrencyCode": "840", "timestamp": at.Format(time.DateTime), "nextRenewalDate": at.Add(720 * time.Hour).Format(time.DateOnly),
+				"cardType": "VISA", "last4": "1111"})
+			require.Equal(t, http.StatusOK, status, body)
+		}
+		rebill("0912233445566778801", now.Add(-30*time.Minute))
+		renewed := onlySubscription(t, a.alpha, alice)
+		next := now.Add(720 * time.Hour)
+		require.True(t, renewed.CurrentPeriodEndsAt.Equal(time.Date(next.Year(), next.Month(), next.Day(), 23, 59, 59, 0, time.UTC)), "paid through %s", renewed.CurrentPeriodEndsAt)
+
+		rebill("0912233445566778802", now.Add(-20*time.Minute))
+		after := onlySubscription(t, a.alpha, alice)
+		require.Equal(t, billing.SubscriptionStatus("active"), after.Status)
+		require.True(t, after.CurrentPeriodEndsAt.Equal(*renewed.CurrentPeriodEndsAt), "an extra capture moves nothing: %s", after.CurrentPeriodEndsAt)
+		paid := ccbillPayments(t, a.world, alice)
+		require.EqualValues(t, 10_000_000, paid["0912233445566778801"])
+		require.EqualValues(t, 10_000_000, paid["0912233445566778802"], "the second charge is kept")
+	})
+
 	t.Run("OR-J38-S79/a-ccbill-cancel-the-pull-lands-is-restored-by-its-rebill", func(t *testing.T) {
 		// The Cancellation webhook never came; DataLink reports it, with the
 		// time paid for ending two days ago.

@@ -2611,6 +2611,9 @@
     ],
     "OR-J38-S94": [
       "TestCCBillCallbackEvidence/OR-J38-S94/a-rebill-callback-reusing-another-subscriptions-transaction-is-raised"
+    ],
+    "OR-J38-S97": [
+      "TestCCBillIdentity/OR-J38-S97/a-second-rebill-past-the-cycles-billing-day-is-an-extra-capture"
     ]
   }
 }
