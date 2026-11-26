@@ -210,7 +210,7 @@ func (e *env) runPosting(ctx context.Context) *PostingResult {
 	logf("[posting] close: %s in %.1fs %s", r.Close.State, r.Close.Seconds, r.Close.Error)
 	var after2, unposted int64
 	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_postings").Scan(&after2)
-	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_unposted WHERE due_at <= $1", clock.Now()).Scan(&unposted)
+	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_pending WHERE due_at <= $1", clock.Now()).Scan(&unposted)
 	r.CloseCustomers = after2 - before
 	r.check("month-end-close-posts-everyone", r.Close.State == "completed" && unposted == 0, "%d postings by the close, %d customers still due", r.CloseCustomers, unposted)
 	e.checkPostedOnce(ctx, r, schema, id)

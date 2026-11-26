@@ -216,9 +216,9 @@ type BillingCreditGrant struct {
 	UnitsCredited int64
 	// Units the ledger debited from the lot on its balance account: spends, repayments, expiries, revocations and refunds. Remaining is units_credited - units_debited.
 	UnitsDebited int64
-	// Units pending refunds of the lot's payment will withdraw: its share of the refunds' cash, rounded up. Available is remaining - units_reserved.
-	UnitsReserved int64
-	CreatedAt     time.Time
+	// Units pending refunds of the lot's payment withdrew from its balance (credit_refund at their own ids): off the balance at once, their money still deferred until each refund settles, or back on the balance (credit_refund_restore) when one fails. Kept by billing.credit_grant_refunding.
+	UnitsRefunding int64
+	CreatedAt      time.Time
 	// Money of the lot's price the general ledger deferred: legs crediting its customer's deferred_revenue_credit in paid_currency (in unit for a lot given back at face, a usage reversal) that name the lot. Kept by ledger_transfers_apply_lot_deferred.
 	DeferredCredited int64
 	// Money of the lot released from deferral: spent, broken, forfeited or refunded. deferred_credited - deferred_debited is what its remaining units are worth at its rate.
@@ -833,14 +833,14 @@ type BillingLease struct {
 	Receipts []byte
 }
 
-// What a gate has had in flight for one customer's limit across at least one sync: open tickets and usage a sync left unsettled. Other gates' views and admissions count it as held in the limit's current window while its lease is live. Retention: rows; each sync replaces its lease's rows, close clears them, and they go with the lease.
+// What a gate has had in flight for one customer's declared limit or spend window across at least one sync: open tickets and usage a sync left unsettled. Other gates' views and admissions count it as held in the limit's current window while its lease is live; the balance is never reported. Retention: rows; each sync replaces its lease's rows, close clears them, and they go with the lease.
 type BillingLeaseInFlight struct {
 	MerchantID uuid.UUID
 	LeaseID    uuid.UUID
 	CustomerID uuid.UUID
-	// balance, a declared limit's key, or a spend window's spend:<identity>.
+	// A declared limit's key, or a spend window's spend:<identity>.
 	LimitKey string
-	// The limit's unit: balance's currency.
+	// The limit's unit.
 	Unit      string
 	Amount    int64
 	UpdatedAt time.Time
@@ -2530,6 +2530,29 @@ type BillingUsageCardPrint struct {
 	CreatedAt  time.Time
 }
 
+// A customer whose usage in a currency the ledger has not taken in full: the posting queue. Intake holds the row FOR KEY SHARE from before it inserts its events until it commits, and writes it only to move since_at or due_at earlier; a posting locks it FOR UPDATE, takes every usage the event store holds and deletes the customer's usage_pending_amounts. A posting that leaves nothing to post deletes it.
+type BillingUsagePending struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	// The start of the oldest pricing period whose usage may not be posted in full: a posting reads from it.
+	SinceAt time.Time
+	// When the daily posting takes it: the end of the merchant's accounting-zone day its oldest pending usage occurred in, or when a period whose price fell may be credited.
+	DueAt     time.Time
+	UpdatedAt time.Time
+}
+
+// The provisional price of a customer's usage in a currency that no posting has taken, per lease that took it: the balance is the customer's ledger account less their sum. A lease's syncs serialize on the lease, so intakes never wait on each other here; a posting deletes the rows it took.
+type BillingUsagePendingAmount struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	LeaseID    uuid.UUID
+	// What the lease's settled usage costs at the provisional prices intake gave it, in the currency's native units.
+	Amount    int64
+	UpdatedAt time.Time
+}
+
 // One posting of a customer's usage in one pricing period to the ledger: the price of the period's deduplicated usage before cut_at, less what its earlier postings took. A posting draws the balance first, one credit_spend per lot, and leaves the rest owed in one owed_accrual, at (usage_posting, usage_posting:<id>, 1); a reversal credits a period whose price fell, as usage_reversed. Retention: permanent, never pruned.
 type BillingUsagePosting struct {
 	MerchantID     uuid.UUID
@@ -2538,9 +2561,9 @@ type BillingUsagePosting struct {
 	Currency       string
 	PeriodStartsAt time.Time
 	PeriodEndsAt   time.Time
-	// Usage that occurred before it is in the posting: the month's end in the merchant's accounting zone, or the balance movement the posting preceded.
+	// Usage that occurred before it is in the posting: past every usage the event store held (now plus the usage clock skew), or a credit lot's lapse.
 	CutAt time.Time
-	// close: the month-end close; movement: before a movement of the balance; reversal: a period whose price fell below what posted, once its late usage window closed.
+	// daily: once the accounting-zone day of the oldest pending usage ended (the month-end close is its last day's); billing: before a usage invoice is billed; credit: before a credit lot's expiry, revocation or refund; purge: before a merchant purge deletes the event store's usage; reversal: a period whose price fell below what posted, once its late usage window closed.
 	Reason string
 	// What the posting moved: positive for usage, negative for a reversal.
 	Amount int64
@@ -2553,18 +2576,6 @@ type BillingUsagePosting struct {
 	Forgiven int64
 	// How forgiven is shared, as the posting computed it: [{invoker, event_type, meter_key, cell, amount}], by what the period charged each before the cut, to the largest remainder; a reversal takes back from the period's shares the same way. NULL when nothing was forgiven.
 	ForgivenLines []byte
-}
-
-// A customer whose usage in a currency the ledger has not taken in full: the event store holds it, its balance reads it there, and the month-end close or the next movement of the balance posts it. Intake writes the row in the transaction that commits the usage, and a posting locks it; a posting that leaves nothing to post deletes it.
-type BillingUsageUnposted struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	// The start of the oldest pricing period whose usage may not be posted in full: a posting reads from it.
-	SinceAt time.Time
-	// When the close posts it: the end of the month its oldest unposted usage occurred in, or when a period whose price fell may be credited.
-	DueAt     time.Time
-	UpdatedAt time.Time
 }
 
 // Merchant-global customer card-delete and soft-cancel rolling-hour/day rate reservations. No actor can obtain a separate budget. customer_id is an opaque identity and deliberately has no cascading customer FK. The canonical operation/card/subscription remains authoritative after pruning. Retention: rows are deleted 24 hours after reserved_at.

@@ -182,7 +182,7 @@ func TestBalanceLooks(t *testing.T) {
 		require.False(t, runPass(t, fleet))
 		notified(t, w, customer)
 	})
-	t.Run("OR-J25-S43/a-look-at-a-balance-without-unposted-usage-needs-no-event-store", func(t *testing.T) {
+	t.Run("OR-J25-S43/a-look-at-a-balance-without-pending-usage-needs-no-event-store", func(t *testing.T) {
 		var conn *downConn
 		w := newWorld(t, lowAt600, func(w *world) {
 			conn = &downConn{Conn: w.deps.ClickHouse}

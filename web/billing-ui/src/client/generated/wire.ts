@@ -157,7 +157,7 @@ export type Balance = {
   unit: MerchantCurrency | null
   billing_mode: "arrears" | "prepaid"
   balance_amount: string
-  held_amount: string
+  pending_amount: string
   accrued_amount: string
   available_amount: string
   owed_amount: string

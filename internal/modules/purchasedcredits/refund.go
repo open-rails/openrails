@@ -18,11 +18,46 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
 
-// ValidateRefund reserves no value by itself. The caller binds this service to
-// the transaction that inserts its pending refund payment and then writes the
-// lot's reservation (credits.Lots.SyncReservation), which admission and
-// spending hold.
+// A voluntary refund of a bought lot's payment takes the lot's units off the
+// balance when it is requested (WithdrawRefund, credit_refund at the refund's
+// id), and gives them back (credit_refund_restore) when the provider refund
+// fails (ReleaseRefund). Their money stays deferred until the refund settles
+// (units_refunding), when ApplyReversal books it.
+
+// ValidateRefund checks, without writing, that a refund of additional of the
+// payment's cash finds the units it withdraws of the lot the payment bought
+// unspent: live on the lot and not owed to pending usage.
 func (s *Service) ValidateRefund(ctx context.Context, paymentID uuid.UUID, additional int64) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	if additional <= 0 {
+		return fmt.Errorf("invalid credit refund amount: %w", billing.ErrInvalid)
+	}
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		grant, err := q.GetPurchasedCreditGrant(ctx, gen.GetPurchasedCreditGrantParams{MerchantID: mid.UUID(), PaymentID: paymentID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		pending, err := q.GetPurchasedCreditPendingRefunds(ctx, gen.GetPurchasedCreditPendingRefundsParams{MerchantID: mid.UUID(), PaymentID: paymentID})
+		if err != nil {
+			return err
+		}
+		_, err = s.refundUnits(ctx, q, mid.UUID(), grant, pending, additional)
+		return err
+	})
+}
+
+// WithdrawRefund takes off the balance, in the caller's transaction, the
+// units a pending refund (reversal, of cash) withdraws from the lot the
+// payment bought, after the customer's usage and running charges posted: the
+// lot funds what came before. The refund's row is already written.
+func (s *Service) WithdrawRefund(ctx context.Context, paymentID, reversal uuid.UUID, cash int64) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -36,55 +71,132 @@ func (s *Service) ValidateRefund(ctx context.Context, paymentID uuid.UUID, addit
 		if err != nil {
 			return err
 		}
-		// What running charges accrued is spend the lots have funded: it is
-		// posted before the refundable remainder is read.
 		lots := credits.New(q, mid.UUID(), s.now)
 		if _, err := lots.SettleRunningCharges(ctx, grant.CustomerID, grant.Unit, s.now()); err != nil {
-			return err
-		}
-		balance, held, err := s.lockBalance(ctx, q, mid.UUID(), grant.CustomerID, grant.Unit)
-		if err != nil {
-			return err
-		}
-		paid, err := fundingAmount(grant)
-		if err != nil {
-			return err
-		}
-		if additional <= 0 {
-			return fmt.Errorf("invalid credit refund amount: %w", billing.ErrInvalid)
-		}
-		net, err := q.GetPurchasedCreditRefundState(ctx, gen.GetPurchasedCreditRefundStateParams{MerchantID: mid.UUID(), CreditGrantID: grant.ID})
-		if err != nil {
 			return err
 		}
 		pending, err := q.GetPurchasedCreditPendingRefunds(ctx, gen.GetPurchasedCreditPendingRefundsParams{MerchantID: mid.UUID(), PaymentID: paymentID})
 		if err != nil {
 			return err
 		}
-		open, err := openCreditCash(paid, net.Cash)
-		if err != nil {
+		units, err := s.refundUnits(ctx, q, mid.UUID(), grant, max(pending-cash, 0), cash)
+		if err != nil || units == 0 {
 			return err
-		}
-		// Pending refunds settle against the credit line first, as this one does.
-		reservedCash := min(pending, open)
-		requestedCash := min(additional, open-reservedCash)
-		if requestedCash == 0 {
-			return nil
 		}
 		lot, err := lots.Get(ctx, grant.ID)
 		if err != nil {
 			return err
 		}
-		if lot.RevokedAt != nil || (lot.ExpiresAt != nil && !lot.ExpiresAt.After(s.now())) {
-			return fmt.Errorf("credit grant is no longer refundable: %w", billing.ErrConflict)
+		if err := postUnits(ctx, ledger.New(q, mid.UUID()), lot, reversal, ledger.CustomerUnits, withdrawnTo(lot), units, ledger.CreditRefund, "credit"); err != nil {
+			return err
 		}
-		// The lot's reservation is the pending refunds' share of reservedCash.
-		requested := proportional(lot.Units, requestedCash, paid, true)
-		if requested > credits.Remaining(lot)-lot.UnitsReserved || requested > balance-held {
-			return fmt.Errorf("refund requires unused and unreserved purchased credit: %w", billing.ErrConflict)
-		}
-		return nil
+		return lots.SyncRefunding(ctx, paymentID)
 	})
+}
+
+// ReleaseRefund gives back, in the caller's transaction, the units a refund
+// that failed withdrew. Idempotent.
+func (s *Service) ReleaseRefund(ctx context.Context, paymentID, reversal uuid.UUID) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		lot, err := q.GetPurchasedCreditGrant(ctx, gen.GetPurchasedCreditGrantParams{MerchantID: mid.UUID(), PaymentID: paymentID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		state, err := q.GetPurchasedCreditReversalState(ctx, gen.GetPurchasedCreditReversalStateParams{MerchantID: mid.UUID(), CreditGrantID: lot.ID, ReversalID: reversal.String()})
+		if err != nil {
+			return err
+		}
+		if state.Withdrawn > 0 {
+			if err := postUnits(ctx, ledger.New(q, mid.UUID()), lot, reversal, withdrawnTo(lot), ledger.CustomerUnits, state.Withdrawn, ledger.CreditRefundRestore, "credit_release"); err != nil {
+				return err
+			}
+		}
+		return credits.New(q, mid.UUID(), s.now).SyncRefunding(ctx, paymentID)
+	})
+}
+
+// supersedePending gives back to the lot up to short units that the payment's
+// pending refunds withdrew, newest first, for reversal, which settled before
+// them.
+func (s *Service) supersedePending(ctx context.Context, q *gen.Queries, lot gen.BillingCreditGrant, reversal uuid.UUID, short int64) error {
+	pending, err := q.ListPendingCreditRefunds(ctx, gen.ListPendingCreditRefundsParams{MerchantID: lot.MerchantID, CreditGrantID: lot.ID})
+	if err != nil {
+		return err
+	}
+	l := ledger.New(q, lot.MerchantID)
+	for _, r := range pending {
+		if short == 0 {
+			break
+		}
+		back := min(short, r.Withdrawn)
+		if back <= 0 || r.ReversalID == reversal {
+			continue
+		}
+		if err := postUnits(ctx, l, lot, r.ReversalID, withdrawnTo(lot), ledger.CustomerUnits, back, ledger.CreditRefundRestore, "credit_superseded:"+reversal.String()); err != nil {
+			return err
+		}
+		short -= back
+	}
+	return credits.New(q, lot.MerchantID, s.now).SyncRefunding(ctx, *lot.PaymentID)
+}
+
+// withdrawnTo is where a refund's units leave the balance for: a lot from
+// before the credit books keeps them in clearing.
+func withdrawnTo(lot gen.BillingCreditGrant) ledger.AccountType {
+	if reversalPathOf(books.CreditLotOf(lot)) == reversalLegacy {
+		return ledger.UnitsRefundClearing
+	}
+	return ledger.UnitsRefunded
+}
+
+// refundUnits is what a refund of cash withdraws from the lot, under the
+// customer's lock: its share of the lot's face, cumulative with the refunds
+// before it (pending, the pending refunds' cash ahead of it), rounded down.
+// A revoked or lapsed lot is not refundable, and the units must be on the lot
+// and not owed to pending usage.
+func (s *Service) refundUnits(ctx context.Context, q *gen.Queries, mid uuid.UUID, grant gen.BillingCreditGrant, pending, cash int64) (int64, error) {
+	balance, unposted, err := s.lockBalance(ctx, q, mid, grant.CustomerID, grant.Unit)
+	if err != nil {
+		return 0, err
+	}
+	paid, err := fundingAmount(grant)
+	if err != nil {
+		return 0, err
+	}
+	net, err := q.GetPurchasedCreditRefundState(ctx, gen.GetPurchasedCreditRefundStateParams{MerchantID: mid, CreditGrantID: grant.ID})
+	if err != nil {
+		return 0, err
+	}
+	open, err := openCreditCash(paid, net.Cash)
+	if err != nil {
+		return 0, err
+	}
+	// Refunds settle against the credit line first, in the order they came.
+	before := min(pending, open)
+	requested := min(cash, open-before)
+	if requested == 0 {
+		return 0, nil
+	}
+	lot, err := credits.New(q, mid, s.now).Get(ctx, grant.ID)
+	if err != nil {
+		return 0, err
+	}
+	if lot.RevokedAt != nil || (lot.ExpiresAt != nil && !lot.ExpiresAt.After(s.now())) {
+		return 0, fmt.Errorf("credit grant is no longer refundable: %w", billing.ErrConflict)
+	}
+	units := proportional(lot.Units, net.Cash+before+requested, paid, false) - proportional(lot.Units, net.Cash+before, paid, false)
+	if units > credits.Remaining(lot) || units > balance-unposted {
+		return 0, fmt.Errorf("refund requires unused purchased credit: %w", billing.ErrConflict)
+	}
+	return units, nil
 }
 
 // ApplyReversal decides, once, a settled reversal's share of the lot its
@@ -128,8 +240,10 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		if reversal.CustomerID != g.CustomerID || reversal.Currency != paidCurrency || reversal.RefundedPaymentID == nil || *reversal.RefundedPaymentID != paymentID || reversal.Status != "succeeded" || reversal.Amount == 0 {
 			return fmt.Errorf("credit reversal contradicts completed payment")
 		}
+		// What a refund withdrew when it was requested is already off the
+		// balance.
 		committed, err := q.GetPurchasedCreditReversalState(ctx, gen.GetPurchasedCreditReversalStateParams{MerchantID: mid.UUID(), CreditGrantID: g.ID, ReversalID: reversalID.String()})
-		if err != nil || committed.Legs > 0 {
+		if err != nil {
 			return err
 		}
 		// A reversal's share is decided once, when it first settles: a later
@@ -174,13 +288,31 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			remaining := credits.Remaining(g)
 			face := g.Units
 			var faceDelta, withdrawn, retired, expired, revoked, repaid int64
+			// more is what this call withdraws beyond what the request did,
+			// excess what the request withdrew beyond the reversal's share.
+			var more, excess int64
 			retiredAccount := ledger.UnitsRevoked
 			source := "credit"
 			cashSource := "cash"
 			lossSource := "consumed_credit"
 			if !restoring {
 				faceDelta = proportional(face, net.Cash+cashDelta, paid, false) - proportional(face, net.Cash, paid, false)
-				withdrawn = min(max(remaining, 0), faceDelta)
+				kept := min(committed.Withdrawn, faceDelta)
+				excess = committed.Withdrawn - kept
+				// A settled reversal comes before pending refunds: what they
+				// withdrew goes back to the lot for it, and each takes what is
+				// left of its share when it settles.
+				if short := faceDelta - kept - max(remaining, 0); short > 0 {
+					if err := s.supersedePending(ctx, q, g, reversalID, short); err != nil {
+						return 0, err
+					}
+					if g, err = lots.Get(ctx, g.ID); err != nil {
+						return 0, err
+					}
+					remaining = credits.Remaining(g)
+				}
+				more = min(max(remaining, 0), faceDelta-kept)
+				withdrawn = kept + more
 				retiredBalance, err := q.GetPurchasedCreditRetiredBalance(ctx, gen.GetPurchasedCreditRetiredBalanceParams{MerchantID: mid.UUID(), CreditGrantID: g.ID})
 				if err != nil {
 					return 0, err
@@ -222,13 +354,29 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 						retiredAccount = ledger.UnitsExpired
 					}
 				}
+				more = withdrawn
 				source = "credit_restore:" + reversesID.String()
 				cashSource = "cash_restore:" + reversesID.String()
 				lossSource = "consumed_credit_restore:" + reversesID.String()
 			}
 			l := ledger.New(q, mid.UUID())
-			units := unitsMoved{withdrawn: withdrawn, retired: retired, expired: expired, revoked: revoked, repaid: repaid,
+			units := unitsMoved{withdrawn: more, retired: retired, expired: expired, revoked: revoked, repaid: repaid,
 				consumed: faceDelta - withdrawn - retired - expired - revoked - repaid, retiredAccount: retiredAccount}
+			if committed.Withdrawn > 0 {
+				// Its request posted at "credit"; what it settles beyond or short
+				// of that posts apart.
+				source = "credit_settled"
+				if err := postUnits(ctx, l, g, reversalID, withdrawnTo(g), ledger.CustomerUnits, excess, ledger.CreditRefundRestore, "credit_excess"); err != nil {
+					return 0, err
+				}
+			}
+			// The reversal is settled: its units are no longer refunding.
+			if err := lots.SyncRefunding(ctx, paymentID); err != nil {
+				return 0, err
+			}
+			if g, err = lots.Get(ctx, g.ID); err != nil {
+				return 0, err
+			}
 			if path == reversalLegacy {
 				// A lot from before the credit books keeps its reversals' cash in
 				// the units book until the books are rebuilt.

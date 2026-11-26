@@ -54,7 +54,7 @@ func TestUsageContracts(t *testing.T) {
 		// for.
 		fleet := startFleet(t, w)
 		nextMonth(w)
-		closeMonths(t, fleet)
+		postDays(t, fleet)
 		balance(t, w.alpha, customer, 800, 0, 800)
 		ledger, err := w.alpha.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
 		require.NoError(t, err)
@@ -63,7 +63,7 @@ func TestUsageContracts(t *testing.T) {
 		require.Len(t, deductions, 1)
 		require.EqualValues(t, -200, deductions[0].Amount)
 		require.Equal(t, []billing.UsageDeductionLine{{MeterKey: "compute", Requests: 1, Quantity: 2, Amount: 200}}, deductions[0].Usage.Lines)
-		closeMonths(t, fleet)
+		postDays(t, fleet)
 		require.Len(t, usageDeductions(t, w.alpha, customer), 1, "a posted month posts nothing again")
 	})
 

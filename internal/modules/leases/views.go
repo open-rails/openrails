@@ -248,7 +248,7 @@ func (v *viewing) build(k viewKey) (*viewBuild, error) {
 	}
 	b := &viewBuild{key: k, cap: capacity, lines: map[string]bool{}, view: billing.View{CustomerID: billing.CustomerID(k.customer),
 		Currency: catalog.Currency(k.currency), AsOf: r.now, Limits: []billing.ViewLimit{{Limit: catalog.BalanceLimit, Unit: k.currency,
-			Overrun: catalog.OverrunRequireEstimate, Capacity: capacity.Balance, Held: capacity.Held, Remaining: admission.Available(capacity),
+			Overrun: catalog.OverrunRequireEstimate, Capacity: capacity.Balance, Held: capacity.Unposted(), Remaining: admission.Available(capacity),
 			DrainPerHour: v.rates[k]}}}}
 	b.lines[catalog.BalanceLimit] = true
 	if len(v.defs) > 0 {

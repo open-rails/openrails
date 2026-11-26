@@ -28,12 +28,14 @@ usage costs is [usage billing](usage-billing.md).
   or the first use), `billing_period`, `session` (opens at the first use),
   `rolling` (60 buckets), `rate` (refills continuously), `lifetime`.
 - **`balance`**: the built-in limit per currency, prepaid balance plus credit line
-  (`catalog.BalanceLimit`), never declared. A billing policy's **spend window** is
+  (`catalog.BalanceLimit`), never declared: the ledger balance less pending
+  usage and running-charge accrual, never held for in-flight work. A billing policy's **spend window** is
   a fixed currency window kept as a limit window keyed `spend:` and a hash.
 - **Limit window**: one customer's settled units of one limit in one window
   (`limit_windows`), placed by the server clock.
-- **Lease**: a gate's (or a batch job's) usage stream and in-flight report
-  (`leases`, `lease_in_flight`), one per process. It is live for 10 seconds
+- **Lease**: a gate's (or a batch job's) usage stream and in-flight report of
+  its declared limits and spend windows (`leases`, `lease_in_flight`; never the
+  balance), one per process. It is live for 10 seconds
   after its last sync; a later sync makes it live again.
 - **View**: where one customer stands on every limit its requests may claim, as
   one sync reads it (`billing.View`); it reserves nothing.
@@ -79,15 +81,16 @@ within its usage budget ([usage billing](usage-billing.md)), replaces its in-fli
 `settled_through_n` and receipts. Once it committed, it watches the balances its
 usage moved (`MoneyService.WatchUsage`) and answers views, limit sets and pricing
 (`views.go`) in one read-only snapshot, reading every customer's money, recent
-spend and limit usage in one batch each. Every writer inserts usage into the event
-store before it commits the end of the in-flight line that held it, and readers
-take PostgreSQL before the event store, so an item counts
+spend and limit usage in one batch each; money is PostgreSQL's alone (a balance
+and its pending usage). Every writer inserts usage into the event
+store before it commits the end of the in-flight line that held it, and limit
+reads take PostgreSQL before the event store, so an item counts
 twice at worst, never not at all; the view covers every item the receipts name.
 Views read usage only through `leases.UsageReader`.
 
-**Limits.** Every opener of a window locks the customer (`LockCustomerForSpend`, `FOR NO KEY UPDATE`, so a row naming the customer is written without waiting for it); intake, which only appends usage, takes it only to open a window or charge a failure. A request is checked against `balance`, its spend windows (`spendgate.SpendClaims`), then its declared limits, each by its overrun; held is what live leases report in flight. `admission.Admitter` resolves the set a view carries and adds delinquency, the accrual-rate cap (`AccrualRateMeter`, summing the event store's `usage_minutes` and running charges' rates) and the delegated-invoker cutoff. Intake (`MoneyService.PrepareUsageTx`) counts units in their windows in full, never clamped, in the event store's `limit_usage`: the windows current when the usage was admitted (`admitted_at`), and the spend windows of the invoker attributes it reports (none when its policy cannot be resolved, such as during an FX outage); reads take a window's units there, a rolling limit's buckets and a rate limit's level from its buckets (`limits.RateLevelOf`). A lease's report counts while it is live (`limits.LeaseLiveSince`). A view request a sync cannot answer is refused alone (`refused_views`).
+**Limits.** Every opener of a window locks the customer (`LockCustomerForSpend`, `FOR NO KEY UPDATE`, so a row naming the customer is written without waiting for it); intake, which only appends usage, takes it only to open a window or charge a failure. A request is checked against `balance`, its spend windows (`spendgate.SpendClaims`), then its declared limits, each by its overrun; a declared limit's or spend window's held is what live leases report in flight, the balance's its pending usage and accrual. `admission.Admitter` resolves the set a view carries and adds delinquency, the accrual-rate cap (`AccrualRateMeter`, summing the event store's `usage_minutes` and running charges' rates) and the delegated-invoker cutoff. Intake (`MoneyService.PrepareUsageTx`) counts units in their windows in full, never clamped, in the event store's `limit_usage`: the windows current when the usage was admitted (`admitted_at`), and the spend windows of the invoker attributes it reports (none when its policy cannot be resolved, such as during an FX outage); reads take a window's units there, a rolling limit's buckets and a rate limit's level from its buckets (`limits.RateLevelOf`). A lease's report counts while it is live (`limits.LeaseLiveSince`). A view request a sync cannot answer is refused alone (`refused_views`).
 
-**The gate.** `openrails.NewGate` keeps one lease for its life and a view of each customer it serves (`gate_view.go`). A warm decision prices the request (named units by the view's counts, money at its `PriceBound`s) and takes it from every limit of its set or none, against the view less what the gate has in flight, with no I/O. Nothing is decided or held on the server: near a limit, what other gates admit before the next views may take it past its line, by at most what they admit in about four sync intervals plus one request per gate. Tickets open across a sync, and usage it does not carry, are reported in flight; what a sync carried but had no time to settle, the next carries at once. A sync answering requests that wait for their first view carries no usage unless a full batch is queued, leaving it to the next, so a first decision does not wait on the event store's insert. A view older than two syncs decides one request until a sync answers; with OpenRails unreachable a view answered when the outage began keeps deciding within the gate's share (remaining under the request's policy, less running charges since, ÷ live leases). A view with anything in flight is never dropped. An idle gate stops syncing. Captured usage goes on the next sync, stored first by `GateDeps.Outbox`.
+**The gate.** `openrails.NewGate` keeps one lease for its life and a view of each customer it serves (`gate_view.go`). A warm decision prices the request (named units by the view's counts, money at its `PriceBound`s) and takes it from every limit of its set or none, against the view less what the gate has in flight, with no I/O. Nothing is decided or held on the server: near a limit, what other gates admit before the next views may take it past its line, by at most what they admit in about four sync intervals plus one request per gate; for the balance, the views see other gates' usage once it settles, and spending past zero posts as owed. Tickets open across a sync, and usage it does not carry, are reported in flight for declared limits and spend windows; what a sync carried but had no time to settle, the next carries at once. A sync answering requests that wait for their first view carries no usage unless a full batch is queued, leaving it to the next, so a first decision does not wait on the event store's insert. A view older than two syncs decides one request until a sync answers; with OpenRails unreachable a view answered when the outage began keeps deciding within the gate's share (remaining under the request's policy, less running charges since, ÷ live leases). A view with anything in flight is never dropped. An idle gate stops syncing. Captured usage goes on the next sync, stored first by `GateDeps.Outbox`.
 
 ## Interfaces
 
@@ -186,8 +189,7 @@ No job projects or expires keys or reports, and no table caches keys: they are d
 Checks:
 - `internal/river` has no job that reads `product_access` or
   `product_entitlements` for expiry, and none but retention scans `limit_windows`
-  or `leases` across customers; a balance look reads one customer's in-flight
-  reports.
+  or `leases` across customers; a balance look reads no in-flight report.
 - OR-J27-S16: for a customer holding 10,000 of 40,000 products, exact checks start from `product_entitlements_entitlement_idx`, a prefix page touches at most 4 blocks per held product, and no read scans a table.
 - OR-J24-S34, OR-J24-S70: a sync settles what its time allows, at least a chunk, so a backlog of a thousand customers' usage settles across syncs, every item once.
 

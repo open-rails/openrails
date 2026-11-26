@@ -57,13 +57,9 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	if err != nil {
 		return 0, 0, false, err
 	}
-	available := bal.Balance - bal.HeldBalance
-	if available < 0 {
-		available = 0
-	}
-	// bal.Balance is the raw ledger balance and can include unswept lapsed-lot
-	// remainders that CreditSpend cannot draw: cap the balance leg at the
-	// spendable-lot total so a lapsed lot never fails the spend outright.
+	available := max(s.spendable(bal), 0)
+	// The ledger balance holds a lapsed lot until its expiry posts, and a
+	// spend never draws it: cap the balance leg at the live lots.
 	lots, lerr := q.ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now, LiveAt: s.lotsLiveAt(),
 	})
@@ -75,7 +71,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		spendable += lot.Available
 	}
 	// Admitted usage in a merchant's unit takes what the lots hold, whatever
-	// other holds reserve: it is never owed.
+	// else is pending: it is never owed.
 	if available > spendable || preAuthorized && IsMerchantUnit(cur) {
 		available = spendable
 	}

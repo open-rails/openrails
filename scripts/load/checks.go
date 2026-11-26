@@ -259,7 +259,7 @@ type RowStats struct {
 	LedgerTransfers  int64            `json:"ledger_transfers"`
 	ByType           map[string]int64 `json:"ledger_transfers_by_type"`
 	UsagePostings    int64            `json:"usage_postings"`
-	Unposted         int64            `json:"usage_unposted"`
+	Unposted         int64            `json:"usage_pending"`
 	UsageEvents      int64            `json:"usage_events"`
 	PerCustomerMax   int64            `json:"ledger_transfers_per_customer_max"`
 	TableBytes       map[string]int64 `json:"table_bytes"`
@@ -277,7 +277,7 @@ func (e *env) rowStats(ctx context.Context, w *WorldResult, schema string) *RowS
 	q("SELECT count(*), count(DISTINCT customer_id) FROM "+t+".ledger_transfers WHERE customer_id IS NOT NULL", &r.LedgerTransfers, &r.Customers)
 	q("SELECT coalesce(max(n), 0) FROM (SELECT count(*) n FROM "+t+".ledger_transfers WHERE customer_id IS NOT NULL GROUP BY customer_id) x", &r.PerCustomerMax)
 	q("SELECT count(*) FROM "+t+".usage_postings", &r.UsagePostings)
-	q("SELECT count(*) FROM "+t+".usage_unposted", &r.Unposted)
+	q("SELECT count(*) FROM "+t+".usage_pending", &r.Unposted)
 	if rows, err := e.pool.Query(ctx, "SELECT transfer_type, count(*) FROM "+t+".ledger_transfers GROUP BY 1"); err == nil {
 		for rows.Next() {
 			var k string

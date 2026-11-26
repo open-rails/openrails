@@ -441,13 +441,13 @@
       "TestBillingImportBounds/OR-J21-S61/a-line-whose-list-total-overflows-is-refused"
     ],
     "OR-J22-S01": [
-      "TestCredits/OR-J22-S01/usage-in-flight-then-settled-conserves-native-units"
+      "TestCredits/OR-J22-S01/usage-is-pending-at-once-and-posts-at-the-days-end"
     ],
     "OR-J22-S02": [
-      "TestCreditRevocation/OR-J22-S02/capture-and-credit-revocation-conserve-funds"
+      "TestCreditRevocation/OR-J22-S02/a-revocation-posts-settled-usage-first-and-conserves-funds"
     ],
     "OR-J22-S03": [
-      "TestCreditExpiry/OR-J22-S03/expiry-preserves-spent-value-and-what-a-live-gate-has-in-flight"
+      "TestCreditExpiry/OR-J22-S03/usage-before-a-lapse-spends-the-lot-before-it-expires"
     ],
     "OR-J22-S04": [
       "TestCreditAtomicity/OR-J22-S04/batch-conflict-rolls-back-ledger-and-events",
@@ -553,7 +553,7 @@
       "TestLeaseSyncs/OR-J24-S10/periods-and-rate-card-revisions-are-priced-apart"
     ],
     "OR-J24-S11": [
-      "TestLeaseSyncs/OR-J24-S11/a-month-posts-once-and-once-more-before-a-top-up"
+      "TestLeaseSyncs/OR-J24-S11/a-day-posts-once-and-a-top-up-posts-nothing"
     ],
     "OR-J24-S14": [
       "TestLeaseSyncs/OR-J24-S14/views-of-an-occasional-customer-reserve-nothing-and-show-what-settled"
@@ -1080,7 +1080,7 @@
       "TestPSPReconcile/OR-J38-S35/correction-adopts-an-ended-rows-cancel-facts"
     ],
     "OR-J22-S06": [
-      "TestCreditExpiry/OR-J22-S06/lapsed-credit-leaves-available-at-its-lapse-and-its-watch-expires-it"
+      "TestCreditExpiry/OR-J22-S06/a-lapsed-lot-leaves-the-balance-when-its-watch-expires-it"
     ],
     "OR-J29-S08": [
       "TestBackgroundJobs/OR-J29-S08/cleanup-alone-ages-out-unpaid-invoices-leases-and-orphan-state"
@@ -1122,7 +1122,10 @@
       "TestUsageBillingContracts/OR-J26-S53/usage-pass-queues-the-charge-without-waiting-on-the-gateway"
     ],
     "OR-J22-S50": [
-      "TestCreditExpiry/OR-J22-S50/a-view-offers-no-credit-that-lapsed-before-its-watch-looks"
+      "TestCreditExpiry/OR-J22-S50/a-lapsed-lot-counts-until-its-look-expires-it"
+    ],
+    "OR-J22-S51": [
+      "TestMixedInvoiceCreditRefunds/OR-J22-S51/a-refused-refund-gives-its-credit-back"
     ],
     "OR-J26-S54": [
       "TestUsageBillingContracts/OR-J26-S54/a-running-charge-is-billed-through-the-bill-date-before-its-daily-posting"
@@ -1403,7 +1406,7 @@
       "TestMerchantCardRemoval/OR-J12-S73/a-card-an-unverified-membership-bills-is-kept"
     ],
     "OR-J22-S07": [
-      "TestMixedInvoiceCreditRefunds/OR-J22-S07/pending-credit-line-refund-holds-the-whole-lot"
+      "TestMixedInvoiceCreditRefunds/OR-J22-S07/a-pending-credit-line-refund-takes-the-whole-lot-off-the-balance-at-once"
     ],
     "OR-J22-S08": [
       "TestMixedInvoiceCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first/full-refund",
@@ -1460,7 +1463,7 @@
       "TestRunningChargeContracts/OR-J25-S05/running-charges-count-toward-the-accrual-rate-cap"
     ],
     "OR-J25-S43": [
-      "TestBalanceLooks/OR-J25-S43/a-look-at-a-balance-without-unposted-usage-needs-no-event-store"
+      "TestBalanceLooks/OR-J25-S43/a-look-at-a-balance-without-pending-usage-needs-no-event-store"
     ],
     "OR-J29-S37": [
       "TestDueWork/OR-J29-S37/an-operation-scheduled-ahead-is-not-stuck"
@@ -1949,7 +1952,7 @@
       "TestUsageStore/OR-J24-S47/a-resend-after-a-lost-commit-inserts-nothing-twice"
     ],
     "OR-J24-S48": [
-      "TestUsageStore/OR-J24-S48/while-clickhouse-is-out-of-reach-usage-settles-nothing-and-other-money-moves"
+      "TestUsageStore/OR-J24-S48/while-clickhouse-is-out-of-reach-usage-settles-nothing-and-balances-read-and-move"
     ],
     "OR-J24-S49": [
       "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total",
@@ -1958,7 +1961,7 @@
       "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total/a-card-revision-mid-period-is-priced-card-by-card"
     ],
     "OR-J24-S50": [
-      "TestUsageStore/OR-J24-S50/late-usage-after-its-month-posted-posts-the-difference"
+      "TestUsageStore/OR-J24-S50/late-usage-after-its-day-posted-posts-the-difference"
     ],
     "OR-J24-S51": [
       "TestUsageStore/OR-J24-S51/every-limit-kind-reads-its-use-from-the-event-store"
@@ -1976,7 +1979,7 @@
       "TestUsageStore/OR-J24-S55/equal-lease-ids-and-numbers-under-two-merchants-stay-apart"
     ],
     "OR-J24-S56": [
-      "TestUsageStore/OR-J24-S56/a-month-closes-at-its-end-in-the-merchants-accounting-zone"
+      "TestUsageStore/OR-J24-S56/a-day-posts-once-it-ends-in-the-merchants-accounting-zone"
     ],
     "OR-J24-S57": [
       "TestUsageStore/OR-J24-S57/usage-history-folds-into-the-merchants-days-and-regroups-when-its-zone-changes"
@@ -2092,7 +2095,7 @@
       "TestBooks/OR-J40-S03/ledger-audit-catches-injected-counter-and-rollup-corruption"
     ],
     "OR-J40-S06": [
-      "TestBooks/OR-J40-S06/concurrent-top-ups-one-posting-unposted-usage-first-all-commit"
+      "TestBooks/OR-J40-S06/concurrent-top-ups-of-customers-with-and-without-pending-usage-all-commit"
     ],
     "OR-J40-S08": [
       "TestBooks/OR-J40-S08/a-ledger-transfer-and-an-mrr-change-in-either-order-both-commit"
@@ -2467,6 +2470,9 @@
     ],
     "OR-J24-S70": [
       "TestLeaseVersions/OR-J24-S70/a-sync-out-of-time-settles-a-prefix-and-the-next-continues-where-it-stopped"
+    ],
+    "OR-J24-S71": [
+      "TestLeaseSyncs/OR-J24-S71/usage-past-the-balance-is-pending-and-posts-as-owed"
     ],
     "OR-J40-S20": [
       "TestUsageReceivable/OR-J40-S20/usage-beyond-the-balance-is-receivable-collected-by-card-and-by-remittance/card",

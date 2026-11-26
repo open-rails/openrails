@@ -584,17 +584,17 @@ func (s *Service) postUsage(ctx context.Context, id billing.MerchantID) (*events
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		store = db.EventStoreOf(q)
-		rows, err := q.ListMerchantUsageUnposted(ctx, id.UUID())
+		rows, err := q.ListMerchantUsagePending(ctx, id.UUID())
 		if err != nil || len(rows) == 0 {
 			return err
 		}
 		usage := db.UsageLedgerOf(q)
 		if usage == nil {
-			return fmt.Errorf("%w: its unposted usage cannot post", billing.ErrEventStoreRequired)
+			return fmt.Errorf("%w: its pending usage cannot post", billing.ErrEventStoreRequired)
 		}
 		now := time.Now().UTC()
 		for _, r := range rows {
-			if _, err := usage.PostUsage(ctx, q, id.UUID(), r.CustomerID, r.Currency, now, now); err != nil {
+			if _, err := usage.PostUsage(ctx, q, id.UUID(), r.CustomerID, r.Currency, time.Time{}, now, "purge"); err != nil {
 				return fmt.Errorf("post usage of customer %s: %w", r.CustomerID, err)
 			}
 		}

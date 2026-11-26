@@ -158,7 +158,7 @@ func AttachEventStore(ctx context.Context, database *db.DB, store *eventstore.St
 		if err != nil || recorded == store.ID() {
 			return err
 		}
-		merchants, err := q.CountUsageUnpostedByMerchant(ctx)
+		merchants, err := q.CountUsagePendingByMerchant(ctx)
 		if err != nil {
 			return err
 		}
@@ -168,7 +168,7 @@ func AttachEventStore(ctx context.Context, database *db.DB, store *eventstore.St
 		}
 		now := time.Now().UTC()
 		for _, m := range merchants {
-			rows, err := q.DiscardUsageUnposted(ctx, m.MerchantID)
+			rows, err := q.DiscardUsagePending(ctx, m.MerchantID)
 			if err != nil {
 				return err
 			}
@@ -190,11 +190,11 @@ func AttachEventStore(ctx context.Context, database *db.DB, store *eventstore.St
 
 // reportUnpostedUsage opens, on a deployment without an event store, a
 // finding for each merchant whose customers have usage the ledger has not
-// taken: only the store can post it, so those customers' balances can be
-// neither read nor moved, while every other customer bills as before. An
-// attached store resolves them.
+// taken: only the store can post it, so those customers' credit lots cannot
+// expire, be revoked or refunded, and their usage cannot be billed, while
+// every other customer bills as before. An attached store resolves them.
 func (r *Runtime) reportUnpostedUsage(ctx context.Context) {
-	rows, err := r.DB.GenDirectory().CountUsageUnpostedByMerchant(ctx)
+	rows, err := r.DB.GenDirectory().CountUsagePendingByMerchant(ctx)
 	if err != nil {
 		r.Log.WarnContext(ctx, "event store: cannot read unposted usage", logx.Err(err))
 		return
@@ -202,7 +202,7 @@ func (r *Runtime) reportUnpostedUsage(ctx context.Context) {
 	for _, row := range rows {
 		mid := billing.MerchantID(row.MerchantID)
 		if r.EventStore == nil {
-			r.Log.WarnContext(ctx, "no event store (Deps.ClickHouse): usage the ledger has not taken waits for one; these customers' balances can be neither read nor moved",
+			r.Log.WarnContext(ctx, "no event store (Deps.ClickHouse): usage the ledger has not taken waits for one; these customers' credit lots cannot move and their usage cannot be billed",
 				"merchant_id", mid.String(), "customers", row.Customers)
 		}
 		err := r.DB.RunInMerchantScope(ctx, mid, "unposted usage finding", func(ctx context.Context) error {
@@ -212,8 +212,8 @@ func (r *Runtime) reportUnpostedUsage(ctx context.Context) {
 					_, err := q.ResolveConfigFinding(ctx, gen.ResolveConfigFindingParams{MerchantID: mid.UUID(), FindingType: eventstore.UnpostedFindingType, SubjectKey: eventstore.UnpostedFindingSubject})
 					return err
 				}
-				action := fmt.Sprintf("%d customers have usage the ledger has not taken, and the deployment has no event store (Deps.ClickHouse): their balances can be "+
-					"neither read nor moved, and new usage is refused (event_store_required). Attach the store, or discard the usage with openrails usage attach --discard-unposted.", row.Customers)
+				action := fmt.Sprintf("%d customers have usage the ledger has not taken, and the deployment has no event store (Deps.ClickHouse): their credit lots cannot "+
+					"expire, be revoked or refunded, their usage cannot be billed, and new usage is refused (event_store_required). Attach the store, or discard the usage with openrails usage attach --discard-unposted.", row.Customers)
 				evidence, err := json.Marshal(map[string]int64{"customers": row.Customers})
 				if err != nil {
 					return err

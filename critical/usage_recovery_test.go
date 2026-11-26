@@ -51,14 +51,14 @@ func awaitErasure(t *testing.T, events <-chan *river.Event) river.EventKind {
 
 // loseLeaseCommit is the fixture of a sync whose events reached the store
 // and whose transaction never committed: the lease settled nothing and the
-// customer has no unposted usage.
+// customer has no pending usage.
 func loseLeaseCommit(t *testing.T, w *world, lease billing.LeaseID) {
 	t.Helper()
-	leases, unposted := pgx.Identifier{w.schema, "leases"}.Sanitize(), pgx.Identifier{w.schema, "usage_unposted"}.Sanitize()
+	leases, pending := pgx.Identifier{w.schema, "leases"}.Sanitize(), pgx.Identifier{w.schema, "usage_pending"}.Sanitize()
 	_, err := w.pool.Exec(t.Context(), "UPDATE "+leases+" SET settled_through_n = 0, receipts = '[]'::jsonb WHERE merchant_id = $1 AND id = $2",
 		w.alpha.MerchantID().UUID(), lease.UUID())
 	require.NoError(t, err)
-	_, err = w.pool.Exec(t.Context(), "DELETE FROM "+unposted+" WHERE merchant_id = $1", w.alpha.MerchantID().UUID())
+	_, err = w.pool.Exec(t.Context(), "DELETE FROM "+pending+" WHERE merchant_id = $1", w.alpha.MerchantID().UUID())
 	require.NoError(t, err)
 }
 
@@ -130,7 +130,7 @@ func TestUsageRecovery(t *testing.T) {
 			balance(t, w.alpha, customer, 700, 300, 1000)
 			fleet := startFleet(t, w)
 			nextMonth(w)
-			closeMonths(t, fleet)
+			postDays(t, fleet)
 			balance(t, w.alpha, customer, 700, 0, 700)
 		})
 	})
@@ -275,26 +275,28 @@ products:
 		customer, _ := fundedCustomer(t, w)
 		lease := newLease()
 		settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "posted", 3))...)
-		w.clock.Advance(time.Minute)
-		fund(t, w.alpha, customer, "top-up", 100)
-		balance(t, w.alpha, customer, 800, 0, 800)
+		fleet := startFleet(t, w)
+		nextDay(w)
+		postDays(t, fleet)
+		balance(t, w.alpha, customer, 700, 0, 700)
 		// Fixture: the store is restored from a backup older than that usage.
 		for _, table := range []string{"usage_events", "limit_usage", "usage_quantities", "usage_minutes", "usage_history"} {
 			require.NoError(t, w.deps.ClickHouse.Exec(t.Context(), "ALTER TABLE `"+w.schema+"`."+table+" DELETE WHERE merchant_id = toUUID(?) SETTINGS mutations_sync = 2",
 				w.alpha.MerchantID().String()))
 		}
+		w.clock.Advance(time.Minute)
 		settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "after-the-restore", 2))...)
-		fleet := startFleet(t, w)
-		nextMonth(w)
-		closeMonths(t, fleet)
-		balance(t, w.alpha, customer, 600, 0, 600)
+		balance(t, w.alpha, customer, 500, 200, 700)
+		nextDay(w)
+		postDays(t, fleet)
+		balance(t, w.alpha, customer, 500, 0, 500)
 		deductions := usageDeductions(t, w.alpha, customer)
 		require.Len(t, deductions, 2)
 		require.EqualValues(t, -200, deductions[0].Amount, "the usage since the restore is charged on top of what posted")
 		// Its late window closed: nothing that posted is credited back.
 		w.clock.Advance(70 * 24 * time.Hour)
-		closeMonths(t, fleet)
-		balance(t, w.alpha, customer, 600, 0, 600)
+		postDays(t, fleet)
+		balance(t, w.alpha, customer, 500, 0, 500)
 		require.Len(t, usageDeductions(t, w.alpha, customer), 2)
 	})
 
@@ -359,7 +361,7 @@ products:
 			w, customer, _ := orphan(t)
 			fleet := startFleet(t, w)
 			nextMonth(w)
-			closeMonths(t, fleet)
+			postDays(t, fleet)
 			deductions := usageDeductions(t, w.alpha, customer)
 			require.Len(t, deductions, 1)
 			require.EqualValues(t, -500, deductions[0].Amount, "2 at 100, then 1 at 300")
@@ -371,7 +373,7 @@ products:
 			require.NoError(t, err)
 			fleet := startFleet(t, w)
 			nextMonth(w)
-			closeMonths(t, fleet)
+			postDays(t, fleet)
 			deductions := usageDeductions(t, w.alpha, customer)
 			require.Len(t, deductions, 1)
 			require.EqualValues(t, -200, deductions[0].Amount, "the usage that can be priced posts")

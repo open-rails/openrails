@@ -210,12 +210,12 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, err)
 		// A live gate has a request in flight.
 		lease := newLease()
-		syncLease(t, source.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: []billing.InFlight{{CustomerID: customer, Limit: "balance", Unit: "USD", Amount: 600}}})
+		syncLease(t, source.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: []billing.InFlight{{CustomerID: customer, Limit: "quota", Unit: "units", Amount: 600}}})
 		var partial bytes.Buffer
 		err = source.alpha.ExportBillingArchive(t.Context(), &partial)
 		require.Error(t, err)
 		require.Empty(t, partial.Bytes())
-		balance(t, source.alpha, customer, 400, 600, 1000)
+		balance(t, source.alpha, customer, 1000, 0, 1000)
 		status, raw := source.request(t, "POST", "/v1/me/invoices", source.aliceToken, saleInput(t, source, provider), map[string]string{"Idempotency-Key": "after-failed-export"})
 		require.Equal(t, 201, status, string(raw))
 		require.Len(t, provider.effects(t), 1)

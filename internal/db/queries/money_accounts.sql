@@ -13,30 +13,16 @@ WHERE merchant_id = $1 AND customer_id = $2
 ORDER BY currency;
 
 -- name: GetAdmissionCapacity :one
--- Affordability snapshot: customer_units counters, the held total (as
--- GetFinancialHeldAmount sums it), money_settings (missing = prepaid, no
--- credit line) and outstanding owed.
+-- Affordability snapshot: customer_units counters, pending usage and
+-- running-charge accrual (as GetUnpostedAmounts reads them), money_settings
+-- (missing = prepaid, no credit line) and outstanding owed.
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
-    (COALESCE((SELECT SUM(f.amount)
-              FROM billing.lease_in_flight f
-              JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
-             WHERE f.merchant_id = a.merchant_id AND f.customer_id = a.customer_id
-               AND f.limit_key = 'balance' AND f.unit = a.currency
-               AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz
-               AND (sqlc.narg(except_lease)::uuid IS NULL OR f.lease_id <> sqlc.narg(except_lease)::uuid)), 0)
-     -- What pending refunds reserve of a purchased lot, up to its units left.
-     -- Retired credit funds its refund from the retired account; an unswept
-     -- lapsed lot is entirely unavailable.
-     + COALESCE((SELECT sum(CASE WHEN g.expires_at <= sqlc.arg(as_of)::timestamptz
-         THEN g.units_credited - g.units_debited ELSE LEAST(g.units_reserved, g.units_credited - g.units_debited) END)
-       FROM billing.credit_grants g
-       WHERE g.merchant_id = a.merchant_id AND g.customer_id = a.customer_id AND g.unit = a.currency
-         AND g.units_reserved > 0 AND g.units_credited > g.units_debited), 0)
-     -- What the customer's running charges have accrued and not posted.
-     + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, sqlc.arg(as_of)::timestamptz) - rc.posted_amount, 0))
+    COALESCE((SELECT SUM(p.amount) FROM billing.usage_pending_amounts p
+              WHERE p.merchant_id = a.merchant_id AND p.customer_id = a.customer_id AND p.currency = a.currency), 0)::bigint AS pending,
+    COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, sqlc.arg(as_of)::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc
-             WHERE rc.merchant_id = a.merchant_id AND rc.customer_id = a.customer_id AND rc.currency = a.currency AND rc.stopped_at IS NULL), 0))::bigint AS held,
+             WHERE rc.merchant_id = a.merchant_id AND rc.customer_id = a.customer_id AND rc.currency = a.currency AND rc.stopped_at IS NULL), 0)::bigint AS accrued,
     -- A revoked collection agreement leaves only the balance to spend.
     CASE WHEN s.collection_revoked_at IS NULL THEN COALESCE(s.billing_mode, 'prepaid') ELSE 'prepaid' END::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
@@ -62,26 +48,15 @@ LIMIT 1;
 
 -- name: ListViewCapacities :many
 -- GetAdmissionCapacity for many customers in one currency, as gates' views
--- start from: one lease's in-flight report left out. A customer with no
--- balance account has none.
+-- start from. A customer with no balance account has none.
 SELECT
     c.id::uuid AS customer_id,
     COALESCE(a.credits_posted - a.debits_posted, 0)::bigint AS balance,
-    (COALESCE((SELECT SUM(f.amount)
-              FROM billing.lease_in_flight f
-              JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
-             WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.customer_id = c.id
-               AND f.limit_key = 'balance' AND f.unit = sqlc.arg(currency)::text
-               AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz
-               AND (sqlc.narg(except_lease)::uuid IS NULL OR f.lease_id <> sqlc.narg(except_lease)::uuid)), 0)
-     + COALESCE((SELECT sum(CASE WHEN g.expires_at <= sqlc.arg(as_of)::timestamptz
-         THEN g.units_credited - g.units_debited ELSE LEAST(g.units_reserved, g.units_credited - g.units_debited) END)
-       FROM billing.credit_grants g
-       WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.customer_id = c.id AND g.unit = sqlc.arg(currency)::text
-         AND g.units_reserved > 0 AND g.units_credited > g.units_debited), 0)
-     + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, sqlc.arg(as_of)::timestamptz) - rc.posted_amount, 0))
+    COALESCE((SELECT SUM(p.amount) FROM billing.usage_pending_amounts p
+              WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.customer_id = c.id AND p.currency = sqlc.arg(currency)::text), 0)::bigint AS pending,
+    COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, sqlc.arg(as_of)::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc
-             WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id = c.id AND rc.currency = sqlc.arg(currency)::text AND rc.stopped_at IS NULL), 0))::bigint AS held,
+             WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id = c.id AND rc.currency = sqlc.arg(currency)::text AND rc.stopped_at IS NULL), 0)::bigint AS accrued,
     CASE WHEN s.collection_revoked_at IS NULL THEN COALESCE(s.billing_mode, 'prepaid') ELSE 'prepaid' END::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     COALESCE(s.credit_limit_override, false)::boolean AS credit_limit_override,
@@ -211,28 +186,14 @@ FROM billing.money_settings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
   AND default_payment_method_id IS NOT NULL;
 
--- name: GetFinancialHeldAmount :one
--- The one financial hold total in PostgreSQL: what gates have in flight,
--- pending refunds, and what the customer's running charges have accrued and
--- not posted (accrued, also answered apart); unposted usage is the event
--- store's, added by the caller. GetAdmissionCapacity computes the same sum. A
--- posting through an instant holds the accrual as of it (accrued_as_of);
--- every other read, as of as_of.
-SELECT (h.claims + h.accrued)::bigint AS held, h.accrued::bigint AS accrued
-FROM (SELECT (COALESCE((SELECT SUM(f.amount)
-              FROM billing.lease_in_flight f
-              JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
-             WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.customer_id = sqlc.arg(customer_id)::uuid
-               AND f.limit_key = 'balance' AND f.unit = sqlc.arg(currency)::text
-               AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz), 0)
-     -- What pending refunds reserve of a purchased lot, up to its units left.
-     -- Retired credit funds its refund from the retired account; an unswept
-     -- lapsed lot is entirely unavailable.
-     + COALESCE((SELECT sum(CASE WHEN g.expires_at <= sqlc.arg(as_of)::timestamptz
-         THEN g.units_credited - g.units_debited ELSE LEAST(g.units_reserved, g.units_credited - g.units_debited) END)
-       FROM billing.credit_grants g
-       WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.customer_id = sqlc.arg(customer_id)::uuid AND g.unit = sqlc.arg(currency)::text
-         AND g.units_reserved > 0 AND g.units_credited > g.units_debited), 0)) AS claims,
-     COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, COALESCE(sqlc.narg(accrued_as_of)::timestamptz, sqlc.arg(as_of)::timestamptz)) - rc.posted_amount, 0))
+-- name: GetUnpostedAmounts :one
+-- What the ledger has not taken of a customer's balance: pending usage at its
+-- provisional prices, and what running charges accrued since their last
+-- posting. A posting through an instant reads the accrual as of it
+-- (accrued_as_of); every other read, as of as_of.
+SELECT
+    COALESCE((SELECT SUM(p.amount) FROM billing.usage_pending_amounts p
+              WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.customer_id = sqlc.arg(customer_id)::uuid AND p.currency = sqlc.arg(currency)::text), 0)::bigint AS pending,
+    COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, COALESCE(sqlc.narg(accrued_as_of)::timestamptz, sqlc.arg(as_of)::timestamptz)) - rc.posted_amount, 0))
               FROM billing.running_charges rc
-             WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id = sqlc.arg(customer_id)::uuid AND rc.currency = sqlc.arg(currency)::text AND rc.stopped_at IS NULL), 0) AS accrued) h;
+             WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id = sqlc.arg(customer_id)::uuid AND rc.currency = sqlc.arg(currency)::text AND rc.stopped_at IS NULL), 0)::bigint AS accrued;

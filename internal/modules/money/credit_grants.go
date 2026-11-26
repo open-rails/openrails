@@ -219,8 +219,8 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 			if current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
 				return ErrCreditGrantUnavailable
 			}
-			// What running charges accrued is spend the lots have funded: it is
-			// posted before the remainder is read.
+			// The customer's usage and running charges are spend the lots
+			// funded: they post before the remainder is read.
 			if err := s.settleRunningCharges(ctx, q, mid.UUID(), payer, row.Unit); err != nil {
 				return err
 			}
@@ -234,8 +234,8 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 			if err != nil {
 				return err
 			}
-			// A pending refund of the lot's payment needs it whole.
-			if lot.UnitsReserved > 0 {
+			// A refund of the lot's payment in flight settles first.
+			if lot.UnitsRefunding > 0 {
 				return ErrCreditGrantHeld
 			}
 			bal, err := s.deriveBalance(ctx, q, mid.UUID(), payer, row.Unit)
@@ -244,12 +244,6 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 			}
 			if current.RemainingAmount > bal.Balance {
 				return ErrCreditGrantUnavailable
-			}
-			if bal.HeldBalance < 0 {
-				return fmt.Errorf("revoke credit grant: held balance %d is negative", bal.HeldBalance)
-			}
-			if current.RemainingAmount > satSub(bal.Balance, bal.HeldBalance) {
-				return ErrCreditGrantHeld
 			}
 			changed = true
 			if _, err := s.creditLots(q, mid.UUID()).Revoke(ctx, grantID, reason, actor, time.Time{}); err != nil {

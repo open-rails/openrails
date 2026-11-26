@@ -18,9 +18,8 @@ import (
 // Spend consumes amount from the customer's live lots, soonest expiry first:
 // one credit_spend per lot drawn, each at the caller's coordinate (its
 // idempotency key) and naming its lot, and its money recognised as usage
-// revenue at the lot's rate. A lot gives what pending refunds do not
-// reserve. Nothing is applied unless the lots cover amount; compose inside a
-// transaction.
+// revenue at the lot's rate. Nothing is applied unless the lots cover amount;
+// compose inside a transaction.
 func (l *Lots) Spend(ctx context.Context, customer uuid.UUID, unit string, amount int64, invoker, resource string, coord ledger.Coord) (applied bool, err error) {
 	return l.SpendInto(ctx, customer, unit, amount, invoker, resource, coord, nil)
 }
@@ -104,30 +103,41 @@ var PostRunningCharges func(ctx context.Context, q *gen.Queries, merchant, custo
 
 // SettleRunningCharges posts the customer's usage before an instant, then
 // what its running charges accrued through it, before a lot is expired,
-// revoked or refunded at it: the lot funds what accrued while it lived.
+// revoked or refunded at it: the lot funds what accrued while it lived. An
+// instant not before now posts all the usage, after expiring the lots that
+// lapsed by now, each once what came before its lapse posted.
 func (l *Lots) SettleRunningCharges(ctx context.Context, customer uuid.UUID, unit string, through time.Time) (bool, error) {
-	// Usage first: the running charges then post with none of it unposted
-	// before through, so usage after it holds back nothing they may draw.
-	accrued, err := l.settleUsage(ctx, customer, unit, &through)
-	if err != nil || PostRunningCharges == nil {
-		return accrued, err
+	if !through.Before(l.now()) {
+		if _, err := l.ExpireLapsedBy(ctx, customer, unit, l.now()); err != nil {
+			return false, err
+		}
 	}
-	posted, err := PostRunningCharges(ctx, l.q, l.merchant, customer, unit, through, l.now())
-	return posted || accrued, err
+	return l.settleThrough(ctx, customer, unit, through)
 }
 
-// settleUsage posts the customer's usage that occurred before liveAt (now
-// when nil), drawing the lots live just before it: the usage ledger bound to
-// the transaction posts it.
-func (l *Lots) settleUsage(ctx context.Context, customer uuid.UUID, unit string, liveAt *time.Time) (bool, error) {
-	cut := l.now()
-	if liveAt != nil && liveAt.Before(cut) {
-		cut = *liveAt
+// settleThrough posts the customer's usage before through, then its running
+// charges through it.
+func (l *Lots) settleThrough(ctx context.Context, customer uuid.UUID, unit string, through time.Time) (bool, error) {
+	// Usage first: it came before what the running charges post.
+	posted, err := l.settleUsage(ctx, customer, unit, through)
+	if err != nil || PostRunningCharges == nil {
+		return posted, err
+	}
+	charged, err := PostRunningCharges(ctx, l.q, l.merchant, customer, unit, through, l.now())
+	return posted || charged, err
+}
+
+// settleUsage posts the customer's usage that occurred before cut, drawing
+// the lots live just before it; a cut not before now posts all of it. The
+// usage ledger bound to the transaction posts it.
+func (l *Lots) settleUsage(ctx context.Context, customer uuid.UUID, unit string, cut time.Time) (bool, error) {
+	if !cut.Before(l.now()) {
+		cut = time.Time{}
 	}
 	if usage := db.UsageLedgerOf(l.q); usage != nil {
-		return usage.PostUsage(ctx, l.q, l.merchant, customer, unit, cut, l.now())
+		return usage.PostUsage(ctx, l.q, l.merchant, customer, unit, cut, l.now(), "credit")
 	}
-	_, err := l.q.GetUsageUnposted(ctx, gen.GetUsageUnpostedParams{MerchantID: l.merchant, CustomerID: customer, Currency: unit})
+	_, err := l.q.GetUsagePending(ctx, gen.GetUsagePendingParams{MerchantID: l.merchant, CustomerID: customer, Currency: unit})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -146,8 +156,8 @@ func (l *Lots) ExpireLapsed(ctx context.Context, customer uuid.UUID, unit string
 }
 
 // ExpireLapsedBy is ExpireLapsed for the lots that lapsed by an instant. Each
-// lot first funds what the customer's running charges accrued until it
-// lapsed.
+// lot first funds the customer's usage and what its running charges accrued
+// until it lapsed; then the usage since posts from the lots left.
 func (l *Lots) ExpireLapsedBy(ctx context.Context, customer uuid.UUID, unit string, by time.Time) (int64, error) {
 	if err := l.LockCustomer(ctx, customer); err != nil {
 		return 0, err
@@ -168,7 +178,7 @@ func (l *Lots) ExpireLapsedBy(ctx context.Context, customer uuid.UUID, unit stri
 	}
 	var expired int64
 	for _, lot := range lapsed {
-		if _, err := l.SettleRunningCharges(ctx, customer, unit, lot.ExpiresAt); err != nil {
+		if _, err := l.settleThrough(ctx, customer, unit, lot.ExpiresAt); err != nil {
 			return expired, fmt.Errorf("credits: settle running charges at lot %s: %w", lot.ID, err)
 		}
 		// What settled at an earlier lot's lapse may have drawn this one.
@@ -193,6 +203,11 @@ func (l *Lots) ExpireLapsedBy(ctx context.Context, customer uuid.UUID, unit stri
 			return expired, err
 		}
 		expired += remaining
+	}
+	if len(lapsed) > 0 {
+		if _, err := l.settleUsage(ctx, customer, unit, time.Time{}); err != nil {
+			return expired, fmt.Errorf("credits: post usage after the expiries: %w", err)
+		}
 	}
 	return expired, nil
 }

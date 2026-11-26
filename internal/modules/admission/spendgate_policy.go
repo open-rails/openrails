@@ -112,7 +112,7 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 // payerCapacity is the affordability snapshot the spendgate is evaluated
 // against: spendable balance (ledger customer_units counters, O(1)) plus the
 // arrears credit line still available, used as the gate's negative floor.
-// In-flight request reservations are already included in capacity.Held.
+// Pending usage and running-charge accrual are deducted from the balance.
 //
 // The bound policy's KIND decides whether prior debt reduces the line, and that
 // single branch is the whole distinction between or#897's two seed businesses:
@@ -129,14 +129,14 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 // The policy's declared OutstandingCapAmount wins when set; zero defers to the
 // payer's own arrears credit limit, which stays the per-account lever.
 // Available is what the customer may spend before any credit line: its
-// balance after every hold, less what it owes when it prepays.
+// balance less pending usage and accrual, less what it owes when it prepays.
 func Available(capacity money.AdmissionCapacity) int64 {
 	available, _, _ := payerCapacity(capacity, ResolvedPolicy{})
 	return available
 }
 
 func payerCapacity(capacity money.AdmissionCapacity, policy ResolvedPolicy) (available, creditLine, outstanding int64) {
-	available = capacity.Balance - capacity.Held
+	available = capacity.Balance - capacity.Unposted()
 	outstanding = capacity.OutstandingOwed
 	if capacity.BillingMode != money.BillingModeArrears {
 		// Prepaid: money already owed is not available to new work.
@@ -164,13 +164,14 @@ func creditLimitForPolicy(capacity money.AdmissionCapacity, policy ResolvedPolic
 	return max(limit, 0)
 }
 
-// Debt settlement frees the credit line, but not other live reservations. Do
-// not collect early for a request that still could not fit after payment.
+// Debt settlement frees the credit line, but not pending usage. Do not
+// collect early for a request that still could not fit after payment.
 func canFitAfterDebtSettlement(capacity money.AdmissionCapacity, policy ResolvedPolicy, cost int64) bool {
-	if capacity.Held > 0 && capacity.Balance < math.MinInt64+capacity.Held {
+	unposted := capacity.Unposted()
+	if unposted > 0 && capacity.Balance < math.MinInt64+unposted {
 		return false
 	}
-	available := capacity.Balance - capacity.Held
+	available := capacity.Balance - unposted
 	limit := creditLimitForPolicy(capacity, policy)
 	if available > math.MaxInt64-limit {
 		return true

@@ -170,10 +170,6 @@ func (l *Lots) Materialize(ctx context.Context, id uuid.UUID) error {
 	if lot.UnitsCredited > 0 {
 		return nil
 	}
-	// The customer's usage so far draws the balance before the deposit.
-	if _, err := l.settleUsage(ctx, lot.CustomerID, lot.Unit, nil); err != nil {
-		return fmt.Errorf("credits: post usage before the deposit: %w", err)
-	}
 	// A bought lot's units were sold, a gift's granted.
 	from := ledger.UnitsGranted
 	if lot.PaidAmount != nil {
@@ -362,11 +358,11 @@ func (l *Lots) clawback(ctx context.Context, lot gen.BillingCreditGrant) error {
 	return l.move(ctx, lot.ID, books.CreditRevoked, leg, nil)
 }
 
-// SyncReservation writes what the pending refunds of payment reserve of the
+// SyncRefunding writes what the pending refunds of payment withdrew from the
 // lot it bought, if any: after a refund of it is reserved, released or
 // settled, in that transaction.
-func (l *Lots) SyncReservation(ctx context.Context, payment uuid.UUID) error {
-	return l.q.SyncCreditGrantReservation(ctx, gen.SyncCreditGrantReservationParams{MerchantID: l.merchant, PaymentID: payment})
+func (l *Lots) SyncRefunding(ctx context.Context, payment uuid.UUID) error {
+	return l.q.SyncCreditGrantRefunding(ctx, gen.SyncCreditGrantRefundingParams{MerchantID: l.merchant, PaymentID: payment})
 }
 
 // MissingDeposits are lots none of whose units posted
@@ -382,9 +378,9 @@ func (l *Lots) UnretractedRevocations(ctx context.Context, customer *uuid.UUID, 
 	return l.q.ListRevokedCreditLotsWithUnits(ctx, gen.ListRevokedCreditLotsWithUnitsParams{MerchantID: l.merchant, CustomerID: customer, RowLimit: limit})
 }
 
-// ReservationDrifts are purchased lots whose reservation disagrees with their
-// payment's pending refunds (derive.credit_reservation.mismatch). Repair =
-// SyncReservation.
-func (l *Lots) ReservationDrifts(ctx context.Context, customer *uuid.UUID, limit int32) ([]gen.BillingCreditGrant, error) {
-	return l.q.ListCreditReservationDrifts(ctx, gen.ListCreditReservationDriftsParams{MerchantID: l.merchant, CustomerID: customer, RowLimit: limit})
+// RefundingDrifts are purchased lots whose refunding units disagree with
+// their payment's pending refunds (derive.credit_refunding.mismatch). Repair
+// = SyncRefunding.
+func (l *Lots) RefundingDrifts(ctx context.Context, customer *uuid.UUID, limit int32) ([]gen.BillingCreditGrant, error) {
+	return l.q.ListCreditRefundingDrifts(ctx, gen.ListCreditRefundingDriftsParams{MerchantID: l.merchant, CustomerID: customer, RowLimit: limit})
 }

@@ -240,7 +240,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   charge_psp_unknown: { status: 409, type: "invalid_request_error", meaning: "settings.charge_psps names a PSP that is not a live card PSP of the merchant." },
   credential_expired: { status: 401, type: "authentication_error", meaning: "The credential has expired." },
   credential_revoked: { status: 401, type: "authentication_error", meaning: "The credential or its session was revoked." },
-  credit_grant_held: { status: 409, type: "invalid_request_error", meaning: "Active holds need the grant's remaining credit." },
+  credit_grant_held: { status: 409, type: "invalid_request_error", meaning: "A refund of the grant's payment is in flight: retry once it settles." },
   credit_grant_not_found: { status: 404, type: "invalid_request_error", meaning: "The credit grant does not exist." },
   credit_grant_unavailable: { status: 409, type: "invalid_request_error", meaning: "The credit grant expired, ended or has no remaining credit." },
   csrf_origin_denied: { status: 403, type: "authorization_error", meaning: "A cookie-authenticated request came from an origin that is not allowed." },

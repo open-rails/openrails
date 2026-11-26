@@ -4,6 +4,7 @@ sql:
     queries: "internal/db/queries"
     schema:
       - "internal/migrate/postgres/0001_schema.up.sql"
+      - "internal/migrate/postgres/0002_ledger_balance.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

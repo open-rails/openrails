@@ -98,21 +98,22 @@ func lotViewEqualsLedger(t *testing.T) {
 	})
 	require.NoError(t, err)
 	spend(t, a.alpha, m.customer, "spend", 2_000_000)
-	// A deposit posts the accrued usage first.
+	// A deposit posts nothing: the usage stays pending.
 	a.clock.Advance(time.Second)
-	topUp, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 1_000_000, Source: "critical", SourceID: "post-the-usage"}})
+	topUp, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 1_000_000, Source: "critical", SourceID: "top-up"}})
 	require.NoError(t, err)
-	balance(t, a.alpha, m.customer, 31_000_000, 0, 31_000_000)
+	balance(t, a.alpha, m.customer, 31_000_000, 2_000_000, 33_000_000)
 	lot := lotMatchesLedger(t, w, expiring[0].ID)
-	require.EqualValues(t, 2_000_000, lot.SpentAmount)
-	require.EqualValues(t, 1_000_000, lot.RemainingAmount)
+	require.Zero(t, lot.SpentAmount)
+	require.EqualValues(t, 3_000_000, lot.RemainingAmount)
 
-	// Expiry: what is left of the lapsed lot leaves it. The clock stays
-	// within the five minutes payments may be dated ahead of the database's,
-	// for the chargeback below.
+	// Expiry: the usage before the lapse posts first and draws the lot; what
+	// is left of it leaves it. The clock stays within the five minutes
+	// payments may be dated ahead of the database's, for the chargeback below.
 	a.clock.Advance(3 * time.Minute)
 	require.False(t, runPass(t, quietFleet(t, w)), "the pass's look at the lapsed lot expires it")
 	lot = lotMatchesLedger(t, w, expiring[0].ID)
+	require.EqualValues(t, 2_000_000, lot.SpentAmount)
 	require.EqualValues(t, 1_000_000, lot.ExpiredAmount)
 	require.Zero(t, lot.RemainingAmount)
 	require.Equal(t, billing.CreditGrantExpired, lot.State)
@@ -232,7 +233,7 @@ func unpostedDepositNotSpendable(t *testing.T) {
 	spend(t, w.alpha, customer, "spend", 1000)
 	fleet := startFleet(t, w)
 	nextMonth(w)
-	closeMonths(t, fleet)
+	postDays(t, fleet)
 	balance(t, w.alpha, customer, 0, 0, 0)
 	lot = lotMatchesLedger(t, w, billing.CreditGrantID(unposted))
 	require.Zero(t, lot.SpentAmount, "the spend never draws a lot with no units")

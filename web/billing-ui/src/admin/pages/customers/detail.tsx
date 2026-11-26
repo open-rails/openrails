@@ -166,8 +166,8 @@ export function CustomerDetailPage() {
                   {formatBalanceAmount(b.balance_amount, b)}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  <AdminMessage id={"held "} />
-                  {formatBalanceAmount(b.held_amount, b)}
+                  <AdminMessage id={"pending "} />
+                  {formatBalanceAmount(b.pending_amount, b)}
                   <AdminMessage id={" · owed"} />{" "}
                   {formatBalanceAmount(b.owed_amount, b)}
                 </p>

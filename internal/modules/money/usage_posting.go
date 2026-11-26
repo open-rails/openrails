@@ -30,25 +30,29 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// Usage posts to the ledger at each month's end in the merchant's
-// accounting zone (the close) and before any other movement of the
-// customer's balance in its currency: a top-up or staff grant, a credit
-// lot's expiry, revocation or refund, a usage invoice and an agreement's
-// revocation. A posting is cut at an instant: per pricing period, the price
-// of the period's deduplicated usage that occurred before the cut, less what
-// the period's earlier postings took. It draws the balance first, one
-// credit_spend per lot live just before the cut, and leaves the rest owed in
-// one owed_accrual split by meter, at (usage_posting, usage_posting:<id>, 1).
-// A period whose price fell below what posted (a volume tier) carries the
+// Usage reaches the ledger in postings; until then a customer's balance
+// holds its provisional price (usage_pending_amounts). A posting takes
+// everything the event store holds (its cut is past every usage intake
+// accepted), except one before a credit lot's lapse, cut at it. Per pricing
+// period it posts the price of the period's deduplicated usage before the
+// cut, less what the period's earlier postings took: the balance first, one
+// credit_spend per lot live just before the cut, and the rest owed in one
+// owed_accrual split by meter, at (usage_posting, usage_posting:<id>, 1). A
+// period whose price fell below what posted (a volume tier) carries the
 // difference until its late usage window closes, then credits it back; usage
 // the event store no longer holds is not a price that fell.
+//
+// Postings run once the accounting-zone day of a customer's oldest pending
+// usage ends (the billing pass's first scan), before a usage invoice bills
+// what is owed, before a credit lot's expiry, revocation or refund (so lots
+// are spent in time order), and before a merchant purge deletes the store.
 
 const usagePostingSourcePrefix = "usage_posting:"
 
 // Posting reasons (usage_postings.reason).
 const (
-	usagePostingClose    = "close"
-	usagePostingMovement = "movement"
+	usagePostingDaily    = "daily"
+	usagePostingBilling  = "billing"
 	usagePostingReversal = "reversal"
 )
 
@@ -79,17 +83,11 @@ func (s *MoneyService) accountingZone(ctx context.Context) (*time.Location, erro
 	return z, nil
 }
 
-// monthAfter is the start of the month after the one t falls in, in zone z:
-// when the close posts usage of t.
-func monthAfter(z *time.Location, t time.Time) time.Time {
+// dayAfter is the start of the day after the one t falls in, in zone z:
+// when the daily posting takes usage of t.
+func dayAfter(z *time.Location, t time.Time) time.Time {
 	l := t.In(z)
-	return time.Date(l.Year(), l.Month()+1, 1, 0, 0, 0, 0, z).UTC()
-}
-
-// monthStart is the start of the month t falls in, in zone z.
-func monthStart(z *time.Location, t time.Time) time.Time {
-	l := t.In(z)
-	return time.Date(l.Year(), l.Month(), 1, 0, 0, 0, 0, z).UTC()
+	return time.Date(l.Year(), l.Month(), l.Day()+1, 0, 0, 0, 0, z).UTC()
 }
 
 // at is the service on a clock stopped at now.
@@ -112,38 +110,31 @@ func (s *MoneyService) eventStore(q *gen.Queries) *eventstore.Store {
 
 var _ db.UsageLedger = (*MoneyService)(nil)
 
-// PostUsage posts at now, in q's transaction and on the caller's clock, what
-// a customer's usage in a currency costs before cut and the ledger has not
-// taken: before a movement of its balance. It reports whether anything
-// posted.
-func (s *MoneyService) PostUsage(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, cut, now time.Time) (bool, error) {
+// PostUsage posts, in q's transaction and at now, what a customer's usage in
+// a currency costs and the ledger has not taken: everything with a zero cut,
+// else what occurred before cut. reason is usage_postings.reason: credit
+// before a credit lot moves, purge before a merchant purge.
+func (s *MoneyService) PostUsage(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, cut, now time.Time, reason string) (bool, error) {
 	if _, bound := merchant.FromContext(ctx); !bound {
 		ctx = merchant.WithID(ctx, billing.MerchantID(merchantID))
 	}
-	return s.WithDatabase(s.db.InTx(q)).at(now).postUsageTx(ctx, q, merchantID, customer, currency, cut, usagePostingMovement)
+	return s.WithDatabase(s.db.InTx(q)).at(now).postUsageTx(ctx, q, merchantID, customer, currency, cut, reason)
 }
 
-// UnpostedUsage is what a customer's usage in a currency costs beyond what
-// its postings took, read in q's transaction.
-func (s *MoneyService) UnpostedUsage(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string) (int64, error) {
-	if _, bound := merchant.FromContext(ctx); !bound {
-		ctx = merchant.WithID(ctx, billing.MerchantID(merchantID))
-	}
-	return s.WithDatabase(s.db.InTx(q)).unpostedUsage(ctx, q, merchantID, customer, currency)
-}
-
-// postUsageTx is the one choke point usage reaches the ledger through: the
-// close and every movement post here. Under the customer's lock it posts each
-// period's price before cut less what the period took, credits a period
-// whose price fell once its late window closed, and leaves the customer's
-// unposted mark at what is left. A cut before one already posted takes that
-// one's: usage before it is posted. Of the usage an earlier posting may have
-// read, a line is priced at no less than what posted: usage the store no
+// postUsageTx is the one choke point usage reaches the ledger through. Under
+// the customer's lock and its queue row's, it posts each period's price
+// before cut less what the period took, credits a period whose price fell
+// once its late window closed, and leaves the queue row at what is left. A
+// zero cut takes everything: no intake can be inserting while the row is
+// locked, so every usage the store holds is in what was pending and nothing
+// else is, and the pending amounts go. A cut before one already posted takes
+// that one's: usage before it is posted. Of the usage an earlier posting may
+// have read, a line is priced at no less than what posted: usage the store no
 // longer holds is never read as a price that fell, and usage ingested since
 // is priced on top.
 func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, cut time.Time, reason string) (bool, error) {
-	key := gen.GetUsageUnpostedParams{MerchantID: merchantID, CustomerID: customer, Currency: currency}
-	if _, err := q.GetUsageUnposted(ctx, key); errors.Is(err, pgx.ErrNoRows) {
+	key := gen.GetUsagePendingParams{MerchantID: merchantID, CustomerID: customer, Currency: currency}
+	if _, err := q.GetUsagePending(ctx, key); errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	} else if err != nil {
 		return false, err
@@ -155,7 +146,7 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 	if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID, ID: customer}); err != nil {
 		return false, err
 	}
-	row, err := q.LockUsageUnposted(ctx, gen.LockUsageUnpostedParams(key))
+	row, err := q.LockUsagePending(ctx, gen.LockUsagePendingParams(key))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -163,7 +154,11 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 		return false, err
 	}
 	now := instant(s.now())
-	cut = instant(earlier(cut, now))
+	everything := cut.IsZero()
+	if horizon := now.Add(retention.UsageClockSkew); everything || cut.After(horizon) {
+		cut = horizon
+	}
+	cut = instant(cut)
 	postings, err := q.ListUsagePostings(ctx, gen.ListUsagePostingsParams{MerchantID: merchantID, CustomerID: customer, Currency: currency, PeriodStartsAt: row.SinceAt})
 	if err != nil {
 		return false, err
@@ -172,6 +167,8 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 	for _, p := range postings {
 		prior.Cut, prior.Ingested = later(prior.Cut, p.CutAt.UTC()), later(prior.Ingested, p.IngestedThrough.UTC())
 	}
+	// Lots live just before the cut asked for are drawn, and none past now.
+	liveAt := earlier(cut, now)
 	cut = later(cut, prior.Cut)
 	rows, err := store.PostingQuantities(ctx, billing.CustomerID(customer), currency, row.SinceAt, cut, prior)
 	if err != nil {
@@ -262,12 +259,13 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 			due = d
 		}
 	}
-	if first, ok := earliestLater(rows); ok {
+	first, hasLater := earliestLater(rows)
+	if hasLater {
 		zone, err := s.accountingZone(ctx)
 		if err != nil {
 			return false, err
 		}
-		keep(first, monthAfter(zone, cut))
+		keep(first, dayAfter(zone, earlier(cut, now)))
 	}
 	moved := false
 	for _, period := range periods {
@@ -278,7 +276,7 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 		lines, amount := postingDelta(target[period], posted[period])
 		switch {
 		case amount > 0:
-			if err := s.postPeriod(ctx, q, merchantID, customer, currency, period, end, cut, ingested, reason, amount, lines, billed); err != nil {
+			if err := s.postPeriod(ctx, q, merchantID, customer, currency, period, end, cut, liveAt, ingested, reason, amount, lines, billed); err != nil {
 				return moved, err
 			}
 			moved = true
@@ -292,14 +290,19 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 		}
 	}
 	if since.IsZero() {
-		return moved, q.DeleteUsageUnposted(ctx, gen.DeleteUsageUnpostedParams(key))
+		return moved, q.DeleteUsagePending(ctx, gen.DeleteUsagePendingParams(key))
 	}
-	return moved, q.SetUsageUnposted(ctx, gen.SetUsageUnpostedParams{SinceAt: since, DueAt: later(due, since.Add(time.Microsecond)), Now: now,
+	if everything && !hasLater {
+		if err := q.DeleteUsagePendingAmounts(ctx, gen.DeleteUsagePendingAmountsParams(key)); err != nil {
+			return moved, err
+		}
+	}
+	return moved, q.SetUsagePending(ctx, gen.SetUsagePendingParams{SinceAt: since, DueAt: later(due, since.Add(time.Microsecond)), Now: now,
 		MerchantID: merchantID, CustomerID: customer, Currency: currency})
 }
 
 // earliestLater is the earliest pricing period with usage at or after a
-// posting's cut: where the customer's unposted mark stays.
+// posting's cut: where the customer's queue row stays.
 func earliestLater(rows []eventstore.PostingQuantity) (time.Time, bool) {
 	var first time.Time
 	for _, r := range rows {
@@ -470,9 +473,9 @@ func postingDelta(target, posted map[lineKey]*PostingLine) ([]PostingLine, int64
 
 // postPeriod posts what a period's usage adds: balance first, the rest owed,
 // split by meter and dated when the usage occurred but never before the end
-// of the customer's last usage invoice. In a merchant's unit, never owed, what
-// the lots live before the cut cannot take is forgiven.
-func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, period, end, cut, ingested time.Time,
+// of the customer's last usage invoice. It draws the lots live just before
+// liveAt; in a merchant's unit, never owed, what they cannot take is forgiven.
+func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, period, end, cut, liveAt, ingested time.Time,
 	reason string, amount int64, lines []PostingLine, billed time.Time) error {
 	encoded, err := json.Marshal(lines)
 	if err != nil {
@@ -481,7 +484,7 @@ func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantI
 	now := instant(s.now())
 	posting := *s
 	posting.clock = clockwork.NewFakeClockAt(now)
-	posting.posting = &runningChargePosting{through: cut}
+	posting.posting = &runningChargePosting{through: liveAt}
 	var forgiven int64
 	var split []byte
 	if IsMerchantUnit(currency) {
@@ -524,7 +527,7 @@ func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantI
 	for _, m := range meters {
 		owed = append(owed, owedShare{meter: m, weight: byMeter[m]})
 	}
-	posting.posting = &runningChargePosting{through: cut, owed: owed, usagePosted: true, from: period,
+	posting.posting = &runningChargePosting{through: liveAt, owed: owed, from: period,
 		owedAt: later(earlier(earlier(end, cut).Add(-time.Microsecond), now), billed)}
 	key := MustIdempotencyKey(OpUsagePosting, usagePostingSourcePrefix+row.ID.String(), "1")
 	payer := identity.CustomerID(customer)
@@ -593,94 +596,22 @@ func (s *MoneyService) reversePeriod(ctx context.Context, q *gen.Queries, mercha
 	return ledger.WatchChange(ctx, q, merchantID, customer, currency, true, now)
 }
 
-// unpostedUsage is what a customer's usage in a currency costs beyond what
-// its postings took: per period, the price of its usage so far less what
-// posted, never below zero. A customer with nothing unposted reads nothing
-// from the event store.
-func (s *MoneyService) unpostedUsage(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string) (int64, error) {
-	row, err := q.GetUsageUnposted(ctx, gen.GetUsageUnpostedParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	store := s.eventStore(q)
-	if store == nil {
-		return 0, eventstore.Required("a balance with unposted usage")
-	}
-	rows, err := store.PeriodQuantities(ctx, []billing.CustomerID{billing.CustomerID(customer)}, currency, row.SinceAt)
-	if err != nil {
-		return 0, err
-	}
-	var prints []string
-	for _, r := range rows {
-		prints = append(prints, r.Print)
-	}
-	cards, err := loadPrints(ctx, q, merchantID, prints)
-	if err != nil {
-		return 0, err
-	}
-	target, err := cards.priceQuantities(cards.known(rows))
-	if err != nil {
-		return 0, err
-	}
-	postings, err := q.ListUsagePostings(ctx, gen.ListUsagePostingsParams{MerchantID: merchantID, CustomerID: customer, Currency: currency, PeriodStartsAt: row.SinceAt})
-	if err != nil {
-		return 0, err
-	}
-	posted := map[time.Time]int64{}
-	for _, p := range postings {
-		posted[p.PeriodStartsAt.UTC()] = addSat(posted[p.PeriodStartsAt.UTC()], p.Amount)
-	}
-	var unposted int64
-	for period, lines := range target {
-		var price int64
-		for _, l := range lines {
-			price = addSat(price, l.Amount)
-		}
-		unposted = addSat(unposted, max(price-posted[period], 0))
-	}
-	return unposted, nil
-}
-
-// withUnposted adds a customer's unposted usage to what its capacity holds.
-func (s *MoneyService) withUnposted(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, c AdmissionCapacity) (AdmissionCapacity, error) {
-	unposted, err := s.unpostedUsage(ctx, q, merchantID, customer, currency)
-	c.Held = addSat(c.Held, unposted)
-	return c, err
-}
-
-// CloseUsage posts, in its own transaction, a customer's usage in a currency
-// before the start of now's month: the month-end close. It also credits a
+// PostDueUsage posts, in its own transaction, everything a customer's usage
+// in a currency costs and the ledger has not taken: the daily posting, once
+// the accounting-zone day of its oldest pending usage ended. It also credits a
 // period whose price fell once its late window closed.
-func (s *MoneyService) CloseUsage(ctx context.Context, customer uuid.UUID, currency string, now time.Time) (bool, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return false, err
-	}
-	zone, err := s.accountingZone(ctx)
-	if err != nil {
-		return false, err
-	}
-	var posted bool
-	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		posted, err = s.WithDatabase(s.db.NewWithPgxTx(tx)).at(now).postUsageTx(ctx, gen.New(tx), mid.UUID(), customer, currency, monthStart(zone, now), usagePostingClose)
-		return err
-	})
-	return posted, err
+func (s *MoneyService) PostDueUsage(ctx context.Context, customer uuid.UUID, currency string, now time.Time) (bool, error) {
+	return s.postUsageOwnTx(ctx, customer, currency, now, usagePostingDaily)
 }
 
-// postUsageNow posts what a customer's usage costs through now, in the
-// caller's transaction: before a movement of its balance.
-func (s *MoneyService) postUsageNow(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string) (bool, error) {
-	return s.postUsageTx(ctx, q, merchantID, customer, currency, s.now(), usagePostingMovement)
-}
-
-// PostUsageNow posts at now, in its own transaction, what a customer's usage
-// in a currency costs: before its agreement is revoked.
+// PostUsageNow posts at now, in its own transaction, everything a customer's
+// usage in a currency costs: before its agreement ends and its owed is
+// billed.
 func (s *MoneyService) PostUsageNow(ctx context.Context, customer uuid.UUID, currency string, now time.Time) (bool, error) {
+	return s.postUsageOwnTx(ctx, customer, currency, now, usagePostingBilling)
+}
+
+func (s *MoneyService) postUsageOwnTx(ctx context.Context, customer uuid.UUID, currency string, now time.Time, reason string) (bool, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
@@ -688,10 +619,20 @@ func (s *MoneyService) PostUsageNow(ctx context.Context, customer uuid.UUID, cur
 	var posted bool
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		posted, err = s.WithDatabase(s.db.NewWithPgxTx(tx)).at(now).postUsageNow(ctx, gen.New(tx), mid.UUID(), customer, currency)
+		posted, err = s.WithDatabase(s.db.NewWithPgxTx(tx)).at(now).postEverything(ctx, gen.New(tx), mid.UUID(), customer, currency, reason)
 		return err
 	})
 	return posted, err
+}
+
+// postEverything posts all of a customer's usage in a currency, in q's
+// transaction: first the lots that lapsed expire, each once the usage and
+// running charges before its lapse posted, so usage is spent in time order.
+func (s *MoneyService) postEverything(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency, reason string) (bool, error) {
+	if _, err := s.creditLots(q, merchantID).ExpireLapsedBy(ctx, customer, currency, s.now()); err != nil {
+		return false, err
+	}
+	return s.postUsageTx(ctx, q, merchantID, customer, currency, time.Time{}, reason)
 }
 
 // usageDeductions are the postings the transfers that took usage belong to,

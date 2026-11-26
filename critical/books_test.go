@@ -575,11 +575,11 @@ func TestBooks(t *testing.T) {
 		require.Contains(t, output, `"side_warnings"`)
 	})
 
-	t.Run("OR-J40-S06/concurrent-top-ups-one-posting-unposted-usage-first-all-commit", func(t *testing.T) {
+	t.Run("OR-J40-S06/concurrent-top-ups-of-customers-with-and-without-pending-usage-all-commit", func(t *testing.T) {
 		w := newWorld(t)
 		meterForCapture(t, w)
-		// A top-up posts the customer's unposted usage, then the deposit:
-		// the rollups both touch are kept at commit, after every account
+		// A top-up posts nothing of the customer's pending usage: the
+		// rollups both deposits touch are kept at commit, after every account
 		// lock, so neither waits on the other's rollups mid-transaction.
 		for round := range 16 {
 			used, plain := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
@@ -600,7 +600,7 @@ func TestBooks(t *testing.T) {
 			group.Wait()
 			require.NoError(t, errs[0], "round %d", round)
 			require.NoError(t, errs[1], "round %d", round)
-			balance(t, w.alpha, used, 1100, 0, 1100)
+			balance(t, w.alpha, used, 1100, 400, 1500)
 			balance(t, w.alpha, plain, 500, 0, 500)
 		}
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")

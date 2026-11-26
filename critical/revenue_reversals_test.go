@@ -432,12 +432,14 @@ func TestRevenueReversals(t *testing.T) {
 		a, provider := m.a, m.p
 		payment := m.buy(t, "settled-later")
 
-		// The rail's answer is lost: the refund waits, reserved, and neither
-		// the lot's poster nor the payment's posts anything.
+		// The rail's answer is lost: the refund waits. The lot's units left the
+		// balance when it was asked for; neither the lot's money nor the
+		// payment's posts anything in the general ledger.
 		provider.mu.Lock()
 		provider.lostRefundResponse = true
 		provider.mu.Unlock()
 		_, _ = a.alpha.RefundPayment(t.Context(), "later", payment, billing.RefundPaymentParams{Amount: 40_000_000, Reason: "Partial refund"})
+		balance(t, a.alpha, m.customer, 0, 0, 0)
 		read, err := a.alpha.GetPayment(t.Context(), payment)
 		require.NoError(t, err)
 		require.Len(t, read.Refunds, 1)

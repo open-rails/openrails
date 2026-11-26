@@ -452,7 +452,7 @@ var errorCodes = []ErrorCodeInfo{
 
 	// Credits and admission.
 	{CodeCreditGrantNotFound, 404, invalid, "The credit grant does not exist."},
-	{CodeCreditGrantHeld, 409, invalid, "Active holds need the grant's remaining credit."},
+	{CodeCreditGrantHeld, 409, invalid, "A refund of the grant's payment is in flight: retry once it settles."},
 	{CodeCreditGrantUnavailable, 409, invalid, "The credit grant expired, ended or has no remaining credit."},
 	{CodeCurrencyUnsupported, 400, invalid, "The currency is not in OpenRails' registry."},
 	{CodeMerchantUnitUnsupported, 400, invalid, "The currency is one of the merchant's own units, which the operation does not take: it takes a currency from OpenRails' registry."},

@@ -39,9 +39,10 @@ import (
 // pinned, in its pricing period), a provisional amount (the marginal price at
 // the period position intake read: what limits and the per-minute rate
 // count) and the limit windows that count it, located when it was admitted.
-// Intake then marks the customer's usage unposted; the month-end close or the
-// next balance movement posts it. A failed item is not priced: what its grace
-// leaves is charged at once, with its own ledger legs.
+// Intake then adds the provisional prices to the customer's pending amount,
+// which its balance deducts until a posting takes the usage. A failed item is
+// not priced: what its grace leaves is charged at once, with its own ledger
+// legs.
 //
 // Intake is two steps in the caller's transaction: PrepareUsageTx validates,
 // prices and locates, writing nothing; then CommitUsageTx inserts the events
@@ -848,16 +849,70 @@ func (b *UsageIntake) event(i int, it UsageItem, p pricedItem) *eventstore.Usage
 	return e
 }
 
-// CommitUsageTx inserts the batch's events the store does not hold and waits
-// until they read back, then, in the caller's transaction: marks the
-// customers' usage unposted, records the card prints, opens the session and
-// first-use windows and posts what failed items charge.
-// Should the transaction not commit, a resend finds the events and redoes
-// only this side, which is idempotent. Changed names the balances the usage
-// moved, for the caller to watch (watchUsageTx, WatchUsage).
+// CommitUsageTx, in the caller's transaction: queues the customers' usage for
+// posting and holds its queue rows, inserts the batch's events the store does
+// not hold and waits until they read back, adds their provisional prices to
+// the lease's pending amounts, records the card prints, opens the session and
+// first-use windows and posts what failed items charge. Should the
+// transaction not commit, a resend finds the events and redoes only this
+// side, which is idempotent. Changed names the balances the usage moved, for
+// the caller to watch (watchUsageTx, WatchUsage).
 func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *UsageIntake) error {
 	if b == nil {
 		return nil
+	}
+	type mark struct {
+		since, due time.Time
+		amount     int64
+		pending    int64
+	}
+	marks := map[account]*mark{}
+	var accounts []account
+	var zone *time.Location
+	var lease uuid.UUID
+	var err error
+	for i, e := range b.events {
+		if e == nil {
+			continue
+		}
+		lease = e.LeaseID
+		a := account{e.CustomerID.UUID(), e.Currency}
+		m := marks[a]
+		if m == nil {
+			m = &mark{}
+			marks[a] = m
+			accounts = append(accounts, a)
+		}
+		m.amount = addSat(m.amount, b.Results[i].Amount)
+		if len(e.Charges) == 0 {
+			continue
+		}
+		// Priced usage is pending until a posting takes it; a failed item's
+		// charge posts below.
+		m.pending = addSat(m.pending, b.Results[i].Amount)
+		if zone == nil {
+			if zone, err = s.accountingZone(ctx); err != nil {
+				return err
+			}
+		}
+		due := dayAfter(zone, e.OccurredAt)
+		if m.since.IsZero() || e.PeriodStartsAt.Before(m.since) {
+			m.since = e.PeriodStartsAt
+		}
+		if m.due.IsZero() || due.Before(m.due) {
+			m.due = due
+		}
+	}
+	slices.SortFunc(accounts, func(x, y account) int {
+		return cmp.Or(compareUUID(x.customer, y.customer), strings.Compare(x.currency, y.currency))
+	})
+	// Before the insert: a posting either waits for this transaction or
+	// finished before any of its usage was in the store.
+	if err := b.queueUsage(ctx, q, accounts, func(a account) (since, due time.Time) {
+		m := marks[a]
+		return m.since, m.due
+	}); err != nil {
+		return err
 	}
 	var fresh []eventstore.UsageEvent
 	for i, e := range b.events {
@@ -873,6 +928,9 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 	if err := b.store.InsertUsage(ctx, fresh); err != nil {
 		return err
 	}
+	if err := b.addPending(ctx, q, lease, accounts, func(a account) int64 { return marks[a].pending }); err != nil {
+		return err
+	}
 	prints := make([]string, 0, len(b.prints))
 	for p := range b.prints {
 		prints = append(prints, p)
@@ -886,51 +944,6 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 		if err := q.InsertUsageCardPrint(ctx, gen.InsertUsageCardPrintParams{MerchantID: b.merchant, Print: p, Card: raw, Now: b.now}); err != nil {
 			return err
 		}
-	}
-	type mark struct {
-		since, due time.Time
-		amount     int64
-	}
-	marks := map[account]*mark{}
-	var accounts []account
-	var zone *time.Location
-	var err error
-	for i, e := range b.events {
-		if e == nil {
-			continue
-		}
-		a := account{e.CustomerID.UUID(), e.Currency}
-		m := marks[a]
-		if m == nil {
-			m = &mark{}
-			marks[a] = m
-			accounts = append(accounts, a)
-		}
-		m.amount = addSat(m.amount, b.Results[i].Amount)
-		if len(e.Charges) == 0 {
-			continue
-		}
-		if zone == nil {
-			if zone, err = s.accountingZone(ctx); err != nil {
-				return err
-			}
-		}
-		due := monthAfter(zone, e.OccurredAt)
-		if m.since.IsZero() || e.PeriodStartsAt.Before(m.since) {
-			m.since = e.PeriodStartsAt
-		}
-		if m.due.IsZero() || due.Before(m.due) {
-			m.due = due
-		}
-	}
-	slices.SortFunc(accounts, func(x, y account) int {
-		return cmp.Or(compareUUID(x.customer, y.customer), strings.Compare(x.currency, y.currency))
-	})
-	if err := b.markUnposted(ctx, q, accounts, func(a account) (time.Time, time.Time) {
-		m := marks[a]
-		return m.since, m.due
-	}); err != nil {
-		return err
 	}
 	customers := make([]uuid.UUID, 0, len(b.opens))
 	for c := range b.opens {
@@ -974,12 +987,12 @@ func (b *UsageIntake) Changed() []UsageAccount {
 	return b.changed
 }
 
-// markUnposted marks each account's usage unposted from its period (mark;
-// a zero since marks nothing). Most accounts already carry a mark that
+// queueUsage queues each account's usage for posting from its period (mark;
+// a zero since queues nothing). Most accounts already have a queue row that
 // covers it: those are only held, by key share, so a posting (which locks
-// the mark for update) waits for this transaction or has already read its
-// events, and intakes never wait on each other. The rest are written.
-func (b *UsageIntake) markUnposted(ctx context.Context, q *gen.Queries, accounts []account, mark func(account) (since, due time.Time)) error {
+// the row for update) waits for this transaction, and intakes never wait on
+// each other. The rest are written.
+func (b *UsageIntake) queueUsage(ctx context.Context, q *gen.Queries, accounts []account, mark func(account) (since, due time.Time)) error {
 	byCurrency := map[string][]uuid.UUID{}
 	var currencies []string
 	for _, a := range accounts {
@@ -993,15 +1006,15 @@ func (b *UsageIntake) markUnposted(ctx context.Context, q *gen.Queries, accounts
 	}
 	slices.Sort(currencies)
 	for _, currency := range currencies {
-		held, err := q.ShareUsageUnposted(ctx, gen.ShareUsageUnpostedParams{MerchantID: b.merchant, Currency: currency, CustomerIds: byCurrency[currency]})
+		held, err := q.ShareUsagePending(ctx, gen.ShareUsagePendingParams{MerchantID: b.merchant, Currency: currency, CustomerIds: byCurrency[currency]})
 		if err != nil {
 			return err
 		}
-		have := make(map[uuid.UUID]gen.ShareUsageUnpostedRow, len(held))
+		have := make(map[uuid.UUID]gen.ShareUsagePendingRow, len(held))
 		for _, h := range held {
 			have[h.CustomerID] = h
 		}
-		write := gen.UpsertUsageUnpostedParams{MerchantID: b.merchant, Currency: currency, Now: b.now}
+		write := gen.UpsertUsagePendingParams{MerchantID: b.merchant, Currency: currency, Now: b.now}
 		for _, c := range byCurrency[currency] {
 			since, due := mark(account{c, currency})
 			due = later(due, since.Add(time.Microsecond))
@@ -1013,7 +1026,34 @@ func (b *UsageIntake) markUnposted(ctx context.Context, q *gen.Queries, accounts
 		if len(write.CustomerIds) == 0 {
 			continue
 		}
-		if err := q.UpsertUsageUnposted(ctx, write); err != nil {
+		if err := q.UpsertUsagePending(ctx, write); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// addPending adds what each account's usage costs at its provisional prices
+// to the lease's pending amounts. Only the lease's syncs, which serialize on
+// it, write its rows.
+func (b *UsageIntake) addPending(ctx context.Context, q *gen.Queries, lease uuid.UUID, accounts []account, amount func(account) int64) error {
+	byCurrency := map[string]*gen.AddUsagePendingAmountsParams{}
+	var currencies []string
+	for _, a := range accounts {
+		if amount(a) <= 0 {
+			continue
+		}
+		p := byCurrency[a.currency]
+		if p == nil {
+			p = &gen.AddUsagePendingAmountsParams{MerchantID: b.merchant, Currency: a.currency, LeaseID: lease, Now: b.now}
+			byCurrency[a.currency] = p
+			currencies = append(currencies, a.currency)
+		}
+		p.CustomerIds, p.Amounts = append(p.CustomerIds, a.customer), append(p.Amounts, amount(a))
+	}
+	slices.Sort(currencies)
+	for _, currency := range currencies {
+		if err := q.AddUsagePendingAmounts(ctx, *byCurrency[currency]); err != nil {
 			return err
 		}
 	}

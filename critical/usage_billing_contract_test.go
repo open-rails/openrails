@@ -86,7 +86,7 @@ func owedAccruedAt(t *testing.T, w *world, invoice billing.InvoiceID) time.Time 
 func postUsageMonth(t *testing.T, w *world, fleet *river.Client[pgx.Tx]) {
 	t.Helper()
 	nextMonth(w)
-	closeMonths(t, fleet)
+	postDays(t, fleet)
 }
 
 // unscheduledAgreement is alice's USD collection agreement.
@@ -159,7 +159,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		oneUsage(t, a.alpha, usageInput(customer, "debt-without-opt-in", 3))
 		fleet := startFleet(t, a.world)
 		nextMonth(a.world)
-		closeMonths(t, fleet)
+		postDays(t, fleet)
 		runUsageDue(t, fleet)
 		invoices, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
 		require.NoError(t, err)

@@ -563,9 +563,8 @@ func TestGate(t *testing.T) {
 			}
 		}
 		require.Positive(t, offline, "a view keeps deciding while OpenRails is unreachable")
-		// A flush resends what the outage held back: what a sync settles it
-		// never also reports in flight, so the balance reads right as each
-		// flush returns.
+		// A flush resends what the outage held back: it settles once, pending
+		// in the balance as each flush returns.
 		for _, p := range processes {
 			p.wire.down.Store(false)
 			gateFlush(t, p.gate)

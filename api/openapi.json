@@ -14484,7 +14484,7 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
-          "held_amount": {
+          "pending_amount": {
             "type": "string",
             "description": "A number as a decimal string."
           },
@@ -14526,7 +14526,7 @@
           "unit",
           "billing_mode",
           "balance_amount",
-          "held_amount",
+          "pending_amount",
           "accrued_amount",
           "available_amount",
           "owed_amount",
@@ -28863,7 +28863,7 @@
     "credit_grant_held": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "Active holds need the grant's remaining credit."
+      "meaning": "A refund of the grant's payment is in flight: retry once it settles."
     },
     "credit_grant_not_found": {
       "status": 404,
