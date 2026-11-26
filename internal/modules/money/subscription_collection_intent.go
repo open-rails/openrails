@@ -581,6 +581,14 @@ func (h *SubscriptionCollectionHandler) renewMembership(ctx context.Context, d *
 				}
 				params.KeepCanceled = errors.Is(err, pgx.ErrNoRows)
 			}
+			// A canceled replacement still paid through now holds the slot too.
+			if params.KeepCanceled {
+				runway, err := d.Gen(ctx).GetPaidRunwaySubscription(ctx, gen.GetPaidRunwaySubscriptionParams{MerchantID: in.MerchantID, CustomerID: sub.CustomerID, ProductID: p.Renewal.ProductID, Now: h.now()})
+				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+					return err
+				}
+				params.KeepCanceled = err != nil || runway.ID == sub.ID
+			}
 		}
 		if sub.Status == models.StatusCanceled && !params.KeepCanceled || (!current && !replay) {
 			params.PaymentMetadata = map[string]any{"refund_review": "accepted engine charge completed after lifecycle changed"}

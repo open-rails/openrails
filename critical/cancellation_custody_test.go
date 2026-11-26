@@ -244,7 +244,7 @@ func TestCanceledUnknownRenewal(t *testing.T) {
 		}
 	})
 	t.Run("OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal", func(t *testing.T) {
-		for _, slot := range []string{"same-product", "same-tier-group"} {
+		for _, slot := range []string{"same-product", "same-tier-group", "canceled-replacement"} {
 			t.Run(slot, func(t *testing.T) {
 				a, p, sub := nmiEngineMembership(t)
 				priceID := sub.PriceID
@@ -277,6 +277,14 @@ func TestCanceledUnknownRenewal(t *testing.T) {
 				require.NotNil(t, invoice.Lines[0].SubscriptionID)
 				replacement := subscriptionState(t, a, *invoice.Lines[0].SubscriptionID, "active")
 				require.NotEqual(t, sub.ID, replacement.ID)
+				replacementState := "active"
+				if slot == "canceled-replacement" {
+					// A canceled replacement paid through now still holds the slot.
+					status, raw = a.request(t, http.MethodPost, "/v1/me/subscriptions/"+replacement.ID.String()+"/cancel", a.aliceToken, map[string]any{"reason": "Stop this one too"})
+					require.Equal(t, http.StatusOK, status, string(raw))
+					replacementState = "canceled"
+					replacement = subscriptionState(t, a, replacement.ID, replacementState)
+				}
 				p.core.Reveal()
 				rt := embedded.Graph(a.engine).Runtime
 				ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
@@ -306,7 +314,7 @@ func TestCanceledUnknownRenewal(t *testing.T) {
 					return err == nil && refunded == 1000
 				}, 15*time.Second, 20*time.Millisecond)
 				require.NoError(t, fleet.Stop(context.Background()))
-				unchanged := subscriptionState(t, a, replacement.ID, "active")
+				unchanged := subscriptionState(t, a, replacement.ID, replacementState)
 				require.Equal(t, replacement, unchanged)
 				paidInvoice, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
 				require.NoError(t, err)
