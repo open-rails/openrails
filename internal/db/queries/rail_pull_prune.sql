@@ -29,11 +29,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- name: ListExcessPaymentsForPSP :many
 -- Windowed: only payments inside the pulled [since, until] window are eligible
 -- (a snapshot only proves absence within the window it covered). Same empty-set
--- refusal as the subscription query.
+-- refusal as the subscription query. Pending rows are local holds; chargebacks
+-- are eligible only when the snapshot covers them.
 SELECT id FROM billing.payments
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND psp_id = sqlc.arg(psp_id)::uuid
   AND deleted_at IS NULL
+  AND status <> 'pending'
+  AND (reversal_kind IS DISTINCT FROM 'chargeback' OR sqlc.arg(covers_chargebacks)::boolean)
   AND cardinality(sqlc.arg(present_txns)::text[]) > 0
   AND transaction_id <> ALL(sqlc.arg(present_txns)::text[])
   AND (sqlc.narg(since)::timestamptz IS NULL OR purchased_at >= sqlc.narg(since)::timestamptz)

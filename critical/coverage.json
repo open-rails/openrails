@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 823,
+  "scenario_count": 824,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2862,6 +2862,11 @@
       "id": "OR-J15-S74",
       "journey": "J15",
       "name": "An NMI refresh backlog is read a link a run by last change, each ending at its end and advancing the applied watermark, the last through now; a sale settled in it is read in the link of its last change and booked once"
+    },
+    {
+      "id": "OR-J15-S75",
+      "journey": "J15",
+      "name": "Prune keeps a pending refund and a booked NMI chargeback"
     },
     {
       "id": "OR-J28-S13",
