@@ -308,7 +308,7 @@ func TestCheckoutFunnel(t *testing.T) {
 			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"attribution_source"}, Filters: usd, Range: window}), "attribution_source", "cash"))
 
 		// Checkouts and sales read their own indexes, never every invoice.
-		for measure, index := range map[string][]string{"checkouts": {"invoices_checkout_created_at_idx", "invoices_created_at_id_idx"}, "sales": {"invoices_sale_completed_at_idx"}} {
+		for measure, index := range map[string][]string{"checkouts": {"invoices_checkout_created_at_idx", "invoices_created_at_id_idx", "invoices_customer_id_created_at_id_idx"}, "sales": {"invoices_sale_completed_at_idx"}} {
 			q := billing.QueryMetricsParams{Measures: []string{measure}, By: []string{"country"}, Range: window}
 			plan, refused := metrics.ValidateIn(&q, a.clock.Now(), time.UTC)
 			require.Nil(t, refused)
