@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 821,
+  "scenario_count": 822,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2332,6 +2332,11 @@
       "id": "OR-J16-S56",
       "journey": "J16",
       "name": "A held engine case keeps access without due rescans while disarmed, ends once the merchant is armed, and closes its finding on any end"
+    },
+    {
+      "id": "OR-J16-S57",
+      "journey": "J16",
+      "name": "A customer's own declined engine renewal payments spend no scheduled retry, keep the case's schedule, and stop at the per-card customer cap"
     },
     {
       "id": "OR-J15-S70",

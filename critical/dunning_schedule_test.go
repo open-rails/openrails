@@ -166,6 +166,48 @@ func TestDunningSchedule(t *testing.T) {
 			})
 		}
 	})
+	t.Run("OR-J16-S57/a-customers-own-declined-payments-spend-no-scheduled-retry", func(t *testing.T) {
+		a, p, sub := purchasedMembershipWith(t, 30*24, func(w *world) { w.clock.Advance(-15 * 24 * time.Hour) })
+		enableLifecycleMaintenance(t, a)
+		due := *sub.CurrentPeriodEndsAt
+		const day = 24 * time.Hour
+		p.core.SetDecline("4242", "insufficient_funds")
+		a.clock.Advance(due.Sub(a.clock.Now()))
+		fleet := startFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
+		require.Eventually(t, func() bool {
+			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+			return err == nil && current.Dunning != nil && current.Dunning.Attempts == 1 &&
+				current.Dunning.NextRetryAt != nil && current.Dunning.NextRetryAt.Equal(due.Add(2*day))
+		}, 20*time.Second, 20*time.Millisecond)
+		current := subscriptionState(t, a, sub.ID, "past_due")
+		require.Equal(t, 4, *current.Dunning.RetriesLeft)
+		require.Equal(t, due.Add(9*day), *current.Dunning.FinalRetryAt)
+		invoice := myRenewalInvoice(t, a, sub.ID)
+		for i := range 3 {
+			status, raw := payMyRenewal(t, a, invoice, *sub.PaymentMethodID, fmt.Sprintf("customer-decline-%d", i))
+			require.Equal(t, http.StatusPaymentRequired, status, string(raw))
+			require.Contains(t, string(raw), `"code":"card_declined"`)
+		}
+		retried, err := a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{SubscriptionID: sub.ID, Kind: []string{"customer_retry"}})
+		require.NoError(t, err)
+		require.Len(t, retried.Items, 3)
+		current = subscriptionState(t, a, sub.ID, "past_due")
+		require.Equal(t, 1, current.Dunning.Attempts)
+		require.Equal(t, due.Add(2*day), *current.Dunning.NextRetryAt)
+		require.Equal(t, 4, *current.Dunning.RetriesLeft)
+		require.Equal(t, due.Add(9*day), *current.Dunning.FinalRetryAt)
+		status, raw := payMyRenewal(t, a, invoice, *sub.PaymentMethodID, "past-the-cap")
+		require.Equal(t, http.StatusConflict, status, string(raw))
+		require.Contains(t, string(raw), `"code":"invoice_not_payable"`)
+		a.clock.Advance(due.Add(2 * day).Sub(a.clock.Now()))
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
+		require.Eventually(t, func() bool {
+			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+			return err == nil && current.Dunning != nil && current.Dunning.Attempts == 2 &&
+				current.Dunning.NextRetryAt != nil && current.Dunning.NextRetryAt.Equal(due.Add(4*day))
+		}, 20*time.Second, 20*time.Millisecond)
+	})
 	t.Run("OR-J16-S51/a-merchants-customer-retry-cap-is-honoured", func(t *testing.T) {
 		for _, tc := range []struct {
 			name    string

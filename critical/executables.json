@@ -1241,6 +1241,9 @@
     "OR-J16-S56": [
       "TestDunningSchedule/OR-J16-S56/a-held-engine-case-ends-once-the-merchant-is-armed"
     ],
+    "OR-J16-S57": [
+      "TestDunningSchedule/OR-J16-S57/a-customers-own-declined-payments-spend-no-scheduled-retry"
+    ],
     "OR-J15-S70": [
       "TestDueWork/OR-J15-S70/an-nmi-renewal-the-probe-cannot-settle-is-read-by-id-after-its-grace"
     ],

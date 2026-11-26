@@ -70,7 +70,9 @@ CCBill-owned subscriptions retry at the provider; OpenRails mirrors `past_due`.)
   for standing advice. Advice is a card's: a new card, or the old one an
   account updater replaced, drops it and the deferral it set (`ReplaceMethod`,
   or `ForgetAdvice` when staff choose the card). A spent schedule is
-  `lifecycle.DunningExhausted`.
+  `lifecycle.DunningExhausted`. A customer's own retryable engine decline spends
+  no scheduled retry and keeps the case's count, next retry and end; network
+  advice can still delay that retry.
 - `FixPaymentMethod` moves the case to `awaiting_method`, sends
   `payment_method_update_required` (`payment_method_failed` when it queues a
   refresh of a possibly reissued card) and sets `grace_ends_at` to the window's end;
@@ -97,8 +99,8 @@ gets `due_recheck_at` from `deferDue`.
 schedules) and paying an engine renewal invoice with the subscription's card pass
 `intents.AdmitCustomerRetry` before any provider call. From
 `GetCycleCardStanding` it refuses (`ErrRetryNeedsNewMethod`) once the customer's
-declines on the card reach `customer_retries`, after a non-recoverable decline
-or forbidding issuer code, and while `awaiting_method` unless
+declines on the card reach `customer_retries` (default 3, per card), after a
+non-recoverable decline or forbidding issuer code, and while `awaiting_method` unless
 `decline.HolderCanClear`. Another card is always admitted.
 
 **Usage invoices.** An `order_collection` operation charges a due invoice. On a decline, `InvoiceCollectionHandler` applies `collection.FailureAction` to the answer and its advice (Stripe's and the network's) under the merchant's current `dunning_policy`, with the invoice's period as the cycle (at least 4 days); `usage.DeclineCollection` sets `next_collection_attempt_at`, marks it `uncollectible`, or stops collecting. Its transient answers count as failures; there is no transient ladder.

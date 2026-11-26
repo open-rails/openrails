@@ -212,6 +212,8 @@ type FailMembershipParams struct {
 	// attempt the merchant's policy allows still runs, up to the next renewal:
 	// a retry advised past it ends the case as exhausted (issuer_deferred).
 	RetryAfter time.Duration
+	// CustomerAttempt excludes a retryable customer decline from the schedule.
+	CustomerAttempt bool
 	// Terminal requests immediate cancellation (entitlements revoked, no
 	// further retries) without incrementing the retry count. It is a request:
 	// without TerminalCertainty the row parks as `unknown` instead.
