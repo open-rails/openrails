@@ -714,7 +714,9 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			}
 		}
 
-		if reconcileErr == nil && match == nil && recorded != nil && recorded.PaymentID != nil {
+		// The charge the case is recorded against decides, so a heuristic
+		// that later finds another candidate never acts on that one.
+		if reconcileErr == nil && recorded != nil && recorded.PaymentID != nil && (match == nil || match.PaymentID != *recorded.PaymentID) {
 			payment, err := s.PaymentService.GetByID(ctx, *recorded.PaymentID)
 			if err != nil {
 				return fmt.Errorf("load attached NMI chargeback payment: %w", err)
