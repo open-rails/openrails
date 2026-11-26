@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -173,7 +172,8 @@ func (r *MRRRisk) Run(ctx context.Context) {
 	}
 }
 
-// listen rings wake for this schema's notifications, on a dedicated session.
+// listen rings wake for this schema's notifications, and on every
+// (re)connect for those queued while nothing listened, on a session of its own.
 func (r *MRRRisk) listen(ctx context.Context, wake chan<- struct{}) {
 	schema := r.DB.DataPool().Schema()
 	ring := func() {
@@ -182,33 +182,16 @@ func (r *MRRRisk) listen(ctx context.Context, wake chan<- struct{}) {
 		default:
 		}
 	}
-	for ctx.Err() == nil {
-		err := func() error {
-			conn, err := r.DB.ConnectSession(ctx)
-			if err != nil {
-				return err
+	r.DB.Listen(ctx, db.Listener{
+		Channel:   mrrRiskChannel,
+		Connected: func(context.Context) { ring() },
+		Notified: func(_ context.Context, payload string) {
+			if payload == schema {
+				ring()
 			}
-			defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
-			if _, err := conn.Exec(ctx, "LISTEN "+pgx.Identifier{mrrRiskChannel}.Sanitize()); err != nil {
-				return err
-			}
-			ring()
-			for {
-				n, err := conn.WaitForNotification(ctx)
-				if err != nil {
-					return err
-				}
-				if n.Payload == schema {
-					ring()
-				}
-			}
-		}()
-		if err != nil && ctx.Err() == nil {
+		},
+		Interrupted: func(ctx context.Context, err error) {
 			r.Log.WarnContext(ctx, "mrr risk: wake notifications interrupted; reconnecting", logx.Err(err))
-			select {
-			case <-ctx.Done():
-			case <-time.After(time.Second):
-			}
-		}
-	}
+		},
+	})
 }

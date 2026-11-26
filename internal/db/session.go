@@ -8,46 +8,36 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/internal/pgidentity"
+	"github.com/open-rails/openrails/internal/pgsession"
 )
 
-// UsesTransactionPooler reports whether the query pool uses transaction pooling.
-func (d *DB) UsesTransactionPooler() bool { return d.direct != nil }
-
-// ConnectSession dials a dedicated connection for a session-scoped operation.
-// It uses the host's direct configuration when the query pool is pooled by
-// transaction. The caller closes the connection when the operation ends.
-func (d *DB) ConnectSession(ctx context.Context) (*pgx.Conn, error) {
-	return d.connectSession(ctx, nil)
+// SessionConfig is the direct configuration sessions are dialed from when
+// the query pool is a transaction pooler; nil when the pool is direct.
+func (d *DB) SessionConfig() *pgxpool.Config {
+	if d == nil || d.direct == nil {
+		return nil
+	}
+	return d.direct.Copy()
 }
 
-func (d *DB) connectSession(ctx context.Context, configure func(*pgx.ConnConfig)) (*pgx.Conn, error) {
+// ConnectSession dials a dedicated connection for a session-scoped operation
+// (a LISTEN, a session advisory lock): from the direct configuration when the
+// query pool is a transaction pooler, else from the pool's. The caller closes
+// it when the operation ends.
+func (d *DB) ConnectSession(ctx context.Context) (*pgx.Conn, error) {
 	if d == nil || d.pool == nil {
 		return nil, errors.New("db: opening a session requires a pool-backed DB")
 	}
-	cfg := d.direct
-	if cfg == nil {
-		cfg = d.pool.Config()
+	return pgsession.Dial(ctx, d.SessionDialConfig())
+}
+
+// SessionDialConfig is what ConnectSession dials: the direct configuration
+// when the pool is a transaction pooler, else the pool's.
+func (d *DB) SessionDialConfig() *pgxpool.Config {
+	if d.direct != nil {
+		return d.direct.Copy()
 	}
-	connConfig := cfg.ConnConfig.Copy()
-	if cfg.BeforeConnect != nil {
-		if err := cfg.BeforeConnect(ctx, connConfig); err != nil {
-			return nil, err
-		}
-	}
-	if configure != nil {
-		configure(connConfig)
-	}
-	conn, err := pgx.ConnectConfig(ctx, connConfig)
-	if err != nil {
-		return nil, err
-	}
-	if cfg.AfterConnect != nil {
-		if err := cfg.AfterConnect(ctx, conn); err != nil {
-			_ = conn.Close(context.WithoutCancel(ctx))
-			return nil, err
-		}
-	}
-	return conn, nil
+	return d.pool.Config()
 }
 
 // MigrationPool supplies direct sessions to the migrator without changing

@@ -28,10 +28,10 @@ func InCallerTransaction(ctx context.Context) bool {
 }
 
 // CommittedMerchantTx is for durable custody and queue handoff. It commits
-// independently on the request's compatible, idle lazy pin, or a scoped pool connection when no
-// pin exists. It never joins or commits an existing caller-owned transaction.
-// Supported DB/Pool transaction callbacks carry the private marker below;
-// manually managed raw pgx transactions must use BindMerchantTx to bind context.
+// independently on a pooled connection of its own. It never joins or commits
+// an existing caller-owned transaction. Supported DB/Pool transaction
+// callbacks carry the private marker below; manually managed raw pgx
+// transactions must use BindMerchantTx to bind context.
 func (p *Pool) CommittedMerchantTx(ctx context.Context, id billing.MerchantID, fn func(context.Context, pgx.Tx) error) error {
 	if p == nil || p.raw == nil || id.IsZero() {
 		return fmt.Errorf("db: committed merchant transaction requires pool and merchant")
@@ -42,30 +42,15 @@ func (p *Pool) CommittedMerchantTx(ctx context.Context, id billing.MerchantID, f
 	if current, ok := merchant.FromContext(ctx); ok && current != id {
 		return fmt.Errorf("db: committed merchant transaction has a different merchant scope")
 	}
-	var conn *pgx.Conn
-	if pin, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn); ok {
-		if pin.pool != p.raw || pin.tenantID != id.String() || pin.schema != p.rw.schema() {
-			return fmt.Errorf("db: committed merchant transaction has an incompatible pin")
-		}
-		if !pin.transactionLocal {
-			var err error
-			conn, err = pin.get(ctx)
-			if err != nil {
-				return err
-			}
-		}
+	if scope, ok := ctx.Value(merchantScopeKey{}).(*merchantScope); ok &&
+		(scope.pool != p.raw || scope.tenantID != id.String() || scope.schema != p.rw.schema()) {
+		return fmt.Errorf("db: committed merchant transaction has an incompatible merchant scope")
 	}
-	if conn == nil {
-		acquired, err := acquire(ctx, p.raw)
-		if err != nil {
-			return err
-		}
-		defer acquired.Release()
-		conn = acquired.Conn()
+	conn, err := acquire(ctx, p.raw)
+	if err != nil {
+		return err
 	}
-	if conn.PgConn().TxStatus() != 'I' {
-		return ErrCallerTransaction
-	}
+	defer conn.Release()
 	raw, err := conn.Begin(ctx)
 	if err != nil {
 		return err

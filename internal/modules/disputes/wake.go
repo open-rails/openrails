@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/disputejob"
 	"github.com/open-rails/openrails/internal/logx"
@@ -50,41 +51,23 @@ func (s *Service) wakeUntilDone(ctx context.Context) {
 }
 
 // Run wakes the waiting responses on every notification for this schema and
-// on every (re)connect, until ctx ends.
+// on every (re)connect, for those queued while nothing listened, until ctx
+// ends, on a session of its own.
 func (s *Service) Run(ctx context.Context) {
 	if s.DB.Pool() == nil {
 		return
 	}
 	schema := s.DB.DataPool().Schema()
-	for ctx.Err() == nil {
-		err := func() error {
-			conn, err := s.DB.ConnectSession(ctx)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
-			if _, err := conn.Exec(ctx, "LISTEN "+pgx.Identifier{wakeChannel}.Sanitize()); err != nil {
-				return err
-			}
-			for {
+	s.DB.Listen(ctx, db.Listener{
+		Channel:   wakeChannel,
+		Connected: s.wakeUntilDone,
+		Notified: func(ctx context.Context, payload string) {
+			if payload == schema {
 				s.wakeUntilDone(ctx)
-				for {
-					n, err := conn.WaitForNotification(ctx)
-					if err != nil {
-						return err
-					}
-					if n.Payload == schema {
-						break
-					}
-				}
 			}
-		}()
-		if err != nil && ctx.Err() == nil {
+		},
+		Interrupted: func(ctx context.Context, err error) {
 			s.Log.WarnContext(ctx, "dispute responses: wake notifications interrupted; reconnecting", logx.Err(err))
-			select {
-			case <-ctx.Done():
-			case <-time.After(time.Second):
-			}
-		}
-	}
+		},
+	})
 }

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit/keys"
 	"github.com/open-rails/helpers/deps"
@@ -66,11 +67,15 @@ type Opened struct {
 // a source named, until ctx ends; a malformed optional section (redis, vault,
 // email_smtp) is left out and reported in Degraded.
 func Open(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config) (*Opened, error) {
+	session, err := Session(cfg)
+	if err != nil {
+		return nil, err
+	}
 	pool, err := Pool(ctx, logger, cfg, true)
 	if err != nil {
 		return nil, err
 	}
-	o := &Opened{Deps: openrails.Deps{Postgres: pool}}
+	o := &Opened{Deps: openrails.Deps{Postgres: pool, PostgresSession: session}}
 	o.closes = append(o.closes, pool.Close)
 	if cfg.Redis != nil {
 		if opts, err := RedisOptions(cfg.Redis); err != nil {
@@ -170,14 +175,34 @@ func (o *Opened) Close() {
 	}
 }
 
-// Pool opens the database section's pool. retry waits for the database until ctx
-// ends, as a serving process does; otherwise it tries once.
+// Pool opens the database section's pool for a serving process. retry
+// waits for the database until ctx ends; otherwise it tries once. Beside a
+// session_url, url is a transaction pooler's, so its statements keep no
+// server-side prepared statement.
 func Pool(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config, retry bool) (*pgxpool.Pool, error) {
-	pc, err := pgxpool.ParseConfig(cfg.Database.DSN(os.Getenv))
+	pooled := strings.TrimSpace(cfg.Database.SessionURL) != ""
+	return openPool(ctx, logger, cfg.Database.DSN(os.Getenv), pooled, retry)
+}
+
+// CommandPool opens a one-off command's pool, which reaches PostgreSQL
+// directly: through session_url when set, so its locks and migrations hold
+// their sessions. It tries once.
+func CommandPool(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config) (*pgxpool.Pool, error) {
+	if url := strings.TrimSpace(cfg.Database.SessionURL); url != "" {
+		return openPool(ctx, logger, url, false, false)
+	}
+	return openPool(ctx, logger, cfg.Database.DSN(os.Getenv), false, false)
+}
+
+func openPool(ctx context.Context, logger *slog.Logger, dsn string, pooled, retry bool) (*pgxpool.Pool, error) {
+	pc, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse postgres config: %w", err)
 	}
 	pc.MaxConns, pc.MaxConnLifetime, pc.MaxConnIdleTime = maxConns, maxConnLifetime, maxConnIdleTime
+	if pooled {
+		pc.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, pc)
 	if err != nil {
 		return nil, fmt.Errorf("create pgx pool: %w", err)
@@ -191,6 +216,21 @@ func Pool(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config, retr
 		return nil, err
 	}
 	return pool, nil
+}
+
+// Session is the database section's direct session configuration: nil
+// without a session_url.
+func Session(cfg *hostconfig.Config) (*pgxpool.Config, error) {
+	url := strings.TrimSpace(cfg.Database.SessionURL)
+	if url == "" {
+		return nil, nil
+	}
+	pc, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, fmt.Errorf("parse database.session_url: %w", err)
+	}
+	pc.MaxConns, pc.MaxConnLifetime, pc.MaxConnIdleTime = maxConns, maxConnLifetime, maxConnIdleTime
+	return pc, nil
 }
 
 // pingUntil pings until what (database, clickhouse) answers or ctx ends: one

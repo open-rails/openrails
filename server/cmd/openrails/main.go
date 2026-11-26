@@ -245,7 +245,7 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 		if conn != nil {
 			defer conn.Close()
 			chdb := config.ClickHouseDatabase(&host.Server.Engine)
-			if err := eventstore.Migrate(ctx, conn, chdb, eventstore.Options{Logger: slog.Default(), Serialize: migrate.ClickHouseLock(database.Pool(), chdb)}); err != nil {
+			if err := eventstore.Migrate(ctx, conn, chdb, eventstore.Options{Logger: slog.Default(), Serialize: migrate.ClickHouseLock(database.Pool().Config(), chdb)}); err != nil {
 				return err
 			}
 		}

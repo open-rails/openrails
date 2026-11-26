@@ -67,24 +67,11 @@ func (d *DB) ReadSnapshot(ctx context.Context, fn func(ctx context.Context, tx p
 	if _, err := tx.Exec(ctx, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"); err != nil {
 		return err
 	}
-	if err := d.bindTransactionPoolMerchant(ctx, tx); err != nil {
+	if err := d.bindScopedMerchant(ctx, tx); err != nil {
 		return err
 	}
 	if err := fn(transactionContext(ctx), tx); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
-}
-
-// ReleasePin returns the request's pinned merchant connection to the pool
-// while it is idle, for a caller about to wait; the next query pins again, on
-// a possibly different connection. Only safe when nothing from before depends
-// on that connection: no open transaction, no raw connection handed out, and
-// no session-level lock or setting other than the merchant GUC.
-func (d *DB) ReleasePin(ctx context.Context) {
-	lc, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn)
-	if !ok || d == nil || lc.pool != d.pool {
-		return
-	}
-	lc.releaseIdle()
 }

@@ -27,13 +27,15 @@ import (
 // itself authenticates nobody.
 type Deps struct {
 	// Postgres is the host's pool, required; its role owns OpenRails'
-	// tables, which New creates or upgrades.
+	// tables, which New creates or upgrades. Nothing OpenRails runs on it
+	// outlives its transaction, so it may be a transaction pooler.
 	Postgres *pgxpool.Pool
-	// PostgresSession is the direct connection configuration for a transaction-
-	// pooled Postgres. It connects to the same database and role without the
-	// pooler, for migrations, listeners and session locks (usage policy writes,
-	// billing imports). When supplied, merchant scope on the application pool
-	// is transaction-local.
+	// PostgresSession is the direct connection configuration of the same
+	// database and role when Postgres is a transaction pooler (PgBouncer in
+	// transaction mode). Migrations, listeners (River's too) and session locks
+	// (usage policy writes, billing imports) connect through it, and Postgres's
+	// DefaultQueryExecMode must then be cache_describe, exec or
+	// simple_protocol. Nil dials them with Postgres's configuration.
 	PostgresSession *pgxpool.Config
 	// MerchantGroups reads live ownership metadata for explicit bound merchant
 	// declarations. It authenticates no request and is never closed by the engine.

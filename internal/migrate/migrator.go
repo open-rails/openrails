@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/internal/config"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
+	"github.com/open-rails/openrails/internal/pgsession"
 	"github.com/open-rails/openrails/internal/sqlschema"
 
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -114,7 +115,7 @@ func loadChain(chain fs.FS, schema string) ([]migratekit.Migration, error) {
 // applyRiver migrates River's tables in schema, serialized with AuthKit and
 // riverhelpers on the lock they share.
 func applyRiver(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, schema string) error {
-	return locked(ctx, pool, "river-migrations:"+schema, func() error {
+	return locked(ctx, pool.Config(), "river-migrations:"+schema, func() error {
 		if _, err := pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+pgx.Identifier{schema}.Sanitize()); err != nil {
 			return err
 		}
@@ -136,17 +137,18 @@ func applyRiver(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, sc
 // ClickHouseLock serializes the event store's migration of a ClickHouse
 // database across every process migrating it with this PostgreSQL database,
 // as the PostgreSQL and River migrations are: replicas starting together
-// take turns.
-func ClickHouseLock(pool *pgxpool.Pool, database string) func(context.Context, func() error) error {
+// take turns. session reaches PostgreSQL directly: a transaction pooler would
+// leave the lock on a server connection it hands to someone else.
+func ClickHouseLock(session *pgxpool.Config, database string) func(context.Context, func() error) error {
 	return func(ctx context.Context, fn func() error) error {
-		return locked(ctx, pool, "openrails-clickhouse-migrations:"+database, fn)
+		return locked(ctx, session, "openrails-clickhouse-migrations:"+database, fn)
 	}
 }
 
-// locked runs fn holding key's advisory lock on a session of its own, so the
-// lock never pins a connection of the caller's pool.
-func locked(ctx context.Context, pool *pgxpool.Pool, key string, fn func() error) error {
-	conn, err := pgx.ConnectConfig(ctx, pool.Config().ConnConfig.Copy())
+// locked runs fn holding key's advisory lock on a session of its own, dialed
+// from session, so the lock never pins a connection of the caller's pool.
+func locked(ctx context.Context, session *pgxpool.Config, key string, fn func() error) error {
+	conn, err := pgsession.Dial(ctx, session)
 	if err != nil {
 		return fmt.Errorf("connect %s lock: %w", key, err)
 	}

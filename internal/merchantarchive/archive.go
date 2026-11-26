@@ -78,11 +78,8 @@ func Export(ctx context.Context, database *db.DB, id billing.MerchantID, out io.
 	if err != nil {
 		return classify(err)
 	}
-	// RunInTx (not MerchantTx) lets isolation be set before even the GUC query.
-	err = database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"); err != nil {
-			return err
-		}
+	// One read-only snapshot: its isolation is set before any query.
+	err = database.ReadSnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if err := scope(ctx, tx, id); err != nil {
 			return err
 		}

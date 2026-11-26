@@ -268,8 +268,8 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 // processes the event waits for that outcome, briefly: the provider treats
 // any 2xx as delivered, so answering before the owner succeeds could lose the
 // event, and answering 5xx would only schedule a needless redelivery. While it
-// waits it returns the request's pinned connection to the pool and polls on
-// short-lived connections with backoff, never the lease-renewal pool; it
+// waits it holds no connection and polls on short-lived ones with backoff,
+// never the lease-renewal pool; it
 // claims again only once the owner's claim is settled or lapsed.
 func (s *DeduplicationService) claim(ctx context.Context, op, eventID string) (*idempotency.Claim, *idempotency.Record, error) {
 	deadline := time.NewTimer(webhookDuplicateWait)
@@ -283,7 +283,6 @@ func (s *DeduplicationService) claim(ctx context.Context, op, eventID string) (*
 		if claim != nil || rec.Status != idempotency.StatusProcessing {
 			return claim, rec, nil
 		}
-		s.db.ReleasePin(ctx)
 		for rec != nil && rec.Status == idempotency.StatusProcessing && rec.Leased {
 			select {
 			case <-ctx.Done():

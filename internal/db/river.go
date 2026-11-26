@@ -115,16 +115,13 @@ var ErrRiverTablesMissing = errors.New("River's tables are missing")
 var ErrNoRiverProducer = errors.New("a job queued with its work requires a bound River producer")
 
 // ValidateRiverJobBinding must succeed before the runtime enables a producer.
-// Validate during composition, before requests hold any transaction or pool pin.
+// Validate during composition, before requests hold any transaction.
 func (d *DB) ValidateRiverJobBinding(ctx context.Context, pool *pgxpool.Pool, schema string) error {
 	if d == nil || ctx == nil {
 		return fmt.Errorf("River binding requires the billing database and context")
 	}
 	if marked, _ := ctx.Value(transactionContextKey{}).(bool); marked || d.pgtx != nil {
 		return fmt.Errorf("River binding must precede caller transactions: %w", ErrCallerTransaction)
-	}
-	if pin, _ := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn); pin != nil {
-		return fmt.Errorf("River binding must precede merchant connection pins: %w", ErrCallerTransaction)
 	}
 	if err := pgidentity.RequireSameDatabase(ctx, d.pool, pool); err != nil {
 		return fmt.Errorf("River queue database: %w", err)

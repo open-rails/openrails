@@ -79,6 +79,9 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 		defer cancel()
 		_, err := pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{w.schema}.Sanitize()+", "+pgx.Identifier{w.schema + "_river"}.Sanitize()+" CASCADE")
 		require.NoError(t, err)
+		if w.deps.Postgres != pool {
+			w.deps.Postgres.Close()
+		}
 		pool.Close()
 	})
 	w.cfg = openrails.Config{

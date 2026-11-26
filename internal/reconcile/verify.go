@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/billing"
@@ -259,48 +258,52 @@ func (v *Verifier) RetryDue(ctx context.Context) error {
 }
 
 // Listen feeds the unverified trigger's notifications to Enqueue until ctx
-// ends, reconnecting on failure. It uses a dedicated session.
+// ends, on a session of its own. Each (re)connect queues the rows no read has
+// reached, which a notification missed while nothing listened.
 func (v *Verifier) Listen(ctx context.Context) {
 	v.init()
 	if v.DB.Pool() == nil {
 		return
 	}
-	channel := pgx.Identifier{unverifiedChannel + v.DB.DataPool().Schema()}.Sanitize()
-	for ctx.Err() == nil {
-		if err := recovered(func() error { return v.listenOnce(ctx, channel) }); err != nil && ctx.Err() == nil {
-			v.Log.WarnContext(ctx, "verify: unverified notifications interrupted; reconnecting", logx.Err(err))
-			select {
-			case <-ctx.Done():
-			case <-time.After(time.Second):
+	v.DB.Listen(ctx, db.Listener{
+		Channel: unverifiedChannel + v.DB.DataPool().Schema(),
+		Connected: func(ctx context.Context) {
+			if err := recovered(func() error { return v.queueUnread(ctx) }); err != nil && ctx.Err() == nil {
+				v.Log.WarnContext(ctx, "verify: unread verifications not queued; the billing pass retries them", logx.Err(err))
 			}
-		}
-	}
+		},
+		Notified: func(ctx context.Context, payload string) {
+			m, s, ok := strings.Cut(payload, ":")
+			if !ok {
+				return
+			}
+			mid, merr := uuid.Parse(m)
+			sid, serr := uuid.Parse(s)
+			if merr == nil && serr == nil {
+				v.Enqueue(billing.MerchantID(mid), sid)
+			}
+		},
+		Interrupted: func(ctx context.Context, err error) {
+			v.Log.WarnContext(ctx, "verify: unverified notifications interrupted; reconnecting", logx.Err(err))
+		},
+	})
 }
 
-func (v *Verifier) listenOnce(ctx context.Context, channel string) error {
-	conn, err := v.DB.ConnectSession(ctx)
+// queueUnread queues a bounded batch of the rows no read has reached.
+func (v *Verifier) queueUnread(ctx context.Context) error {
+	rows, err := v.DB.GenDirectory().ListUnreadSubscriptionVerifications(ctx, verificationScanLimit)
 	if err != nil {
-		return err
+		return fmt.Errorf("verify: list unread subscription verifications: %w", err)
 	}
-	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
-	if _, err := conn.Exec(ctx, "LISTEN "+channel); err != nil {
-		return err
+	byMerchant := map[billing.MerchantID][]uuid.UUID{}
+	for _, row := range rows {
+		mid := billing.MerchantID(row.MerchantID)
+		byMerchant[mid] = append(byMerchant[mid], row.SubscriptionID)
 	}
-	for {
-		n, err := conn.WaitForNotification(ctx)
-		if err != nil {
-			return err
-		}
-		m, s, ok := strings.Cut(n.Payload, ":")
-		if !ok {
-			continue
-		}
-		mid, merr := uuid.Parse(m)
-		sid, serr := uuid.Parse(s)
-		if merr == nil && serr == nil {
-			v.Enqueue(billing.MerchantID(mid), sid)
-		}
+	for mid, ids := range byMerchant {
+		v.Enqueue(mid, ids...)
 	}
+	return nil
 }
 
 func (v *Verifier) lifecycle() *subscriptions.SubscriptionLifecycleService {

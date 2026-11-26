@@ -1850,6 +1850,47 @@ func (q *Queries) ListUnknownSubscriptions(ctx context.Context, arg ListUnknownS
 	return items, nil
 }
 
+const listUnreadSubscriptionVerifications = `-- name: ListUnreadSubscriptionVerifications :many
+SELECT v.merchant_id, v.subscription_id
+FROM billing.subscription_verifications v
+JOIN billing.subscriptions s ON s.merchant_id = v.merchant_id AND s.id = v.subscription_id
+JOIN billing.merchants m ON m.id = v.merchant_id
+WHERE v.last_read_at IS NULL
+  AND m.status = 'active' AND m.deleted_at IS NULL
+  AND s.status = 'unverified' AND s.deleted_at IS NULL
+  AND s.collection_policy <> 'engine' AND s.rail_subscription_id IS NOT NULL
+  AND s.rail IN ('nmi', 'stripe', 'ccbill')
+ORDER BY v.unverified_at, v.merchant_id, v.subscription_id
+LIMIT $1::int
+`
+
+type ListUnreadSubscriptionVerificationsRow struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// CROSS-MERCHANT: route unverified rows no read has reached yet, what a
+// verifier missed while it was not listening.
+func (q *Queries) ListUnreadSubscriptionVerifications(ctx context.Context, rowLimit int32) ([]ListUnreadSubscriptionVerificationsRow, error) {
+	rows, err := q.db.Query(ctx, listUnreadSubscriptionVerifications, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnreadSubscriptionVerificationsRow
+	for rows.Next() {
+		var i ListUnreadSubscriptionVerificationsRow
+		if err := rows.Scan(&i.MerchantID, &i.SubscriptionID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnresolvedReceiptFindings = `-- name: ListUnresolvedReceiptFindings :many
 SELECT id, substr(subject_key, 9)::text AS transaction_id, (evidence->>'subscription_id')::text AS subscription_id
 FROM billing.reconciliation_findings

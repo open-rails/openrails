@@ -36,7 +36,8 @@ func closeCLI() {
 	cli.closes = nil
 }
 
-// cliPool is the command's pool, opened once with one connection attempt.
+// cliPool is the command's pool, opened once with one connection attempt,
+// directly to PostgreSQL (hostdeps.CommandPool).
 func cliPool(ctx context.Context) (*pgxpool.Pool, error) {
 	cli.mu.Lock()
 	defer cli.mu.Unlock()
@@ -49,7 +50,7 @@ func cliPool(ctx context.Context) (*pgxpool.Pool, error) {
 	}
 	connect, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pool, err := hostdeps.Pool(connect, slog.Default(), h, false)
+	pool, err := hostdeps.CommandPool(connect, slog.Default(), h)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}
@@ -114,7 +115,8 @@ func cliDeps(ctx context.Context) (*pgxpool.Pool, *vaultapi.Client, error) {
 	return pool, vault, nil
 }
 
-// openCLIDB is the command's database over its own pool, which Close closes.
+// openCLIDB is the command's database over its own pool, which Close closes,
+// directly to PostgreSQL (hostdeps.CommandPool).
 // Tenant operations carry their authorized merchant explicitly; PostgreSQL
 // role flags do not select a tenant.
 func openCLIDB(ctx context.Context) (*db.DB, error) {
@@ -124,7 +126,7 @@ func openCLIDB(ctx context.Context) (*db.DB, error) {
 	}
 	connect, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pool, err := hostdeps.Pool(connect, slog.Default(), h, false)
+	pool, err := hostdeps.CommandPool(connect, slog.Default(), h)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}

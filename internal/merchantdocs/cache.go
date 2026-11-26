@@ -209,6 +209,21 @@ func (c *Cache) Invalidate(id billing.MerchantID) {
 	}
 }
 
+// Expire makes every cached merchant reload on its next use.
+func (c *Cache) Expire() {
+	c.mu.Lock()
+	entries := make([]*entry, 0, len(c.entries))
+	for _, e := range c.entries {
+		entries = append(entries, e)
+	}
+	c.mu.Unlock()
+	for _, e := range entries {
+		e.mu.Lock()
+		e.checked = time.Time{}
+		e.mu.Unlock()
+	}
+}
+
 // Forget drops the merchant: it was deleted.
 func (c *Cache) Forget(id billing.MerchantID) {
 	c.mu.Lock()
