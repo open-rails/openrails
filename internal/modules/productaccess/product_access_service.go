@@ -277,9 +277,9 @@ func (s *Service) ListByIDs(ctx context.Context, ids []uuid.UUID) ([]gen.ListPro
 	return out, nil
 }
 
-// GrantProducts records free grants all or none under key, in one transaction,
-// and returns each window with its product and grant attribution, in order.
-// A replay needs the same item count and terms.
+// GrantProducts records free grants all or none under key, in one transaction
+// that holds the key's lock, and returns each window with its product and grant
+// attribution, in order. A replay needs the same item count and terms.
 func (s *Service) GrantProducts(ctx context.Context, key string, batch []Grant) ([]gen.ListProductAccessPageRow, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("product access service not initialized")
@@ -290,6 +290,9 @@ func (s *Service) GrantProducts(ctx context.Context, key string, batch []Grant) 
 	}
 	var out []gen.ListProductAccessPageRow
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := gen.New(tx).LockAccessGrantKey(ctx, gen.LockAccessGrantKeyParams{MerchantID: mid.UUID(), IdempotencyKey: key}); err != nil {
+			return err
+		}
 		bound := NewService(s.db.NewWithPgxTx(tx), s.clock)
 		ids := make([]uuid.UUID, len(batch))
 		createdCount := 0

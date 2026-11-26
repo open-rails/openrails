@@ -5,6 +5,7 @@ package critical_test
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -67,6 +68,29 @@ func TestRequestIdempotency(t *testing.T) {
 		status, raw = a.request(t, http.MethodPost, "/v1/admin/product-access", a.alphaKey.Secret, grant, map[string]string{"Idempotency-Key": "comp-pair"})
 		require.Equal(t, http.StatusUnprocessableEntity, status, string(raw))
 		require.Contains(t, string(raw), `"code":"idempotency_key_reused"`)
+		var statuses [3]int
+		var raws [3][]byte
+		var errs [3]error
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for i := range statuses {
+			wg.Go(func() {
+				<-start
+				statuses[i], raws[i], errs[i] = a.do(t.Context(), http.MethodPost, "/v1/admin/product-access", a.alphaKey.Secret, batch, map[string]string{"Idempotency-Key": "comp-race"})
+			})
+		}
+		close(start)
+		wg.Wait()
+		var answers [3]billing.CreateProductAccessBatchResult
+		for i := range statuses {
+			require.NoError(t, errs[i])
+			require.Equal(t, http.StatusCreated, statuses[i], string(raws[i]))
+			require.NoError(t, json.Unmarshal(raws[i], &answers[i]))
+			require.Len(t, answers[i].Items, 2)
+			for j := range answers[i].Items {
+				require.Equal(t, answers[0].Items[j].ID, answers[i].Items[j].ID)
+			}
+		}
 	})
 	t.Run("OR-J10-S06/a-card-save-key-answers-one-saved-card", func(t *testing.T) {
 		a, journal := newNMIWorld(t)
