@@ -73,7 +73,13 @@ type NMIHistoryWorker struct {
 	Log         *slog.Logger
 }
 
-func (w *NMIHistoryWorker) Work(ctx context.Context, _ *river.Job[NMIHistoryArgs]) error {
+// NMIHistoryReport is what a job that read records as its River output: the
+// PSPs it read. A job that exits records none.
+type NMIHistoryReport struct {
+	Read int `json:"read"`
+}
+
+func (w *NMIHistoryWorker) Work(ctx context.Context, _ *river.Job[NMIHistoryArgs]) (err error) {
 	if w.NMIResolver == nil {
 		return errors.New("nmi history: nmi resolver not wired")
 	}
@@ -91,6 +97,8 @@ func (w *NMIHistoryWorker) Work(ctx context.Context, _ *river.Job[NMIHistoryArgs
 	}
 	defer lease.Release()
 	ctx = lease.Context()
+	var report NMIHistoryReport
+	defer func() { err = errors.Join(err, river.RecordOutput(ctx, report)) }()
 	now := workerNow(w.Clock)
 	cursor := gen.ListDueNMIHistoryReadsParams{DueBy: now, RowLimit: nmiHistoryPage}
 	var errs error
@@ -102,7 +110,7 @@ func (w *NMIHistoryWorker) Work(ctx context.Context, _ *river.Job[NMIHistoryArgs
 		for _, merchantDue := range byMerchant(due) {
 			mid := merchantDue[0].MerchantID
 			err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "nmi history", func(ctx context.Context) error {
-				return w.readMerchant(ctx, mid, merchantDue, now)
+				return w.readMerchant(ctx, mid, merchantDue, now, &report)
 			})
 			if err != nil {
 				errs = errors.Join(errs, fmt.Errorf("merchant %s: %w", mid, err))
@@ -135,7 +143,7 @@ func byMerchant(due []gen.ListDueNMIHistoryReadsRow) [][]gen.ListDueNMIHistoryRe
 
 // readMerchant reads the merchant's due PSPs that are live in its
 // configuration and parks the rest until it declares them again.
-func (w *NMIHistoryWorker) readMerchant(ctx context.Context, mid uuid.UUID, due []gen.ListDueNMIHistoryReadsRow, now time.Time) error {
+func (w *NMIHistoryWorker) readMerchant(ctx context.Context, mid uuid.UUID, due []gen.ListDueNMIHistoryReadsRow, now time.Time, report *NMIHistoryReport) error {
 	var errs error
 	park := func(psp uuid.UUID) {
 		if err := w.DB.Gen(ctx).ParkNMIHistoryRead(ctx, gen.ParkNMIHistoryReadParams{MerchantID: mid, PspID: psp}); err != nil {
@@ -176,7 +184,9 @@ func (w *NMIHistoryWorker) readMerchant(ctx context.Context, mid uuid.UUID, due 
 		if err != nil {
 			w.Log.WarnContext(ctx, "nmi history: read failed; the stored months stand and the next job tries again", logx.Err(err), "merchant_id", mid, "psp_id", psp.PspID)
 			errs = errors.Join(errs, fmt.Errorf("psp %s: %w", psp.PspID, err))
+			continue
 		}
+		report.Read++
 	}
 	return errs
 }

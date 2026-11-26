@@ -72,24 +72,12 @@ CREATE TRIGGER %s BEFORE INSERT ON %s FOR EACH ROW EXECUTE FUNCTION %s()`,
 // return its error to River.
 func runRegisteredFails(t *testing.T, fleet *river.Client[pgx.Tx], kind string) {
 	t.Helper()
-	events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
-	defer unsubscribe()
-	job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: openrails.QueueBilling})
-	require.NoError(t, err)
-	deadline := time.NewTimer(20 * time.Second)
-	defer deadline.Stop()
-	for {
-		select {
-		case event := <-events:
-			if event == nil || event.Job.ID != job.Job.ID {
-				continue
-			}
-			require.Equal(t, river.EventKindJobFailed, event.Kind, "%s must report the merchant it could not finish", kind)
-			return
-		case <-deadline.C:
-			t.Fatalf("registered %s job did not finish", kind)
-		}
-	}
+	finished := finishPass(t, fleet, kind, func() []int64 {
+		job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: registeredQueue(kind)})
+		require.NoError(t, err)
+		return []int64{job.Job.ID}
+	})
+	require.Equal(t, river.EventKindJobFailed, finished[0].Kind, "%s must report the merchant it could not finish", kind)
 }
 
 func TestBackgroundJobs(t *testing.T) {
