@@ -2209,6 +2209,15 @@
     "OR-J40-S26": [
       "TestCreditBooksEdges/OR-J40-S26/a-lot-whose-payment-brought-no-cash-defers-nothing-and-raises-a-finding"
     ],
+    "OR-J40-S42": [
+      "TestCreditBooksEdges/OR-J40-S42/staff-refunds-of-revoked-or-spent-credit-are-conflicts-and-move-nothing/revoked/partial",
+      "TestCreditBooksEdges/OR-J40-S42/staff-refunds-of-revoked-or-spent-credit-are-conflicts-and-move-nothing/revoked/full",
+      "TestCreditBooksEdges/OR-J40-S42/staff-refunds-of-revoked-or-spent-credit-are-conflicts-and-move-nothing/revoked",
+      "TestCreditBooksEdges/OR-J40-S42/staff-refunds-of-revoked-or-spent-credit-are-conflicts-and-move-nothing/spent/partial",
+      "TestCreditBooksEdges/OR-J40-S42/staff-refunds-of-revoked-or-spent-credit-are-conflicts-and-move-nothing/spent/full",
+      "TestCreditBooksEdges/OR-J40-S42/staff-refunds-of-revoked-or-spent-credit-are-conflicts-and-move-nothing/spent",
+      "TestCreditBooksEdges/OR-J40-S42/staff-refunds-of-revoked-or-spent-credit-are-conflicts-and-move-nothing"
+    ],
     "OR-J41-S18": [
       "TestRevenueReversals/OR-J41-S18/a-partial-refund-while-service-runs-is-a-price-reduction-with-catch-up"
     ],

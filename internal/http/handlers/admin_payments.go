@@ -224,7 +224,7 @@ type adminRefundPrepared struct {
 func refundAmountCents(currency string, amountNative int64) (moneyutil.Cents, error) {
 	cents, err := moneyutil.NativeToRailMinorExact(currency, amountNative)
 	if err != nil {
-		return 0, fmt.Errorf("refund amount must be a whole number of cents: %w", err)
+		return 0, fmt.Errorf("refund amount must be a whole number of minor units: %w", err)
 	}
 	return cents, nil
 }
