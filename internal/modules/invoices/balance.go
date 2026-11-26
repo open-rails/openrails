@@ -29,13 +29,14 @@ func InMerchantUnit(code string) bool { return currency.IsUnitCode(code) }
 // customer's balance in that unit, then settles it: each line draws the live
 // lots, soonest expiry first, one credit_spend per lot at (invoice,
 // invoice_line, line), naming the invoice, and its money moves into the line's
-// deferred revenue at each lot's rate. Pending usage and running charges'
-// accrual are not spent: they post later from what is left.
+// deferred revenue at each lot's rate. The customer's usage and running
+// charges post first, lapsed lots expiring in turn, so lots are spent in time
+// order.
 func (s *Service) payFromBalance(ctx context.Context, d *db.DB, invoice *Invoice) (Outcome, error) {
 	q := d.Gen(ctx)
 	now := s.now()
 	lots := credits.New(q, invoice.MerchantID, s.now)
-	if _, err := lots.ExpireLapsed(ctx, invoice.CustomerID, invoice.Currency); err != nil {
+	if _, err := lots.SettleRunningCharges(ctx, invoice.CustomerID, invoice.Currency, now); err != nil {
 		return "", err
 	}
 	available, err := availableUnits(ctx, q, invoice, now)

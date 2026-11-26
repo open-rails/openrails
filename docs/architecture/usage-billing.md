@@ -79,11 +79,12 @@ in `usage_pending_amounts` and nothing else did, so it deletes them. It runs
 oldest pending usage ended (`UsagePostingWorker`, the first scan of the hourly
 billing pass; a month's last day's posting is its close); `billing`, before a
 usage invoice bills what is owed; `credit`, before a credit lot's expiry,
-revocation or refund, so lots are spent in time order (`db.UsageLedger`: an
-expiry posts through the lapse, expires, then posts the rest); `purge`, before
+revocation or refund and before an invoice is paid from the balance, so lots
+are spent in time order (`db.UsageLedger`: an expiry posts through the lapse,
+expires, then posts the rest); `purge`, before
 a merchant purge. Lots that lapsed expire first, each after what came before
-its lapse posted (`postEverything`). Deposits post nothing: their spends are
-gated by the available amount, which already deducts pending usage. Each posting
+its lapse posted (`postEverything`). Deposits post nothing: they draw no lot, and
+spends are gated by the available amount, which already deducts pending usage. Each posting
 records how far it read the store (`usage_postings.ingested_through`); a later one
 takes, of the usage that occurred before an earlier cut and was ingested by then,
 no less than what posted, and prices what came since on top (`takenQuantities`).

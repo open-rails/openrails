@@ -594,6 +594,7 @@ func unitOverrun(t *testing.T) {
 	// The first request overruns its estimate: 5 images cost 20 and the
 	// second 8, against 20 in the lots. The day's posting takes the 20 and
 	// forgives 8: nothing is owed in a unit.
+	used := a.clock.Now()
 	first.capture(t, imageUse(5))
 	phone.capture(t, imageUse(2))
 	unitBalance(t, a.alpha, s.alice, "GOLD", -8, 28, 20)
@@ -616,11 +617,11 @@ func unitOverrun(t *testing.T) {
 		" WHERE merchant_id = $1 AND customer_id = $2 AND transfer_type = 'owed_accrual'", a.alpha.MerchantID().UUID(), s.alice.UUID()).Scan(&owed))
 	require.Zero(t, owed, "nothing is owed in a unit")
 
-	require.Equal(t, map[string]int64{"charged": 20, "forgiven": 8}, usageByCharge(t, a, s.alice, a.clock.Now()), "the overrun shows as forgiven usage")
+	require.Equal(t, map[string]int64{"charged": 20, "forgiven": 8}, usageChargedBetween(t, a, s.alice, used, a.clock.Now()), "the overrun shows as forgiven usage")
 	// Each invoker's charge gives up its share of the 8, 20:8 to the largest
 	// remainder: what each charged and had forgiven adds up to its usage.
 	require.Equal(t, map[string]int64{s.alice.String() + "/charged": 14, s.alice.String() + "/forgiven": 6, "alice-phone/charged": 6, "alice-phone/forgiven": 2},
-		usageCharged(t, a, s.alice, a.clock.Now(), "invoker"))
+		usageChargedBetween(t, a, s.alice, used, a.clock.Now(), "invoker"))
 
 	status, raw := a.request(t, http.MethodGet, "/v1/me/usage?currency=GOLD", a.aliceToken, nil)
 	require.Equal(t, http.StatusOK, status, string(raw))
@@ -694,10 +695,16 @@ func usageByCharge(t *testing.T, a *authorityWorld, customer billing.CustomerID,
 // dimensions by and then charge, keyed by their values joined with "/".
 func usageCharged(t *testing.T, a *authorityWorld, customer billing.CustomerID, day time.Time, by ...string) map[string]int64 {
 	t.Helper()
-	on := day.UTC().Format(time.DateOnly)
+	return usageChargedBetween(t, a, customer, day, day, by...)
+}
+
+// usageChargedBetween is usageCharged over the UTC days from one to another.
+func usageChargedBetween(t *testing.T, a *authorityWorld, customer billing.CustomerID, from, to time.Time, by ...string) map[string]int64 {
+	t.Helper()
 	dims := append(slices.Clone(by), "charge")
 	result, err := a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"usage_charged"}, By: dims,
-		Filters: map[string][]string{"customer": {customer.String()}, "currency": {"GOLD"}}, Range: &billing.MetricsRange{From: on, To: on}})
+		Filters: map[string][]string{"customer": {customer.String()}, "currency": {"GOLD"}},
+		Range:   &billing.MetricsRange{From: from.UTC().Format(time.DateOnly), To: to.UTC().Format(time.DateOnly)}})
 	require.NoError(t, err)
 	columns := map[string]int{}
 	for i, c := range result.Columns {
@@ -921,6 +928,7 @@ func unitPriceFalls(t *testing.T) {
 		require.NoError(t, err)
 	}
 	grant("ten", 10)
+	day := a.clock.Now().UTC()
 	useImages(t, a, s.alice, "five", 5)
 	unitBalance(t, a.alpha, s.alice, "GOLD", -10, 20, 10)
 	// Five images cost 20: the day's posting takes the 10 and forgives 10.
@@ -930,9 +938,10 @@ func unitPriceFalls(t *testing.T) {
 	unitBalance(t, a.alpha, s.alice, "GOLD", 0, 0, 0)
 	grant("one", 1)
 	unitBalance(t, a.alpha, s.alice, "GOLD", 1, 0, 1)
-	// A sixth brings the period's price to 6: it posted 20. Its marginal
-	// price is never below zero.
-	useImages(t, a, s.alice, "sixth", 1)
+	// A sixth of the same day, reported late, brings the period's price to
+	// 6: it posted 20. Its marginal price is never below zero.
+	settleUsage(t, a.alpha, newLease(), numbered(1, billing.LeaseUsage{CustomerID: s.alice, Invoker: s.alice.String(), InvokerType: billing.InvokerTypeCustomer,
+		Currency: "GOLD", EventType: "image", Dimensions: map[string]int64{"images": 1}, Source: "critical", SourceID: "sixth", OccurredAt: day.Add(time.Hour)})...)
 	unitBalance(t, a.alpha, s.alice, "GOLD", 1, 0, 1)
 	nextDay(a.world)
 	postDays(t, fleet)

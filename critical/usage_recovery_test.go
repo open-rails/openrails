@@ -274,6 +274,7 @@ products:
 		usageMeter(t, w.alpha, 100)
 		customer, _ := fundedCustomer(t, w)
 		lease := newLease()
+		day := w.clock.Now().UTC()
 		settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "posted", 3))...)
 		fleet := startFleet(t, w)
 		nextDay(w)
@@ -284,8 +285,10 @@ products:
 			require.NoError(t, w.deps.ClickHouse.Exec(t.Context(), "ALTER TABLE `"+w.schema+"`."+table+" DELETE WHERE merchant_id = toUUID(?) SETTINGS mutations_sync = 2",
 				w.alpha.MerchantID().String()))
 		}
-		w.clock.Advance(time.Minute)
-		settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "after-the-restore", 2))...)
+		// Usage of the same day, reported after the restore.
+		after := usageInput(customer, "after-the-restore", 2)
+		after.OccurredAt = day.Add(time.Minute)
+		settleUsage(t, w.alpha, lease, numbered(2, after)...)
 		balance(t, w.alpha, customer, 500, 200, 700)
 		nextDay(w)
 		postDays(t, fleet)

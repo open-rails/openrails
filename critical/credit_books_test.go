@@ -68,6 +68,16 @@ func (s *creditShop) buy(t *testing.T, price billing.PriceID, total int64, key s
 	require.Equal(t, http.StatusCreated, status, string(raw))
 	var invoice billing.Invoice
 	require.NoError(t, json.Unmarshal(raw, &invoice))
+	if s.fleet != nil && invoice.Status == billing.InvoiceProcessing {
+		// With a fleet running, the charge completes in its job.
+		require.Eventually(t, func() bool {
+			read, err := s.a.alpha.GetInvoice(t.Context(), invoice.ID)
+			if err == nil {
+				invoice = *read
+			}
+			return err == nil && invoice.Status == billing.InvoiceComplete
+		}, 20*time.Second, 20*time.Millisecond)
+	}
 	require.Equal(t, billing.InvoiceComplete, invoice.Status)
 	require.NotNil(t, invoice.Payment.PaymentID)
 	return *invoice.Payment.PaymentID, paymentLot(t, s.a.alpha, s.customer, *invoice.Payment.PaymentID)

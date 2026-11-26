@@ -179,14 +179,18 @@ func TestUsageStore(t *testing.T) {
 			pricedMeter(t, w.alpha, tiers(catalog.TierModeGraduated, 10, 5, 10))
 			customer, _ := fundedCustomer(t, w)
 			lease := newLease()
+			day := w.clock.Now().UTC()
 			settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "first", 6))...)
 			balance(t, w.alpha, customer, 940, 60, 1000)
 			fleet := startFleet(t, w)
 			nextDay(w)
 			postDays(t, fleet)
 			balance(t, w.alpha, customer, 940, 0, 940)
-			// The next 6 are pending at their marginal price: 12 units cost 110.
-			settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "second", 6))...)
+			// Six more of the same day, reported late, are pending at their
+			// marginal price: 12 units cost 110.
+			second := usageInput(customer, "second", 6)
+			second.OccurredAt = day.Add(time.Hour)
+			settleUsage(t, w.alpha, lease, numbered(2, second)...)
 			balance(t, w.alpha, customer, 890, 50, 940)
 			nextDay(w)
 			postDays(t, fleet)
@@ -201,6 +205,7 @@ func TestUsageStore(t *testing.T) {
 			pricedMeter(t, w.alpha, tiers(catalog.TierModeVolume, 10, 5, 10))
 			customer, _ := fundedCustomer(t, w)
 			lease := newLease()
+			day := w.clock.Now().UTC()
 			settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "first", 8))...)
 			balance(t, w.alpha, customer, 920, 80, 1000)
 			fleet := startFleet(t, w)
@@ -209,7 +214,9 @@ func TestUsageStore(t *testing.T) {
 			balance(t, w.alpha, customer, 920, 0, 920)
 			// 12 units cost 60 at the cheaper band: 20 less than posted. Their
 			// marginal price is never below zero.
-			settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "second", 4))...)
+			second := usageInput(customer, "second", 4)
+			second.OccurredAt = day.Add(time.Hour)
+			settleUsage(t, w.alpha, lease, numbered(2, second)...)
 			balance(t, w.alpha, customer, 920, 0, 920)
 			nextDay(w)
 			postDays(t, fleet)

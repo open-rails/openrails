@@ -489,8 +489,18 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			// The credit line's part of the reversal.
 			cash := min(-reversal.Amount, open)
 			units := int64(0)
-			if cash > 0 {
+			switch {
+			case cash > 0:
 				if units, err = move(nil, cash, gen.GetPurchasedCreditReversalStateRow{}, gen.GetCreditReversalShareRow{}, 0); err != nil {
+					return err
+				}
+			case committed.Withdrawn > 0:
+				// Reversals that settled first took the whole line: what the
+				// request withdrew goes back.
+				if err := postUnits(ctx, ledger.New(q, mid.UUID()), g, reversalID, withdrawnTo(g), ledger.CustomerUnits, committed.Withdrawn, ledger.CreditRefundRestore, "credit_excess"); err != nil {
+					return err
+				}
+				if err := credits.New(q, mid.UUID(), s.now).SyncRefunding(ctx, paymentID); err != nil {
 					return err
 				}
 			}
