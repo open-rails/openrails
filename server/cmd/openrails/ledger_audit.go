@@ -23,7 +23,8 @@ import (
 //
 //	openrails ledger-audit [--merchant=<slug|id>] [--format=table|json]
 //
-// Read-only. Exits non-zero on any finding so it can be wired to alerting.
+// Records books.entry.missing and books.reversal.misbalanced findings.
+// Exits non-zero on any finding so it can be wired to alerting.
 func newLedgerAuditCmd() *cobra.Command {
 	var (
 		merchantSlug string
@@ -32,7 +33,7 @@ func newLedgerAuditCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "ledger-audit",
 		SilenceUsage: true,
-		Short:        "Verify the books' integrity: conservation per (merchant, book, currency), account and lot counters and rollups vs the transfer log (read-only)",
+		Short:        "Verify the books' integrity: conservation per (merchant, book, currency), account and lot counters and rollups vs the transfer log; records books.entry.missing and books.reversal.misbalanced findings",
 		Args:         cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return runLedgerAudit(c, merchantSlug, format)
