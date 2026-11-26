@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -444,19 +445,34 @@ func TestLimitDecisions(t *testing.T) {
 
 	t.Run("OR-J23-S42/one-policy-caps-what-is-owed-and-spend-per-window-and-a-customers-own-limit-overrides-its-cap", func(t *testing.T) {
 		// The terms give $30 of credit; the policy caps what is owed at $20
-		// and spend at $5 an hour.
-		a, _, customer := usageBillingAccount(t, false, func(w *world) {
+		// and spend at $15 an hour. Compute costs $10 a unit. A gate refuses
+		// on the set's balance code once the line is gone, and with
+		// budget_exceeded once the window is: both are read from its view.
+		a, _, customer := usageBillingWorld(t, false, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.BillingPolicies = []billing.BillingPolicy{{Name: "team", OutstandingCapAmount: 20_000_000,
-				SpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 5_000_000, Currency: "USD"}}}}
+				SpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 15_000_000, Currency: "USD"}}}}
 			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "team"}}
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})
-		creditLine := func() int64 {
+		view := func(usage ...billing.LeaseUsage) (*billing.LimitSet, billing.ViewLimit) {
 			t.Helper()
-			return syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}}).LimitSets[0].CreditLine
+			out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Usage: numbered(1, usage...), Views: []billing.ViewParams{computeView(customer)}})
+			require.Empty(t, out.Usage.Refused)
+			set := out.LimitSets[0]
+			require.Nil(t, set.Refusal)
+			for _, key := range set.Limits {
+				if strings.HasPrefix(key, limits.SpendKeyPrefix) {
+					return set, lineOf(t, viewOf(t, out, customer), key)
+				}
+			}
+			require.FailNow(t, "the policy's spend window is in the set", "%v", set.Limits)
+			return nil, billing.ViewLimit{}
 		}
-		require.EqualValues(t, 20_000_000, creditLine(), "the policy's cap, not the terms' line")
+		set, window := view()
+		require.EqualValues(t, 20_000_000, set.CreditLine, "the policy's cap, not the terms' line")
+		require.Equal(t, billing.DenyInsufficientCredit, set.BalanceDenyCode)
+		require.EqualValues(t, 15_000_000, window.Remaining)
 
 		// $20 owed takes the whole line.
 		_, err := a.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "owed", CustomerID: customer, Currency: "USD", RatePerHour: 20_000_000})
@@ -464,14 +480,21 @@ func TestLimitDecisions(t *testing.T) {
 		a.clock.Advance(time.Hour)
 		_, err = a.alpha.StopRunningCharge(t.Context(), "owed", billing.StopRunningChargeParams{})
 		require.NoError(t, err)
-		require.Zero(t, creditLine())
-		requireDenied(t, admitOne(t, a.alpha, reservation(customer, "past-the-cap", 1_000_000)), billing.DenyOutstandingCapReached)
+		set, _ = view()
+		require.Zero(t, set.CreditLine)
+		require.Equal(t, billing.DenyOutstandingCapReached, set.BalanceDenyCode)
 
-		// The customer's own $40 overrides the cap; the window still binds.
+		// The customer's own $40 overrides the cap.
 		_, err = a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 40_000_000}}})
 		require.NoError(t, err)
-		require.EqualValues(t, 20_000_000, creditLine(), "$40 less the $20 owed")
-		require.True(t, admitOne(t, a.alpha, reservation(customer, "within", 4_000_000)).Allowed())
-		requireDenied(t, admitOne(t, a.alpha, reservation(customer, "past-the-window", 2_000_000)), billing.DenyBudgetExceeded)
+		set, _ = view()
+		require.EqualValues(t, 20_000_000, set.CreditLine, "$40 less the $20 owed")
+		require.Equal(t, billing.DenyInsufficientCredit, set.BalanceDenyCode)
+
+		// $20 of compute fills the window while the line has room.
+		set, window = view(usageInput(customer, "past-the-window", 2))
+		require.EqualValues(t, 20_000_000, window.Used)
+		require.LessOrEqual(t, window.Remaining, int64(0), "the window refuses")
+		require.EqualValues(t, 20_000_000, set.CreditLine)
 	})
 }
