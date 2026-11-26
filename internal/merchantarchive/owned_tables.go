@@ -101,6 +101,7 @@ var ownedTables = []string{
 	"provider_bills",
 	"provider_charge_attributions",
 	"provider_cycle_receipts",
+	"provider_listed_rebills",
 	"provider_intents",
 	"provider_catalog_objects",
 	"provider_schedules",

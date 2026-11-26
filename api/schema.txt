@@ -49,6 +49,7 @@ migration 0053_price_quantity_identity.up.sql sha256:12cd85f601f043351b66f219a45
 migration 0054_drop_catalog_restore_receipts.up.sql sha256:3cc444004e0c5b6ca9f721d535fd68c15523687ee8eb50d84463d7630c130a38
 migration 0055_drop_unread_catalog_columns.up.sql sha256:aae9d3f1bc88b08487f259ddff75fa2349fd1d7952d6dd90d73694919380374c
 migration 0056_catalog_revision_transaction.up.sql sha256:35f97fb6d15772a87d148263807ea07e45363bf99234a1d2cecdef256ba91dcf
+migration 0057_provider_listed_rebills.up.sql sha256:6439a117de9e827935e0477fa928ccf187775ad86a77bf9f9a2bdccdf0256a5f
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -2821,6 +2822,21 @@ table billing.provider_intents
   index CREATE UNIQUE INDEX provider_intents_subscription_id_tier_change_subscription_key ON billing.provider_intents USING btree (merchant_id, subscription_id) WHERE ((intent_type = ANY (ARRAY['nmi_upgrade'::text, 'stripe_tier_change'::text, 'initial_membership'::text])) AND (subscription_id IS NOT NULL) AND (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text])))
   index CREATE INDEX provider_intents_updated_at_idx ON billing.provider_intents USING btree (merchant_id, updated_at) WHERE ((status = ANY (ARRAY['succeeded'::text, 'failed_terminal'::text, 'superseded'::text, 'expired'::text])) AND (destructive_run_id IS NULL) AND (intent_type = ANY (ARRAY['nmi_delete_subscription'::text, 'stripe_cancel_subscription'::text, 'stripe_resume_subscription'::text, 'ccbill_cancel_subscription'::text, 'nmi_payment_method_update'::text, 'nmi_payment_source_update'::text, 'nmi_card_vault'::text, 'network_token'::text, 'stripe_archive_price'::text, 'stripe_archive_product'::text, 'solana_sunset_plan'::text, 'account_updater'::text])))
 
+table billing.provider_listed_rebills
+  column merchant_id uuid NOT NULL
+  column psp_id uuid NOT NULL
+  column transaction_key text NOT NULL
+  column subscription_key text NOT NULL
+  column amount text
+  column listed_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint provider_listed_rebills_amount_check CHECK (((octet_length(amount) >= 1) AND (octet_length(amount) <= 64)))
+  constraint provider_listed_rebills_pkey PRIMARY KEY (merchant_id, psp_id, transaction_key)
+  constraint provider_listed_rebills_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
+  constraint provider_listed_rebills_subscription_key_check CHECK (((octet_length(subscription_key) >= 1) AND (octet_length(subscription_key) <= 128)))
+  constraint provider_listed_rebills_transaction_key_check CHECK (((octet_length(transaction_key) >= 1) AND (octet_length(transaction_key) <= 128)))
+  index CREATE INDEX provider_listed_rebills_listed_at_idx ON billing.provider_listed_rebills USING btree (merchant_id, listed_at)
+  index CREATE UNIQUE INDEX provider_listed_rebills_pkey ON billing.provider_listed_rebills USING btree (merchant_id, psp_id, transaction_key)
+
 table billing.provider_schedules
   column merchant_id uuid NOT NULL
   column subscription_id uuid NOT NULL
@@ -4771,6 +4787,7 @@ function billing.guard_billing_restore_receipt()
                     'provider_charge_attributions',
                     'provider_cycle_receipts',
                     'provider_intents',
+                    'provider_listed_rebills',
                     'provider_schedules',
                     'psp_customers',
                     'psp_refresh_watermarks',

@@ -592,6 +592,15 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	bindApplyActions(findings, binding.ID, runID)
 	findings = e.classifyProvenance(ctx, binding.ID, snap, findings)
 
+	// CCBill callbacks are unsigned: each read confirms the rebills it lists.
+	if provider == ProviderCCBill && !params.Reversals {
+		unconfirmed, err := e.confirmCCBillCallbackRebills(ctx, binding.ID, snap, params.Until, now)
+		if err != nil {
+			return rep, nil, nil, nil, fmt.Errorf("confirm callback rebills: %w", err)
+		}
+		findings = append(findings, unconfirmed...)
+	}
+
 	if snap.Capabilities.Transactions && !params.Reversals {
 		history, historyNote := e.fetchHistory(ctx, provider, params)
 		rep.Dunning = computeDunningForensics(provider, snap, local, history, historyNote, now)

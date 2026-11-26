@@ -24,7 +24,8 @@
 // user_destructive_reservations 24 hours; limit_windows 61 days after
 // window_ends_at (lifetime and rate limits stay); leases with their in-flight
 // reports, and limit_adjustments, 61 days after the last sync;
-// webhook_health_daily 13 months; periodic_leases after 30 days unscheduled.
+// webhook_health_daily 13 months; provider_listed_rebills 90 days;
+// periodic_leases after 30 days unscheduled.
 //
 // The event store's ClickHouse tables expire by their TTLs (EventStoreTTLs):
 // usage_events 90 days after occurred_at (the owner's choice; its period's

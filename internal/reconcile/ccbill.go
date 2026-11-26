@@ -4,10 +4,16 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
@@ -103,6 +109,95 @@ func (f *CCBillFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 	}
 
 	return snap, nil
+}
+
+// ccbillTransactionKey ignores leading zeros: a CCBill id is a number.
+func ccbillTransactionKey(id string) string { return strings.TrimLeft(strings.TrimSpace(id), "0") }
+
+// Callback rebills are checked once DataLink has had this long to list them,
+// and for this long after.
+const (
+	ccbillListingGrace  = 36 * time.Hour
+	ccbillListingWindow = 30 * 24 * time.Hour
+)
+
+// confirmCCBillCallbackRebills records the rebills snap lists, resolves the
+// unconfirmed-charge findings they confirm, and answers a finding for each
+// callback rebill received between 30 days and 36 hours ago, before the read
+// reached 36 hours past it, that no read has listed. It only reports: CCBill
+// signs nothing, and an unlisted rebill is a question for a person.
+func (e *Engine) confirmCCBillCallbackRebills(ctx context.Context, pspID uuid.UUID, snap *RemoteSnapshot, readThrough, now time.Time) ([]Finding, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q := e.Local.DB.Gen(ctx)
+	var keys, subs, amounts []string
+	for _, t := range snap.Transactions {
+		key, sub := ccbillTransactionKey(t.TransactionID), rails.SubscriptionKey(string(ProviderCCBill), strings.TrimSpace(t.SubscriptionID))
+		if t.Type == TransactionTypeSale && key != "" && sub != "" {
+			keys, subs, amounts = append(keys, key), append(subs, sub), append(amounts, strings.TrimSpace(t.Amount))
+		}
+	}
+	if len(keys) > 0 {
+		if err := q.RecordProviderListedRebills(ctx, gen.RecordProviderListedRebillsParams{MerchantID: mid.UUID(), PspID: pspID, TransactionKeys: keys, SubscriptionKeys: subs, Amounts: amounts, ListedAt: now}); err != nil {
+			return nil, fmt.Errorf("record listed rebills: %w", err)
+		}
+	}
+	confirmed, err := q.ReconcileListConfirmedUnconfirmedCharges(ctx, gen.ReconcileListConfirmedUnconfirmedChargesParams{MerchantID: mid.UUID(), PspID: pspID})
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range confirmed {
+		if err := e.Store.MarkFindingVanished(ctx, id); err != nil {
+			return nil, fmt.Errorf("resolve confirmed charge %s: %w", id, err)
+		}
+	}
+	if readThrough.IsZero() || readThrough.After(now) {
+		readThrough = now
+	}
+	rows, err := q.ReconcileListUnconfirmedCallbackRebills(ctx, gen.ReconcileListUnconfirmedCallbackRebillsParams{MerchantID: mid.UUID(), PspID: pspID,
+		ReceivedFrom: now.Add(-ccbillListingWindow), ReceivedBefore: readThrough.Add(-ccbillListingGrace)})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Finding, 0, len(rows))
+	for _, p := range rows {
+		local := map[string]any{"payment_id": p.ID.String(), "customer_id": p.CustomerID.String(), "transaction_id": p.TransactionID,
+			"amount": strconv.FormatInt(p.Amount, 10), "currency": p.Currency, "received_at": p.CreatedAt.UTC(), "callback_timestamp": p.PurchasedAt.UTC()}
+		if p.SubscriptionID != nil {
+			local["subscription_id"] = p.SubscriptionID.String()
+		}
+		if p.RailSubscriptionID != nil {
+			local["rail_subscription_id"] = *p.RailSubscriptionID
+		}
+		remote := map[string]any{"source": "ccbill_datalink_export", "read_through": readThrough.UTC()}
+		if p.ListedSubscriptionKey != nil {
+			remote["listed_subscription_id"], remote["listed_amount"] = *p.ListedSubscriptionKey, p.ListedAmount
+		}
+		out = append(out, Finding{
+			Provider:          ProviderCCBill,
+			Type:              FindingChargeUnconfirmed,
+			SubjectKey:        p.TransactionID,
+			Severity:          SeverityHigh,
+			Status:            FindingStatusRequiresReview,
+			RequiresAdmin:     true,
+			RecommendedAction: "no CCBill DataLink read lists this rebill under its subscription, recorded from an unsigned callback; check the transaction, its subscription and amount in CCBill's admin before trusting the payment and the period it paid for",
+			LocalEvidence:     local,
+			RemoteEvidence:    remote,
+		})
+	}
+	return out, nil
+}
+
+// ccbillLapseInDoubt reports a CCBill lapse the roster contradicts: it cut
+// paid access short, or the roster still lists the member 48 hours after it.
+func ccbillLapseInDoubt(provider Provider, s *LocalSubscription, now time.Time) bool {
+	if provider != ProviderCCBill || s.Status != string(models.StatusCanceled) || s.CancelType != string(models.CancelTypeExpired) || s.EndedAt == nil {
+		return false
+	}
+	cutShort := s.CurrentPeriodEndsAt != nil && s.EndedAt.Before(*s.CurrentPeriodEndsAt)
+	return cutShort || now.Sub(*s.EndedAt) > 48*time.Hour
 }
 
 // CCBillRemoteSubscription is one ACTIVEMEMBERS row as a pull reads it.

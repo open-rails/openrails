@@ -2575,6 +2575,36 @@
     ],
     "OR-J37-S74": [
       "TestSolanaPulls/OR-J37-S74/a-confirmed-pull-its-fork-drops-books-nothing-and-is-signed-again-only-after-its-blockhash-expires"
+    ],
+    "OR-J38-S86": [
+      "TestCCBillCallbackEvidence/OR-J38-S86/a-back-dated-rebill-callback-no-read-lists-is-raised-once-after-36-hours"
+    ],
+    "OR-J38-S87": [
+      "TestCCBillCallbackEvidence/OR-J38-S87/a-rebill-callback-a-read-lists-raises-nothing"
+    ],
+    "OR-J38-S88": [
+      "TestCCBillCallbackEvidence/OR-J38-S88/a-rebill-listed-late-raises-nothing-and-a-listing-resolves-a-raised-one"
+    ],
+    "OR-J38-S89": [
+      "TestCCBillCallbackEvidence/OR-J38-S89/an-unlisted-rebill-callback-waits-36-hours"
+    ],
+    "OR-J38-S90": [
+      "TestCCBillCallbackEvidence/OR-J38-S90/a-failed-rebill-cancel-callback-of-a-member-the-roster-lists-is-critical"
+    ],
+    "OR-J38-S91": [
+      "TestCCBillCallbackEvidence/OR-J38-S91/a-rebill-datalink-dates-before-its-callback-raises-nothing"
+    ],
+    "OR-J38-S92": [
+      "TestCCBillCallbackEvidence/OR-J38-S92/an-ordinary-ccbill-cancellation-the-roster-still-lists-is-not-critical"
+    ],
+    "OR-J38-S93": [
+      "TestCCBillCallbackEvidence/OR-J38-S93/a-paced-ccbill-refresh-raises-only-the-rebill-no-read-lists"
+    ],
+    "OR-J38-S94": [
+      "TestCCBillCallbackEvidence/OR-J38-S94/a-rebill-callback-reusing-another-subscriptions-transaction-is-raised"
+    ],
+    "OR-J38-S97": [
+      "TestCCBillIdentity/OR-J38-S97/a-second-rebill-past-the-cycles-billing-day-is-an-extra-capture"
     ]
   }
 }

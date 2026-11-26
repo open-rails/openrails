@@ -68,6 +68,7 @@ var excludedTables = map[string]string{
 	"psp_import_basis":              "import working state: the row versions a pull read, read again",
 	"psp_import_mappings":           "the merchant's own identifiers; it maps them again for an import",
 	"provider_catalog_objects":      "provider observations; the destination observes again",
+	"provider_listed_rebills":       "provider observations: the rebills a CCBill read listed; the destination reads again",
 	"parked_provider_subscriptions": "converge working state: the next provider event parks again",
 	"mrr_risk_due":                  "MRR risk work queue: the destination's next change of a card or delinquency queues again",
 	"ledger_type_totals":            "derived: the transfers rebuild it as they are restored, and the restore check proves it",
@@ -119,12 +120,13 @@ var excludedColumns = map[string]string{
 	"reconciliation_findings":       "id merchant_id finding_type rail psp_id subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity change source evidence_digest approval_run_id pull_id dismissed_at",
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
 
-	"price_keys":             "merchant_id product_id key revision created_at updated_at",
-	"network_activity_daily": "merchant_id psp_id rail network currency day_at sales sales_amount refunds refund_amount chargebacks chargeback_amount fraud_chargebacks fraud_chargeback_amount fraud_reports fraud_report_amount",
-	"balance_watches":        "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
-	"ledger_type_totals":     "merchant_id book currency account_type psp_id credits_posted debits_posted",
-	"ledger_daily":           "merchant_id book currency account_type bucket_at transfer_type psp_id product_id credits debits",
-	"ledger_rollup_pending":  "merchant_id transfer_id",
+	"price_keys":              "merchant_id product_id key revision created_at updated_at",
+	"network_activity_daily":  "merchant_id psp_id rail network currency day_at sales sales_amount refunds refund_amount chargebacks chargeback_amount fraud_chargebacks fraud_chargeback_amount fraud_reports fraud_report_amount",
+	"balance_watches":         "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
+	"ledger_type_totals":      "merchant_id book currency account_type psp_id credits_posted debits_posted",
+	"ledger_daily":            "merchant_id book currency account_type bucket_at transfer_type psp_id product_id credits debits",
+	"ledger_rollup_pending":   "merchant_id transfer_id",
+	"provider_listed_rebills": "merchant_id psp_id transaction_key subscription_key amount listed_at",
 }
 
 // Omitted columns are either reconstructed by PostgreSQL, deployment

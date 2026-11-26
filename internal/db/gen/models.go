@@ -1983,6 +1983,16 @@ type BillingProviderIntent struct {
 	SentAttempt *int32
 }
 
+// Provider observations: each rebill a CCBill DataLink read listed, first listed at listed_at: its transaction id and subscription id without leading zeros, and the amount as DataLink states it. A callback-recorded rebill no read lists under its subscription is raised as pull.charge.unconfirmed. Retention: rows are deleted 90 days after listed_at.
+type BillingProviderListedRebill struct {
+	MerchantID      uuid.UUID
+	PspID           uuid.UUID
+	TransactionKey  string
+	SubscriptionKey string
+	Amount          *string
+	ListedAt        time.Time
+}
+
 // Immutable accepted provider schedule versions: first due instant, cadence and the accepted bill a provider-run renewal must match. Retention: permanent, never pruned.
 type BillingProviderSchedule struct {
 	MerchantID        uuid.UUID
