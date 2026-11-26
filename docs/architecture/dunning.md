@@ -14,8 +14,9 @@ Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limit
   resolved into a `collection.Policy`.
 - **Case:** a `past_due` or `awaiting_method` membership, run under the policy
   it recorded at its first decline.
-- **Window:** `Policy.Window`, the last offset plus min(24 h, cycle/2). Nothing
-  older is charged.
+- **Window:** `Policy.Window`, the last offset plus min(24 h, cycle/2). A case
+  ends there unless a retry ran late (`subscriptions.CaseEnd`), and never runs
+  past the next renewal.
 - **Certainty leg:** what a terminal outcome needs (`collection.Certainty*`).
 - **Delinquency:** `current`, `grace` or `delinquent` per (merchant, customer,
   currency).
@@ -149,7 +150,7 @@ Checks:
 - OR-J26-S55: a refused collection keeps its nonexecution proof.
 
 ### 2. Agreement with providers
-`lifecycle.RenewalDeclined` ignores a decline for a canceled row or another period. The completion handlers also require an unchanged failure count. A provider-run subscription is mirrored, not retried. Converge, the pull, the unknown cohort and NMI verification judge a provider-declared failure against the subscription's own window (`Policy.Window` of its cycle): its case policy's where OpenRails duns it, the built-in one where the provider retries. A row past its window is never charged: an NMI row parks `unverified`, a provider-billed row is asked by id, and an engine renewal whose period elapsed is refused (`life.due_pass.refused`).
+`lifecycle.RenewalDeclined` ignores a decline for a canceled row or another period. The completion handlers also require an unchanged failure count. A provider-run subscription is mirrored, not retried. Converge, the pull, the unknown cohort and NMI verification judge a provider-declared failure against the subscription's own window (`Policy.Window` of its cycle): its case policy's where OpenRails duns it, the built-in one where the provider retries. A row past its case end (`subscriptions.CaseEnd`) is not charged again: an NMI row parks `unverified`, a provider-billed row is asked by id, and an engine renewal whose period elapsed is refused (`life.due_pass.refused`). A delayed case still makes every attempt its policy allows: an engine retry admitted inside its case but sent late (its read before sending failed) is still sent until the period it pays for ends, and its remaining retries follow it, so a charge can land after the window.
 
 Checks:
 - `internal/intents/manual_rebill_completion.go` and `internal/modules/money/subscription_collection_intent.go` check the period end and `FailureCount`. Scenarios: OR-J16-S04, S30, S70 and S71.
