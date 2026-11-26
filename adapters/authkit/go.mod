@@ -8,7 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/open-rails/authkit v1.57.0
-	github.com/open-rails/openrails v0.283.0
+	github.com/open-rails/openrails v0.284.0
 )
 
 require (

@@ -5,7 +5,7 @@ go 1.26.10
 toolchain go1.26.11
 
 // The root module at the same release; scripts/release pins it.
-require github.com/open-rails/openrails v0.283.0
+require github.com/open-rails/openrails v0.284.0
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.51.0
