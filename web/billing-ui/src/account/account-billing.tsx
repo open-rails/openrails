@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react"
 import { cn } from "cn"
 
 import type { BillingAppearance } from "#orck/appearance"
@@ -9,6 +10,11 @@ import {
   SubscriptionsPanel,
   type SubscriptionsPanelProps,
 } from "./subscriptions-panel"
+
+// The chart loads only where usage is shown.
+const UsagePanel = lazy(() =>
+  import("./usage-panel").then((m) => ({ default: m.UsagePanel }))
+)
 
 export interface AccountBillingProps {
   /**
@@ -22,11 +28,13 @@ export interface AccountBillingProps {
   plansHref?: string
   renderSubscriptionFooter?: SubscriptionsPanelProps["renderSubscriptionFooter"]
   historyPageSize?: number
+  /** Shows the customer's usage over time in this currency (or unit). */
+  usageCurrency?: string
   appearance?: BillingAppearance
   className?: string
 }
 
-/** Subscriptions, payment methods and history in one column. */
+/** Subscriptions, payment methods, history and, with `usageCurrency`, usage in one column. */
 export function AccountBilling({
   defaultCurrency,
   defaultCountry,
@@ -34,6 +42,7 @@ export function AccountBilling({
   plansHref,
   renderSubscriptionFooter,
   historyPageSize,
+  usageCurrency,
   appearance,
   className,
 }: AccountBillingProps) {
@@ -55,6 +64,11 @@ export function AccountBilling({
         appearance={appearance}
       />
       <PaymentHistory pageSize={historyPageSize} appearance={appearance} />
+      {usageCurrency ? (
+        <Suspense fallback={null}>
+          <UsagePanel currency={usageCurrency} appearance={appearance} />
+        </Suspense>
+      ) : null}
     </BillingUiRoot>
   )
 }

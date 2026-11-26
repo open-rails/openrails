@@ -29,6 +29,7 @@ import {
   subscriptionChangePreviewSchema,
   subscriptionChangeSchema,
   usageSchema,
+  usageSeriesSchema,
   type Account,
   type CustomerConfig,
   type CustomerEntitlement,
@@ -51,6 +52,7 @@ import {
   type SubscriptionChangeOption,
   type SubscriptionChangePreview,
   type Usage,
+  type UsageSeries,
 } from "./types"
 
 export interface BillingClientOptions {
@@ -108,15 +110,39 @@ export interface CursorOptions {
 
 /**
  * A page of the customer's usage report in `currency`, grouped by `groupBy`
- * (event type by default). `from` and `to` are RFC 3339 or a date; left out,
- * the month before now, or with `cursor` the window of the page it came from.
- * `limit` is at most 1,000 groups (default 100).
+ * (event type by default), over the days of `timezone` (an IANA zone; the
+ * merchant's accounting zone when left out). `from` and `to` are RFC 3339 or
+ * a date; left out, the month before now, or with `cursor` the window of the
+ * page it came from. `limit` is at most 1,000 groups (default 100).
  */
 export interface UsageOptions extends CursorOptions {
   currency: string
-  groupBy?: "event_type" | "invoker" | "meter"
+  groupBy?: UsageGroupBy
+  timezone?: string
   from?: string
   to?: string
+}
+
+export type UsageGroupBy = "event_type" | "invoker" | "meter"
+export type UsageInterval = "hour" | "day" | "week" | "month"
+
+/** At most this many buckets a usage series answers (a month by hour fits). */
+export const MAX_USAGE_BUCKETS = 1000
+
+/**
+ * The customer's usage in `currency` over time: one bucket per `interval` of
+ * `timezone`'s calendar (the merchant's accounting zone when left out) over
+ * [`from`, `to`), widened to whole buckets; left out, the month before now.
+ * More than `MAX_USAGE_BUCKETS` buckets is refused, `too_many_buckets`.
+ */
+export interface UsageSeriesOptions {
+  currency: string
+  interval: UsageInterval
+  timezone?: string
+  groupBy?: UsageGroupBy
+  from?: string
+  to?: string
+  signal?: AbortSignal
 }
 
 /**
@@ -843,10 +869,29 @@ export function createBillingClient(options: BillingClientOptions = {}) {
         query: {
           currency: opts.currency,
           group_by: opts.groupBy,
+          timezone: opts.timezone,
           from: opts.from,
           to: opts.to,
           limit: opts.limit,
           cursor: opts.cursor ?? undefined,
+        },
+        signal: opts.signal,
+      })
+    },
+
+    /**
+     * The customer's usage over time, one bucket per interval: each with its
+     * groups as `getUsage` orders them.
+     */
+    getUsageSeries(opts: UsageSeriesOptions): Promise<UsageSeries> {
+      return json(usageSeriesSchema, "/me/usage/series", {
+        query: {
+          currency: opts.currency,
+          interval: opts.interval,
+          timezone: opts.timezone,
+          group_by: opts.groupBy,
+          from: opts.from,
+          to: opts.to,
         },
         signal: opts.signal,
       })

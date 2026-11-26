@@ -174,7 +174,7 @@ Checks:
 - `LocalClient` has no admission method in `api/go.txt`.
 
 ### 6. Data lifecycle
-`product_entitlements` and `grants` are permanent; `product_access` is state and keeps revoked and removed windows. `limit_windows`, `leases` and `limit_adjustments` are rows (61 days); the limit catalog and override tables are state. An archive refuses live leases.
+`product_entitlements` and `grants` are permanent; `product_access` is state and keeps revoked and removed windows. `limit_windows` are rows kept a day past their end (61 days once one reached its capacity, for `limits_reached`; usage settled after a window ended counts toward none, OR-J24-S83), `leases` and `limit_adjustments` rows kept 61 days; the limit catalog and override tables are state. An archive refuses live leases.
 Checks:
 - The table comments and `internal/retention/tables.go` agree on each class.
 - Outside the gated merchant purge (`PurgeMerchantRowsProductAccess`), no query

@@ -246,7 +246,7 @@ func storeMigrationsAndIdentity(t *testing.T) {
 		return names
 	}
 	installed := []string{"limit_usage", "limit_usage_mv", "schema_migrations", "store", "usage_events", "usage_events_mv", "usage_history", "usage_history_charges_mv",
-		"usage_history_events_mv", "usage_intake", "usage_minutes", "usage_minutes_mv", "usage_quantities", "usage_quantities_mv"}
+		"usage_history_events_mv", "usage_intake", "usage_quantities", "usage_quantities_mv"}
 	require.Equal(t, installed, tables())
 
 	// A restart and an explicit migration change nothing.
@@ -255,7 +255,7 @@ func storeMigrationsAndIdentity(t *testing.T) {
 	require.Equal(t, installed, tables())
 	var applied uint64
 	require.NoError(t, conn.QueryRow(ctx, "SELECT count() FROM `"+w.schema+"`.schema_migrations FINAL").Scan(&applied))
-	require.EqualValues(t, 4, applied)
+	require.EqualValues(t, 5, applied)
 
 	// An emptied ClickHouse is not the store this database's usage is in:
 	// once migrated it is another store.

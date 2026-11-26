@@ -106,8 +106,7 @@ var Profiles = []Profile{
 // archive row is.
 var EventStoreProfiles = []Profile{
 	{Name: "event_store.usage_events", Columns: []Column{{"merchant_id", "uuid"}, {"event", "jsonb"}}},
-	{Name: "event_store.usage_history", Columns: []Column{{"merchant_id", "uuid"}, {"customer_id", "uuid"}, {"bucket_at", "timestamp with time zone"}, {"currency", "text"}, {"event_type", "text"}, {"meter", "text"}, {"cell", "text"}, {"print", "text"}, {"period_starts_at", "timestamp with time zone"}, {"invoker", "text"}, {"outcome", "text"}, {"requests", "bigint"}, {"quantity", "bigint"}, {"stated", "bigint"}, {"charged", "bigint"}, {"forgiven", "bigint"}}},
+	{Name: "event_store.usage_history", Columns: []Column{{"merchant_id", "uuid"}, {"customer_id", "uuid"}, {"bucket_at", "timestamp with time zone"}, {"currency", "text"}, {"event_type", "text"}, {"meter", "text"}, {"cell", "text"}, {"requests", "bigint"}, {"quantity", "bigint"}, {"stated", "bigint"}, {"amount", "bigint"}, {"discount", "bigint"}, {"failed_requests", "bigint"}, {"failed_amount", "bigint"}, {"forgiven", "bigint"}}},
 	{Name: "event_store.limit_usage", Columns: []Column{{"merchant_id", "uuid"}, {"customer_id", "uuid"}, {"limit_key", "text"}, {"window_starts_at", "timestamp with time zone"}, {"window_ends_at", "timestamp with time zone"}, {"units", "bigint"}}},
 	{Name: "event_store.usage_quantities", Columns: []Column{{"merchant_id", "uuid"}, {"customer_id", "uuid"}, {"currency", "text"}, {"period_starts_at", "timestamp with time zone"}, {"meter", "text"}, {"cell", "text"}, {"print", "text"}, {"quantity", "bigint"}, {"stated", "bigint"}, {"requests", "bigint"}}},
-	{Name: "event_store.usage_minutes", Columns: []Column{{"merchant_id", "uuid"}, {"customer_id", "uuid"}, {"currency", "text"}, {"minute", "timestamp with time zone"}, {"amount", "bigint"}}},
 }

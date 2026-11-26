@@ -1,7 +1,7 @@
 // Package usageerasure is the erasure of one customer's personal data from
 // the usage event store: queued in the transaction that erases the customer,
-// it clears its events' invoker and metadata and folds its history's
-// invokers. Quantities and what posted stay.
+// it clears its events' invoker and metadata. History names no invoker;
+// quantities and what posted stay.
 package usageerasure
 
 import (
@@ -37,8 +37,8 @@ func (Args) InsertOpts() river.InsertOpts {
 }
 
 // Erase erases the customer's usage from store under its spend lock in q's
-// transaction: no intake adds to its history while the history is folded.
-// A customer with no row has no usage to wait for.
+// transaction: no intake adds to its events while they are cleared. A
+// customer with no row has no usage to wait for.
 func Erase(ctx context.Context, q *gen.Queries, store *eventstore.Store, merchantID, customer uuid.UUID) error {
 	if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID, ID: customer}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err

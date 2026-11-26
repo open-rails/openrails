@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react"
 
 import {
+  type UsageSeriesOptions,
   isWalletAction,
   isWalletRejection,
   signWalletAction,
@@ -16,6 +17,7 @@ import type {
   Subscription,
   SubscriptionChange,
   SubscriptionChangeOption,
+  UsageSeries,
 } from "../client/types"
 import { useBillingContext } from "./context"
 import { useRemote } from "./remote"
@@ -457,6 +459,35 @@ export function usePayments(options: PaymentsOptions = {}): PaymentsState {
       if (cursors.length > 1)
         setState({ filter, cursors: cursors.slice(0, -1) })
     }, [filter, cursors]),
+    refetch: remote.refetch,
+  }
+}
+
+export interface UsageSeriesState {
+  series: UsageSeries | null
+  loading: boolean
+  error: BillingError | null
+  refetch: () => void
+}
+
+/**
+ * The customer's usage over time (`client.getUsageSeries`). Pass a fixed
+ * `from` and `to`: a window that moves on each render reads again each time.
+ */
+export function useUsageSeries(
+  options: Omit<UsageSeriesOptions, "signal">
+): UsageSeriesState {
+  const { client, version } = useBillingContext()
+  const { currency, interval, timezone, groupBy, from, to } = options
+  const remote = useRemote(
+    [currency, interval, timezone ?? "", groupBy ?? "", from ?? "", to ?? "", version].join("|"),
+    (signal) =>
+      client.getUsageSeries({ currency, interval, timezone, groupBy, from, to, signal })
+  )
+  return {
+    series: remote.data,
+    loading: remote.loading,
+    error: remote.error,
     refetch: remote.refetch,
   }
 }

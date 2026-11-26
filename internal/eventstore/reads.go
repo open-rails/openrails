@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // ErrUnavailable is a read or write the event store could not serve: what
@@ -322,104 +323,161 @@ func (s *Store) quantities(ctx context.Context, sql string) ([]PeriodQuantity, e
 	return out, err
 }
 
-// MinuteAmount is what a customer's usage charged in a currency, at its
-// provisional prices, in the minutes from since's up to until's (no bound
-// when zero).
-func (s *Store) MinuteAmount(ctx context.Context, customer billing.CustomerID, currency string, since, until time.Time) (int64, error) {
-	mid, err := s.merchant(ctx)
-	if err != nil {
-		return 0, err
-	}
-	bound := ""
-	if !until.IsZero() {
-		bound = " AND minute < toStartOfMinute(" + timeLiteral(until) + ")"
-	}
-	sql := fmt.Sprintf(`SELECT sum(amount) FROM {database}.usage_minutes
-WHERE merchant_id = %s AND customer_id = %s AND currency = %s AND minute >= toStartOfMinute(%s)%s`,
-		mid, uuidLiteral(uuid.UUID(customer)), stringLiteral(currency), timeLiteral(since), bound)
-	var total int64
-	err = s.query(ctx, "read usage minutes", sql, func(rows interface{ Scan(...any) error }) error { return rows.Scan(&total) })
-	return total, err
-}
+// HistoryBucket is the length of a usage history bucket: a UTC quarter
+// hour. Every zone's offset is a whole number of quarter hours, so its hours
+// and days are whole buckets.
+const HistoryBucket = 15 * time.Minute
 
-// HistoryBucket is the length of a usage history bucket: an hour in UTC.
-// A zone's days are the buckets that start in them, exact for every zone
-// whose offset is whole hours; one on a half or quarter hour has its days
-// cut at the hour.
-const HistoryBucket = time.Hour
+// EventsKept is how long raw usage events are kept (usage_events' TTL):
+// what reads by invoker reach back to.
+const EventsKept = 90 * 24 * time.Hour
 
-// UsageBucket is one row of usage history: a bucket's events of one type,
-// invoker and outcome (Meter ""), or what they took of one meter cell under
-// one card print in one pricing period. BucketAt is the UTC hour, or read in
-// a zone the start of the zone's day.
+// UsageBucket is one row of usage history: a bucket's events of one type
+// (Meter "": Requests, the failed ones' FailedRequests, FailedAmount and
+// Forgiven, and Stated), or what they took of one meter cell (Requests,
+// Quantity, Stated, and Amount at intake's price less Discount, a volume
+// tier's fall). BucketAt is the bucket's start, or read in a zone the first
+// instant of the zone's day (calendarutil.DayStart). Read from raw events by
+// invoker (UsageEvents), a row is one invoker's events of one type with
+// their charges summed in.
 type UsageBucket struct {
-	CustomerID         billing.CustomerID
-	BucketAt           time.Time
-	Currency           string
-	EventType          string
-	Meter, Cell, Print string
-	PeriodStartsAt     time.Time
-	Invoker            string
-	Outcome            UsageOutcome
-	Requests           int64
-	Quantity, Stated   int64
-	Charged, Forgiven  int64
+	CustomerID                   billing.CustomerID
+	BucketAt                     time.Time
+	Currency, EventType          string
+	Meter, Cell                  string
+	Invoker                      string
+	Requests, Quantity, Stated   int64
+	Amount, Discount             int64
+	FailedRequests, FailedAmount int64
+	Forgiven                     int64
 }
 
-// HistoryFilter selects usage history: one customer (all when zero), one
-// currency (all when empty), the buckets that start in [From, To), and with
-// PeriodsFrom only charge rows of periods that start then or later. With a
-// Zone, ClickHouse groups the buckets into the zone's days, as they are
-// read: a zone change regroups all history.
+// Cost is what a row's usage cost: its charges at intake's price, less the
+// volume discount, and what failed usage charged.
+func (b UsageBucket) Cost() int64 { return b.Amount - b.Discount + b.FailedAmount }
+
+// HistoryFilter selects usage: one customer (all when zero), one currency
+// (all when empty), the buckets that start in [From, To). With a Zone,
+// ClickHouse groups the buckets into the zone's dates as they are read, so a
+// zone change regroups all history.
 type HistoryFilter struct {
-	CustomerID  billing.CustomerID
-	Currency    string
-	From, To    time.Time
-	PeriodsFrom *time.Time
-	Zone        *time.Location
+	CustomerID billing.CustomerID
+	Currency   string
+	From, To   time.Time
+	Zone       *time.Location
 }
 
-func (f HistoryFilter) where(mid string) string {
-	w := []string{"merchant_id = " + mid, "bucket_at >= " + timeLiteral(f.From), "bucket_at < " + timeLiteral(f.To)}
+func (f HistoryFilter) where(mid, at string) string {
+	w := []string{"merchant_id = " + mid, at + " >= " + timeLiteral(f.From), at + " < " + timeLiteral(f.To)}
 	if !f.CustomerID.IsZero() {
 		w = append(w, "customer_id = "+uuidLiteral(uuid.UUID(f.CustomerID)))
 	}
 	if f.Currency != "" {
 		w = append(w, "currency = "+stringLiteral(f.Currency))
 	}
-	if f.PeriodsFrom != nil {
-		w = append(w, "meter != ''", "period_starts_at >= "+timeLiteral(*f.PeriodsFrom))
-	}
 	return strings.Join(w, " AND ")
 }
 
+// bucket is the expression a filter groups an instant column by: its quarter
+// hour, or with a zone its date there at UTC midnight (placed at its DayStart
+// as read, as PostgreSQL resolves a midnight a clock change skips or
+// repeats).
+func (f HistoryFilter) bucket(at string) string {
+	if f.Zone == nil {
+		return "toStartOfFifteenMinutes(" + at + ")"
+	}
+	return "toDateTime(toDate(" + at + ", " + stringLiteral(f.Zone.String()) + "), 'UTC')"
+}
+
+// dayStart places a row read by zone at its day's first instant.
+func (f HistoryFilter) dayStart(at time.Time) time.Time {
+	at = at.UTC()
+	if f.Zone == nil {
+		return at
+	}
+	return calendarutil.DayStart(at.Year(), at.Month(), at.Day(), f.Zone).UTC()
+}
+
 // UsageHistory are the history rows a filter selects, summed by key: by
-// hour, or by the filter's zone's days.
+// bucket, or by the filter's zone's days.
 func (s *Store) UsageHistory(ctx context.Context, f HistoryFilter) ([]UsageBucket, error) {
 	mid, err := s.merchant(ctx)
 	if err != nil {
 		return nil, err
 	}
-	bucket := "bucket_at"
-	if f.Zone != nil {
-		bucket = "toStartOfDay(bucket_at, " + stringLiteral(f.Zone.String()) + ")"
-	}
-	sql := `SELECT customer_id, ` + bucket + ` AS b, currency, event_type, meter, cell, print, period_starts_at, invoker, toString(outcome),
-       toInt64(sum(requests)), sum(quantity), sum(stated), sum(charged), sum(forgiven)
-FROM {database}.usage_history WHERE ` + f.where(mid) + `
-GROUP BY customer_id, b, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome`
+	sql := `SELECT customer_id, ` + f.bucket("bucket_at") + ` AS b, currency, event_type, meter, cell, sum(requests), sum(quantity), sum(stated),
+       sum(amount), sum(discount), sum(failed_requests), sum(failed_amount), sum(forgiven)
+FROM {database}.usage_history WHERE ` + f.where(mid, "bucket_at") + `
+GROUP BY customer_id, b, currency, event_type, meter, cell`
 	var out []UsageBucket
 	err = s.query(ctx, "read usage history", sql, func(rows interface{ Scan(...any) error }) error {
 		var b UsageBucket
 		var customer uuid.UUID
-		var outcome string
-		if err := rows.Scan(&customer, &b.BucketAt, &b.Currency, &b.EventType, &b.Meter, &b.Cell, &b.Print, &b.PeriodStartsAt, &b.Invoker, &outcome,
-			&b.Requests, &b.Quantity, &b.Stated, &b.Charged, &b.Forgiven); err != nil {
+		if err := rows.Scan(&customer, &b.BucketAt, &b.Currency, &b.EventType, &b.Meter, &b.Cell, &b.Requests, &b.Quantity, &b.Stated,
+			&b.Amount, &b.Discount, &b.FailedRequests, &b.FailedAmount, &b.Forgiven); err != nil {
 			return err
 		}
-		b.CustomerID, b.Outcome = billing.CustomerID(customer), UsageOutcome(outcome)
-		b.BucketAt, b.PeriodStartsAt = b.BucketAt.UTC(), b.PeriodStartsAt.UTC()
+		b.CustomerID, b.BucketAt = billing.CustomerID(customer), f.dayStart(b.BucketAt)
 		out = append(out, b)
+		return nil
+	})
+	return out, err
+}
+
+// UsageEvents are the raw usage events a filter selects (by occurred_at),
+// deduplicated, summed by invoker and event type in history's buckets or the
+// zone's days: what reads by invoker use, back EventsKept.
+func (s *Store) UsageEvents(ctx context.Context, f HistoryFilter) ([]UsageBucket, error) {
+	mid, err := s.merchant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	at := "toDateTime(occurred_at, 'UTC')"
+	sql := `SELECT customer_id, ` + f.bucket(at) + ` AS b, currency, event_type, invoker, toInt64(count()), toInt64(sum(ifNull(stated, 0))),
+       sum(arraySum(charges.amount)), sum(arraySum(charges.discount)), toInt64(countIf(outcome = 'failed')), sum(charged), sum(forgiven)
+FROM {database}.usage_events FINAL WHERE ` + f.where(mid, "occurred_at") + `
+GROUP BY customer_id, b, currency, event_type, invoker`
+	var out []UsageBucket
+	err = s.query(ctx, "read usage events", sql, func(rows interface{ Scan(...any) error }) error {
+		var b UsageBucket
+		var customer uuid.UUID
+		if err := rows.Scan(&customer, &b.BucketAt, &b.Currency, &b.EventType, &b.Invoker, &b.Requests, &b.Stated,
+			&b.Amount, &b.Discount, &b.FailedRequests, &b.FailedAmount, &b.Forgiven); err != nil {
+			return err
+		}
+		b.CustomerID, b.BucketAt = billing.CustomerID(customer), f.dayStart(b.BucketAt)
+		out = append(out, b)
+		return nil
+	})
+	return out, err
+}
+
+// PeriodCharge is what one invoker's usage of one event type charged a meter
+// cell in a pricing period, at intake's price less the volume discount.
+type PeriodCharge struct {
+	Invoker, EventType, Meter, Cell string
+	Amount                          int64
+}
+
+// PeriodCharges are what a customer's deduplicated usage in a currency
+// charged in the pricing period starting at period, before cut, by invoker,
+// event type and meter cell: how a posting shares what it forgives.
+func (s *Store) PeriodCharges(ctx context.Context, customer billing.CustomerID, currency string, period, cut time.Time) ([]PeriodCharge, error) {
+	mid, err := s.merchant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sql := fmt.Sprintf(`SELECT invoker, event_type, charges.meter, charges.cell, sum(charges.amount) - sum(charges.discount)
+FROM {database}.usage_events FINAL ARRAY JOIN charges
+WHERE merchant_id = %s AND customer_id = %s AND currency = %s AND period_starts_at = %s AND occurred_at >= %s AND occurred_at < %s
+GROUP BY invoker, event_type, charges.meter, charges.cell`, mid, uuidLiteral(uuid.UUID(customer)), stringLiteral(currency), timeLiteral(period), timeLiteral(period), timeLiteral(cut))
+	var out []PeriodCharge
+	err = s.query(ctx, "read usage charges", sql, func(rows interface{ Scan(...any) error }) error {
+		var c PeriodCharge
+		if err := rows.Scan(&c.Invoker, &c.EventType, &c.Meter, &c.Cell, &c.Amount); err != nil {
+			return err
+		}
+		out = append(out, c)
 		return nil
 	})
 	return out, err

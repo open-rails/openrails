@@ -356,7 +356,6 @@ const queryKinds = `multiIf(
   query ILIKE '%usage_events%', 'dedup_lookup',
   query ILIKE '%limit_usage%', 'view_limit_usage',
   query ILIKE '%usage_quantities%', 'view_usage_quantities',
-  query ILIKE '%usage_minutes%', 'usage_minutes',
   query ILIKE '%usage_history%', 'usage_history',
   'other')`
 

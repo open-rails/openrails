@@ -248,6 +248,23 @@ export const en = {
       stripe: "Card",
     },
   },
+  usage: {
+    title: "Usage",
+    description: "What your usage cost over time.",
+    intervalLabel: "Interval",
+    interval: {
+      hour: "Hourly",
+      day: "Daily",
+      week: "Weekly",
+      month: "Monthly",
+    },
+    timezone: "Time zone",
+    total: "Total",
+    requests: "Requests",
+    discount: "Volume discount",
+    empty: "No usage in this period",
+    emptyDescription: "Usage appears here as it is recorded.",
+  },
   errors: {
     generic: "Something went wrong. Please try again.",
     network_error:

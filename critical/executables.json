@@ -2039,7 +2039,7 @@
       "TestUsageRecovery/OR-J24-S62/usage-the-store-lost-is-not-a-price-that-fell"
     ],
     "OR-J24-S63": [
-      "TestUsageRecovery/OR-J24-S63/an-erasure-run-again-after-stopping-part-way-keeps-history-whole"
+      "TestUsageRecovery/OR-J24-S63/an-erasure-run-again-after-stopping-part-way-clears-the-events-and-leaves-history-alone"
     ],
     "OR-J24-S64": [
       "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting",
@@ -2499,7 +2499,7 @@
       "TestEventStore/OR-J24-S66/two-engines-migrating-one-fresh-clickhouse-database-together-both-start"
     ],
     "OR-J24-S67": [
-      "TestUsageStore/OR-J24-S67/history-is-utc-hours-grouped-into-the-zones-days-as-read-a-25-hour-day-a-zone-change-and-burn-included"
+      "TestUsageStore/OR-J24-S67/history-is-utc-quarter-hours-grouped-into-the-zones-days-as-read-a-25-hour-day-a-zone-change-and-burn-included"
     ],
     "OR-J24-S68": [
       "TestUsageStore/OR-J24-S68/usage-metadata-past-1024-bytes-of-compact-json-is-refused-alone"
@@ -2674,6 +2674,33 @@
     ],
     "OR-J38-S97": [
       "TestCCBillIdentity/OR-J38-S97/a-second-rebill-past-the-cycles-billing-day-is-an-extra-capture"
+    ],
+    "OR-J24-S76": [
+      "TestUsageSeries/OR-J24-S76/an-hourly-series-across-a-clock-change-has-each-of-the-days-hours"
+    ],
+    "OR-J24-S77": [
+      "TestUsageSeries/OR-J24-S77/a-kolkata-day-series-cuts-its-days-at-the-half-hour"
+    ],
+    "OR-J24-S78": [
+      "TestUsageSeries/OR-J24-S78/usage-older-than-its-raw-events-stays-in-the-series-and-by-invoker-is-refused"
+    ],
+    "OR-J24-S79": [
+      "TestUsageSeries/OR-J24-S79/a-series-past-its-bucket-cap-is-refused-and-a-month-by-hour-is-not"
+    ],
+    "OR-J24-S80": [
+      "TestUsageSeries/OR-J24-S80/a-customer-reads-only-its-own-usage-over-time"
+    ],
+    "OR-J24-S81": [
+      "TestUsageSeries/OR-J24-S81/a-volume-tiers-fall-is-its-own-discount-and-totals-equal-what-posted"
+    ],
+    "OR-J24-S82": [
+      "TestUsageSeries/OR-J24-S82/failed-usage-is-counted-on-its-event-row-not-a-row-of-its-own"
+    ],
+    "OR-J24-S83": [
+      "TestUsageSeries/OR-J24-S83/a-late-item-whose-limit-window-ended-settles-and-counts-toward-no-window"
+    ],
+    "OR-J25-S44": [
+      "TestBalanceLooks/OR-J25-S44/the-burn-rate-reads-each-ended-quarter-hour-of-usage-history-once"
     ]
   }
 }
