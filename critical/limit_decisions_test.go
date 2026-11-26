@@ -445,9 +445,9 @@ func TestLimitDecisions(t *testing.T) {
 
 	t.Run("OR-J23-S42/one-policy-caps-what-is-owed-and-spend-per-window-and-a-customers-own-limit-overrides-its-cap", func(t *testing.T) {
 		// The terms give $30 of credit; the policy caps what is owed at $20
-		// and spend at $15 an hour. Compute costs $10 a unit. A gate refuses
-		// on the set's balance code once the line is gone, and with
-		// budget_exceeded once the window is: both are read from its view.
+		// and spend at $15 an hour. A gate refuses on the set's balance code
+		// once the line is gone, and with budget_exceeded once the window is:
+		// both are read from its view.
 		a, _, customer := usageBillingWorld(t, false, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.BillingPolicies = []billing.BillingPolicy{{Name: "team", OutstandingCapAmount: 20_000_000,
@@ -455,10 +455,9 @@ func TestLimitDecisions(t *testing.T) {
 			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "team"}}
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})
-		view := func(usage ...billing.LeaseUsage) (*billing.LimitSet, billing.ViewLimit) {
+		view := func() (*billing.LimitSet, billing.ViewLimit) {
 			t.Helper()
-			out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Usage: numbered(1, usage...), Views: []billing.ViewParams{computeView(customer)}})
-			require.Empty(t, out.Usage.Refused)
+			out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}})
 			set := out.LimitSets[0]
 			require.Nil(t, set.Refusal)
 			for _, key := range set.Limits {
@@ -487,13 +486,16 @@ func TestLimitDecisions(t *testing.T) {
 		// The customer's own $40 overrides the cap.
 		_, err = a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 40_000_000}}})
 		require.NoError(t, err)
-		set, _ = view()
+		set, window = view()
 		require.EqualValues(t, 20_000_000, set.CreditLine, "$40 less the $20 owed")
 		require.Equal(t, billing.DenyInsufficientCredit, set.BalanceDenyCode)
 
-		// $20 of compute fills the window while the line has room.
-		set, window = view(usageInput(customer, "past-the-window", 2))
-		require.EqualValues(t, 20_000_000, window.Used)
+		// Another gate's $20 of open requests fills the window while the line
+		// has room.
+		syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(),
+			InFlight: []billing.InFlight{{CustomerID: customer, Limit: window.Limit, Unit: window.Unit, Amount: 20_000_000}}})
+		set, window = view()
+		require.EqualValues(t, 20_000_000, window.Held)
 		require.LessOrEqual(t, window.Remaining, int64(0), "the window refuses")
 		require.EqualValues(t, 20_000_000, set.CreditLine)
 	})
