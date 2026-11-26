@@ -20,8 +20,8 @@ func tieredSales(t *testing.T, tiers ...billing.TrustTier) *sales {
 	s := newSales(t, func(w *world) {
 		m := cfgMerchant(w.cfg, "alpha")
 		m.BillingPolicies = []billing.BillingPolicy{
-			{Name: "starter", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "starter-month", WindowSeconds: 30 * 24 * 3600, Limit: 5_000_000, Currency: "USD"}}},
-			{Name: "graduated", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "graduated-month", WindowSeconds: 30 * 24 * 3600, Limit: 50_000_000, Currency: "USD"}}},
+			{Name: "starter", SpendWindows: []billing.BudgetWindow{{Key: "starter-month", WindowSeconds: 30 * 24 * 3600, Limit: 5_000_000, Currency: "USD"}}},
+			{Name: "graduated", SpendWindows: []billing.BudgetWindow{{Key: "graduated-month", WindowSeconds: 30 * 24 * 3600, Limit: 50_000_000, Currency: "USD"}}},
 		}
 		m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "starter"}}
 		for _, tier := range tiers {
@@ -206,10 +206,66 @@ func TestTrustTiers(t *testing.T) {
 		requireGraduated(t, s, bob(s), "on-the-view", false)
 	})
 
+	t.Run("OR-J23-S50/the-credit-line-and-delinquency-grace-follow-the-computed-tiers-policy", func(t *testing.T) {
+		// The default tier's policy lends $10 with the merchant's grace (none);
+		// a customer who paid $5 is a builder, lent $25 with 30 days' grace.
+		a, _, customer := usageBillingWorld(t, true, func(w *world) {
+			m := cfgMerchant(w.cfg, "alpha")
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "starter", OutstandingCapAmount: 10_000_000}, {Name: "builder", OutstandingCapAmount: 25_000_000, DelinquencyGraceDays: ptr(30)}}
+			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "starter"}, {PolicyName: "builder", Tier: "builder"}}
+			m.TrustTiers = []billing.TrustTier{usdTier("builder", 5_000_000, 0)}
+			setCfgMerchant(&w.cfg, "alpha", m)
+		})
+		view := func() *billing.LimitSet {
+			t.Helper()
+			return syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}}).LimitSets[0]
+		}
+		set := view()
+		require.Equal(t, freeTier, set.TrustLevel)
+		require.EqualValues(t, 10_000_000, set.CreditLine, "the default tier's cap")
+
+		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "starter-pack", DisplayName: "Starter pack"})
+		require.NoError(t, err)
+		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "starter-pack", UnitAmount: 5_000_000, Currency: "USD"})
+		require.NoError(t, err)
+		invoice, err := a.alpha.CreateInvoice(t.Context(), "graduating-sale", billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}})
+		require.NoError(t, err)
+		_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 5_000_000, TransactionID: "bank-receipt-graduates"})
+		require.NoError(t, err)
+		set = view()
+		require.Equal(t, "builder", set.TrustLevel, "money the merchant recorded counts as paid")
+		require.Equal(t, billing.TrustLevelRule, set.TrustLevelSource)
+		require.EqualValues(t, 25_000_000, set.CreditLine, "the graduated tier's cap")
+
+		usage := func() billing.Invoice {
+			t.Helper()
+			rows, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
+			require.NoError(t, err)
+			for _, row := range rows.Items {
+				if row.Usage != nil {
+					return row
+				}
+			}
+			require.FailNow(t, "no usage invoice")
+			return billing.Invoice{}
+		}
+		oneUsage(t, a.alpha, usageInput(customer, "owed-by-a-builder", 3))
+		a.clock.Advance(time.Second)
+		fleet := quietFleet(t, a.world)
+		runUsageDue(t, fleet)
+		due := usage().Usage.DueAt
+		advanceTo(a.world, nextHour(due))
+		require.False(t, runPass(t, fleet))
+		require.False(t, usage().Usage.Delinquent, "the graduated tier's 30 days' grace, not the merchant's none")
+		advanceTo(a.world, nextHour(due.Add(30*24*time.Hour)))
+		require.False(t, runPass(t, fleet))
+		require.True(t, usage().Usage.Delinquent, "delinquent once the tier's grace ends")
+	})
+
 	t.Run("OR-J23-S49/trust-tiers-that-cannot-be-met-in-order-are-refused", func(t *testing.T) {
 		bound := func(tiers ...billing.TrustTier) billing.MerchantDeclaration {
 			m := billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{DisplayName: "Tiered", MerchantSettings: billing.MerchantSettings{
-				BillingPolicies:       []billing.BillingPolicy{{Name: "capped", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 50_000_000, Currency: "USD"}}}},
+				BillingPolicies:       []billing.BillingPolicy{{Name: "capped", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 50_000_000, Currency: "USD"}}}},
 				BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "capped", Tier: "builder"}, {PolicyName: "capped", Tier: "veteran"}},
 				TrustTiers:            tiers,
 			}}}

@@ -1884,6 +1884,9 @@
     "OR-J23-S49": [
       "TestTrustTiers/OR-J23-S49/trust-tiers-that-cannot-be-met-in-order-are-refused"
     ],
+    "OR-J23-S50": [
+      "TestTrustTiers/OR-J23-S50/the-credit-line-and-delinquency-grace-follow-the-computed-tiers-policy"
+    ],
     "OR-J24-S37": [
       "TestLeaseSyncs/OR-J24-S37/a-batch-reporters-usage-only-sync-answers-as-before"
     ],

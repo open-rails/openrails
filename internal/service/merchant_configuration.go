@@ -142,7 +142,7 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 		if usage := settings.Config.UsageBilling; usage != nil {
 			for _, cur := range usage.Currencies {
 				err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-					customer, err := s.rt.DB.Gen(ctx).FindInvalidUsageMinimum(ctx, gen.FindInvalidUsageMinimumParams{MerchantID: mid.UUID(), Currency: string(cur.Currency), DefaultCredit: cur.CreditLimit, DefaultMinimum: cur.MinimumInvoiceAmount, Policies: settings.PoliciesParam()})
+					customer, err := s.rt.DB.Gen(ctx).FindInvalidUsageMinimum(ctx, gen.FindInvalidUsageMinimumParams{MerchantID: mid.UUID(), Currency: string(cur.Currency), DefaultCredit: cur.CreditLimit, DefaultMinimum: cur.MinimumInvoiceAmount, Policies: settings.PoliciesParam(), Now: s.now()})
 					if errors.Is(err, pgx.ErrNoRows) {
 						return nil
 					}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
@@ -18,10 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
-
-// DefaultTrustLevel is assigned to actors with no explicit trust level — the
-// new-account low default (#300): start at the lowest level until graduated.
-const DefaultTrustLevel = "free"
 
 // Admitter resolves a customer's money policy and limits for gates' views.
 type Admitter struct {
@@ -84,9 +81,9 @@ type AdmitDecision struct {
 // gated is a request past the checks admission makes before it weighs any
 // limit: its trust level and the spend windows its policy loads.
 type gated struct {
-	trustLevel string
-	request    spendgate.Request
-	policy     spendgate.Policy
+	trust   billing.EffectiveTrustLevel
+	request spendgate.Request
+	policy  spendgate.Policy
 }
 
 // gates resolves the request's trust level and policy and makes the checks
@@ -94,7 +91,11 @@ type gated struct {
 // delinquency and the delegated-invoker refusal. A lease makes them when it
 // issues a hold.
 func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) (gated, *AdmitDecision, error) {
-	trustLevel := a.trustLevel(ctx, req)
+	trust, err := a.trustLevel(ctx, req)
+	if err != nil {
+		return gated{}, nil, err
+	}
+	trusted := gated{trust: trust}
 
 	// Delegated-invoker failed-usage cutoff (#497): direct payer credentials are
 	// not cut off here (their failures past grace are charged when recorded).
@@ -104,7 +105,7 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 			return gated{}, nil, werr
 		}
 		if over {
-			return gated{}, &AdmitDecision{BlockedBy: "abuse", DenyCode: billing.DenyFailureRateLimited}, nil
+			return trusted, &AdmitDecision{BlockedBy: "abuse", DenyCode: billing.DenyFailureRateLimited}, nil
 		}
 	}
 
@@ -127,14 +128,14 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 			return gated{}, nil, derr
 		}
 		if delinquent {
-			return gated{}, &AdmitDecision{BlockedBy: "money", DenyCode: billing.DenyDelinquentUnpaidInvoice}, nil
+			return trusted, &AdmitDecision{BlockedBy: "money", DenyCode: billing.DenyDelinquentUnpaidInvoice}, nil
 		}
 	}
 
 	// or#897: the merchant chose which policy binds to this payer; OpenRails
 	// measures and enforces its spend windows from the transaction's locked
 	// merchant settings snapshot.
-	sgReq, policy, err := a.policyOf(ctx, req, trustLevel)
+	sgReq, policy, err := a.policyOf(ctx, req, trust.TrustLevel)
 	if err != nil {
 		return gated{}, nil, err
 	}
@@ -142,22 +143,19 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 	// Only the customer's own credential spends its balance: nothing grants a
 	// delegated invoker spend.
 	if !identity.IsDirectPayerInvoker(req.InvokerType) {
-		return gated{}, &AdmitDecision{BlockedBy: "budget", DenyCode: billing.DenyDelegatedSpendNotAllowed}, nil
+		return trusted, &AdmitDecision{BlockedBy: "budget", DenyCode: billing.DenyDelegatedSpendNotAllowed}, nil
 	}
 
-	return gated{trustLevel: trustLevel, request: sgReq, policy: policy}, nil, nil
+	return gated{trust: trust, request: sgReq, policy: policy}, nil, nil
 }
 
-// trustLevel is the request's trust level: explicit, else graduated, else
-// the lowest default.
-func (a *Admitter) trustLevel(ctx context.Context, req AdmitRequest) string {
+// trustLevel is the request's trust level: its own, else the customer's
+// effective one (explicit, else by the merchant's tier rules, else free).
+func (a *Admitter) trustLevel(ctx context.Context, req AdmitRequest) (billing.EffectiveTrustLevel, error) {
 	if req.TrustLevel != "" {
-		return req.TrustLevel
+		return billing.EffectiveTrustLevel{Currency: catalog.Currency(money.NormalizeCurrency(req.Currency)), TrustLevel: req.TrustLevel, Source: billing.TrustLevelExplicit}, nil
 	}
-	if t, err := a.money.GetTrustLevel(ctx, req.CustomerID, req.Currency); err == nil && t != "" {
-		return t
-	}
-	return DefaultTrustLevel
+	return a.money.TrustLevel(ctx, req.CustomerID, req.Currency)
 }
 
 // policyOf is the spend windows of the billing policy bound to the request's

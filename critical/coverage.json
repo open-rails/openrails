@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 831,
+  "scenario_count": 832,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1581,7 +1581,7 @@
     {
       "id": "OR-J23-S47",
       "journey": "J23",
-      "name": "A customer's explicit trust level beats the merchant's tier rules, and a request's own trust level beats both"
+      "name": "A customer's explicit trust level beats the merchant's tier rules, and a request's own trust level picks that request's spend windows"
     },
     {
       "id": "OR-J23-S48",
@@ -1592,6 +1592,11 @@
       "id": "OR-J23-S49",
       "journey": "J23",
       "name": "Trust tiers that are unbound, out of order, ask nothing or are not in whole minor units are refused at load and on edit, and a refused edit writes nothing"
+    },
+    {
+      "id": "OR-J23-S50",
+      "journey": "J23",
+      "name": "A customer's credit line and delinquency grace follow the billing policy of its computed trust tier, money the merchant recorded counting as paid"
     },
     {
       "id": "OR-J29-S07",

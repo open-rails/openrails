@@ -97,6 +97,16 @@ func (s *MoneyService) CustomersTrustLevels(ctx context.Context, customers []uui
 	return out, nil
 }
 
+// trustTier is a customer's effective trust tier in one currency, read on q
+// under settings: the tier its credit line and policy follow.
+func trustTier(ctx context.Context, q *gen.Queries, settings merchantconfig.Settings, merchantID, customer uuid.UUID, currency string, now time.Time) (string, error) {
+	rows, err := q.ListCustomersTrustIn(ctx, gen.ListCustomersTrustInParams{MerchantID: merchantID, CustomerIds: []uuid.UUID{customer}, Currency: currency, Trust: settings.TrustParam(), Now: now})
+	if err != nil || len(rows) == 0 {
+		return merchantconfig.DefaultTrustLevel, err
+	}
+	return rows[0].TrustLevel, nil
+}
+
 // trustParam is the merchant's trust tier rules as billing.trust_tier reads
 // them.
 func (s *MoneyService) trustParam(ctx context.Context) ([]byte, error) {

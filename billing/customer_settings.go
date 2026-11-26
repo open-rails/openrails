@@ -81,7 +81,8 @@ type CreditLimit struct {
 }
 
 // TrustLevel is a customer's explicit trust tier in one currency: it beats
-// the merchant's trust_tiers rules, and a request's own trust level beats it.
+// the merchant's trust_tiers rules. A request's own trust level picks only
+// that request's spend windows.
 type TrustLevel struct {
 	Currency   catalog.Currency `json:"currency"`
 	TrustLevel string           `json:"trust_level"`
