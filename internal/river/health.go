@@ -25,6 +25,9 @@ type Health struct {
 	// LastPass is the newest billing pass that ran to its end; nil when none
 	// did.
 	LastPass *PassRun
+	// PassQueuedAt is when the oldest billing pass queued after LastPass was
+	// queued; nil when there is none.
+	PassQueuedAt *time.Time
 }
 
 // PassRun is one billing pass that ran to its end.
@@ -36,8 +39,8 @@ type PassRun struct {
 // ReadHealth reads every OpenRails job kind from River's tables in schema:
 // its jobs running past their timeout, waiting to retry or discarded, a
 // periodic kind's last completion and the newest error, and the last billing
-// pass's report. It writes nothing. River's tables are not in the sqlc
-// schema, so the SQL is here.
+// pass's report and when the first pass after it was queued. It writes
+// nothing. River's tables are not in the sqlc schema, so the SQL is here.
 func ReadHealth(ctx context.Context, pool *pgxpool.Pool, schema string) (Health, error) {
 	if pool == nil {
 		return Health{}, fmt.Errorf("job health: no pool")
@@ -108,6 +111,14 @@ ORDER BY j.finalized_at DESC LIMIT 1`, KindBillingPass).Scan(&run.FinishedAt, &o
 			return Health{}, fmt.Errorf("job health: last billing pass report: %w", err)
 		}
 		h.LastPass = &run
+	}
+	var after *time.Time
+	if h.LastPass != nil {
+		after = &h.LastPass.FinishedAt
+	}
+	if err := pool.QueryRow(ctx, `SELECT min(j.created_at) FROM `+jobs+` j
+WHERE j.kind = $1 AND ($2::timestamptz IS NULL OR j.created_at > $2)`, KindBillingPass, after).Scan(&h.PassQueuedAt); err != nil {
+		return Health{}, fmt.Errorf("job health: queued billing passes: %w", err)
 	}
 	return h, nil
 }

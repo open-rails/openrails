@@ -7,6 +7,7 @@ package gen
 
 import (
 	"context"
+	"time"
 )
 
 const claimPeriodicLease = `-- name: ClaimPeriodicLease :execrows
@@ -35,35 +36,22 @@ func (q *Queries) ClaimPeriodicLease(ctx context.Context, arg ClaimPeriodicLease
 	return result.RowsAffected(), nil
 }
 
-const listPeriodicLeasesHeldElsewhere = `-- name: ListPeriodicLeasesHeldElsewhere :many
-SELECT kind FROM billing.periodic_leases
-WHERE kind = ANY($1::text[]) AND holder <> $2::text AND expires_at > now()
+const getPeriodicLeaseClaim = `-- name: GetPeriodicLeaseClaim :one
+SELECT holder, claimed_at FROM billing.periodic_leases
+WHERE kind = $1::text
 `
 
-type ListPeriodicLeasesHeldElsewhereParams struct {
-	Kinds  []string
-	Holder string
+type GetPeriodicLeaseClaimRow struct {
+	Holder    string
+	ClaimedAt time.Time
 }
 
-// The kinds whose live lease another fleet holds.
-func (q *Queries) ListPeriodicLeasesHeldElsewhere(ctx context.Context, arg ListPeriodicLeasesHeldElsewhereParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listPeriodicLeasesHeldElsewhere, arg.Kinds, arg.Holder)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []string
-	for rows.Next() {
-		var kind string
-		if err := rows.Scan(&kind); err != nil {
-			return nil, err
-		}
-		items = append(items, kind)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+// The fleet that last claimed the kind, and when: the last to queue its pass.
+func (q *Queries) GetPeriodicLeaseClaim(ctx context.Context, kind string) (GetPeriodicLeaseClaimRow, error) {
+	row := q.db.QueryRow(ctx, getPeriodicLeaseClaim, kind)
+	var i GetPeriodicLeaseClaimRow
+	err := row.Scan(&i.Holder, &i.ClaimedAt)
+	return i, err
 }
 
 const releasePeriodicLease = `-- name: ReleasePeriodicLease :exec

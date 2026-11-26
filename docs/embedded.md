@@ -95,10 +95,7 @@ for _, p := range bill.Probes() { // optional parts: report them, never fail on 
 }
 ```
 
-`openrails_job_progress` fails with no River leader, an overrunning job, or a
-billing pass that has not finished within a day or left critical work (usage
-postings, renewals and retries, balance watches, delinquency, invoice expiry,
-usage billing) due since before yesterday (UTC).
+`openrails_job_progress` fails with no River leader, an overrunning job, or a billing pass that has not finished within a day or left critical work (usage postings, renewals and retries, balance watches, delinquency, invoice expiry, usage billing) due since before yesterday (UTC). Fleets sharing a database each answer for the passes they queue (the fleet holding the pass's lease in `periodic_leases` queues it), and every fleet fails when none has queued one within a day.
 
 ## Config
 

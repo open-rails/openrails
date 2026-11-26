@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db/gen"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -30,11 +31,12 @@ func (r *Runtime) ListWorkerHealth(ctx context.Context) ([]billing.WorkerHealth,
 }
 
 // JobProgress is the openrails_job_progress verdict, a pure read of River's
-// tables: the fleet's River has a leader, no OpenRails job runs past its
-// timeout, and the billing pass ran to its end within a day and its timeout
-// (counted from the leader's election, which runs one at once) and found no
-// critical work a day overdue. A billing pass whose live lease another fleet
-// holds is that fleet's.
+// tables and the billing pass's lease: the fleet's River has a leader, no
+// OpenRails job runs past its timeout, and within a day and the pass's
+// timeout some fleet queued a billing pass (the fleet that claims its lease
+// queues it; counted from the leader's election, which queues one at once),
+// each pass this fleet queued ran to its end, and its last found no critical
+// work a day overdue unless another fleet has queued one since.
 func (r *Runtime) JobProgress(ctx context.Context) error {
 	h, err := r.JobHealth(ctx)
 	if err != nil {
@@ -50,21 +52,24 @@ func (r *Runtime) JobProgress(ctx context.Context) error {
 			stalled = append(stalled, fmt.Sprintf("%s: %d running past its %s timeout", k.Kind, k.Overrunning, riverjobs.Timeout(k.Kind)))
 		}
 	}
-	elsewhere, err := r.DB.GenDirectory().ListPeriodicLeasesHeldElsewhere(ctx, gen.ListPeriodicLeasesHeldElsewhereParams{Kinds: []string{riverjobs.KindBillingPass}, Holder: schema})
-	if err != nil {
-		return fmt.Errorf("job health: periodic leases: %w", err)
+	claim, err := r.DB.GenDirectory().GetPeriodicLeaseClaim(ctx, riverjobs.KindBillingPass)
+	claimed := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("job health: billing pass lease: %w", err)
 	}
-	if len(elsewhere) == 0 {
-		since := *h.LeaderElectedAt
-		if h.LastPass != nil && h.LastPass.FinishedAt.After(since) {
-			since = h.LastPass.FinishedAt
-		}
-		if h.CheckedAt.Sub(since) > riverjobs.CriticalOverdue+riverjobs.Timeout(riverjobs.KindBillingPass) {
-			stalled = append(stalled, fmt.Sprintf("%s has not run to its end since %s", riverjobs.KindBillingPass, since.UTC().Format(time.RFC3339)))
-		}
-		if h.LastPass != nil && len(h.LastPass.Overdue) > 0 {
-			stalled = append(stalled, fmt.Sprintf("a day overdue at %s: %s", h.LastPass.FinishedAt.UTC().Format(time.RFC3339), strings.Join(h.LastPass.Overdue, ", ")))
-		}
+	window := riverjobs.CriticalOverdue + riverjobs.Timeout(riverjobs.KindBillingPass)
+	queued := *h.LeaderElectedAt
+	if claimed && claim.ClaimedAt.After(queued) {
+		queued = claim.ClaimedAt
+	}
+	if h.CheckedAt.Sub(queued) > window {
+		stalled = append(stalled, fmt.Sprintf("no fleet has queued %s since %s", riverjobs.KindBillingPass, queued.UTC().Format(time.RFC3339)))
+	}
+	if q := h.PassQueuedAt; q != nil && h.CheckedAt.Sub(*q) > window {
+		stalled = append(stalled, fmt.Sprintf("%s queued at %s has not run to its end", riverjobs.KindBillingPass, q.UTC().Format(time.RFC3339)))
+	}
+	if h.LastPass != nil && len(h.LastPass.Overdue) > 0 && (!claimed || claim.Holder == schema) {
+		stalled = append(stalled, fmt.Sprintf("a day overdue at %s: %s", h.LastPass.FinishedAt.UTC().Format(time.RFC3339), strings.Join(h.LastPass.Overdue, ", ")))
 	}
 	if len(stalled) > 0 {
 		return errors.New("OpenRails jobs are not progressing: " + strings.Join(stalled, "; "))

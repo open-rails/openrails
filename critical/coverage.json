@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 806,
+  "scenario_count": 807,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3597,6 +3597,11 @@
       "id": "OR-J04-S83",
       "journey": "J04",
       "name": "A slow NMI history read runs on its own queue: a fleet with one billing worker finishes the billing pass while it waits, and once NMI answers the job catches the account up; the next hour reads nothing, the next day reads it again"
+    },
+    {
+      "id": "OR-J04-S84",
+      "journey": "J04",
+      "name": "Two fleets on one database: neither fails job progress while the other queues the billing pass, its lease live or lapsed; the fleet whose queued pass never runs reports it, and once no fleet has queued one for a day every fleet does"
     },
     {
       "id": "OR-J38-S83",
