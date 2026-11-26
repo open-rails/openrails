@@ -430,6 +430,9 @@ func (s *MoneyService) usageAdmissionBillingMode(ctx context.Context, row gen.Bi
 		return BillingModePrepaid, nil
 	}
 	collectible, err := s.canCollectUsage(ctx, s.db.Gen(ctx), row)
+	if errors.Is(err, charge.ErrNoRoute) {
+		return BillingModePrepaid, nil
+	}
 	if err != nil {
 		return "", err
 	}
