@@ -72,3 +72,17 @@ func (s *SubscriptionLifecycleService) EndAdviceDeferred(ctx context.Context, d 
 		return true, nil
 	})
 }
+
+// EndHeldOutcome ends an engine case whose terminal outcome waited for the
+// merchant's destructive arming, as a spent schedule would.
+func (s *SubscriptionLifecycleService) EndHeldOutcome(ctx context.Context, d *db.DB, sub *models.Subscription, blocked string) (bool, error) {
+	now := s.now()
+	if blocked != "" {
+		held := TerminalHold{Reason: blocked, Remedy: SwitchRemedy}
+		action := fmt.Sprintf("subscription %s reached a held terminal outcome but ending it was refused (%s); it keeps access. %s", sub.ID, blocked, SwitchRemedy)
+		return false, s.raiseTerminalHeld(ctx, d, sub, held, action, nil, now)
+	}
+	return s.Decide(ctx, d, sub.ID, lifecycle.DunningExhausted{At: now}, EffectOptions{EndedReason: PremiumEndReasonExpired}, func(_ context.Context, _ *db.DB, locked *models.Subscription) (bool, error) {
+		return locked.CollectionPolicy == models.CollectionPolicyEngine && locked.Status == models.StatusPastDue && locked.NextRetryAt == nil && locked.RetryAdvisedAt == nil && locked.GraceEndsAt != nil && !locked.GraceEndsAt.After(now), nil
+	})
+}

@@ -85,6 +85,87 @@ func TestDunningSchedule(t *testing.T) {
 		require.Len(t, charged(), 5, "a canceled subscription is not charged again")
 		require.Len(t, p.effects(t), 1)
 	})
+	t.Run("OR-J16-S56/a-held-engine-case-ends-once-the-merchant-is-armed", func(t *testing.T) {
+		for _, route := range []string{"armed", "admin-cancel"} {
+			t.Run(route, func(t *testing.T) {
+				a, p, sub := purchasedMembershipWith(t, 7*24)
+				enableLifecycleMaintenance(t, a)
+				armWorldDestructive(t, a.world, false)
+				p.core.SetDecline("4242", "insufficient_funds")
+				a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+				fleet := startFleet(t, a.world)
+				for attempt := 1; attempt <= 3; attempt++ {
+					runRegistered(t, fleet, "openrails.billing_pass", 2)
+					require.Eventually(t, func() bool {
+						current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+						return err == nil && current.Dunning != nil && current.Dunning.Attempts == attempt &&
+							(attempt == 3 || current.Dunning.NextRetryAt != nil)
+					}, 20*time.Second, 20*time.Millisecond)
+					if attempt < 3 {
+						a.clock.Advance(24 * time.Hour)
+					}
+				}
+				held := func(status billing.FindingStatus) billing.Finding {
+					findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.terminal_outcome.held", Status: status})
+					require.NoError(t, err)
+					require.Len(t, findings.Items, 1)
+					require.Equal(t, sub.ID.UUID().String(), findings.Items[0].SubjectKey)
+					require.Equal(t, status, findings.Items[0].Status)
+					return findings.Items[0]
+				}
+				current := subscriptionState(t, a, sub.ID, "past_due")
+				require.Nil(t, current.Dunning.NextRetryAt)
+				held("requires_review")
+				access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"membership:paid"}})
+				require.NoError(t, err)
+				require.True(t, access.Entitlements["membership:paid"])
+				creates, effects, seen := paymentIntentCreates(p), p.effects(t), held("requires_review").LastSeenAt
+				var version int64
+				var grace, recheck, advice *time.Time
+				read := func() {
+					require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT row_version, grace_ends_at, due_recheck_at, retry_advised_at FROM "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" WHERE id = $1", sub.ID.UUID()).Scan(&version, &grace, &recheck, &advice))
+				}
+				read()
+				require.NotNil(t, grace)
+				require.True(t, grace.Equal(a.clock.Now()))
+				require.Nil(t, advice)
+				require.Nil(t, recheck)
+				heldVersion := version
+				for range 3 {
+					a.clock.Advance(24 * time.Hour)
+					runRegistered(t, fleet, "openrails.billing_pass", 2)
+				}
+				read()
+				require.Equal(t, heldVersion, version, "a disarmed held row is not written by later passes")
+				require.Nil(t, recheck, "a disarmed held row is not deferred by the due pass")
+				require.Equal(t, seen, held("requires_review").LastSeenAt)
+				held("requires_review")
+				subscriptionState(t, a, sub.ID, "past_due")
+				access, err = a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"membership:paid"}})
+				require.NoError(t, err)
+				require.True(t, access.Entitlements["membership:paid"])
+				require.Equal(t, creates, paymentIntentCreates(p))
+				require.Equal(t, effects, p.effects(t))
+				if route == "armed" {
+					armWorldDestructive(t, a.world, true)
+					runRegistered(t, fleet, "openrails.billing_pass", 1)
+				} else {
+					_, err := a.alpha.CancelSubscription(t.Context(), sub.ID, billing.CancelSubscriptionParams{Reason: "support request", RevokeAccess: true})
+					require.NoError(t, err)
+				}
+				ended := subscriptionState(t, a, sub.ID, "canceled")
+				if route == "armed" {
+					require.Equal(t, "expired", *ended.CancelType)
+				}
+				held("fixed")
+				access, err = a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"membership:paid"}})
+				require.NoError(t, err)
+				require.False(t, access.Entitlements["membership:paid"])
+				require.Equal(t, creates, paymentIntentCreates(p))
+				require.Equal(t, effects, p.effects(t))
+			})
+		}
+	})
 	t.Run("OR-J16-S51/a-merchants-customer-retry-cap-is-honoured", func(t *testing.T) {
 		for _, tc := range []struct {
 			name    string

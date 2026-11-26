@@ -248,6 +248,9 @@ func (s *Subscription) RememberLifecycle() {
 	s.loaded, s.decision, s.historyDecision = s.lifecycle(), "", ""
 }
 
+// LoadedStatus is the status as persisted when the lifecycle was remembered.
+func (s *Subscription) LoadedStatus() SubscriptionStatus { return s.loaded.status }
+
 // LifecycleChanged reports whether status, paid period or cancellation
 // differ from what was read.
 func (s *Subscription) LifecycleChanged() bool { return s.lifecycle() != s.loaded }

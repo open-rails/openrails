@@ -2123,6 +2123,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
 			}
 		}
+		if _, held := event.(lifecycle.TerminalHeld); held && subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusPastDue {
+			subscription.GraceEndsAt = &now
+		}
 		if subscription.Status == models.StatusAwaitingMethod && subscription.GraceEndsAt == nil {
 			deadline, err := awaitMethodDeadline(ctx, db, priceService, subscription)
 			if err != nil {
