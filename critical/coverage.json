@@ -3621,7 +3621,7 @@
     {
       "id": "OR-J04-S88",
       "journey": "J04",
-      "name": "Behind PgBouncer, a usage policy lock and a billing import lock wait for their holders on direct sessions, a merchant pull lease admits one holder, and three concurrent revocations by an actor allowed two an hour admit two and hold the third"
+      "name": "Behind PgBouncer, a usage policy lock and a billing import lock wait for their holders on direct sessions, a merchant pull lease admits one holder, and four concurrent revocations by an actor allowed two an hour revoke at most two and leave the actor held"
     },
     {
       "id": "OR-J04-S89",

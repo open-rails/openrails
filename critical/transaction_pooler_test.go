@@ -388,11 +388,12 @@ func TestTransactionPooler(t *testing.T) {
 		require.Nil(t, other, "one pull of a merchant at a time")
 		lease.Release()
 
-		// Three revocations by an actor allowed two an hour, at once through
-		// the pooler: two are admitted and the third is held.
-		statuses := make(chan int, 3)
+		// Four revocations at once by an actor allowed two an hour: their
+		// admissions take turns through the pooler, so at most two revoke and
+		// the rest are held; a hold also stops an admitted one at its start.
+		statuses := make(chan int, len(r.grants))
 		var wg sync.WaitGroup
-		for _, grant := range r.grants[:3] {
+		for _, grant := range r.grants {
 			wg.Go(func() {
 				status, _, _ := r.revoke(t, grant)
 				statuses <- status
@@ -404,9 +405,19 @@ func TestTransactionPooler(t *testing.T) {
 		for status := range statuses {
 			counts[status]++
 		}
-		require.Equal(t, map[int]int{http.StatusOK: 2, http.StatusTooManyRequests: 1}, counts, "the actor's hold admits exactly its limit")
-		status, _, raw := r.revoke(t, r.grants[3])
-		require.Equal(t, http.StatusTooManyRequests, status, string(raw))
+		require.Equal(t, len(r.grants), counts[http.StatusOK]+counts[http.StatusTooManyRequests], "%v", counts)
+		require.LessOrEqual(t, counts[http.StatusOK], 2, "the actor's limit admits at most two")
+		var active []billing.CreditGrant
+		for _, grant := range r.grants {
+			got, err := r.alpha.GetCreditGrant(t.Context(), grant.ID)
+			require.NoError(t, err)
+			if got.State == billing.CreditGrantActive {
+				active = append(active, grant)
+			}
+		}
+		require.Len(t, active, len(r.grants)-counts[http.StatusOK], "each answer matches its grant")
+		status, _, raw := r.revoke(t, active[0])
+		require.Equal(t, http.StatusTooManyRequests, status, "the actor stays held: %s", raw)
 		requireNoSettingSurvives(t)
 	})
 
