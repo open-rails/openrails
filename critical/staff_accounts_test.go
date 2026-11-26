@@ -73,7 +73,7 @@ func TestStaffAccounts(t *testing.T) {
 		manifest := filepath.Join(t.TempDir(), "bootstrap.yaml")
 		require.NoError(t, os.WriteFile(manifest, []byte(`users:
   - email: ops@critical.invalid
-    username: ops
+    username: seededops
     email_verified: true
     password: { plaintext: "Seeded-operator-1", enforce: true }
     root_role: root:owner
@@ -113,7 +113,8 @@ func TestStaffAccounts(t *testing.T) {
 	})
 
 	t.Run("OR-J01-S36/without-email-an-operators-invitation-answers-its-link-to-share", func(t *testing.T) {
-		s := startStaffServer(t, newWorld(t))
+		// Behind the deployment's proxy: an address may invite once a minute.
+		s := startStaffServer(t, newWorld(t), map[string]any{"trusted_proxies": []string{"127.0.0.1/32"}})
 		owner, session := s.owner(t)
 		// The Team page's invitation by email: none is sent, so its link is
 		// the inviter's to share.
@@ -131,7 +132,9 @@ func TestStaffAccounts(t *testing.T) {
 		require.Equal(t, created.Code, linkFragment(t, created.URL, "/admin/invite", "invite_code"))
 		// An invite link, for an account that holds one, carries its code
 		// as link_code.
-		status, raw = owner.call(t, http.MethodPost, "/auth/v1/groups/root/invitations", session, map[string]string{"role": operatorRole})
+		elsewhere := *owner
+		elsewhere.forwardedFor = "203.0.113.7"
+		status, raw = elsewhere.call(t, http.MethodPost, "/auth/v1/groups/root/invitations", session, map[string]string{"role": operatorRole})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		require.NoError(t, json.Unmarshal(raw, &created))
 		require.Equal(t, created.Code, linkFragment(t, created.URL, "/admin/invite", "link_code"))
@@ -285,10 +288,12 @@ func (s *staffServer) owner(t *testing.T) (*staffBrowser, string) {
 }
 
 // staffBrowser is a person's browser at the server: one DPoP key, which
-// every sign-in binds its session to.
+// every sign-in binds its session to, and the address the deployment's
+// proxy forwards for it ("" for none).
 type staffBrowser struct {
-	s   *staffServer
-	key *authtest.DPoPKey
+	s            *staffServer
+	key          *authtest.DPoPKey
+	forwardedFor string
 }
 
 func (s *staffServer) browser(t *testing.T) *staffBrowser {
@@ -311,6 +316,9 @@ func (b *staffBrowser) call(t *testing.T, method, path, token string, body any) 
 		require.NoError(t, err)
 		if body != nil {
 			req.Header.Set("Content-Type", "application/json")
+		}
+		if b.forwardedFor != "" {
+			req.Header.Set("X-Forwarded-For", b.forwardedFor)
 		}
 		// A proof names the URL clients reach: the public one.
 		target, _, _ := strings.Cut(path, "?")
