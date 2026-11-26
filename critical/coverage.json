@@ -536,7 +536,7 @@
     {
       "id": "OR-J17-S15",
       "journey": "J17",
-      "name": "Over the merchant's customer cancellation budget, a customer's own cancel of an NMI or CCBill schedule is refused 429, queues nothing and reaches no provider, and the subscription stays live; the accepted cancels before it reach the provider"
+      "name": "Six distinct customers can cancel NMI or CCBill schedules within an hour without card-removal reservations or a wave finding; all provider stops execute on a disarmed merchant"
     },
     {
       "id": "OR-J17-S16",
@@ -3706,7 +3706,7 @@
     {
       "id": "OR-J06-S83",
       "journey": "J06",
-      "name": "Customers' own cancellations past the merchant's cap wait with the time to wait; the finding names the wave and alerts staff once; staff cancellations spend none of the cap"
+      "name": "Six distinct customers can cancel within an hour without a wave finding; card removals past the merchant cap are refused 429 and alert staff once; another customer can still cancel after that cap is exhausted"
     },
     {
       "id": "OR-J06-S84",

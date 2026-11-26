@@ -377,9 +377,9 @@
       "TestUnarmedCancels/OR-J17-S14/a-staff-cancel-on-an-unarmed-merchant-is-still-held"
     ],
     "OR-J17-S15": [
-      "TestUnarmedCancels/OR-J17-S15/over-the-customer-budget-a-customers-own-cancel-reaches-no-provider",
-      "TestUnarmedCancels/OR-J17-S15/over-the-customer-budget-a-customers-own-cancel-reaches-no-provider/nmi",
-      "TestUnarmedCancels/OR-J17-S15/over-the-customer-budget-a-customers-own-cancel-reaches-no-provider/ccbill"
+      "TestUnarmedCancels/OR-J17-S15/six-customers-own-cancels-all-stop-the-provider-without-spending-the-card-budget",
+      "TestUnarmedCancels/OR-J17-S15/six-customers-own-cancels-all-stop-the-provider-without-spending-the-card-budget/nmi",
+      "TestUnarmedCancels/OR-J17-S15/six-customers-own-cancels-all-stop-the-provider-without-spending-the-card-budget/ccbill"
     ],
     "OR-J17-S16": [
       "TestSubscriptionGrantRevocations/OR-J17-S16/admin-revoke-leaves-ended-paid-periods-unrevoked"
@@ -2384,7 +2384,7 @@
       "TestMerchantControls/OR-J06-S81/unreadable-controls-deny-writes-rebills-and-destructive-actions"
     ],
     "OR-J06-S83": [
-      "TestFindingAlerts/OR-J06-S83/customers-own-cancellations-past-the-cap-name-the-wave-and-alert-staff-and-staff-cancels-spend-none"
+      "TestFindingAlerts/OR-J06-S83/customer-cancels-spend-no-budget-and-card-removals-past-the-cap-alert-staff-once"
     ],
     "OR-J06-S84": [
       "TestStandaloneAuthSurface/OR-J06-S84/auth-settings-beyond-the-key-path-refuse-boot"

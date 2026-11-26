@@ -35,18 +35,18 @@ type userActionRateEvidence struct {
 }
 
 func (e *UserActionRateError) Error() string {
-	return fmt.Sprintf("too many card removals or subscription cancellations; try again in %s", (time.Duration(e.RetryAfterSeconds) * time.Second).String())
+	return fmt.Sprintf("too many card removals; try again in %s", (time.Duration(e.RetryAfterSeconds) * time.Second).String())
 }
 func (e *UserActionRateError) Is(target error) bool         { return target == billing.ErrDenied }
 func (e *UserActionRateError) ErrorCode() billing.ErrorCode { return billing.CodeRateLimitExceeded }
 
-// UserActionLimiter reserves one customer's own card removal or soft
-// cancellation across every process serving the merchant: a merchant-wide
-// budget of distinct customers, per rolling hour the larger of 5 or one per
+// UserActionLimiter reserves one customer's own card removal across every
+// process serving the merchant: a merchant-wide budget of distinct customers,
+// per rolling hour the larger of 5 or one per
 // 400 customers who paid in the last 30 days, per rolling day the larger of
 // 10 or one per 100. A customer counts once a day. Staff and host actions go
 // through the destructive limits instead; renewals, expiry and
-// provider-side cancellation spend nothing. A refusal answers 429, records a
+// customer cancellations spend nothing. A refusal answers 429, records a
 // finding that alerts staff, and opens no hold. It is independent of the
 // HTTP rate limits.
 type UserActionLimiter struct {
@@ -71,7 +71,7 @@ func (l *UserActionLimiter) Reserve(ctx context.Context, kind Kind, key string, 
 	if l == nil || l.db == nil || l.db.DataPool() == nil {
 		return errors.New("user action rate limiter unavailable")
 	}
-	if customerID == uuid.Nil || (kind != DeletePaymentMethod && kind != CancelSubscription) || strings.TrimSpace(key) == "" || len(key) > 512 {
+	if customerID == uuid.Nil || kind != DeletePaymentMethod || strings.TrimSpace(key) == "" || len(key) > 512 {
 		return errors.New("invalid user action rate reservation")
 	}
 	mid, err := merchant.Require(ctx)
@@ -137,7 +137,7 @@ func (l *UserActionLimiter) Reserve(ctx context.Context, kind Kind, key string, 
 			if err != nil {
 				return err
 			}
-			action := "Review the wave of customers' own card removals and cancellations: a compromised route or credential, or real churn. This temporary limit clears as the rolling windows expire."
+			action := "Review the wave of customers' own card removals: a compromised route or credential, or real churn. This temporary limit clears as the rolling windows expire."
 			finding, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), FindingType: "life.customer_action_rate.exceeded", SubjectKey: "merchant", Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
 			return err
 		}

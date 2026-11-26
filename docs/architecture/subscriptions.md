@@ -163,14 +163,14 @@ Checks:
 
 ### 9. Destructive-action safeguards
 
-Staff cancels run in `destructive.RunLocal` (`CancellationCommand`, keyed by `lifecycle_rev`). A staff cancel needing a provider stop while destructive actions are disarmed is refused `provider_cancel_held`; an account deletion cancels locally and waits. A customer's own cancel is never held: its NMI delete or CCBill cancel runs disarmed, and only the customer budget refuses it. `ExpireAwaitingMethod` holds under `mode=limited` or a closed gate.
+Staff cancels run in `destructive.RunLocal` (`CancellationCommand`, keyed by `lifecycle_rev`). A staff cancel needing a provider stop while destructive actions are disarmed is refused `provider_cancel_held`; an account deletion cancels locally and waits. A customer's own cancel is never held: its NMI delete or CCBill cancel runs disarmed, and the customer card-removal budget never refuses it. `ExpireAwaitingMethod` holds under `mode=limited` or a closed gate.
 
 Checks:
 - `RequireProviderCancelArmed` (staff only) refuses a disarmed provider stop with `provider_cancel_held`, except an account deletion.
 - The runner's kill switch passes `isAcceptedCustomerCancel` intents, as the volume breaker does.
 - OR-J17-S03: a held provider delete survives process death; OR-J34-S06: a held
   webhook cancel keeps access.
-- OR-J17-S13: a customer's own NMI and CCBill cancels stop the provider while disarmed; OR-J17-S14: a staff cancel is still held; OR-J17-S15: over the customer budget the cancel is refused 429 and reaches no provider.
+- OR-J17-S13: a customer's own NMI and CCBill cancels stop the provider while disarmed; OR-J17-S14: a staff cancel is still held; OR-J17-S15: six customers' cancels within an hour all stop the provider without card-removal reservations or a wave finding.
 
 ## Tests
 
@@ -178,7 +178,7 @@ Journeys:
 - OR-J13-S01–S04: enrollment, concurrent signup, imported terms, trials.
 - OR-J14-S01–S07, OR-J14-S70: boundary, concurrency, restart, frozen terms,
   process death, one agreement, calendar anchor, missed renewal.
-- OR-J17-S01–S15: cancel and resume (a Stripe resume a `stripe_resume_subscription` operation, refused with provider writes off, sent after the cancel before it, ordered by commit, and superseded by a later cancel; a cancel Stripe has not heard survives a converge), renewal custody, held delete, callbacks, a customer's own cancel unheld while disarmed but refused over its budget, and a staff one held.
+- OR-J17-S01–S15: cancel and resume (a Stripe resume a `stripe_resume_subscription` operation, refused with provider writes off, sent after the cancel before it, ordered by commit, and superseded by a later cancel; a cancel Stripe has not heard survives a converge), renewal custody, held delete, callbacks, customers' own cancels unheld while disarmed and outside the card-removal budget, and a staff one held.
 - OR-J18-S01–S06: preview, stale preview, customer action, fences, seats.
 - Related: OR-J04-S42, OR-J04-S70, OR-J34-S05/S06, OR-J27-S08, OR-J37-S64–S68.
 
