@@ -83,6 +83,6 @@ func (s *SubscriptionLifecycleService) EndHeldOutcome(ctx context.Context, d *db
 		return false, s.raiseTerminalHeld(ctx, d, sub, held, action, nil, now)
 	}
 	return s.Decide(ctx, d, sub.ID, lifecycle.DunningExhausted{At: now}, EffectOptions{EndedReason: PremiumEndReasonExpired}, func(_ context.Context, _ *db.DB, locked *models.Subscription) (bool, error) {
-		return locked.CollectionPolicy == models.CollectionPolicyEngine && locked.Status == models.StatusPastDue && locked.NextRetryAt == nil && locked.RetryAdvisedAt == nil && locked.GraceEndsAt != nil && !locked.GraceEndsAt.After(now), nil
+		return locked.TerminalHeld() && !locked.GraceEndsAt.After(now), nil
 	})
 }

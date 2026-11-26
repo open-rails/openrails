@@ -192,6 +192,11 @@ func (s *Subscription) AdviceDeferred() bool {
 	return s.Status == StatusPastDue && s.NextRetryAt == nil && s.RetryAdvisedAt != nil && s.GraceEndsAt != nil
 }
 
+// TerminalHeld reports an engine case whose grace ended when its terminal outcome was held.
+func (s *Subscription) TerminalHeld() bool {
+	return s.CollectionPolicy == CollectionPolicyEngine && s.Status == StatusPastDue && s.NextRetryAt == nil && s.RetryAdvisedAt == nil && s.GraceEndsAt != nil
+}
+
 // Validate checks activation preconditions. amountCents is integer minor
 // units; money is never a float.
 func (s *Subscription) Validate(amountCents int64, now time.Time) error {

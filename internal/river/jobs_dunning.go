@@ -404,7 +404,7 @@ func (w *DunningWorker) processSubscription(
 		}
 		return dunningOutcomeWindowExpired, nil
 	}
-	if sub.Status == models.StatusPastDue && sub.NextRetryAt == nil && sub.CollectionPolicy == models.CollectionPolicyEngine {
+	if sub.TerminalHeld() {
 		blocked := ""
 		if materialize {
 			blocked = "a limited write posture holds local terminal cancellations"

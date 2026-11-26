@@ -86,7 +86,7 @@ func TestDunningSchedule(t *testing.T) {
 		require.Len(t, p.effects(t), 1)
 	})
 	t.Run("OR-J16-S56/a-held-engine-case-ends-once-the-merchant-is-armed", func(t *testing.T) {
-		for _, route := range []string{"armed", "admin-cancel"} {
+		for _, route := range []string{"armed", "admin-cancel", "new-card"} {
 			t.Run(route, func(t *testing.T) {
 				a, p, sub := purchasedMembershipWith(t, 7*24)
 				enableLifecycleMaintenance(t, a)
@@ -131,9 +131,11 @@ func TestDunningSchedule(t *testing.T) {
 				require.Nil(t, advice)
 				require.Nil(t, recheck)
 				heldVersion := version
-				for range 3 {
-					a.clock.Advance(24 * time.Hour)
-					runRegistered(t, fleet, "openrails.billing_pass", 2)
+				if route != "new-card" {
+					for range 3 {
+						a.clock.Advance(24 * time.Hour)
+						runRegistered(t, fleet, "openrails.billing_pass", 2)
+					}
 				}
 				read()
 				require.Equal(t, heldVersion, version, "a disarmed held row is not written by later passes")
@@ -146,6 +148,21 @@ func TestDunningSchedule(t *testing.T) {
 				require.True(t, access.Entitlements["membership:paid"])
 				require.Equal(t, creates, paymentIntentCreates(p))
 				require.Equal(t, effects, p.effects(t))
+				if route == "new-card" {
+					method := saveMethod(t, a, p, a.aliceToken, "5556")
+					p.core.SetDecline("5556", "incorrect_zip")
+					status, raw := a.request(t, http.MethodPut, "/v1/me/subscriptions/"+sub.ID.String()+"/payment-method", a.aliceToken, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: &method.ID})
+					require.Equal(t, http.StatusOK, status, string(raw))
+					runRegistered(t, fleet, "openrails.billing_pass", 2)
+					subscriptionState(t, a, sub.ID, "awaiting_method")
+					read()
+					require.NotNil(t, grace)
+					require.True(t, grace.After(a.clock.Now()), "a new card gets a future card-fix deadline")
+					armWorldDestructive(t, a.world, true)
+					runRegistered(t, fleet, "openrails.billing_pass", 1)
+					subscriptionState(t, a, sub.ID, "awaiting_method")
+					return
+				}
 				if route == "armed" {
 					armWorldDestructive(t, a.world, true)
 					runRegistered(t, fleet, "openrails.billing_pass", 1)
