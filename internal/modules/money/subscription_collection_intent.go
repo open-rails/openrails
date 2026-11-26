@@ -574,6 +574,13 @@ func (h *SubscriptionCollectionHandler) renewMembership(ctx context.Context, d *
 		}
 		if current && sub.Status == models.StatusCanceled && sub.CanceledAt != nil && sub.EndedAt != nil && !sub.EndedAt.Before(p.PreviousPeriodEnd) && sub.CancelType != nil && (*sub.CancelType == models.CancelTypeUser || *sub.CancelType == models.CancelTypeMerchant) {
 			params.KeepCanceled = intents.EvidenceString(in, "cancel_revoked_access_at") == ""
+			if params.KeepCanceled {
+				_, err := d.Gen(ctx).GetConflictingInitialEnrollmentSubscription(ctx, gen.GetConflictingInitialEnrollmentSubscriptionParams{MerchantID: in.MerchantID, CustomerID: sub.CustomerID, ProductID: p.Renewal.ProductID})
+				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+					return err
+				}
+				params.KeepCanceled = errors.Is(err, pgx.ErrNoRows)
+			}
 		}
 		if sub.Status == models.StatusCanceled && !params.KeepCanceled || (!current && !replay) {
 			params.PaymentMetadata = map[string]any{"refund_review": "accepted engine charge completed after lifecycle changed"}

@@ -408,6 +408,11 @@
       "TestCancellationCustody/OR-J17-S20/engine-cancel-locks-customer-before-subscription/false",
       "TestCancellationCustody/OR-J17-S20/engine-cancel-locks-customer-before-subscription/true"
     ],
+    "OR-J17-S21": [
+      "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal",
+      "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal/same-product",
+      "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal/same-tier-group"
+    ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
     ],

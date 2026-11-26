@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -12,11 +13,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	embedded "github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -205,18 +208,19 @@ func TestCanceledUnknownRenewal(t *testing.T) {
 				require.Nil(t, current.Dunning)
 				access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"nmi:engine"}})
 				require.NoError(t, err)
-				require.Equal(t, a.clock.Now().Before(accepted.Renewal.PeriodEnd), access.Entitlements["nmi:engine"])
+				accessEnd := accepted.Renewal.PeriodStart.Add(time.Duration(tc.accessHours) * time.Hour)
+				require.Equal(t, a.clock.Now().Before(accessEnd), access.Entitlements["nmi:engine"])
 				invoice, err := a.alpha.GetInvoice(t.Context(), billing.InvoiceID(accepted.InvoiceID))
 				require.NoError(t, err)
 				require.Equal(t, billing.InvoiceComplete, invoice.Status)
 				require.Equal(t, billing.InvoicePaymentSucceeded, invoice.Payment.Status)
-				for _, at := range []time.Time{accepted.Renewal.PeriodEnd.Add(-time.Microsecond), accepted.Renewal.PeriodEnd, accepted.Renewal.PeriodEnd.Add(time.Hour)} {
+				for _, at := range []time.Time{accepted.Renewal.PeriodEnd.Add(-time.Microsecond), accepted.Renewal.PeriodEnd, accepted.Renewal.PeriodEnd.Add(time.Hour), accessEnd.Add(-time.Microsecond), accessEnd, accessEnd.Add(time.Hour)} {
 					access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"nmi:engine"}, At: at})
 					require.NoError(t, err)
-					require.Equal(t, at.Before(accepted.Renewal.PeriodEnd), access.Entitlements["nmi:engine"])
+					require.Equal(t, at.Before(accessEnd), access.Entitlements["nmi:engine"])
 				}
-				if a.clock.Now().Before(accepted.Renewal.PeriodEnd) {
-					a.clock.Advance(accepted.Renewal.PeriodEnd.Sub(a.clock.Now()) + time.Hour)
+				if a.clock.Now().Before(accessEnd) {
+					a.clock.Advance(accessEnd.Sub(a.clock.Now()) + time.Hour)
 				}
 				require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 					_, err := rt.IntentRunner().VerifyByID(ctx, row.ID)
@@ -233,6 +237,85 @@ func TestCanceledUnknownRenewal(t *testing.T) {
 				require.NoError(t, err)
 				require.Empty(t, findings.Items)
 				p.money(t, 2, 2000)
+				if tc.name == "customer-expired-long-access" {
+					archiveBytes(t, a.alpha)
+				}
+			})
+		}
+	})
+	t.Run("OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal", func(t *testing.T) {
+		for _, slot := range []string{"same-product", "same-tier-group"} {
+			t.Run(slot, func(t *testing.T) {
+				a, p, sub := nmiEngineMembership(t)
+				priceID := sub.PriceID
+				entitlement := "nmi:engine"
+				if slot == "same-tier-group" {
+					_, err := a.alpha.UpdateProduct(t.Context(), sub.ProductID, billing.UpdateProductParams{TierGroup: catalog.Value("nmi-level"), TierRank: catalog.Value(1)})
+					require.NoError(t, err)
+					product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "replacement", DisplayName: "Replacement membership", TierGroup: ptr("nmi-level"), TierRank: 2, Entitlements: []string{"nmi:replacement"}})
+					require.NoError(t, err)
+					price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(7 * 24), AccessDurationHours: ptr(7 * 24)})
+					require.NoError(t, err)
+					priceID, entitlement = price.ID, "nmi:replacement"
+				}
+				p.core.HideSales(1)
+				row := executeEngineRenewal(t, a, sub)
+				require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+				accepted, err := subscriptions.DecodeSubscriptionCollectionPayload(row)
+				require.NoError(t, err)
+				status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", a.aliceToken, map[string]any{"reason": "Stop future renewals"})
+				require.Equal(t, http.StatusOK, status, string(raw))
+				canceled := subscriptionState(t, a, sub.ID, "canceled")
+				a.clock.Advance(time.Hour)
+				input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: priceID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), BillingDetails: billedTo("US", "10001")}}
+				status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "replacement-membership"})
+				require.Equal(t, http.StatusCreated, status, string(raw))
+				var invoice billing.Invoice
+				require.NoError(t, json.Unmarshal(raw, &invoice))
+				require.Equal(t, billing.InvoiceComplete, invoice.Status)
+				require.NotEqual(t, billing.InvoiceID(accepted.InvoiceID), invoice.ID)
+				require.NotNil(t, invoice.Lines[0].SubscriptionID)
+				replacement := subscriptionState(t, a, *invoice.Lines[0].SubscriptionID, "active")
+				require.NotEqual(t, sub.ID, replacement.ID)
+				p.core.Reveal()
+				rt := embedded.Graph(a.engine).Runtime
+				ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+				for range 2 {
+					require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+						var err error
+						row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+						return err
+					}))
+					require.Equal(t, intents.StatusSucceeded, row.Status)
+				}
+				current := subscriptionState(t, a, sub.ID, "canceled")
+				require.Equal(t, canceled.CurrentPeriodStartsAt, current.CurrentPeriodStartsAt)
+				require.Equal(t, canceled.CurrentPeriodEndsAt, current.CurrentPeriodEndsAt)
+				require.Equal(t, canceled.EndedAt, current.EndedAt)
+				var grants int
+				require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "grants"}.Sanitize()+" WHERE source_id=$1 AND source_type='subscription' AND starts_at=$2", sub.ID.String(), accepted.Renewal.PeriodStart).Scan(&grants))
+				require.Zero(t, grants)
+				oldInvoice, err := a.alpha.GetInvoice(t.Context(), billing.InvoiceID(accepted.InvoiceID))
+				require.NoError(t, err)
+				require.Equal(t, billing.InvoiceVoid, oldInvoice.Status)
+				fleet := startFleet(t, a.world)
+				require.Eventually(t, func() bool {
+					wakeJobs(t, fleet, "openrails.provider_operation")
+					var refunded int64
+					err := p.pool.QueryRow(t.Context(), "SELECT refunded FROM "+pgx.Identifier{p.schema, "transactions"}.Sanitize()+" WHERE id=$1", intents.EvidenceString(row, "transaction_id")).Scan(&refunded)
+					return err == nil && refunded == 1000
+				}, 15*time.Second, 20*time.Millisecond)
+				require.NoError(t, fleet.Stop(context.Background()))
+				unchanged := subscriptionState(t, a, replacement.ID, "active")
+				require.Equal(t, replacement, unchanged)
+				paidInvoice, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
+				require.NoError(t, err)
+				require.Equal(t, billing.InvoiceComplete, paidInvoice.Status)
+				require.Equal(t, billing.InvoicePaymentSucceeded, paidInvoice.Payment.Status)
+				access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{entitlement}, At: accepted.Renewal.PeriodEnd})
+				require.NoError(t, err)
+				require.True(t, access.Entitlements[entitlement])
+				p.money(t, 3, 2000)
 			})
 		}
 	})

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 842,
+  "scenario_count": 843,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -546,7 +546,7 @@
     {
       "id": "OR-J17-S17",
       "journey": "J17",
-      "name": "A period-end cancel during an unknown card renewal keeps the paid period without resuming or granting grace"
+      "name": "A period-end cancel during an unknown card renewal keeps the paid period and accepted access duration without resuming or granting grace, and permits archive export"
     },
     {
       "id": "OR-J17-S18",
@@ -562,6 +562,11 @@
       "id": "OR-J17-S20",
       "journey": "J17",
       "name": "Engine customer and admin cancellations wait for the customer before locking the subscription and commit alongside renewal completion"
+    },
+    {
+      "id": "OR-J17-S21",
+      "journey": "J17",
+      "name": "A replacement membership of the same product or tier group refunds a canceled subscription's late renewal charge without another period or changes to the replacement"
     },
     {
       "id": "OR-J18-S01",
@@ -4146,7 +4151,7 @@
     {
       "id": "OR-J14-S09",
       "journey": "J14",
-      "name": "Duplicate and ambiguous NMI renewals stay unknown without automatic release"
+      "name": "Duplicate and ambiguous NMI renewals stay unknown without automatic release; reported duplicate refusals permit operator-attested release"
     },
     {
       "id": "OR-J14-S10",
@@ -4201,7 +4206,7 @@
     {
       "id": "OR-J04-S94",
       "journey": "J04",
-      "name": "An unanswered dunning retry keeps access suspended"
+      "name": "An unanswered dunning retry keeps access suspended and verifies without customer or subscription locks"
     },
     {
       "id": "OR-J04-S95",
