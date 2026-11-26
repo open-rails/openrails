@@ -72,6 +72,11 @@ func TestCreditBooksEdges(t *testing.T) {
 						require.ErrorAs(t, err, &refusal)
 						require.Equal(t, http.StatusConflict, refusal.Status)
 						require.Equal(t, billing.CodeResourceConflict, refusal.Code)
+						message := "refund requires unused purchased credit"
+						if state == "revoked" {
+							message = "credit grant is no longer refundable"
+						}
+						require.Equal(t, message, refusal.Message)
 						require.ErrorIs(t, err, billing.ErrConflict)
 					})
 				}
