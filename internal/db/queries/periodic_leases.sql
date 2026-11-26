@@ -9,10 +9,10 @@ ON CONFLICT (kind) DO UPDATE
 SET holder = EXCLUDED.holder, expires_at = EXCLUDED.expires_at, claimed_at = now()
 WHERE billing.periodic_leases.holder = EXCLUDED.holder OR billing.periodic_leases.expires_at <= now();
 
--- name: ListPeriodicLeasesHeldElsewhere :many
--- The kinds whose live lease another fleet holds.
-SELECT kind FROM billing.periodic_leases
-WHERE kind = ANY(sqlc.arg(kinds)::text[]) AND holder <> sqlc.arg(holder)::text AND expires_at > now();
+-- name: GetPeriodicLeaseClaim :one
+-- The fleet that last claimed the kind, and when: the last to queue its pass.
+SELECT holder, claimed_at FROM billing.periodic_leases
+WHERE kind = sqlc.arg(kind)::text;
 
 -- name: ReleasePeriodicLease :exec
 -- Ends the holder's lease on the kind; another holder's is untouched.

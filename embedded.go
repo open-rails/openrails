@@ -181,8 +181,9 @@ type Probe struct {
 // cranker cannot sign, or a plan with subscribers is owned by no listed
 // cranker: its renewals are not pulled. openrails_job_progress, a read of
 // River's tables, fails while the fleet's River schema has no leader, an
-// OpenRails job runs past its timeout, the hourly billing pass the fleet runs
-// has not run to its end within a day and its timeout, or the last one found
+// OpenRails job runs past its timeout, no fleet on the database has queued
+// the hourly billing pass within a day and its timeout, a pass this fleet
+// queued has not run to its end in that time, or its last one found
 // renewals, retries, balance watches, delinquency or usage billing a day
 // overdue.
 func (e *Engine) Probes() []Probe {

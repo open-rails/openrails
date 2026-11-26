@@ -19,6 +19,7 @@ import (
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -221,6 +222,114 @@ func TestBackgroundJobs(t *testing.T) {
 		_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET state='completed', finalized_at=now() WHERE kind='openrails.usage_orders'")
 		require.NoError(t, err)
 		require.NoError(t, progress(t.Context()), "a fresh leader and no overrunning job")
+	})
+	t.Run("OR-J04-S84/fleets-sharing-a-database-report-no-stall-while-another-queues-the-billing-pass", func(t *testing.T) {
+		w := newWorld(t)
+		window := riverjobs.CriticalOverdue + riverjobs.Timeout(riverjobs.KindBillingPass)
+		progress := func(e *openrails.Engine) func(context.Context) error {
+			for _, p := range e.Probes() {
+				if p.Name == "openrails_job_progress" {
+					return p.Check
+				}
+			}
+			t.Fatal("no openrails_job_progress probe")
+			return nil
+		}
+		// upFor checks a fleet's progress with its River leader elected a
+		// day and more ago, as a fleet that has run for days has.
+		upFor := func(e *openrails.Engine, schema string) error {
+			leader := pgx.Identifier{schema, "river_leader"}.Sanitize()
+			require.Eventually(t, func() bool {
+				var n int
+				err := w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+leader+" WHERE expires_at > now()").Scan(&n)
+				return err == nil && n == 1
+			}, 30*time.Second, 50*time.Millisecond, "%s has a River leader", schema)
+			_, err := w.pool.Exec(t.Context(), "UPDATE "+leader+" SET elected_at = now() - make_interval(secs => $1)", (window + time.Hour).Seconds())
+			require.NoError(t, err)
+			return progress(e)(t.Context())
+		}
+		passes := func(fleet *river.Client[pgx.Tx]) []*rivertype.JobRow {
+			list, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds(riverjobs.KindBillingPass))
+			require.NoError(t, err)
+			return list.Jobs
+		}
+
+		// Fleet A, the world's, queues the billing pass on OpenRails' own
+		// schedule; from its first pass the test keeps the time.
+		aSchema := w.schema + "_river"
+		a := hostFleet(t, w)
+		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(a)))
+		require.NoError(t, a.Start(t.Context()))
+		require.Eventually(t, func() bool {
+			done, err := a.JobList(t.Context(), river.NewJobListParams().Kinds(riverjobs.KindBillingPass).States(rivertype.JobStateCompleted))
+			return err == nil && len(done.Jobs) > 0
+		}, 60*time.Second, 100*time.Millisecond, "A's leader queues the billing pass at once and it runs")
+		a.PeriodicJobs().Clear()
+
+		// Fleet B: another host's engine on the same database, with its River
+		// in its own schema.
+		bSchema := w.schema + "_rb"
+		t.Cleanup(func() {
+			_, err := w.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{bSchema}.Sanitize()+" CASCADE")
+			require.NoError(t, err)
+		})
+		cfg := w.cfg
+		cfg.Database.RiverSchema = bSchema
+		other, err := openrails.New(t.Context(), cfg, w.deps)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, other.Close(context.Background())) })
+		b, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: bSchema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}}}, other.RiverJobs())
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			require.NoError(t, b.StopAndCancel(ctx))
+		})
+		require.NoError(t, other.Start(t.Context(), openrails.WithRiverClient(b)))
+		require.NoError(t, b.Start(t.Context()))
+		require.NoError(t, upFor(other, bSchema), "B's leader finds the pass's lease A's")
+		b.PeriodicJobs().Clear()
+		require.Empty(t, passes(b), "and queues none")
+		require.NoError(t, upFor(w.engine, aSchema))
+
+		// The lease lapses at four fifths of the hour; A's next claim is at the
+		// top of the next one.
+		leases := pgx.Identifier{w.schema, "periodic_leases"}.Sanitize()
+		aJobs := pgx.Identifier{aSchema, "river_job"}.Sanitize()
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+leases+" SET claimed_at = now() - interval '50 minutes', expires_at = now() - interval '2 minutes' WHERE kind = $1", riverjobs.KindBillingPass)
+		require.NoError(t, err)
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+aJobs+" SET created_at = created_at - interval '50 minutes', attempted_at = attempted_at - interval '50 minutes', finalized_at = finalized_at - interval '50 minutes' WHERE kind = $1", riverjobs.KindBillingPass)
+		require.NoError(t, err)
+		require.NoError(t, upFor(other, bSchema), "a pass another fleet queued within the day is that fleet's, lease lapsed or not")
+		require.NoError(t, upFor(w.engine, aSchema))
+
+		// A keeps queueing, but a pass it queued a day ago never ran.
+		stuck, err := a.Insert(t.Context(), registeredJob{KindName: riverjobs.KindBillingPass}, &river.InsertOpts{Queue: "critical_unworked"})
+		require.NoError(t, err)
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+aJobs+" SET created_at = now() - make_interval(secs => $2), attempted_at = now() - make_interval(secs => $2), finalized_at = now() - make_interval(secs => $3) WHERE kind = $1 AND state = 'completed'",
+			riverjobs.KindBillingPass, (window + 2*time.Hour).Seconds(), (window + time.Hour).Seconds())
+		require.NoError(t, err)
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+aJobs+" SET created_at = now() - make_interval(secs => $2) WHERE id = $1", stuck.Job.ID, (window + time.Minute).Seconds())
+		require.NoError(t, err)
+		err = upFor(w.engine, aSchema)
+		require.ErrorContains(t, err, "openrails.billing_pass queued at", "the fleet that queued it reports its pass")
+		require.ErrorContains(t, err, "has not run to its end")
+		require.NoError(t, upFor(other, bSchema), "B queued none of it")
+
+		// A stops, and no fleet queues the pass for a day.
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		require.NoError(t, a.StopAndCancel(ctx))
+		cancel()
+		require.Eventually(t, func() bool {
+			err := progress(w.engine)(t.Context())
+			return err != nil && strings.Contains(err.Error(), "no River leader")
+		}, 30*time.Second, 100*time.Millisecond, "the stopped fleet's own probe says so")
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+leases+" SET claimed_at = now() - make_interval(secs => $2), expires_at = now() - make_interval(secs => $2) + interval '48 minutes' WHERE kind = $1",
+			riverjobs.KindBillingPass, (window + time.Minute).Seconds())
+		require.NoError(t, err)
+		err = upFor(other, bSchema)
+		require.ErrorContains(t, err, "no fleet has queued openrails.billing_pass since", "every fleet reports a pass no fleet queues")
+		require.NotContains(t, err.Error(), "has not run to its end", "A's queued passes are A's to report")
 	})
 	t.Run("OR-J29-S07/one-merchants-failed-pass-fails-the-job-after-the-others-finish", func(t *testing.T) {
 		w := newWorld(t)

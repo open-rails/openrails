@@ -95,10 +95,7 @@ for _, p := range bill.Probes() { // optional parts: report them, never fail on 
 }
 ```
 
-`openrails_job_progress` fails with no River leader, an overrunning job, or a
-billing pass that has not finished within a day or left critical work (usage
-postings, renewals and retries, balance watches, delinquency, invoice expiry,
-usage billing) due since before yesterday (UTC).
+`openrails_job_progress` fails with no River leader, an overrunning job, or a billing pass that has not finished within a day or left critical work (usage postings, renewals and retries, balance watches, delinquency, invoice expiry, usage billing) due since before yesterday (UTC). Fleets sharing a database each answer for the passes they queue (the fleet holding the pass's lease in `periodic_leases` queues it), and every fleet fails when none has queued one within a day.
 
 ## Config
 
@@ -139,7 +136,7 @@ and closes none.
 | `Postgres` | Required: your `*pgxpool.Pool`. Its role owns every object OpenRails creates; another owner is your `SET ROLE`. |
 | `PostgresSession` | A direct-connection `*pgxpool.Config` when `Postgres` goes through a transaction pooler ([PgBouncer](#pgbouncer)). |
 | `Redis` | Abuse state (rate limits, lockouts, captcha, card-testing declines, spent DPoP proofs) shared across instances. Without it each process counts alone: right for one instance. No money path needs Redis. |
-| `Vault` | A logged-in `*vaultapi.Client` (`helpers/vault`'s session); you keep it logged in, and `Config.Vault` names its mounts. |
+| `Vault` | A logged-in `*vaultapi.Client` (`helpers/vault`'s session); you keep it logged in, and `Config.Vault` names its mounts. Until your session's first login sets its token, OpenRails' Vault calls (and so its probes) wait for it, up to 30 seconds after `New`. |
 | `ClickHouse` | The event store usage needs, a `driver.Conn` from `github.com/ClickHouse/clickhouse-go/v2` (native protocol). Nil turns usage off ([event store](#event-store)). |
 | `Email` | Your `EmailSender` for [customer messages](guide.md#customer-messages) and operator alerts; `smtpmail.EmailSender(s)` (package `adapters/smtpmail`) wraps a `helpers/smtp` sender, whose `From` is the default sender. nil sends none. Messages go to the customer's address from `UserInfo`, else from SCIM or the verified email its credential claims. |
 | `MessageRenderer` | Renders customer messages in your code: content it returns true for is sent instead of the merchant's templates, and an error is retried. Nil renders every message from the templates. |

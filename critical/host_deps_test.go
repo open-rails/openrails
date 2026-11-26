@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -129,6 +130,51 @@ func TestHostDeps(t *testing.T) {
 		alpha, err := w.engine.DeclaredMerchant("alpha")
 		require.NoError(t, err, "the other declarations serve")
 		require.Equal(t, w.alpha.MerchantID(), alpha)
+	})
+	t.Run("OR-J04-S85/a-vault-login-still-under-way-is-waited-for-never-reported-as-refused", func(t *testing.T) {
+		t.Setenv(vaulttest.AddrEnv, os.Getenv("OPENRAILS_CRITICAL_VAULT_ADDR"))
+		t.Setenv(vaulttest.TokenEnv, os.Getenv("OPENRAILS_CRITICAL_VAULT_TOKEN"))
+		vault := vaulttest.New(t)
+		w := newWorld(t, func(w *world) {
+			w.cfg.Vault = vault.Config()
+			w.deps.Vault = vault.Client()
+			for i := range w.cfg.Merchants {
+				w.cfg.Merchants[i].MerchantDocument = billing.MerchantDocument{Slug: w.cfg.Merchants[i].Slug}
+			}
+		})
+		require.NoError(t, configurationState(t, w.engine))
+		// The host's helpers/vault session: its client holds no token until
+		// its first login sets one in place.
+		loggingIn := func(after time.Duration) *vaultapi.Client {
+			host, err := vault.Client().Clone()
+			require.NoError(t, err)
+			host.ClearToken()
+			login := time.AfterFunc(after, func() { host.SetToken(vault.Token) })
+			t.Cleanup(func() { login.Stop() })
+			return host
+		}
+		start := func(client *vaultapi.Client) *openrails.Engine {
+			deps := w.deps
+			deps.Vault = client
+			engine, err := openrails.New(t.Context(), w.cfg, deps)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, engine.Close(context.Background())) })
+			return engine
+		}
+		require.NoError(t, configurationState(t, start(loggingIn(time.Second))), "New waits for a login under way")
+
+		// A login that outlasts New's wait for the configuration is reported
+		// as one under way, and served once it completes.
+		slow := start(loggingIn(7 * time.Second))
+		for served := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+			state := configurationState(t, slow)
+			if state == nil {
+				break
+			}
+			require.Contains(t, state.Error(), "awaiting the host's first login")
+			require.NotContains(t, state.Error(), "credential access denied")
+			require.True(t, time.Now().Before(served), "not served once the login completed: %v", state)
+		}
 	})
 	t.Run("OR-J04-S77/a-vault-merchant-document-with-an-unknown-key-is-refused", func(t *testing.T) {
 		t.Setenv(vaulttest.AddrEnv, os.Getenv("OPENRAILS_CRITICAL_VAULT_ADDR"))

@@ -2275,6 +2275,12 @@
     "OR-J04-S83": [
       "TestBillingPass/OR-J04-S83/a-slow-nmi-history-read-holds-up-no-billing-pass-and-catches-up"
     ],
+    "OR-J04-S84": [
+      "TestBackgroundJobs/OR-J04-S84/fleets-sharing-a-database-report-no-stall-while-another-queues-the-billing-pass"
+    ],
+    "OR-J04-S85": [
+      "TestHostDeps/OR-J04-S85/a-vault-login-still-under-way-is-waited-for-never-reported-as-refused"
+    ],
     "OR-J38-S83": [
       "TestMerchantPullLease/OR-J38-S83/one-pull-of-a-merchant-runs-the-others-skip-and-none-holds-a-session"
     ],

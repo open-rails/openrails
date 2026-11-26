@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	vaultapi "github.com/hashicorp/vault/api"
 
@@ -19,6 +20,10 @@ import (
 
 // ErrNoClient refuses a Vault mount named without a client to reach it.
 var ErrNoClient = errors.New("Config names a Vault mount but Deps.Vault is nil")
+
+// firstLoginWait is how long after Open Vault calls wait for the host's first
+// login.
+const firstLoginWait = 30 * time.Second
 
 // Connection is the runtime's Vault: the host's client over the mounts
 // Config names, or none.
@@ -57,17 +62,19 @@ func Open(ctx context.Context, logger *slog.Logger, cfg *billing.Config, client 
 	}
 	if conn.Err != nil {
 		logger.ErrorContext(ctx, "vault: configuration refused; Vault-backed merchant configuration and signing are unavailable", logx.Err(conn.Err))
-	} else if mount != "" {
+	}
+	login := vault.AwaitFirstLogin(client, firstLoginWait)
+	if conn.Err == nil && mount != "" {
 		verify, stop := context.WithCancel(context.WithoutCancel(ctx))
 		conn.stop = stop
-		go verifyCapabilities(verify, logger, client, mount, vc.ScopePrefix)
+		go verifyCapabilities(verify, logger, client, login, mount, vc.ScopePrefix)
 	}
-	conn.SolanaTransit = vault.NewTransitAdapter(client, vc.TransitMount).Refuse(conn.Err)
+	conn.SolanaTransit = vault.NewTransitAdapter(client, vc.TransitMount).Refuse(conn.Err).AwaitLogin(login)
 	if mount != "" {
-		conn.KV = vault.NewKVv2Adapter(client, mount).Refuse(conn.Err)
+		conn.KV = vault.NewKVv2Adapter(client, mount).Refuse(conn.Err).AwaitLogin(login)
 	}
 	if platformMount != "" {
-		conn.PlatformKV = vault.NewKVv2Adapter(client, platformMount).Refuse(conn.Err)
+		conn.PlatformKV = vault.NewKVv2Adapter(client, platformMount).Refuse(conn.Err).AwaitLogin(login)
 	}
 	return conn, nil
 }
@@ -90,8 +97,11 @@ func (c *Connection) State() error {
 // verifyCapabilities reports a token that cannot serve the merchant
 // configuration mount, retrying until Vault answers. Diagnostics only: reads
 // and writes fail at runtime either way.
-func verifyCapabilities(ctx context.Context, logger *slog.Logger, client *vaultapi.Client, kvMount, scopePrefix string) {
+func verifyCapabilities(ctx context.Context, logger *slog.Logger, client *vaultapi.Client, login *vault.FirstLogin, kvMount, scopePrefix string) {
 	_ = retry.Forever(ctx, func(ctx context.Context) error {
+		if err := login.Wait(ctx); err != nil {
+			return err
+		}
 		caps, err := vault.SelfCapabilities(ctx, client, kvMount, scopePrefix)
 		if err != nil {
 			return err

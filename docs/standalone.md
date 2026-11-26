@@ -698,10 +698,7 @@ From v1.0.0 the Go API, the HTTP API and the schema change only by addition
 | `openrails workers [--json]` | each job kind as River holds it: overrunning, retrying and discarded jobs, last completion and the newest error |
 | logs | to stderr at `logger.level`: JSON, or text on a terminal. Secrets, card data and SQL arguments are never logged |
 
-`openrails_job_progress` fails with no River leader, an overrunning job, or a
-billing pass that has not finished within a day or left critical work (usage
-postings, renewals and retries, balance watches, delinquency, invoice expiry,
-usage billing) due since before the start of yesterday (UTC).
+`openrails_job_progress` fails with no River leader, an overrunning job, or a billing pass that has not finished within a day or left critical work (usage postings, renewals and retries, balance watches, delinquency, invoice expiry, usage billing) due since before the start of yesterday (UTC). Fleets sharing a database each answer for the passes they queue (the fleet holding the pass's lease in `periodic_leases` queues it), and every fleet fails when none has queued one within a day.
 
 On SIGTERM the server fails readiness at once, keeps serving for 5 seconds,
 then stops within 20 seconds; give it a grace period of at least 25 seconds
