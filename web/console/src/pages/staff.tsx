@@ -67,8 +67,9 @@ export function SetupPage() {
   )
 }
 
-// An invitation's landing page: sign up with an emailed invitation, or
-// accept one into the signed-in account.
+// An invitation's landing page: sign up with it, or accept it into the
+// signed-in account. Where the server sends no email the sign-up is
+// immediate and the address stays unverified.
 export function InvitePage() {
   const invitation = useFragment(readInvitation)
   const [accepted, setAccepted] = useState(false)
