@@ -100,10 +100,12 @@ WITH bound AS (
         s.credit_limit_override, s.credit_limit_amount, $2::bigint AS terms_credit_limit,
         $3::jsonb -> 'policies' -> COALESCE(
         CASE WHEN $3::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
-        $3::jsonb -> 'tiers' ->> s.tier,
+        $3::jsonb -> 'tiers' ->> billing.trust_tier($3::jsonb -> 'trust', s.currency, s.tier,
+            pt.net_paid_amount, pt.first_paid_at, $4::timestamptz),
         $3::jsonb ->> 'default') AS policy
     FROM billing.money_settings s JOIN billing.customers c ON c.merchant_id=s.merchant_id AND c.id=s.customer_id
-    WHERE s.merchant_id=$4::uuid AND s.currency=$5::text
+    LEFT JOIN billing.customer_paid_totals pt ON pt.merchant_id=s.merchant_id AND pt.customer_id=s.customer_id AND pt.currency=s.currency
+    WHERE s.merchant_id=$5::uuid AND s.currency=$6::text
 ), scoped AS (
     SELECT customer_id, minimum,
         CASE WHEN credit_limit_override THEN credit_limit_amount
@@ -118,6 +120,7 @@ type FindInvalidUsageMinimumParams struct {
 	DefaultMinimum int64
 	DefaultCredit  int64
 	Policies       []byte
+	Now            time.Time
 	MerchantID     uuid.UUID
 	Currency       string
 }
@@ -127,6 +130,7 @@ func (q *Queries) FindInvalidUsageMinimum(ctx context.Context, arg FindInvalidUs
 		arg.DefaultMinimum,
 		arg.DefaultCredit,
 		arg.Policies,
+		arg.Now,
 		arg.MerchantID,
 		arg.Currency,
 	)
@@ -324,9 +328,11 @@ WITH bound AS (
         s.credit_limit_override, s.credit_limit_amount, ($3::jsonb->>s.currency)::bigint AS terms_credit_limit,
         $4::jsonb -> 'policies' -> COALESCE(
         CASE WHEN $4::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
-        $4::jsonb -> 'tiers' ->> s.tier,
+        $4::jsonb -> 'tiers' ->> billing.trust_tier($4::jsonb -> 'trust', s.currency, s.tier,
+            pt.net_paid_amount, pt.first_paid_at, $1::timestamptz),
         $4::jsonb ->> 'default') AS policy
     FROM billing.money_settings s JOIN billing.customers c ON c.merchant_id=s.merchant_id AND c.id=s.customer_id
+    LEFT JOIN billing.customer_paid_totals pt ON pt.merchant_id=s.merchant_id AND pt.customer_id=s.customer_id AND pt.currency=s.currency
     WHERE s.merchant_id=$5::uuid AND $3::jsonb ? s.currency
 ), scoped AS (
     SELECT merchant_id, customer_id, currency, usage_next_bill_at, usage_minimum_invoice_amount,

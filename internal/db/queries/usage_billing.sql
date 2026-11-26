@@ -51,9 +51,11 @@ WITH bound AS (
         s.credit_limit_override, s.credit_limit_amount, (sqlc.arg(limits)::jsonb->>s.currency)::bigint AS terms_credit_limit,
         sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
         CASE WHEN sqlc.arg(policies)::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
-        sqlc.arg(policies)::jsonb -> 'tiers' ->> s.tier,
+        sqlc.arg(policies)::jsonb -> 'tiers' ->> billing.trust_tier(sqlc.arg(policies)::jsonb -> 'trust', s.currency, s.tier,
+            pt.net_paid_amount, pt.first_paid_at, sqlc.arg(now)::timestamptz),
         sqlc.arg(policies)::jsonb ->> 'default') AS policy
     FROM billing.money_settings s JOIN billing.customers c ON c.merchant_id=s.merchant_id AND c.id=s.customer_id
+    LEFT JOIN billing.customer_paid_totals pt ON pt.merchant_id=s.merchant_id AND pt.customer_id=s.customer_id AND pt.currency=s.currency
     WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND sqlc.arg(limits)::jsonb ? s.currency
 ), scoped AS (
     SELECT merchant_id, customer_id, currency, usage_next_bill_at, usage_minimum_invoice_amount,
@@ -115,9 +117,11 @@ WITH bound AS (
         s.credit_limit_override, s.credit_limit_amount, sqlc.arg(default_credit)::bigint AS terms_credit_limit,
         sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
         CASE WHEN sqlc.arg(policies)::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
-        sqlc.arg(policies)::jsonb -> 'tiers' ->> s.tier,
+        sqlc.arg(policies)::jsonb -> 'tiers' ->> billing.trust_tier(sqlc.arg(policies)::jsonb -> 'trust', s.currency, s.tier,
+            pt.net_paid_amount, pt.first_paid_at, sqlc.arg(now)::timestamptz),
         sqlc.arg(policies)::jsonb ->> 'default') AS policy
     FROM billing.money_settings s JOIN billing.customers c ON c.merchant_id=s.merchant_id AND c.id=s.customer_id
+    LEFT JOIN billing.customer_paid_totals pt ON pt.merchant_id=s.merchant_id AND pt.customer_id=s.customer_id AND pt.currency=s.currency
     WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.currency=sqlc.arg(currency)::text
 ), scoped AS (
     SELECT customer_id, minimum,

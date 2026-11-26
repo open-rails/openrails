@@ -28,6 +28,7 @@ usage costs is [usage billing](usage-billing.md).
   or the first use), `billing_period`, `session` (opens at the first use),
   `rolling` (60 buckets), `rate` (refills continuously), `lifetime`.
 - **`balance`**: the built-in limit per currency, prepaid balance plus credit line (`catalog.BalanceLimit`), never declared: the ledger balance less pending usage and running-charge accrual, never held for in-flight work. The credit line is the customer's credit limit (its own, else its billing policy's `outstanding_cap_amount`, else the merchant's usage terms') less what it owes (`MoneyService.usageAdmissionCapacity`). A billing policy's **spend window** is a fixed currency window kept as a limit window keyed `spend:` and a hash.
+- **Trust tier**: picks a customer's billing policy binding in one currency, for its credit line, collection and delinquency terms and spend windows: its explicit level (`money_settings.tier`), else the highest of the merchant's `trust_tiers` whose requirement its paid totals meet, else `free`; a request's own trust level picks only its spend windows. Computed where it is read (`billing.trust_tier` over `customer_paid_totals`, which the payments trigger keeps in the transaction of each settlement, refund and chargeback), never stored (OR-J23-S43 to S50).
 - **Limit window**: one customer's settled units of one limit in one window
   (`limit_windows`), placed by the server clock.
 - **Lease**: a gate's (or a batch job's) usage stream and in-flight report of

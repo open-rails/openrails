@@ -484,7 +484,8 @@ func (c *Client) ListCustomers(ctx context.Context, params billing.CustomerListP
 }
 
 // GetCustomer reads one customer: its contact, its settings, and per
-// currency its balance and the card that pays its invoices.
+// currency its balance, the card that pays its invoices and its effective
+// trust tier.
 func (c *Client) GetCustomer(ctx context.Context, customerID billing.CustomerID) (*billing.Customer, error) {
 	var out billing.Customer
 	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/customers/{customer_id}", args: []string{customerID.String()}}, &out); err != nil {

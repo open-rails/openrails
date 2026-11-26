@@ -21,6 +21,10 @@ type Customer struct {
 	// it pays the currency's invoices and every subscription in it without
 	// its own card. A currency without one is absent.
 	DefaultPaymentMethods []DefaultPaymentMethod `json:"default_payment_methods"`
+	// TrustLevels are its effective trust tier in each currency it holds an
+	// explicit level in, has paid in, or the merchant's trust_tiers name;
+	// in any other it is the default tier, free.
+	TrustLevels []EffectiveTrustLevel `json:"trust_levels"`
 }
 
 // CustomerContact is how to reach a customer, as the merchant's directory

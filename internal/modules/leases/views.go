@@ -321,7 +321,8 @@ func (v *viewing) limitSet(b *viewBuild, vp billing.ViewParams, eventType string
 	if err != nil {
 		return nil, err
 	}
-	out := &billing.LimitSet{CustomerID: vp.CustomerID, Currency: catalog.Currency(b.key.currency), Limits: []string{catalog.BalanceLimit}, Capacities: []billing.LimitCapacity{}}
+	out := &billing.LimitSet{CustomerID: vp.CustomerID, Currency: catalog.Currency(b.key.currency), TrustLevel: set.Trust.TrustLevel, TrustLevelSource: set.Trust.Source,
+		Limits: []string{catalog.BalanceLimit}, Capacities: []billing.LimitCapacity{}}
 	if set.Refusal != nil {
 		out.Refusal = &billing.Refusal{DenyCode: set.Refusal.DenyCode}
 		if set.Refusal.RetryAfterSeconds > 0 {

@@ -5651,7 +5651,7 @@
           "admin"
         ],
         "operationId": "GetCustomer",
-        "description": "GetCustomer reads one customer: its contact, its settings, and per currency its balance and the card that pays its invoices.",
+        "description": "GetCustomer reads one customer: its contact, its settings, and per currency its balance, the card that pays its invoices and its effective trust tier.",
         "parameters": [
           {
             "name": "customer_id",
@@ -16508,6 +16508,12 @@
             "items": {
               "$ref": "#/components/schemas/DefaultPaymentMethod"
             }
+          },
+          "trust_levels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EffectiveTrustLevel"
+            }
           }
         },
         "required": [
@@ -16517,7 +16523,8 @@
           "last_seen_at",
           "settings",
           "balances",
-          "default_payment_methods"
+          "default_payment_methods",
+          "trust_levels"
         ]
       },
       "CustomerAccount": {
@@ -18167,6 +18174,47 @@
           "amount",
           "runway_hours",
           "source"
+        ]
+      },
+      "EffectiveTrustLevel": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "trust_level": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "default",
+              "explicit",
+              "rule"
+            ]
+          },
+          "net_paid_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "first_paid_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "currency",
+          "trust_level",
+          "source",
+          "net_paid_amount",
+          "first_paid_at"
         ]
       },
       "EntitlementChange": {
@@ -20587,6 +20635,17 @@
           "currency": {
             "type": "string"
           },
+          "trust_level": {
+            "type": "string"
+          },
+          "trust_level_source": {
+            "type": "string",
+            "enum": [
+              "default",
+              "explicit",
+              "rule"
+            ]
+          },
           "limits": {
             "type": "array",
             "items": {
@@ -20630,6 +20689,8 @@
         "required": [
           "customer_id",
           "currency",
+          "trust_level",
+          "trust_level_source",
           "limits",
           "capacities",
           "credit_line",
@@ -21144,6 +21205,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BillingPolicyBinding"
+            }
+          },
+          "trust_tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrustTier"
             }
           },
           "delegated_invoker_wasted_spend_limits": {
@@ -27359,6 +27426,42 @@
           "trust_level"
         ]
       },
+      "TrustTier": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrustTierRequirement"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "requirements"
+        ]
+      },
+      "TrustTierRequirement": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "net_paid_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "days_since_first_payment": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "currency"
+        ]
+      },
       "UpdateAlertWebhookParams": {
         "type": "object",
         "properties": {
@@ -27550,6 +27653,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BillingPolicyBinding"
+            }
+          },
+          "trust_tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrustTier"
             }
           },
           "delegated_invoker_wasted_spend_limits": {

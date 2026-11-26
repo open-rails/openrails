@@ -383,7 +383,8 @@ const CardVaultPlatform = "platform"
 // collection thresholds and delinquency floors; BillingPeriodBoundary and
 // ArrearsGraceDays govern when usage arrears are billed and become
 // delinquent. BillingPolicies are named spend policies and
-// BillingPolicyBindings decide which customers get which.
+// BillingPolicyBindings decide which customers get which; TrustTiers raise
+// a customer's tier by what it paid.
 // RepriceNoticeWindowDays is the notice before a price migration takes
 // effect. PSPRouting chooses the PSP for a new charge.
 type MerchantSettings struct {
@@ -435,6 +436,8 @@ type MerchantSettings struct {
 	BillingPolicies []BillingPolicy `json:"billing_policies,omitempty"`
 	// BillingPolicyBindings choose the merchant default policy and each trust tier's.
 	BillingPolicyBindings []BillingPolicyBinding `json:"billing_policy_bindings,omitempty"`
+	// TrustTiers are the tiers customers graduate to by what they paid, lowest first.
+	TrustTiers []TrustTier `json:"trust_tiers,omitempty"`
 	// DelegatedInvokerWastedSpendLimits bound the wasted spend a delegated invoker is forgiven per window.
 	DelegatedInvokerWastedSpendLimits []BudgetWindow `json:"delegated_invoker_wasted_spend_limits,omitempty"`
 	// Currencies are the merchant's own units (MerchantCurrency), at most 32.
@@ -489,6 +492,29 @@ type BillingPolicy struct {
 	// cap and collection threshold bind only money in it, in admission and
 	// usage billing; windows are converted to the request's currency.
 	PolicyCurrency catalog.Currency `json:"policy_currency,omitempty"`
+}
+
+// TrustTier is a tier a customer graduates to in a currency by meeting its
+// requirement there. Tiers are listed lowest first; a requirement never asks
+// less than the one below it in its currency, and asks more of one criterion.
+// Each tier has a billing policy binding, and none is the default tier, free.
+type TrustTier struct {
+	// Name is the tier, as bindings and trust levels name it.
+	Name string `json:"name"`
+	// Requirements are what the tier asks, at most one per currency; a
+	// currency they do not name never reaches the tier.
+	Requirements []TrustTierRequirement `json:"requirements"`
+}
+
+// TrustTierRequirement is what a trust tier asks in one currency: at least
+// one criterion, a zero one asking nothing.
+type TrustTierRequirement struct {
+	// Currency is the requirement's.
+	Currency catalog.Currency `json:"currency"`
+	// NetPaidAmount is the least the customer has paid in it, settled payments less refunds and chargebacks, in whole minor units of its native units.
+	NetPaidAmount int64 `json:"net_paid_amount,omitempty,string"`
+	// DaysSinceFirstPayment is the least time since its first settled payment in it, in 24-hour days.
+	DaysSinceFirstPayment int `json:"days_since_first_payment,omitempty"`
 }
 
 // BillingPolicyBinding declares a merchant-default or per-tier policy.

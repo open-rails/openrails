@@ -3,7 +3,6 @@ package service
 import (
 	"cmp"
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/open-rails/openrails/billing"
@@ -14,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // BillingPolicy declares one named billing policy (or#897). Window entries
@@ -62,11 +60,11 @@ func (s *Service) invokerWastedSpendPolicy(ctx context.Context) ([]abuse.WastedW
 // a window that names no currency is in the policy's policy_currency.
 func (s *Service) payerWastedWindows(ctx context.Context, payer identity.CustomerID, currency, trustLevel string) ([]abuse.WastedWindow, error) {
 	if trustLevel == "" {
-		if t, err := s.GetTrustLevel(ctx, payer, currency); err == nil && t != "" {
-			trustLevel = t
-		} else {
-			trustLevel = admission.DefaultTrustLevel
+		level, err := s.moneyService().TrustLevel(ctx, payer, currency)
+		if err != nil {
+			return nil, err
 		}
+		trustLevel = level.TrustLevel
 	}
 	pol, err := admission.NewBillingPolicyStore(s.rt.DB).Resolve(ctx, payer, trustLevel)
 	if err != nil {
@@ -131,29 +129,4 @@ func (c failedUsageCutoff) CutoffReached(ctx context.Context, customer identity.
 	}
 	reached, _, err := c.s.moneyService().FailedUsageCutoffReached(ctx, customer, invoker, currency, windows)
 	return reached, err
-}
-
-// GetTrustLevel returns the payer's host-assigned trust level for one currency:
-// Empty means the caller treats it as the lowest/default trust level.
-func (s *Service) GetTrustLevel(ctx context.Context, payer identity.CustomerID, currency string) (string, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return "", pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return "", fmt.Errorf("service not initialized")
-	}
-	if payer.IsZero() {
-		return "", fmt.Errorf("payer required")
-	}
-	cur, err := s.registryCurrency(ctx, "currency", currency)
-	if err != nil {
-		return "", err
-	}
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
-		return "", err
-	}
-	return money.NewMoneyService(s.rt.DB).GetTrustLevel(ctx, payer, cur)
 }
