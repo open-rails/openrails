@@ -23,7 +23,7 @@ type Product struct {
 
 	// Entitlements are opaque feature names granted for the purchased access window.
 	Entitlements []string `json:"entitlements"`
-	// RequiredEntitlements are the keys a customer must hold to invoice it.
+	// RequiredEntitlements are the keys a customer must hold to buy it.
 	RequiredEntitlements []string                 `json:"required_entitlements"`
 	CreditGrant          *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
 

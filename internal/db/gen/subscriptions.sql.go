@@ -1197,7 +1197,7 @@ type ListAtRiskSubscriptionsPageParams struct {
 }
 
 // The subscriptions whose MRR is at risk (for risk_reason, when set), read
-// from subscription_mrr's index of at-risk rows: the same filters and invoices.
+// from subscription_mrr's index of at-risk rows: the same filters and orders.
 func (q *Queries) ListAtRiskSubscriptionsPage(ctx context.Context, arg ListAtRiskSubscriptionsPageParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listAtRiskSubscriptionsPage,
 		arg.MerchantID,
@@ -1956,7 +1956,7 @@ type ListScheduledSubscriptionsPageParams struct {
 }
 
 // The subscriptions whose MRR is scheduled to change by scheduled_change_before,
-// read from mrr_scheduled's index: the same filters and invoices as above.
+// read from mrr_scheduled's index: the same filters and orders as above.
 func (q *Queries) ListScheduledSubscriptionsPage(ctx context.Context, arg ListScheduledSubscriptionsPageParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listScheduledSubscriptionsPage,
 		arg.MerchantID,

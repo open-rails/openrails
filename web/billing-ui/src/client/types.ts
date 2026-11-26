@@ -526,7 +526,7 @@ export const productSchema = z.object({
   description: z.string(),
   /** Opaque entitlement keys granted by the product. */
   entitlements: z.array(z.string()),
-  /** Keys a customer must already hold to invoice the product. */
+  /** Keys a customer must already hold to buy the product. */
   required_entitlements: z.array(z.string()).optional(),
   /** Prepaid balance fulfilled once for each qualifying successful payment. */
   credit_grant: z
