@@ -227,7 +227,7 @@ func newSaleError(rawResponse string, output url.Values, sale bool) error {
 	}
 	if strings.TrimSpace(output.Get("response")) != "2" {
 		unknown := ambiguous(fmt.Errorf("NMI outcome requires verification (response code %d)", responseCode))
-		if duplicateRefusal(output, responseCode) {
+		if strings.TrimSpace(output.Get("response")) == "3" && duplicateRefusal(responseCode, output.Get("responsetext")) {
 			return errors.Join(ErrDuplicateTransaction, unknown)
 		}
 		if sale && strings.TrimSpace(output.Get("response")) == "3" && IsSaleRefusalCode(responseCode) {
@@ -258,9 +258,8 @@ func IsSaleRefusalCode(code int) bool {
 	}
 }
 
-func duplicateRefusal(output url.Values, responseCode int) bool {
-	return strings.TrimSpace(output.Get("response")) == "3" && responseCode == 300 &&
-		strings.HasPrefix(strings.ToLower(strings.TrimSpace(output.Get("responsetext"))), "duplicate transaction")
+func duplicateRefusal(responseCode int, responseText string) bool {
+	return responseCode == 300 && strings.HasPrefix(strings.ToLower(strings.TrimSpace(responseText)), "duplicate transaction")
 }
 
 func parseMobiusResponseCode(output url.Values) int {

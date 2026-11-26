@@ -211,11 +211,31 @@ func TestNMIEngineRenewalRecovery(t *testing.T) {
 		}
 	})
 	t.Run("OR-J14-S09/duplicate-and-ambiguous-renewals-stay-unknown", func(t *testing.T) {
-		for _, code := range []string{"duplicate", "420", "421", "430", "transport"} {
+		for _, code := range []string{"duplicate", "duplicate-report", "duplicate-older-report", "420", "421", "430", "transport"} {
 			t.Run(code, func(t *testing.T) {
 				a, p, sub := nmiEngineMembership(t)
 				if code == "duplicate" {
 					p.core.RefuseDuplicates(1)
+				} else if strings.HasPrefix(code, "duplicate-") {
+					p.core.SetDecline("4242", "300")
+					p.core.Intercept(nmiSaleRequest, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
+						response := serve()
+						require.NoError(t, response.Body.Close())
+						response.Body = io.NopCloser(strings.NewReader("response=3&response_code=300&responsetext=Duplicate+transaction+REFID:3187654321"))
+						return response, nil
+					})
+					p.core.Intercept(func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/query.php") }, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
+						response := serve()
+						body, err := io.ReadAll(response.Body)
+						require.NoError(t, err)
+						require.NoError(t, response.Body.Close())
+						report := strings.ReplaceAll(string(body), "<response_text>DECLINE</response_text>", "<response_text>Duplicate transaction REFID:3187654321</response_text>")
+						if code == "duplicate-older-report" {
+							report = strings.ReplaceAll(report, "<order_description>", "<order_description>older-")
+						}
+						response.Body = io.NopCloser(strings.NewReader(report))
+						return response, nil
+					})
 				} else if code == "transport" {
 					p.core.LoseSales(1)
 				} else {
@@ -228,11 +248,20 @@ func TestNMIEngineRenewalRecovery(t *testing.T) {
 				rt := embedded.Graph(a.engine).Runtime
 				a.clock.Advance(25 * time.Hour)
 				require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+					if strings.HasPrefix(code, "duplicate-") {
+						attempts, err := intents.ReadNMIOrderAttempts(ctx, row, rt.CollectionResolver)
+						require.NoError(t, err)
+						require.Equal(t, 1, attempts.Transactions, "an older duplicate still owns a possible charge")
+						require.False(t, attempts.Declined)
+					}
 					var err error
 					row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
 					return err
 				}))
 				require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+				require.NoError(t, err)
+				require.Nil(t, current.Dunning)
 				p.money(t, 1, 1000)
 				require.LessOrEqual(t, len(p.core.Attempts()), 2, "enrollment and at most one renewal")
 			})

@@ -411,8 +411,12 @@ func (r *Runner) apply(ctx context.Context, logEntry *slog.Logger, stats *Stats,
 	case OutcomeAmbiguous:
 		delay := VerifyDelay
 		if verifying {
-			// Attempts do not grow while verifying; the operation's age does.
-			delay = max(handler.Backoff(intent.Attempts), min(now.Sub(intent.CreatedAt)/2, DefaultBackoff.Cap))
+			// Verification age starts at submission, or creation before submission.
+			started := intent.CreatedAt
+			if submitted, err := time.Parse(time.RFC3339Nano, EvidenceString(intent, "submitted_at")); err == nil {
+				started = submitted
+			}
+			delay = max(handler.Backoff(intent.Attempts), min(now.Sub(started)/2, DefaultBackoff.Cap))
 		}
 		err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(delay), outcome.Reason, outcome.Evidence)
 	case OutcomeTerminal:

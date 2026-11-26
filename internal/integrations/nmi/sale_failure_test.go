@@ -55,9 +55,18 @@ func TestSaleRefusalClassification(t *testing.T) {
 			t.Fatalf("unreadable answer %q: %v", raw, err)
 		}
 	}
-	_, err := ParseSaleResponse("response=3&response_code=300&responsetext=Duplicate+transaction", 100, "USD")
-	if !errors.Is(err, ErrDuplicateTransaction) || errors.Is(err, ErrSaleRefused) || !RequiresVerification(err) {
-		t.Fatalf("duplicate: %v", err)
+	for _, text := range []string{"Duplicate transaction", "  DUPLICATE TRANSACTION REFID:3187654321  "} {
+		fields.Set("responsetext", text)
+		_, err := ParseSaleResponse(fields.Encode(), 100, "USD")
+		if !errors.Is(err, ErrDuplicateTransaction) || errors.Is(err, ErrSaleRefused) || !RequiresVerification(err) {
+			t.Fatalf("duplicate: %v", err)
+		}
+		for _, state := range []string{"", "failed", "complete"} {
+			action := QueryAction{ActionType: "sale", Success: "0", ResponseCode: "300", ResponseText: text}
+			if _, closed := action.DefinitiveDecline(state); closed {
+				t.Fatalf("duplicate query refusal closed: %q/%s", text, state)
+			}
+		}
 	}
 }
 

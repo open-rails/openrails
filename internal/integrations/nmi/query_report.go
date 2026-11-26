@@ -227,7 +227,7 @@ func (a QueryAction) DefinitiveDecline(condition string) (int, bool) {
 	}
 	state := strings.ToLower(strings.TrimSpace(condition))
 	code, err := strconv.Atoi(strings.TrimSpace(a.ResponseCode))
-	return code, err == nil && (code >= 200 && code < 300 || a.Is("sale") && IsSaleRefusalCode(code)) &&
+	return code, err == nil && (code >= 200 && code < 300 || a.Is("sale") && IsSaleRefusalCode(code) && !duplicateRefusal(code, a.ResponseText)) &&
 		(state == "" || state == "failed" || state == "complete")
 }
 

@@ -2693,6 +2693,9 @@
     "OR-J14-S14": [
       "TestRenewal/OR-J14-S14/stuck-renewal-verification-slows-with-age-and-stops-at-the-cap"
     ],
+    "OR-J14-S15": [
+      "TestRenewal/OR-J14-S15/late-renewal-submission-starts-with-handler-verification-backoff"
+    ],
     "OR-J04-S90": [
       "TestSubmittedRenewalGrace/OR-J04-S90/a-sent-renewal-keeps-access-until-its-answer"
     ],
