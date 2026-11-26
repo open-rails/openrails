@@ -447,6 +447,24 @@ type nmiChargebackMatch struct {
 	CardLast4            string
 }
 
+func (s *NMIWebhookService) nmiChargebackMatchFromPayment(ctx context.Context, payment *models.Payment) (*nmiChargebackMatch, error) {
+	match := &nmiChargebackMatch{
+		PaymentID: payment.ID, PaymentTransactionID: payment.TransactionID,
+		UserID: payment.CustomerID.String(), Amount: payment.Amount, Currency: payment.Currency, PurchasedAt: payment.PurchasedAt,
+	}
+	if payment.CardLast4 != nil {
+		match.CardLast4 = *payment.CardLast4
+	}
+	if payment.SubscriptionID != nil {
+		sub, err := s.SubscriptionService.GetByID(ctx, *payment.SubscriptionID)
+		if err != nil {
+			return nil, fmt.Errorf("load payment subscription: %w", err)
+		}
+		match.SubscriptionID, match.RailSubscriptionID = sub.ID, sub.RailSubscriptionID
+	}
+	return match, nil
+}
+
 func normalizeNMIChargebackLast4(raw string) string {
 	digits := strings.Builder{}
 	for _, r := range raw {
@@ -668,6 +686,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			"batch_index":   i,
 			"chargeback_id": cb.ID.Trimmed(),
 			"date":          cb.Date,
+			"amount":        cb.Amount,
 			"customer_name": cb.CustomerName,
 			"cc_last4":      cb.CCNumber,
 		}
@@ -692,6 +711,17 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			var err error
 			if recorded, err = s.recordNMIChargeback(ctx, rail, cb, match, reasonCode, reasonText); err != nil {
 				return fmt.Errorf("record NMI chargeback %s: %w", cb.ID.Trimmed(), err)
+			}
+		}
+
+		if reconcileErr == nil && match == nil && recorded != nil && recorded.PaymentID != nil {
+			payment, err := s.PaymentService.GetByID(ctx, *recorded.PaymentID)
+			if err != nil {
+				return fmt.Errorf("load attached NMI chargeback payment: %w", err)
+			}
+			match, err = s.nmiChargebackMatchFromPayment(ctx, payment)
+			if err != nil {
+				return err
 			}
 		}
 
@@ -911,7 +941,7 @@ func (s *NMIWebhookService) applyNMIChargeback(ctx context.Context, rail string,
 		}
 		action := ""
 		if errors.Is(entryLedgerErr, payments.ErrRefundExceedsPayment) {
-			action = fmt.Sprintf("NMI chargeback %s is on charge %s (transaction %s), which was already refunded in full. OpenRails does not book a second reversal of the same charge. Contest the chargeback with your processor and cite the refund; if you lose it, the loss is outside OpenRails' books.", cb.ID.Trimmed(), billing.PaymentID(match.PaymentID).String(), match.PaymentTransactionID)
+			action = fmt.Sprintf("NMI chargeback %s is on charge %s (transaction %s), whose refunds leave less than the charged amount to reverse, so OpenRails books no second reversal. Contest the chargeback with your processor and cite the refund; if a refund of it is still unresolved, resolve that first. If you lose the chargeback, the loss is outside OpenRails' books.", cb.ID.Trimmed(), billing.PaymentID(match.PaymentID).String(), match.PaymentTransactionID)
 		}
 		if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
 			Action:            action,

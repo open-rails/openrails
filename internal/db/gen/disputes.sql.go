@@ -45,9 +45,11 @@ UPDATE billing.disputes SET
     customer_id = $2::uuid,
     amount = $3::bigint,
     currency = $4::text,
+    network = $5::text,
+    reason = $6::text,
     responded_at = NULL,
     updated_at = now()
-WHERE merchant_id = $5::uuid AND id = $6::uuid
+WHERE merchant_id = $7::uuid AND id = $8::uuid
   AND payment_id IS NULL
 RETURNING merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, reason_code, provider_reason, amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at, reversal_payment_id, recovery_payment_id, absorbed_refund_ref, observed_via, responded_at, created_at, updated_at
 `
@@ -57,6 +59,8 @@ type AttachDisputePaymentParams struct {
 	CustomerID uuid.UUID
 	Amount     int64
 	Currency   string
+	Network    string
+	Reason     string
 	MerchantID uuid.UUID
 	ID         uuid.UUID
 }
@@ -68,6 +72,8 @@ func (q *Queries) AttachDisputePayment(ctx context.Context, arg AttachDisputePay
 		arg.CustomerID,
 		arg.Amount,
 		arg.Currency,
+		arg.Network,
+		arg.Reason,
 		arg.MerchantID,
 		arg.ID,
 	)
@@ -1066,6 +1072,23 @@ func (q *Queries) MarkPaymentMethodDisputed(ctx context.Context, arg MarkPayment
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const markUnmatchedDisputeResponded = `-- name: MarkUnmatchedDisputeResponded :exec
+UPDATE billing.disputes SET responded_at = $1::timestamptz, updated_at = now()
+WHERE merchant_id = $2::uuid AND id = $3::uuid
+  AND responded_at IS NULL AND payment_id IS NULL
+`
+
+type MarkUnmatchedDisputeRespondedParams struct {
+	RespondedAt time.Time
+	MerchantID  uuid.UUID
+	ID          uuid.UUID
+}
+
+func (q *Queries) MarkUnmatchedDisputeResponded(ctx context.Context, arg MarkUnmatchedDisputeRespondedParams) error {
+	_, err := q.db.Exec(ctx, markUnmatchedDisputeResponded, arg.RespondedAt, arg.MerchantID, arg.ID)
+	return err
 }
 
 const merchantHasWaitingDisputeResponses = `-- name: MerchantHasWaitingDisputeResponses :one

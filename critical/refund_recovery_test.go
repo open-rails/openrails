@@ -168,7 +168,7 @@ func TestRefundRecovery(t *testing.T) {
 		require.Len(t, p.effects(t), 2, "recovery and caller replay cannot refund twice")
 	})
 	t.Run("OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held", func(t *testing.T) {
-		for _, profile := range []string{"already-refunded", "gateway-refusal", "duplicate"} {
+		for _, profile := range []string{"already-refunded", "gateway-refusal", "duplicate", "unparsed-4xx", "redirect", "rate-limited"} {
 			t.Run(profile, func(t *testing.T) {
 				a, p, payment := purchasedNMISale(t)
 				if profile == "already-refunded" {
@@ -179,6 +179,14 @@ func TestRefundRecovery(t *testing.T) {
 						text = "Duplicate transaction"
 					}
 					p.core.Intercept(nmiRefundRequest, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+						switch profile {
+						case "unparsed-4xx":
+							return answer(r, http.StatusBadRequest, ""), nil
+						case "redirect":
+							return answer(r, http.StatusTemporaryRedirect, `{"error_code":"E_GENERIC_ERROR","message":"Redirected"}`), nil
+						case "rate-limited":
+							return answer(r, http.StatusTooManyRequests, `{"error_code":"E_RATE_LIMIT","message":"Rate limited"}`), nil
+						}
 						return answer(r, http.StatusOK, `{"response":"3","response_code":"300","response_text":"`+text+`"}`), nil
 					})
 				}
@@ -189,10 +197,15 @@ func TestRefundRecovery(t *testing.T) {
 				read, readErr := a.alpha.GetPayment(t.Context(), payment)
 				require.NoError(t, readErr)
 				require.Zero(t, read.AmountRefunded)
-				if profile == "duplicate" {
+				if profile == "duplicate" || profile == "unparsed-4xx" || profile == "redirect" {
 					require.NoError(t, err)
 					require.Equal(t, billing.PaymentPending, refund.Status)
 					require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+					payload, err := intents.DecodeRefundPayload(row)
+					require.NoError(t, err)
+					reservation, err := a.alpha.GetPayment(t.Context(), billing.PaymentID(payload.ReservationID))
+					require.NoError(t, err)
+					require.Equal(t, billing.PaymentPending, reservation.Status)
 					a.clock.Advance(time.Hour)
 					row = nmiRefundOperation(t, a, payment, "refused", true)
 					require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
@@ -214,6 +227,10 @@ func TestRefundRecovery(t *testing.T) {
 				require.True(t, evidence.NoEffect)
 				if profile == "already-refunded" {
 					require.Equal(t, http.StatusBadRequest, evidence.StatusCode)
+				} else if profile == "rate-limited" {
+					require.Equal(t, http.StatusTooManyRequests, evidence.StatusCode)
+					require.Contains(t, reason, "NMI rate limited the refund and nothing was refunded")
+					require.Contains(t, reason, "can be requested again")
 				} else {
 					require.Equal(t, 300, evidence.ResponseCode)
 				}

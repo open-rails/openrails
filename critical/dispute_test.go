@@ -1126,15 +1126,16 @@ func disputeNMIAttach(t *testing.T) {
 	otherCustomer := billing.CustomerID(uuid.MustParse(a.bob.ID))
 	untouched(otherPayment, otherSubscription, otherCustomer)
 	rt := embedded.Graph(a.engine).Runtime
-	attach := func() error {
+	attach := func(disputeID billing.DisputeID, paymentID billing.PaymentID) error {
 		return rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
-			return rt.WebhookDispatcher.AttachNMIChargeback(ctx, dispute.ID.UUID(), payment.ID.UUID(), "operator", "Identified the charge in NMI")
+			return rt.WebhookDispatcher.AttachNMIChargeback(ctx, disputeID.UUID(), paymentID.UUID(), "operator", "Identified the charge in NMI")
 		})
 	}
-	require.NoError(t, attach())
+	require.NoError(t, attach(dispute.ID, payment.ID))
 	waitDisputeJobs(t, a)
 	linked, err := a.alpha.GetDispute(t.Context(), dispute.ID)
 	require.NoError(t, err)
+	require.Equal(t, billing.NetworkVisa, linked.Network)
 	require.Equal(t, payment.ID, *linked.PaymentID)
 	require.Equal(t, sub.CustomerID, *linked.CustomerID)
 	require.EqualValues(t, payment.Amount, *linked.Amount)
@@ -1158,7 +1159,8 @@ func disputeNMIAttach(t *testing.T) {
 	require.Equal(t, finding.ID, findings.Items[0].ID)
 	require.Equal(t, "operator", *findings.Items[0].ResolvedBy)
 	require.Equal(t, "Identified the charge in NMI", *findings.Items[0].Notes)
-	require.ErrorContains(t, attach(), "already attached")
+	require.ErrorContains(t, attach(dispute.ID, otherPayment), "already attached")
+	require.NoError(t, attach(dispute.ID, payment.ID))
 	after, err := a.alpha.GetPayment(t.Context(), payment.ID)
 	require.NoError(t, err)
 	require.Equal(t, read, after)
@@ -1166,6 +1168,51 @@ func disputeNMIAttach(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, linked, again)
 	untouched(otherPayment, otherSubscription, otherCustomer)
+	entry["event_id"] = "ambiguous-after-attach"
+	status, body = nmiSignedDelivery(t, a, entry, "ambiguous-after-attach")
+	require.Equal(t, http.StatusOK, status, body)
+	waitDisputeJobs(t, a)
+	after, err = a.alpha.GetPayment(t.Context(), payment.ID)
+	require.NoError(t, err)
+	require.Equal(t, read, after)
+	findings, err = a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.ledger.unbooked"})
+	require.NoError(t, err)
+	require.Empty(t, findings.Items)
+	findings, err = a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.ledger.unbooked", Status: "fixed"})
+	require.NoError(t, err)
+	require.Len(t, findings.Items, 1)
+	require.Equal(t, finding.ID, findings.Items[0].ID)
+	require.Equal(t, billing.FindingStatus("fixed"), findings.Items[0].Status)
+	untouched(otherPayment, otherSubscription, otherCustomer)
+
+	status, body = nmiSignedDelivery(t, a, map[string]any{"event_id": "partial-chargeback", "event_type": "chargeback.batch.complete", "event_body": map[string]any{
+		"merchant": map[string]string{"id": "critical-gateway"}, "count": 1,
+		"chargebacks": []map[string]string{{"id": "cb-partial", "date": payment.CreatedAt.UTC().Format(time.DateOnly), "cc_number": "************4242", "amount": "4.00", "reason_code": "10.4", "reason": "Fraud"}}}}, "partial-chargeback")
+	require.Equal(t, http.StatusOK, status, body)
+	waitDisputeJobs(t, a)
+	cases, err = a.alpha.ListDisputes(t.Context(), billing.DisputeListParams{})
+	require.NoError(t, err)
+	require.Len(t, cases.Items, 2)
+	index := slices.IndexFunc(cases.Items, func(c billing.Dispute) bool { return c.ProviderRef == "cb-partial" })
+	require.NotEqual(t, -1, index)
+	partial := cases.Items[index]
+	require.Nil(t, partial.PaymentID)
+	findings, err = a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.ledger.unbooked"})
+	require.NoError(t, err)
+	before, err := a.alpha.GetPayment(t.Context(), otherPayment)
+	require.NoError(t, err)
+	require.ErrorContains(t, attach(partial.ID, otherPayment), "chargeback of 4.00 does not equal charge 10.00 USD; a partial chargeback is not booked by attach")
+	after, err = a.alpha.GetPayment(t.Context(), otherPayment)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	again, err = a.alpha.GetDispute(t.Context(), partial.ID)
+	require.NoError(t, err)
+	require.Equal(t, partial, *again)
+	afterFindings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.ledger.unbooked"})
+	require.NoError(t, err)
+	require.Equal(t, findings, afterFindings)
+	untouched(otherPayment, otherSubscription, otherCustomer)
+	require.NotContains(t, cardStatuses(t, a, otherCustomer), "disputed")
 }
 
 func disputeNMIRefunded(t *testing.T) {
@@ -1203,7 +1250,10 @@ func disputeNMIRefunded(t *testing.T) {
 				require.Equal(t, before.Refunds, after.Refunds)
 				require.Len(t, findings.Items, 1)
 				advice := *findings.Items[0].RecommendedAction
-				require.Contains(t, advice, "already refunded in full")
+				require.Contains(t, advice, "whose refunds leave less than the charged amount to reverse, so OpenRails books no second reversal")
+				require.Contains(t, advice, "if a refund of it is still unresolved, resolve that first")
+				require.Contains(t, advice, "If you lose the chargeback, the loss is outside OpenRails' books")
+				require.NotContains(t, advice, "refunded in full")
 				require.Contains(t, advice, payment.ID.String())
 				require.Contains(t, advice, payment.TransactionID)
 				require.Contains(t, advice, "Contest the chargeback with your processor and cite the refund")

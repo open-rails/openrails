@@ -34,6 +34,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 UPDATE billing.disputes SET responded_at = sqlc.arg(responded_at)::timestamptz, updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND responded_at IS NULL;
 
+-- name: MarkUnmatchedDisputeResponded :exec
+UPDATE billing.disputes SET responded_at = sqlc.arg(responded_at)::timestamptz, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND responded_at IS NULL AND payment_id IS NULL;
+
 -- name: PaymentDisputeDecides :one
 -- Whether a dispute decides the charge: an open inquiry or chargeback, or a
 -- chargeback whose reversal was not booked.
@@ -252,6 +257,8 @@ UPDATE billing.disputes SET
     customer_id = sqlc.arg(customer_id)::uuid,
     amount = sqlc.arg(amount)::bigint,
     currency = sqlc.arg(currency)::text,
+    network = sqlc.arg(network)::text,
+    reason = sqlc.arg(reason)::text,
     responded_at = NULL,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid

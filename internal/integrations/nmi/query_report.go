@@ -362,25 +362,25 @@ func flagSet(v string) bool {
 func (c *NMIClient) ReadRefundTransactions(ctx context.Context, originalTransactionID string, since time.Time) ([]string, error) {
 	c = c.scoped()
 	var ids []string
-	for page := 0; page < vaultMaxPages; page++ {
-		report, err := c.TransactionReport(ctx, QueryFilter{ActionType: "refund", StartDate: since.UTC().Truncate(time.Second).Format(QueryTimeFormat), ResultLimit: vaultPageSize, PageNumber: page})
-		if err != nil {
-			return nil, err
-		}
-		for _, txn := range report.Transactions {
-			if txn.OriginalTransactionID != originalTransactionID {
+	seen := map[string]bool{}
+	filter := QueryFilter{ActionType: "refund", StartDate: since.UTC().Truncate(time.Second).Format(QueryTimeFormat)}
+	err := c.PageTransactions(ctx, filter, time.Now(), func(page []QueryTransaction) error {
+		for _, txn := range page {
+			if txn.OriginalTransactionID != originalTransactionID || seen[txn.TransactionID] {
 				continue
 			}
 			for _, action := range txn.Actions {
 				if action.Is("refund") && action.Succeeded() {
 					ids = append(ids, txn.TransactionID)
+					seen[txn.TransactionID] = true
 					break
 				}
 			}
 		}
-		if len(report.Transactions) < vaultPageSize {
-			return ids, nil
-		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("refund report exceeds %d transactions since %s", vaultPageSize*vaultMaxPages, since.UTC().Format(time.RFC3339))
+	return ids, nil
 }

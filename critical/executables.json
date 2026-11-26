@@ -1489,7 +1489,10 @@
       "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held",
       "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/already-refunded",
       "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/gateway-refusal",
-      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/duplicate"
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/duplicate",
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/unparsed-4xx",
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/redirect",
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/rate-limited"
     ],
     "OR-J20-S08": [
       "TestRefundRecovery/OR-J20-S08/an-unresolved-nmi-refund-is-named-and-closed-by-the-operator",

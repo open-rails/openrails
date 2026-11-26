@@ -355,12 +355,14 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingProvid
 			return parkedBeforeEffect("nmi refund held by sandbox posture gate: " + err.Error())
 		}
 		var refusal *nmi.V5Error
-		if errors.As(err, &refusal) {
+		if errors.As(err, &refusal) && refusal.Code != "" && refusal.Status >= 400 && refusal.Status < 500 {
+			if refusal.Status == 429 {
+				return h.terminally(ctx, intent, p, "nmi refund refused: NMI rate limited the refund and nothing was refunded, so it can be requested again", map[string]any{"status_code": refusal.Status})
+			}
 			return h.terminally(ctx, intent, p, "nmi refund refused: "+err.Error(), map[string]any{"status_code": refusal.Status})
 		}
-		if errors.Is(err, nmi.ErrSaleRefused) {
-			var rejection *nmi.CustomerVaultError
-			errors.As(err, &rejection)
+		var rejection *nmi.CustomerVaultError
+		if errors.Is(err, nmi.ErrSaleRefused) && errors.As(err, &rejection) {
 			return h.terminally(ctx, intent, p, fmt.Sprintf("nmi refund refused by the gateway without processing it (response code %d)", rejection.ResponseCode), map[string]any{"response_code": rejection.ResponseCode})
 		}
 		if nmi.RequiresVerification(err) {

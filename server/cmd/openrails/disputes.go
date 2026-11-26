@@ -48,9 +48,6 @@ func runDisputesAttach(ctx context.Context, cfg *billing.Config, merchantSlug st
 	if cfg == nil {
 		return fmt.Errorf("config not loaded")
 	}
-	if strings.TrimSpace(actor) == "" || actor == "unknown" || strings.TrimSpace(reason) == "" {
-		return fmt.Errorf("--actor and --reason are required")
-	}
 	pool, vault, err := cliDeps(ctx)
 	if err != nil {
 		return err
