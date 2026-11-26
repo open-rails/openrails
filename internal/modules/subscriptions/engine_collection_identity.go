@@ -26,8 +26,7 @@ func renewalOperationID(merchantID, pspID uuid.UUID, obligation string, attempt 
 }
 
 // StripeRenewal binds the provider object to the obligation, its attempt and
-// the accepted economic terms. It is absent on already accepted older operations
-// whose provider identity and metadata must not change during recovery.
+// the accepted economic terms.
 type StripeRenewal struct {
 	Obligation  string
 	Attempt     int

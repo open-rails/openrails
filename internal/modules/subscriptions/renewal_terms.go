@@ -2,7 +2,6 @@ package subscriptions
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -294,26 +293,6 @@ func renewalPaymentCustodian(params *RenewMembershipParams) string {
 		return params.PaymentCustodian
 	}
 	return models.CustodianPSP
-}
-
-// UnmarshalJSON preserves already accepted operations from before access and billing were separated.
-// Only an absent access field uses that operation's original billing period; explicit null is indefinite.
-func (t *RenewalTerms) UnmarshalJSON(data []byte) error {
-	type plain RenewalTerms
-	var decoded plain
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	if _, present := fields["access_duration_hours"]; !present {
-		hours := int(decoded.PeriodEnd.Sub(decoded.PeriodStart) / time.Hour)
-		decoded.AccessDurationHours = &hours
-	}
-	*t = RenewalTerms(decoded)
-	return nil
 }
 
 // renewalPaymentPSPID preserves native account binding while an accepted

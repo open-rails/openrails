@@ -45,7 +45,6 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	var evidence struct {
 		PaymentID     uuid.UUID `json:"payment_id"`
 		TransactionID string    `json:"transaction_id"`
-		Declined      bool      `json:"declined"`
 	}
 	if err := json.Unmarshal(op.ResultEvidence, &evidence); err != nil {
 		return err
@@ -56,16 +55,13 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	}
 	observed, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: paymentID})
 	if op.Status == intents.StatusFailedTerminal {
-		// A refused or unexecuted sale moved no money (a decline is a payment
-		// attempt); only an older writer's decline record may carry its id.
+		// A refused or unexecuted sale moved no money: a decline is a payment
+		// attempt, never a payment.
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
-		}
-		if evidence.Declined && declineRecord(observed) {
-			return nil
 		}
 		return errors.New("refused sale has a payment")
 	}
@@ -103,10 +99,4 @@ func invoiceSubscription(ctx context.Context, q *gen.Queries, merchantID, invoic
 		}
 	}
 	return false, nil
-}
-
-// declineRecord is a decline an older writer recorded in payments, not as a
-// payment attempt: it moved no money.
-func declineRecord(p gen.BillingPayment) bool {
-	return p.Status == "failed" && p.MoneyMovement == "none" && p.RefundedPaymentID == nil
 }

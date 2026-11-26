@@ -1,7 +1,6 @@
 package subscriptions
 
 import (
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -16,8 +15,9 @@ import (
 // before provider submission. A schedule-only pending phase confers no new
 // access; a free phase confers its declared access without recording money.
 type InitialMembershipTerms struct {
-	// Rail identifies the specialized wallet authorization on a Solana invoice.
-	// Older card agreements omit it and retain their saved-card requirements.
+	// Rail is the rail an invoice's agreement was paid on; Solana's wallet
+	// authorization depends on it. A tier change or added seats leaves it
+	// empty and keeps the saved-card requirements.
 	Rail models.Rail `json:"rail,omitempty"`
 	// RecurringIntervalHours freezes the ongoing cadence separately from an
 	// initial trial or prorated service period. Provider schedules require it.
@@ -166,24 +166,4 @@ func (t InitialMembershipTerms) Validate() error {
 // UnitAmount is the price of one seat.
 func (t InitialMembershipTerms) UnitAmount() int64 {
 	return t.RecurringAmount / int64(SeatCount(t.Quantity))
-}
-
-// UnmarshalJSON preserves already accepted operations from before access and billing were separated.
-// Only an absent access field uses that operation's original billing period; explicit null is indefinite.
-func (t *InitialMembershipTerms) UnmarshalJSON(data []byte) error {
-	type plain InitialMembershipTerms
-	var decoded plain
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	if _, present := fields["access_duration_hours"]; !present {
-		hours := int(decoded.PeriodEnd.Sub(decoded.PeriodStart) / time.Hour)
-		decoded.AccessDurationHours = &hours
-	}
-	*t = InitialMembershipTerms(decoded)
-	return nil
 }

@@ -96,11 +96,9 @@ WHERE g.merchant_id=$1::uuid AND g.source_type='subscription'
     WHERE i.merchant_id=g.merchant_id AND i.intent_type='subscription_collection'
       AND i.subscription_id::text=g.source_id AND i.status='succeeded'
       AND g.starts_at=(i.payload->'renewal'->>'period_start')::timestamptz
-      AND g.ends_at IS NOT DISTINCT FROM CASE
-          WHEN i.payload->'renewal' ? 'access_duration_hours' THEN
-            (i.payload->'renewal'->>'period_start')::timestamptz +
-            (i.payload->'renewal'->>'access_duration_hours')::int * interval '1 hour'
-          ELSE (i.payload->'renewal'->>'period_end')::timestamptz END)
+      AND g.ends_at IS NOT DISTINCT FROM
+          (i.payload->'renewal'->>'period_start')::timestamptz +
+          (i.payload->'renewal'->>'access_duration_hours')::int * interval '1 hour')
 `
 
 // Initial and pre-engine history precedes the first accepted engine period.

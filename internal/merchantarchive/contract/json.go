@@ -378,7 +378,7 @@ var jsonRules = map[string]jsonRule{
 		"order_captcha_subjects": array(textValue),
 		"order_attempt_id":       uuidValue,
 		"request_fingerprint":    sha256Value, "provider": textValue, "psp": textValue, "amount": moneyStringValue, "currency": textValue, "description": textValue, "user_id": uuidValue, "e2e_run_id": textValue,
-		"payment_method_id": uuidValue, "payment_id": uuidValue, "list_amount": moneyStringValue, "accepted_at": textValue, "provider_access_default": booleanValue,
+		"payment_method_id": uuidValue, "payment_id": uuidValue, "list_amount": moneyStringValue, "accepted_at": textValue,
 		"instrument": frozenInstrumentJSON,
 		// An invoice's sale: its invoice, and a new card the charge saves.
 		"order_id": uuidValue, "recurring": booleanValue, "new_card": booleanValue, "token": textValue, "fingerprint": textValue, "reuse": booleanValue, "purchase_scoped": booleanValue,

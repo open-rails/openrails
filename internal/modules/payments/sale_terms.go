@@ -180,12 +180,9 @@ func NMISaleOrderReference(id uuid.UUID, runID string) string {
 	return id.String()
 }
 
-// Platform custody is independent of the PSP: accepted invoices must retain its
-// exact address. Older merchant-custodian sales keep their existing PSP address.
+// invalidInvoiceCustodianAddress: a sale of a Basis Theory or platform-held
+// card is addressed to exactly its custodian, any other sale to none.
 func invalidInvoiceCustodianAddress(in gen.BillingProviderIntent, instrument charge.FrozenInstrument) bool {
-	if instrument.Custodian == models.CustodianBasisTheory && in.CustodianID == nil {
-		return false
-	} // Historical accepted merchant-vault sales.
 	if !models.BasisTheoryCustody(instrument.Custodian) {
 		return in.CustodianID != nil
 	}

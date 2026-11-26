@@ -103,7 +103,6 @@ func (s *SubscriptionLifecycleService) SupersedeForUpgradeTx(ctx context.Context
 // subscription whose provider schedule was already moved to the new amount.
 // The subscription row, its rail reference and its period end are kept.
 type InPlaceTierChange struct {
-	AccessEndsAt          *time.Time
 	AccessDurationHours   *int
 	ProviderAccessDefault bool
 	SubscriptionID        uuid.UUID
@@ -139,14 +138,12 @@ func (s *SubscriptionLifecycleService) ChangeTierInPlaceTx(ctx context.Context, 
 		return err
 	}
 	sub.PriceID, sub.ProductID = c.PriceID, c.ProductID
-	if c.AccessEndsAt == nil {
-		sub.AccessDurationHoursSnapshot = c.AccessDurationHours
-		sub.ProviderAccessDefaultSnapshot = c.ProviderAccessDefault
-	}
+	sub.AccessDurationHoursSnapshot = c.AccessDurationHours
+	sub.ProviderAccessDefaultSnapshot = c.ProviderAccessDefault
 	if err := repo.UpdateAt(ctx, sub, c.At); err != nil {
 		return err
 	}
-	if err := s.switchTierAccess(ctx, txDB, sub, c.At, c.AccessEndsAt); err != nil {
+	if err := s.switchTierAccess(ctx, txDB, sub, c.At); err != nil {
 		return err
 	}
 	if c.Payment != nil {
@@ -158,16 +155,12 @@ func (s *SubscriptionLifecycleService) ChangeTierInPlaceTx(ctx context.Context, 
 // switchTierAccess ends the subscription's access sources at `at` and opens
 // the current product from at, never past the paid period's end, with its
 // renewal grace.
-func (s *SubscriptionLifecycleService) switchTierAccess(ctx context.Context, txDB *db.DB, sub *models.Subscription, at time.Time, acceptedEnd *time.Time) error {
+func (s *SubscriptionLifecycleService) switchTierAccess(ctx context.Context, txDB *db.DB, sub *models.Subscription, at time.Time) error {
 	ent := s.newLifecycleEntitlementService(txDB)
 	if err := ent.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, at, models.AccessRevokeSuperseded, models.AccessSourceSubscription, models.AccessSourceGrace); err != nil {
 		return err
 	}
-	grant := paidPeriodAccess(sub, at, *sub.CurrentPeriodEndsAt)
-	if acceptedEnd != nil {
-		grant.EndsAt, grant.Indefinite = acceptedEnd, false
-	}
-	if _, err := ent.PushAccess(ctx, grant); err != nil {
+	if _, err := ent.PushAccess(ctx, paidPeriodAccess(sub, at, *sub.CurrentPeriodEndsAt)); err != nil {
 		return err
 	}
 	return s.EnsureRenewalGrace(ctx, txDB, sub)
