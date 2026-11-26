@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 812,
+  "scenario_count": 813,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1362,6 +1362,11 @@
       "id": "OR-J01-S32",
       "journey": "J01",
       "name": "The console signs staff in only with the server's own accounts: its config names no issuer even when root trusts applications, and none is probed or reported among the configuration's refusals"
+    },
+    {
+      "id": "OR-J01-S33",
+      "journey": "J01",
+      "name": "The standalone server listens on loopback unless host names another address, and refuses to start listening beyond loopback while the development operator task dev seeds, with its published password, exists in its database"
     },
     {
       "id": "OR-J22-S05",

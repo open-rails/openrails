@@ -266,6 +266,9 @@ func (c *Config) finish(secretsDir string) error {
 // engine cannot serve without.
 func Validate(cfg *Config) error {
 	s := cfg.Server
+	if net.ParseIP(s.Host) == nil {
+		return fmt.Errorf("invalid host %q: an IP address to listen on, 127.0.0.1 (the default) or 0.0.0.0 in a container", s.Host)
+	}
 	if s.Port < 1 || s.Port > 65535 {
 		return fmt.Errorf("invalid port %d: must be 1-65535", s.Port)
 	}

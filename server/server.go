@@ -99,9 +99,13 @@ type Config struct {
 	// point at it.
 	AdminConsole AdminConsole `yaml:"admin_console"`
 
-	// Port is where Run and Serve listen, on every interface.
+	// Host is the address Run and Serve listen on, an IP literal: loopback
+	// (127.0.0.1) by default. A container sets 0.0.0.0, every interface, and
+	// leaves exposure to its platform.
+	Host string `yaml:"host"`
+	// Port is where Run and Serve listen.
 	Port int `yaml:"port"`
-	// MetricsPort is where Run and Serve also serve MetricsHandler, the
+	// MetricsPort is where Run and Serve also serve MetricsHandler on Host, the
 	// operator's Prometheus /metrics, apart from the public surface. Zero
 	// serves none.
 	MetricsPort int `yaml:"metrics_port"`
@@ -117,6 +121,7 @@ func DefaultConfig() Config {
 			Enabled: new(true), RenameInterval: new(72 * time.Hour),
 			FormerNames: billing.FormerNamesConfig{Mode: billing.FormerNamesFinite},
 		},
+		Host: "127.0.0.1",
 		Port: 3053,
 	}
 }
@@ -126,6 +131,7 @@ func DefaultConfig() Config {
 func (c Config) WithDefaults() Config {
 	d := DefaultConfig()
 	c.Engine = c.Engine.WithDefaults()
+	c.Host = cmp.Or(strings.TrimSpace(c.Host), d.Host)
 	c.Port = cmp.Or(c.Port, d.Port)
 	c.Naming.Enabled = cmp.Or(c.Naming.Enabled, d.Naming.Enabled)
 	c.Naming.RenameInterval = cmp.Or(c.Naming.RenameInterval, d.Naming.RenameInterval)
@@ -154,8 +160,8 @@ func registrationGuard(host func(iam.Route, http.Handler) http.Handler) func(iam
 	}
 }
 
-// Addr is c's public listener, :port on every interface.
-func (c Config) Addr() string { return ":" + strconv.Itoa(c.Port) }
+// Addr is c's public listener, host:port.
+func (c Config) Addr() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
 
 const (
 	// drainDelay is how long Run and Serve keep serving once ctx ends, with
@@ -418,7 +424,7 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	s.log.InfoContext(ctx, "OpenRails serving", "addr", ln.Addr().String())
 	var metrics *http.Server
 	if s.cfg.MetricsPort != 0 {
-		mln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", ":"+strconv.Itoa(s.cfg.MetricsPort))
+		mln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.MetricsPort)))
 		if err != nil {
 			_ = hs.Close()
 			return err

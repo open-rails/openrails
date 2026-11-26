@@ -176,6 +176,8 @@ func TestStandaloneAuthSurface(t *testing.T) {
 		require.Contains(t, string(raw), string(billing.CodeMerchantMismatch))
 	})
 
+	t.Run("OR-J01-S33/the-server-listens-on-loopback-and-refuses-the-development-operator-beyond-it", listenHost)
+
 	t.Run("OR-J01-S32/the-console-signs-staff-in-only-with-the-servers-own-accounts", func(t *testing.T) {
 		w := newStandaloneWorld(t, func(c map[string]any) { c["Console"] = true })
 		// Root trusts applications, one working and one not: the console

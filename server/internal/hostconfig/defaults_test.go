@@ -116,7 +116,7 @@ func TestTheReferenceStatesEveryDefault(t *testing.T) {
 // With nothing configured but public_url, the server runs on the defaults
 // against Compose's dependencies: the database, ClickHouse when it answers,
 // and a loopback issuer, whose account directory and development keys
-// AuthKit makes. Without public_url boot refuses.
+// AuthKit makes, listening on loopback. Without public_url boot refuses.
 func TestAnEmptyConfigurationLoadsTheDefaults(t *testing.T) {
 	configPath, _ := isolate(t)
 	cfg, err := Load(configPath)
@@ -128,6 +128,7 @@ func TestAnEmptyConfigurationLoadsTheDefaults(t *testing.T) {
 		cfg.Server.Engine.PublicURL:                         "http://localhost:3053",
 		cfg.Server.Engine.Database.Schema:                   "billing",
 		fmt.Sprint(cfg.Server.Port):                         "3053",
+		cfg.Server.Host:                                     "127.0.0.1",
 	} {
 		if got != want {
 			t.Errorf("got %q, want %q", got, want)

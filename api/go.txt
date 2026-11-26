@@ -4690,6 +4690,7 @@ pkg openrails/server, type Config struct
 pkg openrails/server, type Config struct, AdminConsole AdminConsole `yaml:"admin_console"`
 pkg openrails/server, type Config struct, AuthKit func(*authkit.Config) `yaml:"-"`
 pkg openrails/server, type Config struct, Engine openrails.Config `yaml:",inline"`
+pkg openrails/server, type Config struct, Host string `yaml:"host"`
 pkg openrails/server, type Config struct, MerchantCreation *MerchantCreationConfig `yaml:"-"`
 pkg openrails/server, type Config struct, MetricsPort int `yaml:"metrics_port"`
 pkg openrails/server, type Config struct, Naming billing.NamingConfig `yaml:"-"`

@@ -44,7 +44,7 @@ func TestOneDatabaseSection(t *testing.T) {
 		"auth:\n  tokn: {}\n":                                    unknown + "auth.tokn",
 		"database:\n  sqltrace: true\n":                          unknown + "database.sqltrace",
 		"clickhouse:\n  url: http://events.internal\n":           "clickhouse.url (CLICKHOUSE_URL) must be clickhouse://",
-		"host: 127.0.0.1\n":                                      unknown + "host",
+		"host: billing.internal\n":                               `invalid host "billing.internal"`,
 		"db:\n  url: x\n":                                        unknown + "db",
 		"auth:\n  keys:\n    allow_ephemeral_dev_keys: true\n":   unknown + "auth.keys.allow_ephemeral_dev_keys",
 		"auth:\n  token:\n    issuer: https://billing.example\n": unknown + "auth.token",
