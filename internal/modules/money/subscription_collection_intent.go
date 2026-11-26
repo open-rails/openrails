@@ -430,6 +430,12 @@ func (h *SubscriptionCollectionHandler) Resolve(ctx context.Context, in gen.Bill
 	} else if paid {
 		return intents.Outcome{}, intents.RejectResolution("renewal has a collected receipt; use --receipt")
 	}
+	// NMI answered approved with this transaction: only its receipt settles it.
+	if _, retained, err := intents.LoadCollectionCandidate(in); err != nil {
+		return intents.Outcome{}, intents.RejectResolution("cannot read retained renewal candidate: %v", err)
+	} else if retained {
+		return intents.Outcome{}, intents.RejectResolution("renewal has a retained collection candidate; use --receipt")
+	}
 	if _, paid, err := intents.ReadNMICollectionReceipt(ctx, in, h.Resolver, ""); err != nil {
 		return intents.Outcome{}, intents.RejectResolution("NMI renewal receipt search is inconclusive: %v", err)
 	} else if paid {

@@ -147,13 +147,16 @@ func TestNMIEngineRenewalRecovery(t *testing.T) {
 		for _, code := range []int{300, 410, 411, 440, 441, 460, 461} {
 			t.Run(fmt.Sprint(code), func(t *testing.T) {
 				a, p, sub := nmiEngineMembership(t)
+				p.core.SetDecline("4242", fmt.Sprint(code))
 				reference := ""
-				if code == 410 {
-					reference = "refused-410"
-				}
 				calls := 0
 				p.core.Intercept(nmiSaleRequest, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
 					calls++
+					if code == 410 {
+						response := serve()
+						require.NoError(t, response.Body.Close())
+						reference = p.core.LastDecline().TransactionID
+					}
 					return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(fmt.Sprintf("response=3&response_code=%d&transactionid=%s&responsetext=Invalid+Customer+Vault+Id", code, reference)))}, nil
 				})
 				row := executeEngineRenewal(t, a, sub)
@@ -179,6 +182,31 @@ func TestNMIEngineRenewalRecovery(t *testing.T) {
 				require.Empty(t, findings.Items)
 				require.Equal(t, 1, calls)
 				p.money(t, 1, 1000)
+				if code != 410 {
+					return
+				}
+				accepted, err := subscriptions.DecodeSubscriptionCollectionPayload(row)
+				require.NoError(t, err)
+				p.core.SetDecline("4242", "")
+				p.core.ClearIntercepts()
+				advanceTo(a.world, *current.Dunning.NextRetryAt)
+				rt := embedded.Graph(a.engine).Runtime
+				require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+					var err error
+					row, err = rt.MoneyService.AdmitDueSubscriptionCollection(ctx, sub.ID.UUID(), a.clock.Now())
+					if err != nil {
+						return err
+					}
+					row, err = rt.IntentRunner().ExecuteNowByID(ctx, row.ID)
+					return err
+				}))
+				require.Equal(t, intents.StatusSucceeded, row.Status)
+				next, err := subscriptions.DecodeSubscriptionCollectionPayload(row)
+				require.NoError(t, err)
+				require.Equal(t, 1, next.Attempt)
+				require.Equal(t, accepted.OrderReference, next.OrderReference)
+				require.Len(t, p.core.Attempts(), 3)
+				p.money(t, 2, 2000)
 			})
 		}
 	})
@@ -227,13 +255,20 @@ func TestNMIEngineRenewalRecovery(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, findings.Items, 1)
 		require.Contains(t, *findings.Items[0].RecommendedAction, "openrails intents resolve --intent "+row.ID.String())
+		candidate, found, err := intents.LoadCollectionCandidate(row)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, p.core.LastSale().TransactionID, candidate.TransactionID)
 		before := row.ResultEvidence
 		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			_, err := rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Order search is empty"})
+			require.ErrorIs(t, err, intents.ErrResolutionRejected)
+			require.ErrorContains(t, err, "--receipt")
 			for _, reference := range []string{"unknown-transaction", p.core.Sales()[0].TransactionID} {
 				_, err := rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{ProviderReference: reference, Actor: "operator", Reason: "Checked receipt"})
 				require.ErrorIs(t, err, intents.ErrResolutionRejected)
 			}
-			_, err := rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{Step: "charge", ProviderReference: p.core.LastSale().TransactionID, Actor: "operator", Reason: "Checked receipt"})
+			_, err = rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{Step: "charge", ProviderReference: p.core.LastSale().TransactionID, Actor: "operator", Reason: "Checked receipt"})
 			require.ErrorIs(t, err, intents.ErrResolutionRejected)
 			current, err := intents.NewStore(rt.DB).Get(ctx, row.ID)
 			require.Equal(t, intents.StatusUnknownNeedsVerify, current.Status)
@@ -359,36 +394,40 @@ func TestNMIEngineRenewalRecovery(t *testing.T) {
 		}
 	})
 	t.Run("OR-J14-S12/operator-retains-the-orders-definitive-decline", func(t *testing.T) {
-		a, p, sub := nmiEngineMembership(t)
-		p.core.SetDecline("4242", "202")
-		p.core.Intercept(nmiSaleRequest, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
-			response := serve()
-			response.StatusCode = http.StatusBadGateway
-			p.core.QueryUnavailable(true)
-			return response, nil
-		})
-		row := executeEngineRenewal(t, a, sub)
-		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
-		p.core.QueryUnavailable(false)
-		rt := embedded.Graph(a.engine).Runtime
-		require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
-			p.core.EditSale(p.core.LastDecline().TransactionID, func(s *nmimock.Sale) { s.Condition = "pending" })
-			_, err := rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Unsettled order"})
-			require.ErrorIs(t, err, intents.ErrResolutionRejected)
-			p.core.EditSale(p.core.LastDecline().TransactionID, func(s *nmimock.Sale) { s.Condition = "" })
-			row, err = rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Confirmed NMI decline"})
-			return err
-		}))
-		require.Equal(t, intents.StatusFailedTerminal, row.Status)
-		require.NoError(t, intents.ValidateSubscriptionCollectionTerminal(row))
-		refusal, found, err := intents.LoadRecurringDecline(row)
-		require.NoError(t, err)
-		require.True(t, found)
-		require.Equal(t, 202, refusal.ResponseCode)
-		require.Contains(t, string(row.ResultEvidence), `"operator_resolution"`)
-		current := subscriptionState(t, a, sub.ID, "past_due")
-		require.NotNil(t, current.Dunning.NextRetryAt)
-		p.money(t, 1, 1000)
+		for _, code := range []int{202, 410} {
+			t.Run(fmt.Sprint(code), func(t *testing.T) {
+				a, p, sub := nmiEngineMembership(t)
+				p.core.SetDecline("4242", fmt.Sprint(code))
+				p.core.Intercept(nmiSaleRequest, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
+					response := serve()
+					response.StatusCode = http.StatusBadGateway
+					p.core.QueryUnavailable(true)
+					return response, nil
+				})
+				row := executeEngineRenewal(t, a, sub)
+				require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+				p.core.QueryUnavailable(false)
+				rt := embedded.Graph(a.engine).Runtime
+				require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+					p.core.EditSale(p.core.LastDecline().TransactionID, func(s *nmimock.Sale) { s.Condition = "pending" })
+					_, err := rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Unsettled order"})
+					require.ErrorIs(t, err, intents.ErrResolutionRejected)
+					p.core.EditSale(p.core.LastDecline().TransactionID, func(s *nmimock.Sale) { s.Condition = "" })
+					row, err = rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Confirmed NMI decline"})
+					return err
+				}))
+				require.Equal(t, intents.StatusFailedTerminal, row.Status)
+				require.NoError(t, intents.ValidateSubscriptionCollectionTerminal(row))
+				refusal, found, err := intents.LoadRecurringDecline(row)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.Equal(t, code, refusal.ResponseCode)
+				require.Contains(t, string(row.ResultEvidence), `"operator_resolution"`)
+				current := subscriptionState(t, a, sub.ID, "past_due")
+				require.NotNil(t, current.Dunning.NextRetryAt)
+				p.money(t, 1, 1000)
+			})
+		}
 	})
 
 	t.Run("OR-J14-S13/stripe-engine-renewals-reject-operator-resolution", func(t *testing.T) {
@@ -416,6 +455,102 @@ func TestNMIEngineRenewalRecovery(t *testing.T) {
 }
 
 func TestSubmittedRenewalGrace(t *testing.T) {
+	t.Run("OR-J04-S96/keep-policy-verification-does-not-lock-the-membership", func(t *testing.T) {
+		a, p, sub := nmiEngineMembership(t)
+		p.core.LoseSales(1)
+		row := executeEngineRenewal(t, a, sub)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		a.clock.Advance(intents.LostSubmissionSettle)
+		lock, err := a.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer lock.Rollback(context.Background())
+		_, err = lock.Exec(t.Context(), "SELECT id FROM "+pgx.Identifier{a.schema, "customers"}.Sanitize()+" WHERE id=$1 FOR UPDATE", sub.CustomerID.UUID())
+		require.NoError(t, err)
+		_, err = lock.Exec(t.Context(), "SELECT id FROM "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" WHERE id=$1 FOR UPDATE", sub.ID.UUID())
+		require.NoError(t, err)
+		rt := embedded.Graph(a.engine).Runtime
+		done := make(chan error, 1)
+		go func() {
+			done <- rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+				var err error
+				row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+				return err
+			})
+		}()
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			require.NoError(t, lock.Rollback(t.Context()))
+			require.NoError(t, <-done)
+			t.Fatal("keep-policy verification waited for customer or subscription locks")
+		}
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		require.Empty(t, intents.EvidenceString(row, "unresolved_renewal_grace_at"))
+		p.money(t, 1, 1000)
+	})
+	t.Run("OR-J04-S94/an-unanswered-dunning-retry-keeps-access-suspended", func(t *testing.T) {
+		a, p, sub := nmiEngineMembership(t, func(w *world) {
+			suspendHeld(w)
+			m := cfgMerchant(w.cfg, "alpha")
+			m.MerchantSettings.DunningPolicy.AccessDuringDunning = billing.DunningAccessSuspend
+			setCfgMerchant(&w.cfg, "alpha", m)
+		})
+		p.core.SetDecline("4242", "202")
+		row := executeEngineRenewal(t, a, sub)
+		require.Equal(t, intents.StatusFailedTerminal, row.Status)
+		current := subscriptionState(t, a, sub.ID, "past_due")
+		require.False(t, entitled(t, a.alpha, sub.CustomerID, "nmi:engine"))
+		p.core.SetDecline("4242", "")
+		p.core.LoseSales(1)
+		advanceTo(a.world, *current.Dunning.NextRetryAt)
+		rt := embedded.Graph(a.engine).Runtime
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			var err error
+			row, err = rt.MoneyService.AdmitDueSubscriptionCollection(ctx, sub.ID.UUID(), a.clock.Now())
+			if err != nil {
+				return err
+			}
+			row, err = rt.IntentRunner().ExecuteNowByID(ctx, row.ID)
+			return err
+		}))
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		a.clock.Advance(intents.LostSubmissionSettle)
+		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			var err error
+			row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+			return err
+		}))
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		subscriptionState(t, a, sub.ID, "past_due")
+		require.False(t, entitled(t, a.alpha, sub.CustomerID, "nmi:engine"))
+		p.money(t, 1, 1000)
+	})
+	t.Run("OR-J04-S95/an-unresolved-renewal-finding-survives-a-grace-write-failure", func(t *testing.T) {
+		a, p, sub := nmiEngineMembership(t, suspendHeld)
+		p.core.LoseSales(1)
+		row := executeEngineRenewal(t, a, sub)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		_, err := a.pool.Exec(t.Context(), "CREATE FUNCTION "+pgx.Identifier{a.schema, "refuse_grace"}.Sanitize()+"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.result_evidence ? 'unresolved_renewal_grace_at' THEN RAISE EXCEPTION 'critical grace write fault'; END IF; RETURN NEW; END $$; CREATE TRIGGER refuse_grace BEFORE UPDATE ON "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+" FOR EACH ROW EXECUTE FUNCTION "+pgx.Identifier{a.schema, "refuse_grace"}.Sanitize()+"()")
+		require.NoError(t, err)
+		a.clock.Advance(intents.LostSubmissionSettle)
+		rt := embedded.Graph(a.engine).Runtime
+		require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+			var err error
+			row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+			return err
+		}))
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		require.Empty(t, intents.EvidenceString(row, "unresolved_renewal_grace_at"))
+		require.NotNil(t, row.LastFailureReason)
+		require.Contains(t, *row.LastFailureReason, "critical grace write fault")
+		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.submission.unresolved"})
+		require.NoError(t, err)
+		require.Len(t, findings.Items, 1)
+		require.Equal(t, row.ID.String(), findings.Items[0].SubjectKey)
+		p.money(t, 1, 1000)
+	})
 	t.Run("OR-J04-S93/a-successful-renewal-keeps-its-access-write-count", func(t *testing.T) {
 		a, _, sub := nmiEngineMembership(t, suspendHeld)
 		counts := func() (int, int) {

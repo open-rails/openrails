@@ -21,8 +21,8 @@ import (
 // fleet halted, rebills held, breaker, readonly). By default the member keeps
 // access, and life.renewal.held reports the backlog. With
 // access_while_renewal_held=suspend, access ends at the allowance while nothing
-// is sent. An NMI charge sent but unresolved past its settle delay keeps
-// access under either policy; proven nonexecution restores the held-renewal policy.
+// is sent. An active subscription's sent renewal keeps access while unresolved
+// past its settle delay; proven nonexecution restores the held-renewal policy.
 //
 // The allowance is a bounded share of the period, never a fixed day (24h would
 // give an hourly member 24 free periods):
@@ -102,6 +102,9 @@ func (s *SubscriptionLifecycleService) EnsureRenewalGrace(ctx context.Context, d
 // restores the held-renewal policy after proven nonexecution. The caller owns
 // the transaction and subscription lock.
 func (s *SubscriptionLifecycleService) SetSubmittedRenewalGrace(ctx context.Context, d *db.DB, sub *models.Subscription, unresolved bool) error {
+	if unresolved && sub.Status != models.StatusActive {
+		return nil
+	}
 	if sub.CanceledAt != nil || !lifecycle.Status(sub.Status).Live() || sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil || !accessMatchesBillingPeriod(sub, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt) {
 		return nil
 	}

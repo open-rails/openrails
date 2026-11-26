@@ -18,7 +18,7 @@ import (
 
 // FindingSubmissionUnresolved is a submitted engine charge the provider's
 // reads cannot settle: the read is unavailable or contradictory, or the
-// Stripe resend cap is spent. The member keeps the renewal allowance meanwhile.
+// Stripe resend cap is spent. Active subscriptions keep the renewal allowance.
 const FindingSubmissionUnresolved = "life.submission.unresolved"
 
 const unresolvedRenewalGraceKey = "unresolved_renewal_grace_at"
@@ -30,6 +30,13 @@ const unresolvedRenewalGraceKey = "unresolved_renewal_grace_at"
 func (h *SubscriptionCollectionHandler) keepUnresolvedRenewalAccess(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) error {
 	if intents.EvidenceString(in, "submitted_at") == "" || intents.EvidenceString(in, unresolvedRenewalGraceKey) != "" {
 		return nil
+	}
+	sub, err := subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, p.Renewal.SubscriptionID)
+	if err != nil {
+		return err
+	}
+	if policy, err := subscriptions.CasePolicy(ctx, h.DB, sub); err != nil || !policy.SuspendWhenHeld {
+		return err
 	}
 	ctx, cancel := intents.LedgerWriteContext(ctx)
 	defer cancel()
@@ -144,9 +151,6 @@ func (h *SubscriptionCollectionHandler) closeChangedResend(ctx context.Context, 
 // is also a standing operator finding, closed when the operation completes.
 func (h *SubscriptionCollectionHandler) unresolved(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, reason string) intents.Outcome {
 	if history, err := intents.LoadSubmissionHistory(in); err != nil || history.Settled(h.now()) {
-		if err := h.keepUnresolvedRenewalAccess(ctx, in, p); err != nil {
-			return intents.Ambiguous("keep access while the sent renewal is unresolved: " + err.Error())
-		}
 		evidence, _ := json.Marshal(map[string]any{"operation_id": in.ID, "subscription_id": p.Renewal.SubscriptionID, "rail": in.Rail, "order_reference": p.OrderReference, "reason": reason})
 		action := fmt.Sprintf("a submitted renewal charge for subscription %s cannot be settled from the provider (%s). No further charge is sent while this stands; confirm the charge at the provider and resolve the operation", p.Renewal.SubscriptionID, reason)
 		if in.Rail == "nmi" {
@@ -157,6 +161,9 @@ func (h *SubscriptionCollectionHandler) unresolved(ctx context.Context, in gen.B
 			Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
 		}); err != nil {
 			h.Log.ErrorContext(ctx, "engine collection: could not record the unresolved-submission finding", logx.Err(err), "operation_id", in.ID)
+		}
+		if err := h.keepUnresolvedRenewalAccess(ctx, in, p); err != nil {
+			return intents.Ambiguous("keep access while the sent renewal is unresolved: " + err.Error())
 		}
 	}
 	return intents.Ambiguous(reason)

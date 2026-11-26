@@ -19,6 +19,20 @@ func TestSaleRefusalClassification(t *testing.T) {
 			if errors.Is(err, ErrSaleRefused) != refused || !RequiresVerification(err) {
 				t.Fatalf("classification: %v", err)
 			}
+			for _, state := range []string{"", "failed", "complete", "pending", "unknown"} {
+				for _, success := range []string{"0", "1", ""} {
+					action := QueryAction{ActionType: "sale", Success: success, ResponseCode: fmt.Sprint(code)}
+					got, closed := action.DefinitiveDecline(state)
+					want := refused && success == "0" && (state == "" || state == "failed" || state == "complete")
+					if closed != want || (closed && got != code) {
+						t.Fatalf("query refusal %d/%s/%s: %d, %t", code, state, success, got, closed)
+					}
+					action.ActionType = "validate"
+					if _, closed := action.DefinitiveDecline(state); closed {
+						t.Fatalf("gateway refusal qualified a validation: %d/%s/%s", code, state, success)
+					}
+				}
+			}
 			if refused {
 				var detail *CustomerVaultError
 				if !errors.As(err, &detail) || detail.ResponseCode != code || detail.LocalizationID == "" || detail.CustomerVaultID != "vault" {

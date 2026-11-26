@@ -2704,6 +2704,15 @@
     ],
     "OR-J04-S93": [
       "TestSubmittedRenewalGrace/OR-J04-S93/a-successful-renewal-keeps-its-access-write-count"
+    ],
+    "OR-J04-S94": [
+      "TestSubmittedRenewalGrace/OR-J04-S94/an-unanswered-dunning-retry-keeps-access-suspended"
+    ],
+    "OR-J04-S95": [
+      "TestSubmittedRenewalGrace/OR-J04-S95/an-unresolved-renewal-finding-survives-a-grace-write-failure"
+    ],
+    "OR-J04-S96": [
+      "TestSubmittedRenewalGrace/OR-J04-S96/keep-policy-verification-does-not-lock-the-membership"
     ]
   }
 }

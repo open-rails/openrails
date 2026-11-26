@@ -230,11 +230,8 @@ func newSaleError(rawResponse string, output url.Values, sale bool) error {
 		if duplicateRefusal(output, responseCode) {
 			return errors.Join(ErrDuplicateTransaction, unknown)
 		}
-		if sale && strings.TrimSpace(output.Get("response")) == "3" {
-			switch responseCode {
-			case 300, 410, 411, 440, 441, 460, 461:
-				return errors.Join(ErrSaleRefused, ambiguous(rejection))
-			}
+		if sale && strings.TrimSpace(output.Get("response")) == "3" && IsSaleRefusalCode(responseCode) {
+			return errors.Join(ErrSaleRefused, ambiguous(rejection))
 		}
 		return unknown
 	}
@@ -250,6 +247,16 @@ var ErrDuplicateTransaction = errors.New("nmi: gateway refused a duplicate trans
 // ErrSaleRefused marks a gateway refusal that did not process the sale.
 // Checkout may release its unique order; other callers still verify.
 var ErrSaleRefused = errors.New("nmi: gateway refused the sale without processing it")
+
+// IsSaleRefusalCode reports a gateway refusal that did not process the sale.
+func IsSaleRefusalCode(code int) bool {
+	switch code {
+	case 300, 410, 411, 440, 441, 460, 461:
+		return true
+	default:
+		return false
+	}
+}
 
 func duplicateRefusal(output url.Values, responseCode int) bool {
 	return strings.TrimSpace(output.Get("response")) == "3" && responseCode == 300 &&

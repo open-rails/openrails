@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 838,
+  "scenario_count": 841,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -4192,6 +4192,21 @@
       "id": "OR-J04-S93",
       "journey": "J04",
       "name": "A normal successful renewal adds only its existing three grant rows and two product access rows"
+    },
+    {
+      "id": "OR-J04-S94",
+      "journey": "J04",
+      "name": "An unanswered dunning retry keeps access suspended"
+    },
+    {
+      "id": "OR-J04-S95",
+      "journey": "J04",
+      "name": "An unresolved renewal finding survives a grace write failure"
+    },
+    {
+      "id": "OR-J04-S96",
+      "journey": "J04",
+      "name": "Keep-policy verification does not lock the membership"
     }
   ]
 }
