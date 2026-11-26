@@ -59,7 +59,7 @@ This system reverses charges: a staff refund OpenRails sends to the provider, a 
    payment's access when asked (`RevokeRefundedPaymentAccess`) and completes the
    reservation (`CompleteRefundReservation`), or releases it if a provider notice
    already booked the refund. When access was revoked and the charge is fully
-   refunded, it also ends a membership OpenRails renews (`endRefundedMembership`).
+   refunded, it also ends a membership OpenRails renews (`subscriptions.EndRefundedMembership`).
 
 A retry with the same key reuses the reservation and intent
 (`preparedRefundReplay`); other terms are `idempotency_key_reused`.
@@ -68,9 +68,13 @@ A retry with the same key reuses the reservation and intent
   `Idempotency-Key`; `Verify` finds the refund by it
   (`FindRefundByIdempotencyKey`). 4xx is terminal, 429 retryable, 5xx ambiguous.
 - **NMI** (`NMIRefundHandler`): no request idempotency, so a second attempt never
-  sends again. It settles from a captured receipt, or stays `unknown_needs_verify`
-  until an operator names the refund and the provider confirms it (`Resolve`,
-  `ConfirmRefund`); a "not executed" resolution is refused.
+  sends again. A refusal NMI answered (a v5 4xx, a decline, or a response 3 the
+  gateway did not process, `nmi.ErrSaleRefused`) releases the reservation and
+  keeps NMI's reason. Any other outcome settles from a captured receipt, or stays
+  `unknown_needs_verify` with a `life.refund.unresolved` finding until an operator
+  names the refund and NMI confirms it is a refund of the original sale
+  (`Resolve`, `ConfirmRefund`), or attests release when NMI's report shows no
+  refund of the sale that OpenRails has not recorded (`ReadRefundTransactions`).
 - **CCBill**: no API refund (`ccbill.ErrRefundUnsupported`); refunds made at
   CCBill arrive as notices.
 
@@ -88,6 +92,11 @@ System refunds use the same reservation and intents with `OriginSystem`
   id with the same facts and refuses one with other facts, defers while an
   OpenRails refund of the payment is pending (`ErrRefundReservationPending`), and
   applies the merchant's `provider_refund_access` (`ApplyRefundAccessPolicy`).
+  When access was revoked and the payment is fully refunded, the same
+  `subscriptions.EndRefundedMembership` rule ends an engine-collected membership:
+  now for its latest paid period, otherwise at period end. Provider-owned
+  subscriptions and access kept for review keep their renewal. A partial refund
+  under `revoke_on_any` revokes access but keeps the membership.
 - Disputes come from Stripe's `charge.dispute.*` events (classified by status and card `case_type`, `disputerules.StripeKind`), the reconcile pull's `/v1/disputes` read (`reconcile.DisputeRecorder`), NMI chargeback batches (every entry, matched or not) and CCBill `Chargeback` notices. Each is recorded; a case is acted on by the kind its notice reports. A chargeback (`ReversalChargeback`) records the reversal on whichever notice says so first, cancels the subscription (`CancelTypeChargeback`) or ends a one-off purchase's access; its response blocks the card the charge was taken from (`payments.payment_method_id`, `disputes.Service.BlockCard`): the method is `disputed` and its mandates end (`disputed`). A charge names its card when OpenRails charged a saved one, when a Stripe Billing invoice's charge names a saved payment method, and when an NMI schedule's sale names the vault of the customer's one card in it; one that names none blocks none, and the customer review says so. An inquiry, a status Stripe had not reported before (`unknown`) and a CE 3.0 block book nothing; an RDR resolution books one refund (`dispute_prevention`), whichever of it and Stripe's refund arrives first: a Stripe refund of the whole charge made no earlier than five minutes before the case, which OpenRails did not ask for, is absorbed, its id recorded on the case (`absorbed_refund_ref`), each refund by one case. Stripe's order of the two is unconfirmed. A won, lost or closed case stays so against a later notice from before the decision, and a chargeback or a prevented case keeps its kind against a stale notice. A reversal it cannot book (no matching charge, more than remains) raises `consistency.ledger.unbooked`; access still ends. A dispute or fraud report on a charge OpenRails has no record of raises `life.disputes.unknown_charge` and is answered.
 - A won Stripe dispute (`handleStripeDisputeWon`) records a positive
   `dispute_reversal` whose `metadata.reverses_payment_id` names the chargeback,
@@ -254,19 +263,19 @@ Checks:
 
 ## Tests
 
-- J20: OR-J20-S01 partial then full refund (`TestRefunds`); OR-J20-S02 concurrent refunds, OR-J20-S03 lost response, OR-J20-S70 dashboard refund under a failing read (`TestRefundRecovery`); OR-J20-S04 foreign and off-rail refunds (`TestRefundBoundaryContract`); OR-J20-S05 CCBill partial refunds (`TestCCBillRefunds`); OR-J20-S06 a won dispute nets against its chargeback (`TestRefunds`).
+- J20: OR-J20-S01 partial then full refund (`TestRefunds`); OR-J20-S02 concurrent refunds, OR-J20-S03 lost response, OR-J20-S70 dashboard refund under a failing read, OR-J20-S07 NMI refusals released, OR-J20-S08 an unresolved NMI refund closed by the operator (`TestRefundRecovery`); OR-J20-S04 foreign and off-rail refunds (`TestRefundBoundaryContract`); OR-J20-S05 CCBill partial refunds (`TestCCBillRefunds`); OR-J20-S06 a won dispute nets against its chargeback (`TestRefunds`).
 - J21: OR-J21-S01 to S03 external payments (`TestExternalPayments`); OR-J21-S04
   imported refund allowance (`TestImportedReceipt`).
 - J46 (`TestDisputes`): OR-J46-S01 a chargeback; S02 an inquiry, its escalation and the reconcile pull; S03 RDR and CE 3.0; S04 won and lost disputes stay decided; S06 CCBill; S07 early fraud warnings; S08 the monitor's findings, alerts and resolution; S09 Mastercard's previous-month basis; S10 the levels in force; S11 the blocked card; S05 an NMI batch; S12 the dispute metrics; S13 the rollup across a restore; S14 refund reasons; S15 only the charged card is blocked; S16 reports on unknown charges.
 - Credit-line reversals (`TestMixedInvoiceCreditRefunds`): OR-J22-S07 (a pending
   refund holds the lot), S08 (refunds, chargeback, won dispute), S09 (dispute credit).
+- OR-J20-S09: a full NMI dashboard refund ends an engine membership and prevents
+  renewal; redelivery changes nothing, and a partial refund keeps access and renewal.
 - OR-J27-S04: a staff refund's `revoke_access`, and a full revoking refund ends
   the membership; OR-J27-S07 repair after a chargeback; OR-J38-S37 (CCBill
   chargeback); OR-J38-S43 (a late CCBill sale held for refund).
 - No Go package test covers this system; `sqlc vet` prepares its queries.
 
 Gaps:
-- No scenario sends an NMI refund through `RefundPayment`: `NMIRefundHandler`'s
-  execute, verify and resolve paths are untested end to end.
 - No scenario ingests an NMI chargeback.
-- No scenario sets `provider_refund_access`: `ApplyRefundAccessPolicy` is untested.
+- No scenario sets a nondefault `provider_refund_access` policy.

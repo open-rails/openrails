@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	embedded "github.com/open-rails/openrails/internal/engine"
@@ -345,6 +346,77 @@ func TestRefundRecovery(t *testing.T) {
 				active, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: intents.RefundUnresolvedFinding, Status: "requires_review"})
 				require.NoError(t, err)
 				require.Empty(t, active.Items)
+			})
+		}
+	})
+
+	t.Run("OR-J20-S09/a-full-dashboard-refund-ends-the-nmi-engine-membership", func(t *testing.T) {
+		for _, full := range []bool{true, false} {
+			t.Run(map[bool]string{true: "full-refund", false: "partial-refund"}[full], func(t *testing.T) {
+				a, p, sub := nmiEngineMembership(t)
+				due := *sub.CurrentPeriodEndsAt
+				access := func(want bool) {
+					t.Helper()
+					check, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"nmi:engine"}})
+					require.NoError(t, err)
+					require.Equal(t, want, check.Entitlements["nmi:engine"])
+				}
+				access(true)
+				paid, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
+				require.NoError(t, err)
+				require.Len(t, paid.Items, 1)
+				sale := p.core.LastSale()
+				cents, amount := int64(1000), "10.00"
+				if !full {
+					cents, amount = 400, "4.00"
+				}
+				a.clock.Advance(time.Hour)
+				refund := p.core.Refund(sale.TransactionID, cents)
+				event := map[string]any{
+					"event_id": "dashboard-refund", "event_type": "transaction.refund.success",
+					"event_body": map[string]any{
+						"transaction_id": refund, "amount": amount, "currency": "USD",
+						"merchant":    map[string]string{"id": "critical-gateway"},
+						"transaction": map[string]string{"transaction_id": sale.TransactionID},
+					},
+				}
+				status, raw := nmiSignedDelivery(t, a, event, "dashboard-refund")
+				require.Equal(t, http.StatusOK, status, raw)
+				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+				require.NoError(t, err)
+				access(!full)
+				if !full {
+					require.Equal(t, billing.SubscriptionActive, current.Status)
+					require.Nil(t, current.EndedAt)
+					require.Equal(t, sub.CurrentPeriodEndsAt, current.CurrentPeriodEndsAt, "renewal stays scheduled")
+					return
+				}
+				require.Equal(t, billing.SubscriptionStatus("canceled"), current.Status)
+				require.NotNil(t, current.EndedAt)
+				require.False(t, current.EndedAt.After(a.clock.Now()))
+				notifications := func() int {
+					t.Helper()
+					var count int
+					require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "notification_events"}.Sanitize()+" WHERE merchant_id=$1 AND customer_id=$2", a.alpha.MerchantID().UUID(), sub.CustomerID.UUID()).Scan(&count))
+					return count
+				}
+				before := notifications()
+				a.clock.Advance(time.Minute)
+				event["event_id"] = "dashboard-refund-redelivered"
+				status, raw = nmiSignedDelivery(t, a, event, "dashboard-refund-redelivered")
+				require.Equal(t, http.StatusOK, status, raw)
+				replayed, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+				require.NoError(t, err)
+				require.Equal(t, current, replayed)
+				require.Equal(t, before, notifications())
+				payment, err := a.alpha.GetPayment(t.Context(), paid.Items[0].ID)
+				require.NoError(t, err)
+				require.Len(t, payment.Refunds, 1)
+				ledger := p.core.Ledger("")
+				a.clock.Advance(due.Add(time.Hour).Sub(a.clock.Now()))
+				runRegistered(t, startFleet(t, a.world), "openrails.billing_pass", 1)
+				require.Equal(t, ledger, p.core.Ledger(""), "the refunded membership must never charge again")
+				access(false)
 			})
 		}
 	})

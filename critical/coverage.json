@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 822,
+  "scenario_count": 823,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -627,6 +627,11 @@
       "id": "OR-J20-S08",
       "journey": "J20",
       "name": "An unresolved NMI refund names the operator command and closes on an exact receipt or attested release with no unrecorded refund of the sale"
+    },
+    {
+      "id": "OR-J20-S09",
+      "journey": "J20",
+      "name": "A full NMI dashboard refund ends the engine membership and prevents renewal, redelivery changes nothing, and a partial refund keeps access and renewal"
     },
     {
       "id": "OR-J21-S01",

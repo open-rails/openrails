@@ -604,7 +604,7 @@ return shop.RefundPayment(ctx, key, payment, billing.RefundPaymentParams{
 })
 ```
 
-A refund through CCBill or Solana is `refund_unsupported`. A chargeback revokes the access its payment bought; a refund does with `RevokeAccess`, and one made in the provider's own dashboard follows `provider_refund_access`. Staff never start a card charge.
+A refund through CCBill or Solana is `refund_unsupported`. A chargeback revokes the access its payment bought; a refund does with `RevokeAccess`, and one made in the provider's own dashboard follows `provider_refund_access` (default `revoke_on_full`). A fully refunded payment whose access was revoked also ends its engine-collected membership: now for its latest paid period, otherwise at period end. A partial refund keeps the membership even with `revoke_on_any`; provider-owned subscriptions and access kept for review keep their renewal. Staff never start a card charge.
 
 **Disputes.** A chargeback ends what its charge paid for and the card is never charged again (`disputed`): the customer's other subscriptions on it wait for another card, or end at period end where a provider bills them. An inquiry moves no money and ends nothing. A Stripe early fraud warning refunds its charge in full and ends what it paid for, unless the merchant setting `fraud_warning_refund` is `record`. Each chargeback raises a `life.disputes.customer_review` finding.
 

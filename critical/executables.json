@@ -422,6 +422,11 @@
     "OR-J20-S04": [
       "TestRefundBoundaryContract/OR-J20-S04/foreign-account-and-off-rail-refunds-have-no-effect"
     ],
+    "OR-J20-S09": [
+      "TestRefundRecovery/OR-J20-S09/a-full-dashboard-refund-ends-the-nmi-engine-membership",
+      "TestRefundRecovery/OR-J20-S09/a-full-dashboard-refund-ends-the-nmi-engine-membership/full-refund",
+      "TestRefundRecovery/OR-J20-S09/a-full-dashboard-refund-ends-the-nmi-engine-membership/partial-refund"
+    ],
     "OR-J20-S05": [
       "TestCCBillRefunds/OR-J20-S05/each-partial-refund-of-a-sale-is-booked-once"
     ],
