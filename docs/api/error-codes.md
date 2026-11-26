@@ -105,7 +105,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `pay_url_not_found` | 404 | `invalid_request_error` | The pay URL is unknown or no longer valid. |
 | `pay_url_unavailable` | 400 | `invalid_request_error` | This deployment serves no checkout origin, or the invoice cannot take a pay URL. |
 | `payment_duplicate_refused` | 409 | `invalid_request_error` | The provider refused an identical charge it had just made; retry after its duplicate window. |
-| `payment_exceeds_due` | 409 | `invalid_request_error` | The recorded payment exceeds what the usage invoice has due, or is not the invoice's total. |
+| `payment_exceeds_due` | 409 | `invalid_request_error` | A recorded payment must equal the invoice's total; a usage payment must not exceed the amount due. |
 | `payment_failed` | 402 | `card_error` | The payment was not made. |
 | `payment_idempotency_conflict` | 409 | `invalid_request_error` | The idempotency key belongs to another payment request. |
 | `payment_in_progress` | 409 | `invalid_request_error` | A payment is already unresolved; read the resource before retrying. |

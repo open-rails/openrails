@@ -410,7 +410,7 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeInvoiceActionNotAllowed, 409, invalid, "The invoice's origin or status does not allow this action."},
 	{CodePaymentOptionUnavailable, 422, invalid, "No PSP that can take the invoice's lines accepts this payment."},
 	{CodeInvoiceHasRecurringLine, 409, invalid, "An invoice with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid."},
-	{CodePaymentExceedsDue, 409, invalid, "The recorded payment exceeds what the usage invoice has due, or is not the invoice's total."},
+	{CodePaymentExceedsDue, 409, invalid, "A recorded payment must equal the invoice's total; a usage payment must not exceed the amount due."},
 
 	// Subscriptions and tier changes.
 	{CodeCatalogBenefitOverlap, 409, invalid, "Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group."},

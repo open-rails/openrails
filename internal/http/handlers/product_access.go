@@ -32,7 +32,7 @@ func productAccessGrant(row gen.ListProductAccessPageRow, now time.Time) billing
 	out := billing.ProductAccessGrant{
 		ID: billing.ProductAccessID(row.ID), CustomerID: billing.CustomerID(row.CustomerID),
 		ProductID: billing.ProductID(row.ProductID), ProductKey: row.ProductKey, ProductName: row.ProductName,
-		SourceType: billing.ProductAccessSourceType(row.SourceType), SourceID: catalogrules.SourceRef(row.SourceType, row.SourceID),
+		SourceType: billing.ProductAccessSourceType(row.SourceType), SourceID: catalogrules.SourceRef(row.SourceType, row.SourceID, row.PaymentID),
 		StartsAt: row.StartsAt, EndsAt: row.EndsAt, RevokedAt: row.RevokedAt, RevokeReason: row.RevokeReason,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, Quantity: models.DerefIntPtr(row.Quantity),
 	}

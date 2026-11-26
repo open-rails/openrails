@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
 
@@ -346,7 +345,9 @@ func sourceRef(funding credits.FundingSource, id *string) *string {
 	}
 	ref := *id
 	if funding.Paid() {
-		ref = catalogrules.SourceRef("purchase", *id)
+		if u, err := uuid.Parse(*id); err == nil {
+			ref = billing.PaymentID(u).String()
+		}
 	}
 	return &ref
 }

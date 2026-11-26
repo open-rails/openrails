@@ -1705,27 +1705,6 @@
     "OR-J28-S16": [
       "TestProviderTime/OR-J28-S16/access-restored-after-an-nmi-chargeback-survives-a-replayed-batch"
     ],
-    "OR-J28-S17": [
-      "TestCCBillWebhookToken/OR-J28-S17/a-declared-webhook-token-is-required-and-the-source-address-still-is"
-    ],
-    "OR-J28-S18": [
-      "TestCCBillWebhookToken/OR-J28-S18/a-rotated-out-webhook-token-verifies-only-inside-its-overlap"
-    ],
-    "OR-J28-S19": [
-      "TestCCBillWebhookToken/OR-J28-S19/without-a-declared-token-the-tokenless-url-works-and-the-token-url-is-refused"
-    ],
-    "OR-J28-S20": [
-      "TestCCBillWebhookToken/OR-J28-S20/require-webhook-token-false-admits-a-tokenless-delivery-never-a-wrong-token"
-    ],
-    "OR-J28-S21": [
-      "TestCCBillWebhookToken/OR-J28-S21/the-token-url-exists-only-for-ccbill"
-    ],
-    "OR-J28-S22": [
-      "TestCCBillWebhookToken/OR-J28-S22/a-tokenless-delivery-is-never-handed-to-a-sibling-psp-without-a-token"
-    ],
-    "OR-J28-S23": [
-      "TestCCBillWebhookToken/OR-J28-S23/rotating-the-webhook-token-over-the-api-keeps-the-old-one-for-its-overlap"
-    ],
     "OR-J48-S13": [
       "TestMerchantUnits/OR-J48-S13/a-unit-priced-invoices-revenue-is-its-lots-money-scheduled-per-currency"
     ],
@@ -2533,6 +2512,51 @@
     ],
     "OR-J47-S12": [
       "TestCheckoutFunnel/OR-J47-S12/an-erasure-clears-a-checkouts-attribution"
+    ],
+    "OR-J38-S95": [
+      "TestPublicLifecycle/OR-J38-S95/customer-cancel-preserves-usage-and-merchant-invoices"
+    ],
+    "OR-J38-S96": [
+      "TestPublicEntitlements/OR-J38-S96/consumable-purchases-do-not-report-duplicate-ownership"
+    ],
+    "OR-J09-S71": [
+      "TestCheckoutBoundaries/OR-J09-S71/gateway-refusal-reopens-the-invoice"
+    ],
+    "OR-J09-S72": [
+      "TestCheckoutBoundaries/OR-J09-S72/never-connected-sale-reopens-the-invoice"
+    ],
+    "OR-J09-S73": [
+      "TestCheckoutBoundaries/OR-J09-S73/disconnected-client-keeps-the-sale-running"
+    ],
+    "OR-J09-S74": [
+      "TestCheckoutBoundaries/OR-J09-S74/empty-order-releases-after-a-day-and-expires"
+    ],
+    "OR-J09-S75": [
+      "TestCheckoutBoundaries/OR-J09-S75/operator-attests-an-empty-order-release"
+    ],
+    "OR-J09-S76": [
+      "TestCheckoutBoundaries/OR-J09-S76/vault-read-failure-keeps-paid-access-and-retries-storage"
+    ],
+    "OR-J28-S17": [
+      "TestCCBillWebhookToken/OR-J28-S17/a-declared-webhook-token-is-required-and-the-source-address-still-is"
+    ],
+    "OR-J28-S18": [
+      "TestCCBillWebhookToken/OR-J28-S18/a-rotated-out-webhook-token-verifies-only-inside-its-overlap"
+    ],
+    "OR-J28-S19": [
+      "TestCCBillWebhookToken/OR-J28-S19/without-a-declared-token-the-tokenless-url-works-and-the-token-url-is-refused"
+    ],
+    "OR-J28-S20": [
+      "TestCCBillWebhookToken/OR-J28-S20/require-webhook-token-false-admits-a-tokenless-delivery-never-a-wrong-token"
+    ],
+    "OR-J28-S21": [
+      "TestCCBillWebhookToken/OR-J28-S21/the-token-url-exists-only-for-ccbill"
+    ],
+    "OR-J28-S22": [
+      "TestCCBillWebhookToken/OR-J28-S22/a-tokenless-delivery-is-never-handed-to-a-sibling-psp-without-a-token"
+    ],
+    "OR-J28-S23": [
+      "TestCCBillWebhookToken/OR-J28-S23/rotating-the-webhook-token-over-the-api-keeps-the-old-one-for-its-overlap"
     ],
     "OR-J37-S72": [
       "TestSolanaPulls/OR-J37-S72/a-pull-confirmed-and-not-finalized-books-nothing-and-is-not-signed-again"

@@ -7,8 +7,31 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 )
+
+func TestLineQuantity(t *testing.T) {
+	price := &models.Price{}
+	for _, sample := range []struct {
+		ownership catalog.Ownership
+		quantity  int
+		message   string
+	}{
+		{catalog.OwnershipConsumable, MaxQuantity + 1, "The maximum quantity is 10000."},
+		{catalog.OwnershipUnique, 2, "Only a consumable line takes a quantity above 1."},
+	} {
+		_, refused := lineQuantity(price, sample.ownership, &sample.quantity)
+		require.NotNil(t, refused)
+		require.Equal(t, RefusalQuantityInvalid, refused.Code)
+		require.Equal(t, sample.message, refused.Message)
+	}
+	quantity := MaxQuantity
+	got, refused := lineQuantity(price, catalog.OwnershipConsumable, &quantity)
+	require.Nil(t, refused)
+	require.Equal(t, quantity, *got)
+}
 
 func TestCheckAttribution(t *testing.T) {
 	text := func(s string) *string { return &s }

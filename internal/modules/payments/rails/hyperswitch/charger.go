@@ -96,6 +96,9 @@ func (c *Charger) charge(ctx context.Context, req charge.Request) (charge.Result
 		if errors.Is(err, provider.ErrNotDispatched) {
 			return charge.Result{}, nil, errors.Join(charge.ErrNotDispatched, err)
 		}
+		if errors.Is(err, nmi.ErrSaleRefused) {
+			return charge.Result{}, nil, err
+		}
 		if nmi.RequiresVerification(err) {
 			return charge.Result{}, nil, provider.ErrUnknown
 		}

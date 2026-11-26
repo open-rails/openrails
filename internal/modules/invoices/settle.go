@@ -157,7 +157,7 @@ func (s *Service) settle(ctx context.Context, d *db.DB, invoice *Invoice, charge
 		if charge != nil && uuidOf(invoice.PaymentID) != charge.PaymentID {
 			return "", errLateApprovalDup
 		}
-		if charge != nil && charge.PaymentMethodID != uuid.Nil && charge.TokenType == paycharge.TokenTypePANViaProxy {
+		if charge != nil && charge.PaymentMethodID != uuid.Nil {
 			if err := s.restoreInvoiceCard(ctx, d, invoice, charge, now); err != nil {
 				return "", err
 			}
@@ -398,7 +398,7 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, invoice *Invoice, line g
 				terms.AccessDurationHours = new(int(end.Sub(now) / time.Hour))
 			}
 		}
-		terms.AwaitingMethod = charge.PaymentMethodID == uuid.Nil && charge.TokenType == paycharge.TokenTypePANViaProxy
+		terms.AwaitingMethod = charge.PaymentMethodID == uuid.Nil && charge.Enrolled == nil && (charge.Rail == string(models.RailNMI) || charge.Rail == string(models.RailStripe))
 		params := &subscriptions.CreateMembershipParams{
 			Prepared: &terms, UserID: invoice.CustomerID.String(), PriceID: models.DerefUUID(line.PriceID), Rail: models.Rail(charge.Rail), PurchasedAt: &now,
 			ExistingInvoiceID: &invoice.ID, PaymentMetadata: map[string]any{"invoice_id": invoice.ID.String()}, Paid: linePaid(invoice, line, charge),

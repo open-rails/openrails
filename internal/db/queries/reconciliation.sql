@@ -827,7 +827,7 @@ ORDER BY id;
 SELECT DISTINCT ON (e.customer_id)
        e.id, e.customer_id, e.product_id,
        LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) AS closed_at,
-       e.source_type, e.source_id
+       e.source_type, e.source_id, e.payment_id
 FROM billing.product_access e
 WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR e.customer_id = sqlc.narg(customer_id)::uuid)

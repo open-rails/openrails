@@ -31,7 +31,7 @@ func ParseSaleResponse(raw string, amount moneyutil.Cents, currency string) (*Sa
 		return nil, err
 	}
 	if !isDirectResponseApproved(output) {
-		return nil, newSaleError(raw, output)
+		return nil, newSaleError(raw, output, amount > 0)
 	}
 	if err := fullApproval(output, amount, currency); err != nil {
 		return nil, err

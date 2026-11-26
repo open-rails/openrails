@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
@@ -57,6 +58,50 @@ func publicAccess(t *testing.T, a *authorityWorld, at time.Time, expected bool) 
 }
 
 func TestPublicEntitlements(t *testing.T) {
+	t.Run("OR-J38-S96/consumable-purchases-do-not-report-duplicate-ownership", func(t *testing.T) {
+		a, journal := newNMIWorld(t)
+		consumable, price := publicSale(t, a, "repeat-consumable", 5_000_000, nil)
+		unique, uniquePrice := publicSale(t, a, "duplicate-unique", 5_000_000, nil)
+		buy := func(price billing.PriceID, key string) billing.Invoice {
+			t.Helper()
+			input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(5_000_000)), Reusable: ptr(false),
+				Payment: &billing.InvoicePaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")}}
+			status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": key})
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(raw, &invoice))
+			require.Equal(t, billing.InvoiceComplete, invoice.Status)
+			return invoice
+		}
+		first := buy(price.ID, "consumable-first")
+		second := buy(price.ID, "consumable-second")
+		require.NotEqual(t, first.ID, second.ID)
+		owned := buy(uniquePrice.ID, "unique-first")
+		buy(uniquePrice.ID, "unique-second")
+		customer := owned.CustomerID.UUID()
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		require.NoError(t, err)
+		convergeCustomer := func() []billing.Finding {
+			t.Helper()
+			_, err := converge.NewConvergeEngine(database, a.clock).Converge(ctx, converge.Scope{Merchant: a.alpha.MerchantID(), Customer: &customer})
+			require.NoError(t, err)
+			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.duplicate.ownership"})
+			require.NoError(t, err)
+			return findings.Items
+		}
+		require.Empty(t, convergeCustomer())
+		windows, err := a.alpha.ListProductAccess(t.Context(), billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{owned.CustomerID}, ProductIDs: []billing.ProductID{consumable.ID}, LiveOnly: true})
+		require.NoError(t, err)
+		require.Len(t, windows.Items, 2)
+		_, err = a.alpha.UpdateProduct(t.Context(), unique.ID, billing.UpdateProductParams{Ownership: catalog.Value(catalog.OwnershipUnique)})
+		require.NoError(t, err)
+		findings := convergeCustomer()
+		require.Len(t, findings, 1)
+		require.Contains(t, findings[0].SubjectKey, unique.ID.UUID().String())
+		journal.money(t, 4, 2000)
+	})
+
 	t.Run("OR-J27-S01/purchase-and-grant-overlap-counts-once", func(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) { publicPastClock(w, 72*time.Hour) })
 		_, price := publicSale(t, a, "purchased-day", 9_990_000, ptr(24))

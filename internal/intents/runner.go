@@ -38,7 +38,7 @@ const (
 )
 
 // LedgerWriteContext detaches a ledger write from the caller's cancellation
-// (db.DetachedWriteContext). The caller's deadline governs the provider call;
+// (db.DetachedWriteContext). Inline provider calls have their own lease bound;
 // once made, its result must reach the ledger regardless, or a timed-out
 // caller leaves the row in_flight until lease expiry hands it to the executor
 // instead of the verifier. Handlers also use it to persist a provider receipt
@@ -240,6 +240,8 @@ func (r *Runner) EnqueueOwnedAndExecute(ctx context.Context, p EnqueueParams, ow
 
 // executeInline runs a request's accepted operation in the request.
 func (r *Runner) executeInline(ctx context.Context, row gen.BillingProviderIntent) (gen.BillingProviderIntent, error) {
+	ctx, cancel := db.DetachedWriteContext(ctx, r.lease())
+	defer cancel()
 	if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeInline, Kind: row.IntentType, Operation: row.ID}); err != nil {
 		return gen.BillingProviderIntent{}, err
 	}

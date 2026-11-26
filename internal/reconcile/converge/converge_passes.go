@@ -346,7 +346,7 @@ func unjustifiedAccessFinding(o *gen.ListUnjustifiedAccessWindowsRow) ConvergeFi
 
 	ev := map[string]any{
 		"access_id": o.AccessID.String(), "customer_id": o.CustomerID.String(),
-		"product_id": product.String(), "source_type": o.SourceType, "source_id": catalogrules.SourceRef(o.SourceType, o.SourceID),
+		"product_id": product.String(), "source_type": o.SourceType, "source_id": catalogrules.SourceRef(o.SourceType, o.SourceID, o.PaymentID),
 		"cause":               o.Cause,
 		recommend.EvidenceKey: rec.Map(),
 	}
@@ -674,7 +674,7 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 			Provider:   "self",
 			Evidence: map[string]any{
 				"customer_id": cust.String(), "product_id": product.String(),
-				"ended_at": closedAt.Format(time.RFC3339), "source_type": c.SourceType, "source_id": catalogrules.SourceRef(c.SourceType, c.SourceID),
+				"ended_at": closedAt.Format(time.RFC3339), "source_type": c.SourceType, "source_id": catalogrules.SourceRef(c.SourceType, c.SourceID, c.PaymentID),
 			},
 			Repair: func(ctx context.Context) error {
 				ctx = merchant.WithID(ctx, scope.Merchant)
@@ -739,7 +739,7 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	// Free grants have no source row to dangle: the grant ledger is their
 	// provenance.
 
-	emit := func(accessID uuid.UUID, userID string, product uuid.UUID, sourceType, sourceID string) {
+	emit := func(accessID uuid.UUID, userID string, product uuid.UUID, sourceType, sourceID string, paymentID *uuid.UUID) {
 		out = append(out, ConvergeFinding{
 			Type:       "consistency.reference.source_reference",
 			Shape:      ShapeMismatch,
@@ -749,7 +749,7 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 			Provider:   "self",
 			Evidence: map[string]any{
 				"access_id": accessID.String(), "customer_id": userID,
-				"product_id": billing.ProductID(product).String(), "source_type": sourceType, "source_id": catalogrules.SourceRef(sourceType, sourceID),
+				"product_id": billing.ProductID(product).String(), "source_type": sourceType, "source_id": catalogrules.SourceRef(sourceType, sourceID, paymentID),
 			},
 			// surface-only: a dangling source has no safe auto-repair (it may be a
 			// valid historical record or a real corruption) — an admin decides.
@@ -757,11 +757,11 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	}
 	for i := range orphanSubs {
 		r := orphanSubs[i]
-		emit(r.AccessID, r.UserID, r.ProductID, r.SourceType, r.SourceID)
+		emit(r.AccessID, r.UserID, r.ProductID, r.SourceType, r.SourceID, r.PaymentID)
 	}
 	for i := range orphanPays {
 		r := orphanPays[i]
-		emit(r.AccessID, r.UserID, r.ProductID, r.SourceType, r.SourceID)
+		emit(r.AccessID, r.UserID, r.ProductID, r.SourceType, r.SourceID, r.PaymentID)
 	}
 
 	// consistency.duplicate.provider_charge — more than one captured charge
@@ -854,15 +854,18 @@ type ownershipPurchase struct {
 }
 
 func (r ownershipPurchaseRow) evidence() ownershipPurchase {
-	p := ownershipPurchase{GrantID: r.GrantID, SourceType: r.SourceType, SourceID: catalogrules.SourceRef(r.SourceType, r.SourceID), Amount: r.Amount, Currency: r.Currency, PurchasedAt: r.PurchasedAt}
+	var paymentID *uuid.UUID
+	p := ownershipPurchase{GrantID: r.GrantID, SourceType: r.SourceType, Amount: r.Amount, Currency: r.Currency, PurchasedAt: r.PurchasedAt}
 	if r.PaymentID != nil {
 		if u, err := uuid.Parse(*r.PaymentID); err == nil {
+			paymentID = &u
 			typed := billing.PaymentID(u).String()
 			p.PaymentID = &typed
 		} else {
 			p.PaymentID = r.PaymentID
 		}
 	}
+	p.SourceID = catalogrules.SourceRef(r.SourceType, r.SourceID, paymentID)
 	return p
 }
 
