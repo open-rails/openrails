@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/limits"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -31,6 +32,8 @@ func (a *Admitter) Bind(d *db.DB) *Admitter {
 // costs, or the spend windows and declared limits a request claims (costing
 // nothing here), what the customer may spend and its policy's credit line.
 type Set struct {
+	// Trust is the trust level the request's policy was resolved at.
+	Trust   billing.EffectiveTrustLevel
 	Refusal *AdmitDecision
 	Spend   []limits.Claim
 	Limits  []limits.Claim
@@ -52,9 +55,9 @@ func (a *Admitter) ResolveSet(ctx context.Context, q *gen.Queries, req AdmitRequ
 		return Set{}, err
 	}
 	if refused != nil {
-		return Set{Refusal: refused}, nil
+		return Set{Trust: g.trust, Refusal: refused}, nil
 	}
-	out := Set{}
+	out := Set{Trust: g.trust}
 	if out.Limits, err = a.limitClaimsFor(ctx, q, tid.UUID(), req, eventType); err != nil {
 		return Set{}, err
 	}
@@ -110,7 +113,7 @@ func (a *Admitter) SpendPolicies(ctx context.Context, reqs []AdmitRequest) ([]*S
 	}
 	r, rerr := a.loader.policies.resolver(ctx, payers)
 	// Trust levels matter only where a policy is declared.
-	tiers := map[string]map[uuid.UUID]string{}
+	tiers := map[string]map[uuid.UUID]billing.EffectiveTrustLevel{}
 	if rerr == nil && r.declares() {
 		byCurrency := map[string][]uuid.UUID{}
 		for _, req := range reqs {
@@ -120,7 +123,7 @@ func (a *Admitter) SpendPolicies(ctx context.Context, reqs []AdmitRequest) ([]*S
 			}
 		}
 		for cur, customers := range byCurrency {
-			if tiers[cur], err = a.money.TrustLevels(ctx, customers, cur); err != nil {
+			if tiers[cur], err = a.money.TrustLevelsIn(ctx, customers, cur); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -135,7 +138,7 @@ func (a *Admitter) SpendPolicies(ctx context.Context, reqs []AdmitRequest) ([]*S
 		}
 		trustLevel := req.TrustLevel
 		if trustLevel == "" {
-			trustLevel = cmp.Or(tiers[money.NormalizeCurrency(req.Currency)][req.CustomerID.UUID()], DefaultTrustLevel)
+			trustLevel = cmp.Or(tiers[money.NormalizeCurrency(req.Currency)][req.CustomerID.UUID()].TrustLevel, merchantconfig.DefaultTrustLevel)
 		}
 		policy, err := a.loader.Load(ctx, req.Currency, r.resolve(req.CustomerID.UUID(), trustLevel))
 		if err != nil {

@@ -168,6 +168,11 @@ func refuseUnits(in billing.MerchantSettings, r currency.Registry) error {
 			add(fmt.Sprintf("balance_notices.low_amounts[%d].currency", i), line.Currency)
 		}
 	}
+	for i, tier := range in.TrustTiers {
+		for j, req := range tier.Requirements {
+			add(fmt.Sprintf("trust_tiers[%d].requirements[%d].currency", i, j), req.Currency)
+		}
+	}
 	for i, code := range codes {
 		if code == "" {
 			continue

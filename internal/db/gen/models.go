@@ -388,6 +388,17 @@ type BillingCustomerMrr struct {
 	FirstActiveAt *time.Time
 }
 
+// What a customer paid in a currency, net of refunds and chargebacks, and when it first paid: what the merchant's trust tier rules read. Written only by the payments trigger, which rebuilds it on restore.
+type BillingCustomerPaidTotal struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	// Settled receipts (books.ReceiptOf: taken at a rail on a PSP, or recorded by the merchant) plus the signed amounts of their settled refunds, chargebacks and won disputes, in native units.
+	NetPaidAmount int64
+	// The earliest settled receipt's purchased_at; NULL when none counts.
+	FirstPaidAt *time.Time
+}
+
 // Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|cohort|funnel|heading|programs), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant's profile.
 type BillingDashboardConfig struct {
 	MerchantID uuid.UUID

@@ -567,9 +567,15 @@ func newSales(t *testing.T, configure ...func(*world)) *sales {
 
 func (s *sales) buy(t *testing.T, key string) billing.Payment {
 	t.Helper()
+	return s.buyAs(t, s.a.aliceToken, key)
+}
+
+// buyAs is one sale to the customer token signs in.
+func (s *sales) buyAs(t *testing.T, token, key string) billing.Payment {
+	t.Helper()
 	input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: s.price}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
 		Payment: &billing.InvoicePaymentParams{Token: s.p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-	status, raw := s.a.request(t, http.MethodPost, "/v1/me/invoices", s.a.aliceToken, input, map[string]string{"Idempotency-Key": key})
+	status, raw := s.a.request(t, http.MethodPost, "/v1/me/invoices", token, input, map[string]string{"Idempotency-Key": key})
 	require.Equal(t, http.StatusCreated, status, string(raw))
 	var invoice billing.Invoice
 	require.NoError(t, json.Unmarshal(raw, &invoice))

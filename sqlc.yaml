@@ -6,6 +6,7 @@ sql:
       - "internal/migrate/postgres/0001_schema.up.sql"
       - "internal/migrate/postgres/0002_ledger_balance.up.sql"
       - "internal/migrate/postgres/0003_transfer_types.up.sql"
+      - "internal/migrate/postgres/0004_customer_paid_totals.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

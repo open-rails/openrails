@@ -79,6 +79,8 @@ type Settings struct {
 	// Default names the policy of a customer no tier or assignment binds;
 	// "" none.
 	Default string
+	// TrustRules are each currency's trust tier rules, highest tier first.
+	TrustRules map[string][]TrustRule
 	// Currencies is the merchant's currency registry: OpenRails' and the
 	// merchant's own units.
 	Currencies currency.Registry
@@ -239,6 +241,9 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 			out.Tiers[tier] = name
 		}
 	}
+	if out.TrustRules, err = NormalizeTrustTiers(in.TrustTiers, out.Tiers); err != nil {
+		return Settings{}, err
+	}
 	return out, nil
 }
 
@@ -294,14 +299,37 @@ func (s Settings) Policy(assigned, tier string) (name string, body models.Billin
 }
 
 // PoliciesParam is the settings' policies as the per-merchant SQL reads them:
-// {policies: {name: body}, tiers: {tier: name}, default: name}.
+// {policies: {name: body}, tiers: {tier: name}, default: name, trust}, trust
+// being TrustParam's.
 func (s Settings) PoliciesParam() []byte {
 	body, _ := json.Marshal(struct {
 		Policies map[string]models.BillingPolicy `json:"policies"`
 		Tiers    map[string]string               `json:"tiers"`
 		Default  *string                         `json:"default"`
-	}{s.Policies, s.Tiers, nonEmpty(s.Default)})
+		Trust    trustParam                      `json:"trust"`
+	}{s.Policies, s.Tiers, nonEmpty(s.Default), s.trust()})
 	return body
+}
+
+// TrustParam is the settings' trust tier rules as billing.trust_tier reads
+// them: {default: tier, rules: {currency: [{tier, net_paid_amount, days}]}},
+// each currency's highest tier first.
+func (s Settings) TrustParam() []byte {
+	body, _ := json.Marshal(s.trust())
+	return body
+}
+
+type trustParam struct {
+	Default string                 `json:"default"`
+	Rules   map[string][]TrustRule `json:"rules"`
+}
+
+func (s Settings) trust() trustParam {
+	rules := s.TrustRules
+	if rules == nil {
+		rules = map[string][]TrustRule{}
+	}
+	return trustParam{Default: DefaultTrustLevel, Rules: rules}
 }
 
 func nonEmpty(v string) *string {

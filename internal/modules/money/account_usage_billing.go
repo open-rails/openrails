@@ -483,7 +483,8 @@ func (s *MoneyService) ValidateUsageBillingAccountTx(ctx context.Context, q *gen
 type usageTerms struct{ creditLimit, minimum, threshold int64 }
 
 // resolveUsageTerms resolves the customer's credit line (creditLimit) under
-// its bound policy, its minimum invoice and its collection threshold once. A
+// its bound policy (its own, else its trust tier's, else the merchant's
+// default), its minimum invoice and its collection threshold once. A
 // collection threshold changes when to invoice, never how much is owed. cur
 // is nil without usage terms.
 func (s *MoneyService) resolveUsageTerms(ctx context.Context, q *gen.Queries, row gen.BillingMoneySetting, cur *billing.UsageBillingCurrency) (usageTerms, error) {
@@ -492,11 +493,13 @@ func (s *MoneyService) resolveUsageTerms(ctx context.Context, q *gen.Queries, ro
 	if err != nil {
 		return terms, err
 	}
+	tier, err := trustTier(ctx, q, settings, row.MerchantID, row.CustomerID, row.Currency, s.now())
+	if err != nil {
+		return terms, err
+	}
 	name := settings.Default
-	if row.Tier != nil {
-		if n, ok := settings.Tiers[*row.Tier]; ok {
-			name = n
-		}
+	if n, ok := settings.Tiers[tier]; ok {
+		name = n
 	}
 	customer, err := q.GetCustomer(ctx, gen.GetCustomerParams{MerchantID: row.MerchantID, ID: row.CustomerID})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {

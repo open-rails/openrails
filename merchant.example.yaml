@@ -294,6 +294,18 @@ billing_policy_bindings:
   - policy: ""
     # Tier is the trust tier it applies to; empty makes it the merchant default.
     tier: ""
+# TrustTiers are the tiers customers graduate to by what they paid, lowest first.
+trust_tiers:
+    # Name is the tier, as bindings and trust levels name it.
+  - name: ""
+    # Requirements are what the tier asks, at most one per currency; a currency they do not name never reaches the tier.
+    requirements:
+        # Currency is the requirement's.
+      - currency: ""
+        # NetPaidAmount is the least the customer has paid in it, settled payments less refunds and chargebacks, in whole minor units of its native units.
+        net_paid_amount: "0"
+        # DaysSinceFirstPayment is the least time since its first settled payment in it, in 24-hour days.
+        days_since_first_payment: 0
 # DelegatedInvokerWastedSpendLimits bound the wasted spend a delegated invoker is forgiven per window.
 delegated_invoker_wasted_spend_limits:
     # Key names the window.
