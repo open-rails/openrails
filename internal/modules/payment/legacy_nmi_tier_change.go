@@ -154,12 +154,12 @@ func (s *PurchaseService) previewProviderNMITierChange(ctx context.Context, resp
 		return resp, nil
 	}
 	paid, err := periodKept(ctx, s.SubscriptionService.Database(), sub, current.Currency)
-		if err != nil {
-			return nil, err
-		}
-		upgrade := providerUpgradeOf(sub, current, target)
-		upgrade.Paid = paid
-		quote, err := QuoteKeepBoundaryUpgrade(upgrade, now)
+	if err != nil {
+		return nil, err
+	}
+	upgrade := providerUpgradeOf(sub, current, target)
+	upgrade.Paid = paid
+	quote, err := QuoteKeepBoundaryUpgrade(upgrade, now)
 	if err != nil {
 		return nil, err
 	}
