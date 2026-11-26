@@ -262,7 +262,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   embed_origins_required: { status: 400, type: "invalid_request_error", meaning: "An embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins." },
   entitlement_required: { status: 403, type: "invalid_request_error", meaning: "A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks." },
   event_cursor_expired: { status: 410, type: "invalid_request_error", meaning: "The event cursor is no longer retained; resynchronize current state." },
-  event_store_required: { status: 409, type: "invalid_request_error", meaning: "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off." },
+  event_store_required: { status: 409, type: "invalid_request_error", meaning: "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows and usage history are off." },
   finding_action_failed: { status: 502, type: "api_error", meaning: "Running the finding's recommendation failed; the finding stays open with the error in its notes." },
   finding_not_actionable: { status: 422, type: "invalid_request_error", meaning: "The finding carries no recommendation to approve; ignore it or fix it out of band." },
   finding_requires_merchant_config: { status: 409, type: "invalid_request_error", meaning: "The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config." },

@@ -153,13 +153,15 @@ func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity
 // AdmissionCapacity is the affordability snapshot consumed by the SQL
 // service-admit gate.
 type AdmissionCapacity struct {
-	HardCreditLimit bool
 	// Balance is the ledger account; Pending is usage not yet posted, at its
 	// provisional prices; Accrued is running charges' accrual since their
 	// last posting.
 	Balance, Pending, Accrued int64
 	BillingMode               string
-	CreditLimit               int64
+	// CreditLimit is the arrears credit line once usageAdmissionCapacity
+	// resolved it: the customer's own, else its policy's cap, else the
+	// merchant's usage terms'.
+	CreditLimit int64
 	// OutstandingOwed is the payer's unpaid arrears (positive), read O(1) from
 	// their own arrears account in the same lookup. The credit line caps debt,
 	// so the line still available is CreditLimit - this.

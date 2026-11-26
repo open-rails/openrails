@@ -19,16 +19,10 @@ import (
 )
 
 // Bind is the admitter on a transaction's database, as Admit runs it.
-func (a *Admitter) Bind(d *db.DB, now func() time.Time) *Admitter {
+func (a *Admitter) Bind(d *db.DB) *Admitter {
 	bound := *a
 	bound.money = a.money.WithDatabase(d)
 	bound.loader = NewSpendgatePolicyLoader(NewBillingPolicyStore(d), a.loader.fx)
-	if a.rates != nil {
-		rates := *a.rates
-		rates.db = d
-		rates.now = now
-		bound.rates = &rates
-	}
 	return &bound
 }
 
@@ -43,7 +37,6 @@ type Set struct {
 	// Available is what the customer may spend after every live hold, and
 	// CreditLine the overdraft the policy allows on it.
 	Available, CreditLine, Outstanding int64
-	resolved                           ResolvedPolicy
 }
 
 // ResolveSet makes the checks Admit makes before it weighs any cost, for
@@ -61,26 +54,26 @@ func (a *Admitter) ResolveSet(ctx context.Context, q *gen.Queries, req AdmitRequ
 	if refused != nil {
 		return Set{Refusal: refused}, nil
 	}
-	out := Set{resolved: g.resolved}
+	out := Set{}
 	if out.Limits, err = a.limitClaimsFor(ctx, q, tid.UUID(), req, eventType); err != nil {
 		return Set{}, err
 	}
 	if out.Spend, err = spendgate.SpendClaims(tid.UUID(), req.CustomerID.UUID(), strings.TrimSpace(req.Currency), g.policy, g.request, 0, now); err != nil {
 		return Set{}, err
 	}
-	out.Available, out.CreditLine, out.Outstanding = payerCapacity(capacity, g.resolved)
+	out.Available, out.CreditLine, out.Outstanding = payerCapacity(capacity)
 	return out, nil
 }
 
 // BalanceRefusal is the deny code a request that does not fit the balance
 // gets, as Admit answers it: insufficient_balance, insufficient_credit with a
-// credit line, or outstanding_cap_reached when the policy gates on debt.
+// credit line, or outstanding_cap_reached when what it owes took the line.
 func (s Set) BalanceRefusal() billing.DenyCode {
 	code := billing.DenyInsufficientBalance
 	if s.CreditLine > 0 {
 		code = billing.DenyInsufficientCredit
 	}
-	if s.resolved.GatesOnOutstandingOwed() && s.CreditLine == 0 && s.Available <= 0 && s.Outstanding > 0 {
+	if s.CreditLine == 0 && s.Available <= 0 && s.Outstanding > 0 {
 		code = billing.DenyOutstandingCapReached
 	}
 	return code
@@ -144,12 +137,7 @@ func (a *Admitter) SpendPolicies(ctx context.Context, reqs []AdmitRequest) ([]*S
 		if trustLevel == "" {
 			trustLevel = cmp.Or(tiers[money.NormalizeCurrency(req.Currency)][req.CustomerID.UUID()], DefaultTrustLevel)
 		}
-		resolved, err := a.loader.InCurrency(ctx, r.resolve(req.CustomerID.UUID(), trustLevel), req.Currency)
-		if err != nil {
-			errs[i] = err
-			continue
-		}
-		policy, err := a.loader.Load(ctx, req.Currency, resolved)
+		policy, err := a.loader.Load(ctx, req.Currency, r.resolve(req.CustomerID.UUID(), trustLevel))
 		if err != nil {
 			errs[i] = err
 			continue

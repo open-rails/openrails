@@ -408,7 +408,7 @@ var referenceChecks = []rowCheck{
    WHERE g.merchant_id=$1 AND g.id=ledger_transfers.credit_grant_id AND (
      g.customer_id=ledger_transfers.customer_id OR (
        ledger_transfers.customer_id IS NULL AND g.paid_amount IS NOT NULL
-       AND ledger_transfers.transfer_type IN ('credit_purchase_revenue','credit_refund_cash','credit_refund_cash_restore','credit_refund_funding')
+       AND ledger_transfers.transfer_type='credit_refund_funding'
        AND NOT EXISTS(SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id=$1
          AND a.id IN (ledger_transfers.debit_account_id,ledger_transfers.credit_account_id) AND a.customer_id IS NOT NULL)))))
 	 OR (invoice_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.invoices o WHERE o.merchant_id=$1 AND o.id=ledger_transfers.invoice_id AND o.customer_id=ledger_transfers.customer_id

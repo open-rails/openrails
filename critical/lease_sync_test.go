@@ -366,7 +366,7 @@ func TestLeaseSyncs(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			w.deps.FXTransport = failingFX{}
 			m := cfgMerchant(w.cfg, "alpha")
-			m.BillingPolicies = []billing.BillingPolicy{{Name: "yen", Kind: "window_spend_cap", PolicyCurrency: "JPY",
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "yen", PolicyCurrency: "JPY",
 				SpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 1_000_000}}}}
 			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "yen", Tier: "gold"}}
 			setCfgMerchant(&w.cfg, "alpha", m)
@@ -415,7 +415,7 @@ func TestLeaseSyncs(t *testing.T) {
 	t.Run("OR-J24-S43/usage-counts-in-the-spend-window-of-its-admission-to-the-millisecond", func(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
-			m.BillingPolicies = []billing.BillingPolicy{{Name: "hourly", Kind: "window_spend_cap",
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "hourly",
 				SpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 1_000_000, Currency: "USD"}}}}
 			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "hourly"}}
 			setCfgMerchant(&w.cfg, "alpha", m)

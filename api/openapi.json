@@ -14881,9 +14881,6 @@
           "name": {
             "type": "string"
           },
-          "kind": {
-            "type": "string"
-          },
           "outstanding_cap_amount": {
             "type": "string",
             "description": "A number as a decimal string."
@@ -14893,13 +14890,6 @@
             "items": {
               "$ref": "#/components/schemas/BudgetWindow"
             }
-          },
-          "accrual_rate_cap_per_hour": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "accrual_rate_window_seconds": {
-            "type": "integer"
           },
           "collection_threshold_amount": {
             "type": "string",
@@ -14926,8 +14916,7 @@
           }
         },
         "required": [
-          "name",
-          "kind"
+          "name"
         ]
       },
       "BillingPolicyBinding": {
@@ -20617,7 +20606,6 @@
           "balance_deny_code": {
             "type": "string",
             "enum": [
-              "accrual_rate_cap_reached",
               "budget_exceeded",
               "delegated_spend_not_allowed",
               "delinquent_unpaid_invoice",
@@ -25495,7 +25483,6 @@
           "deny_code": {
             "type": "string",
             "enum": [
-              "accrual_rate_cap_reached",
               "budget_exceeded",
               "delegated_spend_not_allowed",
               "delinquent_unpaid_invoice",
@@ -28973,7 +28960,7 @@
     "event_store_required": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off."
+      "meaning": "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows and usage history are off."
     },
     "finding_action_failed": {
       "status": 502,
