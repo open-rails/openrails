@@ -142,11 +142,11 @@ type balanceView struct {
 	// floor is the available balance at which capacity is zero; spendFloor
 	// the one at which what the customer may spend before any overdraft is.
 	floor, spendFloor int64
-	// available is the balance less what is held, less lapsed.
+	// available is the balance less pending usage and accrual.
 	available int64
-	// lapsed is what lots that lapsed and were not yet expired will expire
-	// with: still in the ledger balance, not there to spend.
-	lapsed int64
+	// lapsed: a lot lapsed and its expiry has not posted. Its units are in
+	// the balance until it does, which the look does at once.
+	lapsed bool
 	lots   []creditLot
 	// checkpointDue: a charge is not yet posted through the last 00:00 UTC.
 	checkpointDue bool
@@ -207,10 +207,13 @@ func (s *MoneyService) viewBalance(ctx context.Context, q *gen.Queries, bal *mod
 	for i, row := range rows {
 		v.lots[i] = creditLot{remaining: row.Available, endsAt: row.ExpiresAt}
 	}
-	if v.lapsed, err = lapsedUnspent(ctx, q, bal, charges); err != nil {
+	lapsed, err := q.ListLapsedCreditLots(ctx, gen.ListLapsedCreditLotsParams{
+		MerchantID: bal.MerchantID, CustomerID: bal.CustomerID, Currency: bal.Currency, AsOf: bal.AsOf,
+	})
+	if err != nil {
 		return v, err
 	}
-	v.available = satSub(satSub(bal.Balance, bal.HeldBalance), v.lapsed)
+	v.lapsed, v.available = len(lapsed) > 0, bal.Available()
 	return v, nil
 }
 
@@ -269,7 +272,7 @@ func (v balanceView) next(p balanceProjection, lowArmed, depletedArmed bool) *ti
 			next = &t
 		}
 	}
-	if v.lapsed > 0 {
+	if v.lapsed {
 		consider(&v.asOf)
 	}
 	for _, lot := range v.lots {
@@ -293,7 +296,7 @@ func (v balanceView) next(p balanceProjection, lowArmed, depletedArmed bool) *ti
 // watched reports whether the balance keeps a watch: every prepaid one, every
 // one with a running charge and every one holding a lot that lapses.
 func (v balanceView) watched() bool {
-	if !v.arrears || len(v.charges) > 0 || v.lapsed > 0 {
+	if !v.arrears || len(v.charges) > 0 || v.lapsed {
 		return true
 	}
 	for _, lot := range v.lots {
@@ -317,11 +320,11 @@ func (s *MoneyService) sampleUsageRate(ctx context.Context, q *gen.Queries, watc
 		since = later(since, *prev)
 		rate = decayRate(watch.UsageRatePerHour, now.Sub(*prev))
 	}
-	// Only a customer with unposted usage reads the event store: one without
+	// Only a customer with pending usage reads the event store: one without
 	// any looks while it is out of reach.
 	var spent int64
 	if store := s.eventStore(q); store != nil {
-		_, err := q.GetUsageUnposted(ctx, gen.GetUsageUnpostedParams{MerchantID: watch.MerchantID, CustomerID: watch.CustomerID, Currency: watch.Currency})
+		_, err := q.GetUsagePending(ctx, gen.GetUsagePendingParams{MerchantID: watch.MerchantID, CustomerID: watch.CustomerID, Currency: watch.Currency})
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 		case err != nil:
@@ -434,7 +437,7 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 		}
 	}
 	event := billing.BalanceHostEvent{
-		CustomerID: billing.CustomerID(customer), Currency: catalog.Currency(currency), AvailableAmount: bal.Balance - bal.HeldBalance,
+		CustomerID: billing.CustomerID(customer), Currency: catalog.Currency(currency), AvailableAmount: bal.Available(),
 		OwedAmount: view.owed, AccrualRatePerHour: view.accrualRate, UsageRatePerHour: usageRate, LowBalanceAmount: out.line,
 		AsOf: bal.AsOf, DepletesAt: out.depletesAt, RunwayEndsAt: out.runwayEndsAt,
 	}
@@ -486,7 +489,7 @@ func (v balanceView) lines(p balanceProjection) (low, floor *int64) {
 // moving reports a balance time moves: a running charge accrues, or a lot
 // lapses. A change moves its run-out, so each is looked at.
 func (v balanceView) moving() bool {
-	if v.accrualRate > 0 || v.lapsed > 0 {
+	if v.accrualRate > 0 || v.lapsed {
 		return true
 	}
 	for _, lot := range v.lots {

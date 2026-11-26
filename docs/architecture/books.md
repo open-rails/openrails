@@ -6,7 +6,7 @@ OpenRails keeps two double-entry books in the same tables, `ledger_accounts` and
 
 - **Native units**: an amount at the currency's scale, `Units.Decimals` in `internal/currency/registry.go`: 10^6 per unit for two-decimal fiat (micros for USD), 10^4 per yen for JPY and KRW, on-chain precision for SOL and stablecoins. **Minor units** are what a card rail settles in (`MinorDecimals`); `NativeShift` is the difference.
 - **Chart** (`books.Chart`): every account type with its book, class, scope (system, customer or PSP) and sign rules. A merchant-wide general-ledger account (system or PSP scope) keeps no counters: its balance is its `ledger_type_totals` row, checked against its sign rule at commit. `ledger_accounts_type_check` and `ledger_accounts_scope_check` hold the same chart.
-- **Class**: sets an account's normal side. Units book: `held`, `owed`, `issued`, `retired`, `clearing`. General ledger: `asset`, `contra_asset`, `liability`, `revenue`, `contra_revenue`, `expense`, `equity`. Every stored balance is `credits_posted - debits_posted`.
+- **Class**: sets an account's normal side. Units book: `held`, `owed`, `issued`, `retired`. General ledger: `asset`, `contra_asset`, `liability`, `revenue`, `contra_revenue`, `expense`, `equity`. Every stored balance is `credits_posted - debits_posted`.
 - **Transfer** (`ledger_transfers`): an immutable movement of a positive amount from a debit account to a credit account in one book. `transfer_type` is a closed vocabulary per book: the units book's `ledger.AllTransferTypes`, the general ledger's `books.GeneralTransferTypes`. `usage_reversed` alone is in both.
 - **Dates**: `effective_at` is when a transfer takes effect. A units-book transfer takes effect when it posts; a general-ledger posting names its own instant. Nothing in the books stores a zone: a reader groups `ledger_daily`'s 15-minute UTC buckets into days and months of the merchant's `accounting.timezone`, passing the zone as a query parameter (every zone's offset is a whole number of quarter hours).
 - **Dimensions**: `customer_id`, `invoice_id`, `invoice_line_id`, `product_id` and `revenue_schedule_id` attribute a transfer, with no foreign keys; `credit_grant_id` names its lot.
@@ -14,7 +14,7 @@ OpenRails keeps two double-entry books in the same tables, `ledger_accounts` and
 - **Coordinate** (`books.Coord`): operation, source and source id. With customer, currency, type, lot, invoice line and book it is the transfer's once-only identity.
 - **Lot**: a credit grant (`credit_grants`); a transfer that funds or draws it names it in `credit_grant_id` (a foreign key), and the legs on its balance account keep its `units_credited` and `units_debited`.
 - **Rollups**: `ledger_type_totals` sums what every account of a type was credited and debited; `ledger_daily` sums the credits and debits of each 15-minute UTC bucket of `effective_at` per account type, transfer type, PSP and product. A value at a past instant is the total less the flows after it.
-- **Held / available**: holds, pending refunds and running-charge accrual live outside the books (`GetFinancialHeldAmount`), unposted usage in the event store (`MoneyService.unpostedUsage`); available is balance less held.
+- **Pending / available**: usage not yet posted, at its provisional prices (`usage_pending_amounts`), and running-charge accrual (from `running_charges`) live outside the books (`GetUnpostedAmounts`); available is the balance less both.
 - **Owed**: the negated balance of the customer's `customer_owed` (`Ledger.OutstandingOwed`).
 
 ### Units book
@@ -28,7 +28,6 @@ OpenRails keeps two double-entry books in the same tables, `ledger_accounts` and
 | `units_redeemed` | `platform_revenue` | system | retired | none |
 | `units_expired`, `units_revoked` | `expired_credits`, `revoked_credits` | system | retired | none |
 | `units_refunded` | (new) | system | retired | none |
-| `units_refund_clearing`, `units_refund_loss` | `credit_refund_clearing`, `credit_refund_loss` | system | clearing | none |
 
 The books migration renamed the accounts in place; no transfer moved, and every transfer type keeps its stored name.
 
@@ -47,9 +46,9 @@ The books migration renamed the accounts in place; no transfer moved, and every 
 | Purchased credit reversed | `customer_units`, `units_expired`, `units_revoked`, `customer_owed`, `units_redeemed` → `units_refunded` | `credit_refund`, `credit_refund_funding` | `purchasedcredits.Service.ApplyReversal` |
 | Purchased credit restored | `units_refunded` → where it was taken from | `credit_refund_restore`, `credit_refund_funding` | `purchasedcredits.Service.ApplyReversal` |
 
-`deposit_bonus`, `credit_purchase_revenue`, `credit_refund_cash(_restore)` and the promotion and revenue `credit_refund_funding` legs through `units_refund_clearing` are history: a pack's bonus is part of its rate and a refund's cash is the general ledger's. Reversals of a paid lot from before the credit books still post them until the books are rebuilt.
+`deposit_bonus`, `credit_purchase_revenue` and `credit_refund_cash(_restore)` are history: a pack's bonus is part of its rate and a refund's cash is the general ledger's. Nothing posts them.
 
-Usage reaches the units book through postings (`usage_postings`, `MoneyService.postUsageTx`): at each month's end and before any other movement of that balance, per pricing period the price of the period's usage in the event store less what earlier postings took, at (`usage_posting`, `usage_posting:<id>`, `1`): balance first, the rest owed. A period whose volume price fell is credited back to a new lot (`usage_reversed`, `units_redeemed` → `customer_units`, `Ledger.ReverseUsage`). A payment that settles owed points at its transfer (`payments.ledger_transfer_id`).
+Usage reaches the units book through postings (`usage_postings`, `MoneyService.postUsageTx`): once a day, before a usage invoice, and before a credit lot's expiry, revocation or refund ([usage billing](usage-billing.md)), per pricing period the price of the period's usage in the event store less what earlier postings took, at (`usage_posting`, `usage_posting:<id>`, `1`): balance first, the rest owed. A period whose volume price fell is credited back to a new lot (`usage_reversed`, `units_redeemed` → `customer_units`, `Ledger.ReverseUsage`). A payment that settles owed points at its transfer (`payments.ledger_transfer_id`).
 
 `usage_reversed` is the one type in both books: the units book's leg is `Ledger.ReverseUsage`'s, the general ledger's `books.Books.ReverseUsage`'s (`revenue_adjustments` → `deferred_revenue_credit`, the new lot priced at face).
 
@@ -162,7 +161,7 @@ Integrity is checked on demand. `ledger.CheckIntegrity` runs conservation (each 
 
 ## Interfaces
 
-- Go: `Client.GetBalance` (`billing.Balance`: balance, held, accrued, available, owed) and `Client.ListBalanceTransactions` (`billing.BalanceTransaction`; a usage deduction carries `Usage`) read the units book. `catalog.Currencies` and `catalog.ParseCurrency` read the registry. The general ledger and its schedules have no public reader.
+- Go: `Client.GetBalance` (`billing.Balance`: balance, pending, accrued, available, owed) and `Client.ListBalanceTransactions` (`billing.BalanceTransaction`; a usage deduction carries `Usage`) read the units book. `catalog.Currencies` and `catalog.ParseCurrency` read the registry. The general ledger and its schedules have no public reader.
 - Jobs: the `openrails.revenue_recognition` scan of `openrails.billing_pass` ([River jobs](../river-jobs.md)).
 - HTTP: `GET /v1/admin/customers/{customer_id}/balance` and `GET /v1/admin/customers/{customer_id}/balance/transactions` (`merchant:customer:read`); the customer's `GET /v1/me` and `GET /v1/me/balance/transactions`; `GET /v1/config` lists `currencies`.
 - Configuration: `accounting.timezone` ([merchant configuration](merchant-configuration.md)).
@@ -210,7 +209,7 @@ Checks:
 - All five, and `ledger_rollup_pending` (`State`, empty at commit), are in `ownedTables` (`internal/merchantarchive/owned_tables.go`) and in the restore guard's table list; the rollups are excluded from the archive as derived and the queue as scratch (`internal/merchantarchive/checks.go`).
 
 ### 7. Work scales with activity
-A balance or owed read is one counter row (`LedgerAccountBalance`); an account type's total is one `ledger_type_totals` row and a period's flows are its buckets in `ledger_daily`. An insert locks at most two accounts, never a merchant-wide general-ledger account, and, for a lot's leg, its lot; its rollup rows are locked at commit, and a merchant's settlement reads only the transfers its transaction queued. A lot's remainder is its counters. No job scans the books: the month-end usage close finds its customers by `usage_unposted_due_at_idx`, balance looks are queued by crossings. `ledger-audit` reads a merchant's whole log, on demand only. Revenue schedules are found by `revenue_schedules_due_idx`, and an early end finds its subscription's or access's schedules by `revenue_schedules_subscription_id_idx` and `revenue_schedules_product_access_id_idx`.
+A balance or owed read is one counter row (`LedgerAccountBalance`); an account type's total is one `ledger_type_totals` row and a period's flows are its buckets in `ledger_daily`. An insert locks at most two accounts, never a merchant-wide general-ledger account, and, for a lot's leg, its lot; its rollup rows are locked at commit, and a merchant's settlement reads only the transfers its transaction queued. A lot's remainder is its counters. No job scans the books: the daily usage posting finds its customers by `usage_pending_due_at_idx`, balance looks are queued by crossings. `ledger-audit` reads a merchant's whole log, on demand only. Revenue schedules are found by `revenue_schedules_due_idx`, and an early end finds its subscription's or access's schedules by `revenue_schedules_subscription_id_idx` and `revenue_schedules_product_access_id_idx`.
 
 Checks:
 - `LedgerAccountBalance` reads `credits_posted - debits_posted`, not a sum.
@@ -243,7 +242,7 @@ Journeys J05 (money arithmetic), J22 (credits), J40 (books) and J41 (revenue rec
 - OR-J40-S01: every account type opens in its book and class with its sign rules, a merchant-wide general-ledger account reads no balance, the schema refuses any other pairing, each transfer type belongs to one book but `usage_reversed`, which posts in both at one coordinate and reads as a spend given back or usage owed taken back, and the general ledger refuses a merchant unit and stays out of the units book's readers (`TestBooks`).
 - OR-J40-S02: a transfer across books or currencies, or moving another customer's account, is refused by the database whichever writer inserts it, and `books.Open` inside a business transaction is refused; nothing moves. A draw on unapplied cash beyond what was received commits, raises `books.sign_breach` and fails `ledger-audit`; resolved, a later breach reopens it; a customer's usage receivable credited beyond what was accrued commits and raises it for that customer (`TestBooks`).
 - OR-J40-S03: a general-ledger posting late on a New York evening lands in its UTC bucket and on that day when grouped in the merchant's zone, a restore rebuilds the rollups, and `ledger-audit` catches injected rollup, counter, conservation and sign corruption, a merchant-wide general-ledger account's counters included, and warns of a revenue total on the debit side while the books stay OK (`TestBooks`).
-- OR-J40-S06: concurrent top-ups, one posting unposted usage first, all commit (`TestBooks`).
+- OR-J40-S06: concurrent top-ups of customers with and without pending usage all commit (`TestBooks`).
 - OR-J40-S08: two transactions, one posting and then changing a subscription's MRR, the other the reverse, the first held at commit inside the ledger step: both commit (`TestBooks`).
 - OR-J40-S09: the first two checkouts in a currency a catalog apply made sellable overlap without waiting; checkouts in a currency nothing opened still post and raise `books.account.opened_late` once per account; two checkouts' cash postings and a usage collection that locks the customer first, in opposite lock orders, all commit, and the merchant-wide accounts' counters stay 0 (`TestBooks`).
 - OR-J40-S23: two transactions, one posting and then queueing an event, the other the reverse, the first held at commit: both commit and both events are numbered; ledger work queued after the event streams flushed is refused (`TestBooks`).
@@ -289,7 +288,8 @@ Journeys J05 (money arithmetic), J22 (credits), J40 (books) and J41 (revenue rec
 - OR-J41-S34: a refund after an early end takes the forfeit first, and the end undone reinstates only what is left (`TestRevenueReversals`).
 - OR-J41-S35: a recovery naming no chargeback commits and restores the chargeback that occurred first (`TestRevenueReversals`).
 - OR-J41-S36: a provider's discount on a bill with a credit line reduces the other lines alone (`TestRevenueReversals`).
-- OR-J41-S37: a refund of an unbooked pack of a merchant's unit withdraws its units, books its cash against the payment and raises `books.credit.unbooked_unit_pack` (`TestRevenueReversals`).
+- OR-J41-S37: a refund of an unbooked pack of a merchant's unit withdraws its units, books its cash against the payment and raises `books.credit.unbooked` (`TestRevenueReversals`).
+- OR-J41-S38: a refund of an unbooked money lot does the same (`TestRevenueReversals`).
 - `TestMonthStartWhereMidnightIsSkipped`, `TestMonthStartWhereMidnightRepeats`, `TestScheduleEnds` and `TestRecognitionBoundaries` pin the boundaries (a midnight that never happens or happens twice, DST, leap years, a zone change), a schedule ended before its start, an end undone, and the allocation; `TestApplicationsStayWithinReceipts` a second application's; `TestReversalAdjustments`, `TestReversalDrawsFromItsPayment` and `TestPaymentBooksFromLegs` a reversal's.
 - OR-J31-S01, OR-J31-S02: a restore preserves the books, and a corrupt one is refused at commit (`TestBillingArchive`, `TestLedgerMaintenance`).
 - OR-J23-S05: a host transaction rollback leaves no charge (`TestHostTransactions`).

@@ -57,14 +57,14 @@ type SyncLeasesParams struct {
 	Close    bool         `json:"close,omitempty"`
 }
 
-// InFlight is what a gate has had in flight for one customer's limit across
-// at least one sync: tickets open since before its previous sync, and usage
-// a previous sync left unsettled. Other leases' views count
-// it as held while the lease is live.
+// InFlight is what a gate has had in flight for one customer's declared
+// limit or spend window across at least one sync: tickets open since before
+// its previous sync, and usage a previous sync left unsettled. Other leases'
+// views count it as held while the lease is live. The balance is never
+// reported: a sync refuses it.
 type InFlight struct {
 	CustomerID CustomerID `json:"customer_id"`
-	// Limit is balance, a declared limit or a spend window's key; Unit is
-	// its unit (balance's currency).
+	// Limit is a declared limit or a spend window's key; Unit is its unit.
 	Limit  string `json:"limit"`
 	Unit   string `json:"unit"`
 	Amount int64  `json:"amount,string"`

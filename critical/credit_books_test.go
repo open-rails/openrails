@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -36,6 +38,7 @@ type creditShop struct {
 	a        *authorityWorld
 	p        *providerLedger
 	customer billing.CustomerID
+	fleet    *river.Client[pgx.Tx]
 }
 
 func newCreditShop(t *testing.T, configure ...func(*world)) *creditShop {
@@ -43,6 +46,14 @@ func newCreditShop(t *testing.T, configure ...func(*world)) *creditShop {
 	a, p := newPaymentWorld(t, configure...)
 	meterForCapture(t, a.world)
 	return &creditShop{a: a, p: p, customer: billing.CustomerID(uuid.MustParse(a.alice.ID))}
+}
+
+// newPostingShop is a credit shop whose usage posts as its day ends: the
+// clock starts a week back, so a payment is never dated ahead of the
+// database's clock.
+func newPostingShop(t *testing.T) *creditShop {
+	t.Helper()
+	return newCreditShop(t, func(w *world) { w.clock.Advance(-7 * 24 * time.Hour) })
 }
 
 // pack is a product granting credits for a price.
@@ -96,12 +107,16 @@ func (s *creditShop) spend(t *testing.T, amount int64, key string) {
 	}))
 }
 
-// usage settles usage on the customer's credit line; the next movement
-// posts it. Time passes, so a movement at the next instant posts it.
+// usage settles usage on the customer's credit line and posts it: its day
+// ends and a billing pass takes it.
 func (s *creditShop) usage(t *testing.T, amount int64, request string) {
 	t.Helper()
 	spend(t, s.a.alpha, s.customer, request, amount)
-	s.a.clock.Advance(time.Second)
+	if s.fleet == nil {
+		s.fleet = quietFleet(t, s.a.world)
+	}
+	nextDay(s.a.world)
+	require.False(t, runPass(t, s.fleet))
 }
 
 // lotMoney is a lot's money deferred and released.
@@ -260,13 +275,13 @@ func creditBreakageAndReinstatement(t *testing.T) {
 // the same way; a pack's bonus repays at face too, its money at its rate and
 // promotional credit the rest.
 func giftSpendAndRepaidOwed(t *testing.T) {
-	s := newCreditShop(t)
+	s := newPostingShop(t)
 	a, w := s.a, s.a.world
 	_, err := a.alpha.UpdateCustomer(t.Context(), s.customer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 100_000_000}}})
 	require.NoError(t, err)
 
-	// $3 owed, then a $5 gift: the usage posts first, owed, and the gift
-	// repays it.
+	// $3 owed, then a $5 gift: the usage posted owed, and the gift repays
+	// it.
 	s.usage(t, 3_000_000, "owed-before-the-gift")
 	gift, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: s.customer, Currency: "USD", Amount: 5_000_000, Source: "critical", SourceID: "goodwill"}})
 	require.NoError(t, err)
@@ -277,8 +292,8 @@ func giftSpendAndRepaidOwed(t *testing.T) {
 	balance(t, a.alpha, s.customer, 2_000_000, 0, 2_000_000)
 
 	// $13 of usage: the gift's $2 pays part, grossed up; $11 is owed. The
-	// pack bought next posts it and repays the $11 at face: $10 of its money
-	// for 11 credits, $1 promotional.
+	// pack bought next repays the $11 at face: $10 of its money for 11
+	// credits, $1 promotional.
 	s.usage(t, 13_000_000, "beyond-the-gift")
 	_, pack := s.buy(t, s.pack(t, "pack-55", 55_000_000, 50_000_000, 365), 50_000_000, "pack-55")
 	require.Equal(t, []int64{3_000_000, 2_000_000}, lotLegs(t, w, gift[0].ID, "promotional_credit_applied"), "the gift's spend grossed usage up")

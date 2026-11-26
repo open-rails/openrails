@@ -242,12 +242,15 @@ type GetBalanceParams struct {
 	Currency catalog.Currency `form:"currency"`
 }
 
-// Balance is a customer's money in one currency, as of AsOf. AvailableAmount
-// is BalanceAmount less HeldAmount and AccruedAmount; OwedAmount is unpaid
-// arrears.
+// Balance is a customer's money in one currency, as of AsOf. BalanceAmount
+// is the ledger's; AvailableAmount is BalanceAmount less PendingAmount and
+// AccruedAmount; OwedAmount is unpaid arrears.
 //
+// PendingAmount is usage the ledger has not taken yet, at the prices intake
+// gave it: it posts at the end of the merchant's accounting day, before a
+// usage invoice, and before a credit lot's expiry, revocation or refund.
 // AccruedAmount is what the customer's running charges have accrued and the
-// ledger has not been posted, and AccrualRatePerHour their rates summed: until
+// ledger has not taken, and AccrualRatePerHour their rates summed: until
 // DepletesAt a page shows AvailableAmount - AccrualRatePerHour x hours since
 // AsOf, without reading again. DepletesAt is when the customer's capacity
 // (what is available less what is owed, plus its overdraft or credit line)
@@ -261,7 +264,7 @@ type Balance struct {
 	Unit               *MerchantCurrency `json:"unit"`
 	BillingMode        BillingMode       `json:"billing_mode"`
 	BalanceAmount      int64             `json:"balance_amount,string"`
-	HeldAmount         int64             `json:"held_amount,string"`
+	PendingAmount      int64             `json:"pending_amount,string"`
 	AccruedAmount      int64             `json:"accrued_amount,string"`
 	AvailableAmount    int64             `json:"available_amount,string"`
 	OwedAmount         int64             `json:"owed_amount,string"`

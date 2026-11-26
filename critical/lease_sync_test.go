@@ -52,6 +52,32 @@ func lineOf(t *testing.T, v billing.View, limit string) billing.ViewLimit {
 	return billing.ViewLimit{}
 }
 
+// quotaPlan is a lifetime quota of work units: what a gate reports in flight
+// against it is held while its lease is live. The balance is never reported.
+const quotaPlan = `schema_version: 1
+meters:
+  work: {event_type: work, value_property: units, aggregation: sum}
+limits:
+  quota:
+    unit: units
+    reset: {kind: lifetime}
+    counts: [{meter: work}]
+products:
+  plan: {display_name: Plan, limits: {quota: "1000"}}
+`
+
+// quotaInFlight is amount of the customer's quota in flight.
+func quotaInFlight(customer billing.CustomerID, amount int64) []billing.InFlight {
+	return []billing.InFlight{{CustomerID: customer, Limit: "quota", Unit: "units", Amount: amount}}
+}
+
+// grantQuota declares quotaPlan and gives the customer its quota.
+func grantQuota(t *testing.T, w *world, customer billing.CustomerID) {
+	t.Helper()
+	applyLimits(t, w.alpha, quotaPlan)
+	grantLimitProduct(t, w.alpha, customer, "plan", 24)
+}
+
 func TestLeaseSyncs(t *testing.T) {
 	t.Run("OR-J24-S06/a-lost-reply-resends-a-gap-is-refused", func(t *testing.T) {
 		w := newWorld(t)
@@ -82,14 +108,17 @@ func TestLeaseSyncs(t *testing.T) {
 		customer, _ := fundedCustomer(t, w)
 		usageMeter(t, w.alpha, 100)
 		lease := newLease()
+		grantQuota(t, w, customer)
 		outbox := numbered(1, usageInput(customer, "a", 1), usageInput(customer, "b", 2), usageInput(customer, "c", 3))
 		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: outbox[:2], Views: []billing.ViewParams{computeView(customer)},
-			InFlight: []billing.InFlight{{CustomerID: customer, Limit: catalog.BalanceLimit, Unit: "USD", Amount: 100}}})
+			InFlight: quotaInFlight(customer, 100)})
 		require.Empty(t, out.Usage.Refused)
-		balance(t, w.alpha, customer, 600, 400, 1000)
+		balance(t, w.alpha, customer, 700, 300, 1000)
+		require.EqualValues(t, 100, customerLimit(t, w.alpha, customer, "quota").Held)
 		// The process dies with item 3 unsent and a request in flight; once
 		// the lease stops syncing its report counts nowhere.
 		w.clock.Advance(limits.LeaseLifetime + time.Second)
+		require.Zero(t, customerLimit(t, w.alpha, customer, "quota").Held)
 		balance(t, w.alpha, customer, 700, 300, 1000)
 		// Its successor resends the outbox against the dead lease with close:
 		// the first two answer their receipts, the third settles as late
@@ -99,6 +128,7 @@ func TestLeaseSyncs(t *testing.T) {
 		require.Empty(t, out.Usage.Refused)
 		require.False(t, out.Lease.ExpiresAt.After(w.clock.Now()), "a closed lease has ended")
 		balance(t, w.alpha, customer, 400, 600, 1000)
+		require.Zero(t, customerLimit(t, w.alpha, customer, "quota").Held)
 		again := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: outbox})
 		require.Empty(t, again.Usage.Refused)
 		balance(t, w.alpha, customer, 400, 600, 1000)
@@ -116,7 +146,7 @@ func TestLeaseSyncs(t *testing.T) {
 		balance(t, w.alpha, customer, 800, 200, 1000)
 		fleet := startFleet(t, w)
 		nextMonth(w)
-		closeMonths(t, fleet)
+		postDays(t, fleet)
 		require.Len(t, usageDeductions(t, w.alpha, customer), 1)
 		balance(t, w.alpha, customer, 800, 0, 800)
 	})
@@ -163,43 +193,63 @@ func TestLeaseSyncs(t *testing.T) {
 		balance(t, w.alpha, periods, 1000-16, 16, 1000)
 	})
 
-	t.Run("OR-J24-S11/a-month-posts-once-and-once-more-before-a-top-up", func(t *testing.T) {
+	t.Run("OR-J24-S11/a-day-posts-once-and-a-top-up-posts-nothing", func(t *testing.T) {
 		w := newWorld(t, earlyInMonth)
 		customer, _ := fundedCustomer(t, w)
 		usageMeter(t, w.alpha, 100)
 		lease := newLease()
 		settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "a", 2))...)
 		balance(t, w.alpha, customer, 800, 200, 1000)
-		// Until it posts, the usage is held: a view leaves what remains, as if
-		// it had.
+		// Until it posts, the usage is pending: a view leaves what remains.
 		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Views: []billing.ViewParams{computeView(customer)}})
 		require.EqualValues(t, 800, lineOf(t, viewOf(t, out, customer), catalog.BalanceLimit).Remaining)
 
-		// A top-up posts the month so far first.
+		// A top-up posts nothing: the usage stays pending.
 		w.clock.Advance(time.Minute)
 		fund(t, w.alpha, customer, "top-up", 500)
-		balance(t, w.alpha, customer, 1300, 0, 1300)
-		require.Len(t, usageDeductions(t, w.alpha, customer), 1)
+		balance(t, w.alpha, customer, 1300, 200, 1500)
+		require.Empty(t, usageDeductions(t, w.alpha, customer))
 		settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "b", 1))...)
-		balance(t, w.alpha, customer, 1200, 100, 1300)
+		balance(t, w.alpha, customer, 1200, 300, 1500)
 
-		// The rest of the month posts once the month ends.
+		// The day's usage posts once, after the day ends.
 		fleet := startFleet(t, w)
-		closeMonths(t, fleet)
-		require.Len(t, usageDeductions(t, w.alpha, customer), 1, "the month has not ended")
-		month := time.Date(w.clock.Now().Year(), w.clock.Now().Month(), 1, 0, 0, 0, 0, time.UTC)
-		nextMonth(w)
-		closeMonths(t, fleet)
+		postDays(t, fleet)
+		require.Empty(t, usageDeductions(t, w.alpha, customer), "the day has not ended")
+		now := w.clock.Now().UTC()
+		day := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
+		nextDay(w)
+		postDays(t, fleet)
 		balance(t, w.alpha, customer, 1200, 0, 1200)
 		deductions := usageDeductions(t, w.alpha, customer)
-		require.Len(t, deductions, 2)
-		require.EqualValues(t, -100, deductions[0].Amount)
-		require.EqualValues(t, -200, deductions[1].Amount)
-		require.Equal(t, month.AddDate(0, 1, 0), deductions[0].Usage.Through, "the close cuts at the month's end")
-		require.EqualValues(t, 100, deductions[0].Usage.Amount, "each posting shows what it added")
-		require.EqualValues(t, 200, deductions[1].Usage.Amount)
-		require.Equal(t, []billing.UsageDeductionLine{{MeterKey: "compute", Requests: 1, Quantity: 1, Amount: 100}}, deductions[0].Usage.Lines)
-		require.Equal(t, []billing.UsageDeductionLine{{MeterKey: "compute", Requests: 1, Quantity: 2, Amount: 200}}, deductions[1].Usage.Lines)
+		require.Len(t, deductions, 1)
+		require.EqualValues(t, -300, deductions[0].Amount)
+		require.True(t, deductions[0].Usage.Through.After(day), "a posting takes everything the event store holds")
+		require.EqualValues(t, 300, deductions[0].Usage.Amount)
+		require.Equal(t, []billing.UsageDeductionLine{{MeterKey: "compute", Requests: 2, Quantity: 3, Amount: 300}}, deductions[0].Usage.Lines)
+		postDays(t, fleet)
+		require.Len(t, usageDeductions(t, w.alpha, customer), 1, "a posted day posts nothing again")
+	})
+
+	t.Run("OR-J24-S71/usage-past-the-balance-is-pending-and-posts-as-owed", func(t *testing.T) {
+		w := newWorld(t, earlyInMonth)
+		customer, _ := fundedCustomer(t, w)
+		usageMeter(t, w.alpha, 100)
+		// Gates decide on views that lag settled usage by a few syncs: usage
+		// can settle past zero. It is pending, and the balance shows it.
+		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "past-zero", 15))...)
+		balance(t, w.alpha, customer, -500, 1500, 1000)
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}})
+		require.EqualValues(t, -500, lineOf(t, viewOf(t, out, customer), catalog.BalanceLimit).Remaining)
+		// The posting takes the balance and leaves the rest owed.
+		fleet := startFleet(t, w)
+		nextDay(w)
+		postDays(t, fleet)
+		balance(t, w.alpha, customer, 0, 0, 0)
+		require.EqualValues(t, 500, owed(t, w.alpha, customer))
+		deductions := usageDeductions(t, w.alpha, customer)
+		require.NotEmpty(t, deductions)
+		require.EqualValues(t, 1500, deductions[0].Usage.Amount, "one posting took it all")
 	})
 
 	t.Run("OR-J24-S14/views-of-an-occasional-customer-reserve-nothing-and-show-what-settled", func(t *testing.T) {
@@ -233,9 +283,11 @@ func TestLeaseSyncs(t *testing.T) {
 		w := newWorld(t)
 		customer, _ := fundedCustomer(t, w)
 		usageMeter(t, w.alpha, 100)
+		grantQuota(t, w, customer)
 		lease := newLease()
-		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: []billing.InFlight{{CustomerID: customer, Limit: "balance", Unit: "USD", Amount: 200}}})
-		balance(t, w.alpha, customer, 800, 200, 1000)
+		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: quotaInFlight(customer, 200)})
+		require.EqualValues(t, 200, customerLimit(t, w.alpha, customer, "quota").Held)
+		balance(t, w.alpha, customer, 1000, 0, 1000)
 
 		// A sync with close settles its usage, then clears its report and
 		// ends it, long before it would expire.
@@ -243,13 +295,15 @@ func TestLeaseSyncs(t *testing.T) {
 		require.EqualValues(t, 1, out.Usage.ThroughN)
 		require.Empty(t, out.Usage.Refused)
 		require.False(t, out.Lease.ExpiresAt.After(w.clock.Now()), "a closed lease has ended")
+		require.Zero(t, customerLimit(t, w.alpha, customer, "quota").Held)
 		balance(t, w.alpha, customer, 900, 100, 1000)
 
 		// Usage against a closed lease still settles, in full, and its report
 		// stays clear.
 		out = syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(2, usageInput(customer, "late", 1)),
-			InFlight: []billing.InFlight{{CustomerID: customer, Limit: "balance", Unit: "USD", Amount: 100}}})
+			InFlight: quotaInFlight(customer, 100)})
 		require.EqualValues(t, 2, out.Usage.ThroughN)
+		require.Zero(t, customerLimit(t, w.alpha, customer, "quota").Held)
 		balance(t, w.alpha, customer, 800, 200, 1000)
 		again := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Close: true})
 		require.EqualValues(t, 2, again.Usage.ThroughN)
@@ -406,12 +460,11 @@ func TestLeaseSyncs(t *testing.T) {
 		// A sync reporting the customer in flight for the first time takes no
 		// lock of the customer and so commits at once.
 		started := time.Now()
-		_, err = w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease,
-			InFlight: []billing.InFlight{{CustomerID: customer, Limit: catalog.BalanceLimit, Unit: "USD", Amount: 200}}})
+		_, err = w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, InFlight: quotaInFlight(customer, 200)})
 		require.NoError(t, err)
 		require.Less(t, time.Since(started), time.Second)
 		require.NoError(t, tx.Commit(t.Context()))
-		balance(t, w.alpha, customer, 800, 200, 1000)
+		balance(t, w.alpha, customer, 1000, 0, 1000)
 	})
 }
 

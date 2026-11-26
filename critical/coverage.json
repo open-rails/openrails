@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 813,
+  "scenario_count": 820,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -641,17 +641,17 @@
     {
       "id": "OR-J22-S01",
       "journey": "J22",
-      "name": "Usage a gate has in flight, then settles, conserves native units"
+      "name": "Settled usage is pending in the balance at once and posts at the end of its accounting day; a gate never reports the balance in flight"
     },
     {
       "id": "OR-J22-S02",
       "journey": "J22",
-      "name": "Concurrent spend or revoke cannot make balance negative"
+      "name": "A revocation posts settled usage first, so the lot funds it and only the rest is revoked"
     },
     {
       "id": "OR-J22-S03",
       "journey": "J22",
-      "name": "Expiry preserves spent value and what a live gate has in flight"
+      "name": "Usage before a lot's lapse posts through the lapse and spends the lot before what is left expires"
     },
     {
       "id": "OR-J22-S04",
@@ -721,7 +721,7 @@
     {
       "id": "OR-J24-S11",
       "journey": "J24",
-      "name": "A month's usage posts once and once more before a top-up, held until then"
+      "name": "A day's usage posts once after the day ends, and a top-up posts nothing"
     },
     {
       "id": "OR-J24-S14",
@@ -791,7 +791,7 @@
     {
       "id": "OR-J24-S31",
       "journey": "J24",
-      "name": "A sync takes no customer lock: one beside another transaction holding the customer's spend lock settles at once; one that cannot take its locks within its lock budget (a posting holding the unposted mark) is answered 503 service_unavailable before the commit guard, commits and renews nothing, and its retry settles once"
+      "name": "A sync takes no customer lock: one beside another transaction holding the customer's spend lock settles at once; one that cannot take its locks within its lock budget (a posting holding the customer's queue row) is answered 503 service_unavailable before the commit guard, commits and renews nothing, and its retry settles once"
     },
     {
       "id": "OR-J24-S32",
@@ -861,7 +861,7 @@
     {
       "id": "OR-J24-S48",
       "journey": "J24",
-      "name": "While ClickHouse is out of reach a sync answers 503 and settles nothing, a usage customer's balance and top-up wait for it, a customer without usage is unaffected, and every item settles once after"
+      "name": "While ClickHouse is out of reach a sync answers 503 and settles nothing, balances read and move from PostgreSQL, and every item settles once after"
     },
     {
       "id": "OR-J24-S49",
@@ -871,7 +871,7 @@
     {
       "id": "OR-J24-S50",
       "journey": "J24",
-      "name": "Late usage of a month that posted posts the difference at the next close"
+      "name": "Late usage of a day that posted posts the difference at the next posting"
     },
     {
       "id": "OR-J24-S51",
@@ -881,7 +881,7 @@
     {
       "id": "OR-J24-S52",
       "journey": "J24",
-      "name": "A database with unposted usage starts without its store: the merchant's usage is refused and named in a finding, that customer's balance waits for the store, and other customers and running charges bill; an empty store is refused, and usage attach discards the unposted usage only with --discard-unposted, on the record"
+      "name": "A database with pending usage starts without its store: the merchant's usage is refused and named in a finding, balances read from PostgreSQL, and other customers and running charges bill; an empty store is refused, and usage attach discards the pending usage only with --discard-pending, on the record"
     },
     {
       "id": "OR-J24-S53",
@@ -901,7 +901,7 @@
     {
       "id": "OR-J24-S56",
       "journey": "J24",
-      "name": "A month's usage posts at the month's end in the merchant's accounting zone, not UTC's"
+      "name": "A day's usage posts once the day ends in the merchant's accounting zone, not UTC's"
     },
     {
       "id": "OR-J24-S57",
@@ -1446,7 +1446,7 @@
     {
       "id": "OR-J23-S14",
       "journey": "J23",
-      "name": "A request past the balance or a monthly spend cap takes from neither"
+      "name": "A request past the balance or a monthly spend cap takes from neither; an open ticket holds the window, never the balance on the server"
     },
     {
       "id": "OR-J23-S16",
@@ -1521,7 +1521,7 @@
     {
       "id": "OR-J23-S38",
       "journey": "J23",
-      "name": "Two gates and an unreachable OpenRails keep deciding on their views and together spend at most what was left, each its share; what a flush resends is settled and never also reported in flight"
+      "name": "Two gates and an unreachable OpenRails keep deciding on their views and together spend at most what was left, each its share; what a flush resends is settled once"
     },
     {
       "id": "OR-J23-S40",
@@ -1881,7 +1881,7 @@
     {
       "id": "OR-J22-S06",
       "journey": "J22",
-      "name": "Lapsed credit stops being available at its lapse and its balance watch, arrears included, expires it"
+      "name": "A lapsed lot stays in the balance until its watch, arrears included, expires it"
     },
     {
       "id": "OR-J29-S08",
@@ -2131,7 +2131,12 @@
     {
       "id": "OR-J22-S50",
       "journey": "J22",
-      "name": "A view offers no credit that lapsed before its watch looks"
+      "name": "A lapsed lot counts in the balance and its views until its look expires it"
+    },
+    {
+      "id": "OR-J22-S51",
+      "journey": "J22",
+      "name": "A refund the provider refuses gives back the credit it took off the balance, its money never left deferral"
     },
     {
       "id": "OR-J26-S54",
@@ -2416,7 +2421,7 @@
     {
       "id": "OR-J04-S44",
       "journey": "J04",
-      "name": "A credit lot lapsing at 00:00 UTC is never offered past it and is booked by that hour's billing pass"
+      "name": "A credit lot lapsing at 00:00 UTC counts until that hour's billing pass books its lapse"
     },
     {
       "id": "OR-J04-S45",
@@ -2551,7 +2556,7 @@
     {
       "id": "OR-J25-S43",
       "journey": "J25",
-      "name": "While ClickHouse is out of reach a balance look at a customer without unposted usage expires its lapsed lot"
+      "name": "While ClickHouse is out of reach a balance look at a customer without pending usage expires its lapsed lot"
     },
     {
       "id": "OR-J29-S37",
@@ -2581,7 +2586,7 @@
     {
       "id": "OR-J22-S07",
       "journey": "J22",
-      "name": "A pending refund of a mixed invoice's credit line holds the line's whole credit lot until it settles"
+      "name": "A pending refund of a mixed invoice's credit line takes the line's whole credit lot off the balance when it is requested"
     },
     {
       "id": "OR-J22-S08",
@@ -2631,7 +2636,7 @@
     {
       "id": "OR-J40-S06",
       "journey": "J40",
-      "name": "Concurrent top-ups, one posting unposted usage first, all commit"
+      "name": "Concurrent top-ups of customers with and without pending usage all commit"
     },
     {
       "id": "OR-J40-S08",
@@ -3016,7 +3021,7 @@
     {
       "id": "OR-J48-S05",
       "journey": "J48",
-      "name": "Usage priced in a unit by rate card holds and draws the unit balance, soonest-expiring lot first, and a card naming no currency prices no unit; usage the units cannot cover is never owed"
+      "name": "Usage priced in a unit by rate card is pending against the unit balance and its posting draws the soonest-expiring lot first; a card naming no currency prices no unit; usage the units cannot cover is never owed"
     },
     {
       "id": "OR-J48-S06",
@@ -3036,7 +3041,7 @@
     {
       "id": "OR-J48-S09",
       "journey": "J48",
-      "name": "Reversals of a multi-line invoice's pack apply in the order they settle: a chargeback settling before an earlier pending refund takes the line's share first, the refund then takes the rest, each share is recorded once, in the general ledger, and a won dispute restores what the chargeback took"
+      "name": "Reversals of a multi-line invoice's pack apply in the order they settle: a chargeback settling before an earlier pending refund takes the line's share first, back from what the refund withdrew, the refund then keeps the rest, each share is recorded once, in the general ledger, and a won dispute restores what the chargeback took"
     },
     {
       "id": "OR-J48-S10",
@@ -3481,7 +3486,7 @@
     {
       "id": "OR-J41-S29",
       "journey": "J41",
-      "name": "A refund the rail confirms later is dated when it settled, its credit lot's legs with its own"
+      "name": "A refund the rail confirms later is dated in the general ledger when it settled, its credit lot's money with its own; the lot's units left the balance when it was requested"
     },
     {
       "id": "OR-J41-S30",
@@ -3521,7 +3526,12 @@
     {
       "id": "OR-J41-S37",
       "journey": "J41",
-      "name": "A refund of a pack of a merchant's unit the books never booked withdraws its units at once, records its share, books its cash against the payment and raises books.credit.unbooked_unit_pack"
+      "name": "A refund of a pack of a merchant's unit the books never booked withdraws its units at once, records its share, books its cash against the payment and raises books.credit.unbooked"
+    },
+    {
+      "id": "OR-J41-S38",
+      "journey": "J41",
+      "name": "A refund of a money lot the books never booked withdraws its units to units_refunded at once, records its share, books its cash against the payment and raises books.credit.unbooked"
     },
     {
       "id": "OR-J40-S10",
@@ -3837,6 +3847,31 @@
       "id": "OR-J24-S70",
       "journey": "J24",
       "name": "A sync past its usage budget after a chunk starts no other: it answers through_n at the chunk's end, leaves the rest neither settled nor refused (a gap past them too), and the next sync continues there, refusing an item alone and the gap once all before it settled; a resend answers both settlements from their receipts"
+    },
+    {
+      "id": "OR-J24-S71",
+      "journey": "J24",
+      "name": "Usage settled past the balance is pending, then posts the balance and leaves the rest owed"
+    },
+    {
+      "id": "OR-J24-S72",
+      "journey": "J24",
+      "name": "A resend after a lost reply is answered from the lease's receipts and adds nothing to pending"
+    },
+    {
+      "id": "OR-J24-S73",
+      "journey": "J24",
+      "name": "A sync that failed after inserting its first chunk leaves that usage unsettled; the resend adds each item to pending once, priced from the period's start"
+    },
+    {
+      "id": "OR-J24-S74",
+      "journey": "J24",
+      "name": "A posting before the resend leaves usage a failed sync inserted to the resend, which adds it to pending once; the next posting takes it once"
+    },
+    {
+      "id": "OR-J24-S75",
+      "journey": "J24",
+      "name": "A resend older than the lease's kept receipts is covered by its settled number and settles nothing again"
     },
     {
       "id": "OR-J40-S20",

@@ -116,8 +116,16 @@ func earlyInMonth(w *world) {
 	w.clock.Advance(time.Date(now.Year(), now.Month()+1, 2, 12, 0, 0, 0, time.UTC).Sub(now))
 }
 
-// closeMonths runs a billing pass: the usage of every month that ended posts.
-func closeMonths(t *testing.T, fleet *river.Client[pgx.Tx]) {
+// nextDay moves the clock past the start of the next UTC day: the day's
+// usage is due to post.
+func nextDay(w *world) {
+	now := w.clock.Now().UTC()
+	w.clock.Advance(time.Date(now.Year(), now.Month(), now.Day()+1, 0, 1, 0, 0, time.UTC).Sub(now))
+}
+
+// postDays runs a billing pass: the usage of every accounting day that ended
+// posts, a month's last day's with its month.
+func postDays(t *testing.T, fleet *river.Client[pgx.Tx]) {
 	t.Helper()
 	runRegistered(t, fleet, "openrails.billing_pass", 1)
 }

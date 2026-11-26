@@ -218,13 +218,13 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	// Undeclared accounts alert their operator again while unresolved.
 	realerts := &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}
 	storedCards := &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture(), Log: r.Log}
-	closing := &riverjobs.UsageCloseWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
+	posting := &riverjobs.UsagePostingWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
 	// Deferred revenue recognised at each month boundary in the merchant's
 	// accounting timezone, at each schedule's end and at an early end.
 	recognition := &riverjobs.RevenueRecognitionWorker{DB: r.DB, Clock: clock, Log: r.Log}
 	scans := []riverjobs.Scan{
-		// A month's usage posts once its month ends, before anything bills it.
-		{Kind: riverjobs.KindUsageClose, Run: closing.Pass, DueBy: closing.DueBy},
+		// A day's usage posts once its day ends, before anything bills it.
+		{Kind: riverjobs.KindUsagePosting, Run: posting.Pass, DueBy: posting.DueBy},
 		{Kind: riverjobs.KindDunning, Run: dunning.Pass, DueBy: dunning.DueBy},
 		{Kind: riverjobs.KindSubscriptionVerificationRetry, Run: r.Verifier.RetryDue},
 		{Kind: riverjobs.KindBalanceWatch, Run: balances.Pass, DueBy: balances.DueBy},

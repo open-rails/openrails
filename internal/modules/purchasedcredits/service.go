@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/money/owed"
@@ -159,6 +158,10 @@ func sameExpiry(a, b *time.Time) bool {
 	}
 	return a.Equal(*b)
 }
+
+// lockBalance takes the customer's spend lock and reads its balance in the
+// currency and what the ledger has not taken of it: pending usage and
+// running charges' accrual.
 func (s *Service) lockBalance(ctx context.Context, q *gen.Queries, mid, customer uuid.UUID, currency string) (int64, int64, error) {
 	if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid, ID: customer}); err != nil {
 		return 0, 0, err
@@ -172,11 +175,9 @@ func (s *Service) lockBalance(ctx context.Context, q *gen.Queries, mid, customer
 	if err != nil {
 		return 0, 0, err
 	}
-	now := s.now()
-	held, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{MerchantID: mid, CustomerID: customer, Currency: currency, AsOf: now, LeaseLiveSince: limits.LeaseLiveSince(now)})
+	unposted, err := q.GetUnpostedAmounts(ctx, gen.GetUnpostedAmountsParams{MerchantID: mid, CustomerID: customer, Currency: currency, AsOf: s.now()})
 	if err != nil {
 		return 0, 0, err
 	}
-	unposted, err := ledger.UnpostedUsage(ctx, q, mid, customer, currency)
-	return balance, held.Held + unposted, err
+	return balance, unposted.Pending + unposted.Accrued, nil
 }

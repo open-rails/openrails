@@ -22,7 +22,8 @@ import (
 // its $100 payment reverses the credit line first, up to the line's $10; only
 // that part touches the credit lot.
 func TestMixedInvoiceCreditRefunds(t *testing.T) {
-	t.Run("OR-J22-S07/pending-credit-line-refund-holds-the-whole-lot", mixedPendingRefund)
+	t.Run("OR-J22-S07/a-pending-credit-line-refund-takes-the-whole-lot-off-the-balance-at-once", mixedPendingRefund)
+	t.Run("OR-J22-S51/a-refused-refund-gives-its-credit-back", mixedRefusedRefund)
 	t.Run("OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first", mixedReversals)
 	t.Run("OR-J22-S09/won-dispute-credit-stays-when-a-refund-found-none", mixedDisputeAroundRefund)
 }
@@ -112,8 +113,9 @@ func mixedPendingRefund(t *testing.T) {
 	read, err := a.alpha.GetPayment(t.Context(), payment)
 	require.NoError(t, err)
 	require.Zero(t, read.AmountRefunded, "the lost response leaves the refund pending")
-	// $10 is the credit line's whole amount: all 25 credits are held.
-	balance(t, a.alpha, m.customer, 5_000_000, 25_000_000, 30_000_000)
+	// $10 is the credit line's whole amount: all 25 credits left the balance
+	// when the refund was asked for.
+	balance(t, a.alpha, m.customer, 5_000_000, 0, 5_000_000)
 
 	compute, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "compute", DisplayName: "Compute"})
 	require.NoError(t, err)
@@ -123,14 +125,13 @@ func mixedPendingRefund(t *testing.T) {
 	})
 	require.NoError(t, err)
 	out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(m.customer)}})
-	require.EqualValues(t, 5_000_000, lineOf(t, viewOf(t, out, m.customer), catalog.BalanceLimit).Remaining, "held credit is not offered")
-	spend(t, a.alpha, m.customer, "unheld", 5_000_000)
-	// The usage accrues; a top-up posts it first, while the refund is
-	// still pending.
+	require.EqualValues(t, 5_000_000, lineOf(t, viewOf(t, out, m.customer), catalog.BalanceLimit).Remaining, "refunding credit is not offered")
+	spend(t, a.alpha, m.customer, "unrefunded", 5_000_000)
+	// The usage is pending; a top-up does not post it.
 	a.clock.Advance(time.Second)
-	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 1_000_000, Source: "critical", SourceID: "post-the-usage"}})
+	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 1_000_000, Source: "critical", SourceID: "top-up"}})
 	require.NoError(t, err)
-	balance(t, a.alpha, m.customer, 1_000_000, 25_000_000, 26_000_000)
+	balance(t, a.alpha, m.customer, 1_000_000, 5_000_000, 6_000_000)
 
 	p.mu.Lock()
 	p.lostRefundResponse = false
@@ -149,7 +150,8 @@ func mixedPendingRefund(t *testing.T) {
 		read, err := a.alpha.GetPayment(t.Context(), payment)
 		return err == nil && read.AmountRefunded == 10_000_000
 	}, 20*time.Second, 20*time.Millisecond)
-	// The spend drew the goodwill credit; the refund withdrew the whole lot.
+	// The refund's settlement posted the usage first: it drew the goodwill
+	// credit, and the refund's lot was already off the balance.
 	balance(t, a.alpha, m.customer, 1_000_000, 0, 1_000_000)
 	var losses int
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+
@@ -158,6 +160,45 @@ func mixedPendingRefund(t *testing.T) {
 	lot := paymentLot(t, a.alpha, m.customer, payment)
 	require.Equal(t, []int64{10_000_000}, lotLegs(t, a.world, lot, "refund_deferred"), "its 25 unspent credits were worth the line's $10")
 	require.Empty(t, lotLegs(t, a.world, lot, "refund_recognized"))
+}
+
+func mixedRefusedRefund(t *testing.T) {
+	m := newMixedSale(t)
+	a, p := m.a, m.p
+	payment := m.buy(t, "mixed-refused-refund")
+	balance(t, a.alpha, m.customer, 25_000_000, 0, 25_000_000)
+	p.mu.Lock()
+	p.refuseRefund = true
+	p.mu.Unlock()
+	_, _ = a.alpha.RefundPayment(t.Context(), "credit-pack-refused", payment, billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Return the credit pack"})
+	var statuses []string
+	rows, err := a.pool.Query(t.Context(), "SELECT status FROM "+pgx.Identifier{a.schema, "payments"}.Sanitize()+" WHERE merchant_id = $1 AND refunded_payment_id = $2",
+		a.alpha.MerchantID().UUID(), payment.UUID())
+	require.NoError(t, err)
+	for rows.Next() {
+		var status string
+		require.NoError(t, rows.Scan(&status))
+		statuses = append(statuses, status)
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, []string{"failed"}, statuses, "the provider refused the refund")
+	read, err := a.alpha.GetPayment(t.Context(), payment)
+	require.NoError(t, err)
+	require.Zero(t, read.AmountRefunded)
+	// The refund took the lot off the balance when it was asked for, and gave
+	// it back when the provider refused it; its money never left deferral.
+	balance(t, a.alpha, m.customer, 25_000_000, 0, 25_000_000)
+	lot := paymentLot(t, a.alpha, m.customer, payment)
+	grant, err := a.alpha.GetCreditGrant(t.Context(), lot)
+	require.NoError(t, err)
+	require.EqualValues(t, 25_000_000, grant.RemainingAmount)
+	require.Zero(t, grant.RefundedAmount, "the refund is net of its restore")
+	var withdrawn, restored int64
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(amount) FILTER (WHERE transfer_type = 'credit_refund'), 0), COALESCE(sum(amount) FILTER (WHERE transfer_type = 'credit_refund_restore'), 0) FROM "+
+		pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+" WHERE merchant_id = $1 AND credit_grant_id = $2 AND book = 'units'", a.alpha.MerchantID().UUID(), lot.UUID()).Scan(&withdrawn, &restored))
+	require.EqualValues(t, 25_000_000, withdrawn)
+	require.EqualValues(t, 25_000_000, restored)
+	require.Empty(t, lotLegs(t, a.world, lot, "refund_deferred"))
 }
 
 func mixedReversals(t *testing.T) {

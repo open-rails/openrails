@@ -4,9 +4,9 @@
 //
 // A sync takes no customer's lock. Its transaction locks its own lease row
 // and shares the merchant's catalog fence; its intake is append-only (events
-// into the event store, then the lease's numbering and receipts, an unposted
-// mark held by key share), and its in-flight report writes only its own
-// rows. Only a window that must open or a failed item's charge takes
+// into the event store, then the lease's numbering and receipts and pending
+// amounts, the posting queue row held by key share), and its in-flight report
+// writes only its own rows. Only a window that must open or a failed item's charge takes
 // that customer's lock (money.PrepareUsageTx). Views are read after the
 // commit, in batches, in one snapshot (views.go).
 package leases
@@ -65,18 +65,17 @@ const (
 	// one it has no time for is answered null and asked again.
 	workBudget = 2500 * time.Millisecond
 	// lockBudget is how long a sync's statement may wait for a lock: a
-	// posting holding an unposted mark, or a customer whose window opens.
+	// posting holding a customer's queue row, or a customer whose window opens.
 	lockBudget = workBudget - 500*time.Millisecond
-	// usageChunkItems is the most items one chunk of usage takes in.
-	usageChunkItems = 250
 )
 
-// A sync settles its new usage in chunks of at most UsageChunkCustomers
-// customers, each one intake, and starts no chunk after the first once
-// UsageBudget of it has passed: the rest is left for the next sync. A chunk
-// takes well under commitMargin.
+// A sync settles its new usage in chunks of at most UsageChunkItems items
+// naming at most UsageChunkCustomers customers, each one intake, and starts
+// no chunk after the first once UsageBudget of it has passed: the rest is
+// left for the next sync. A chunk takes well under commitMargin.
 const (
 	UsageBudget         = 2 * time.Second
+	UsageChunkItems     = 250
 	UsageChunkCustomers = 100
 )
 
@@ -154,8 +153,10 @@ func validate(p billing.SyncLeasesParams) error {
 		switch {
 		case f.CustomerID.IsZero():
 			return invalid(fmt.Sprintf("in_flight[%d].customer_id", i), "customer_id is required")
+		case f.Limit == catalog.BalanceLimit:
+			return invalid(fmt.Sprintf("in_flight[%d].limit", i), "the balance is not reported in flight: other gates see usage once it settles")
 		case !limitKeyPattern.MatchString(f.Limit):
-			return invalid(fmt.Sprintf("in_flight[%d].limit", i), "limit must be balance, a limit key or a spend window")
+			return invalid(fmt.Sprintf("in_flight[%d].limit", i), "limit must be a limit key or a spend window")
 		case !unitPattern.MatchString(f.Unit):
 			return invalid(fmt.Sprintf("in_flight[%d].unit", i), "unit must be a unit or currency code")
 		case f.Amount < 0:
@@ -647,11 +648,11 @@ func request(u billing.LeaseUsage, currency string) admission.AdmitRequest {
 }
 
 // chunkEnd is where the chunk of the prefix from start ends: at most
-// usageChunkItems items naming at most UsageChunkCustomers customers.
+// UsageChunkItems items naming at most UsageChunkCustomers customers.
 func (r *syncRun) chunkEnd(start int) int {
 	seen := map[billing.CustomerID]bool{}
 	i := start
-	for ; i < r.prefix.end && i-start < usageChunkItems; i++ {
+	for ; i < r.prefix.end && i-start < UsageChunkItems; i++ {
 		if c := r.p.Usage[i].CustomerID; !seen[c] {
 			if len(seen) == UsageChunkCustomers {
 				break

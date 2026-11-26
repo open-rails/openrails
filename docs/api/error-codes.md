@@ -36,7 +36,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `charge_psp_unknown` | 409 | `invalid_request_error` | settings.charge_psps names a PSP that is not a live card PSP of the merchant. |
 | `credential_expired` | 401 | `authentication_error` | The credential has expired. |
 | `credential_revoked` | 401 | `authentication_error` | The credential or its session was revoked. |
-| `credit_grant_held` | 409 | `invalid_request_error` | Active holds need the grant's remaining credit. |
+| `credit_grant_held` | 409 | `invalid_request_error` | A refund of the grant's payment is in flight: retry once it settles. |
 | `credit_grant_not_found` | 404 | `invalid_request_error` | The credit grant does not exist. |
 | `credit_grant_unavailable` | 409 | `invalid_request_error` | The credit grant expired, ended or has no remaining credit. |
 | `csrf_origin_denied` | 403 | `authorization_error` | A cookie-authenticated request came from an origin that is not allowed. |

@@ -89,7 +89,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 		}
 		// Usage is owed as it accrued, and running charges through the
 		// window's end as far as it has come, before the window is billed.
-		if _, err := s.WithDatabase(d).at(now).postUsageTx(ctx, q, merchantID, payerID, cur, now, usagePostingMovement); err != nil {
+		if _, err := s.WithDatabase(d).at(now).postEverything(ctx, q, merchantID, payerID, cur, usagePostingBilling); err != nil {
 			return err
 		}
 		if _, err := postRunningChargesThrough(ctx, q, merchantID, payerID, cur, earlier(pto, now), now); err != nil {

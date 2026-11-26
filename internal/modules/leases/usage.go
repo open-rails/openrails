@@ -14,12 +14,11 @@ import (
 )
 
 // UsageReader is every read of what usage used that a view makes: the
-// customer's money standing (with its unposted usage) and a limit's use in a
+// customer's money standing (with its pending usage) and a limit's use in a
 // window. Views read nothing of usage but through it.
 type UsageReader interface {
-	// Capacity is the customer's money in a currency: its balance and
-	// everything held against it, other than the syncing lease's in-flight
-	// report.
+	// Capacity is the customer's money in a currency: its balance, pending
+	// usage and running-charge accrual.
 	Capacity(ctx context.Context, customer uuid.UUID, currency string) (money.AdmissionCapacity, error)
 	// Limit is where a claim's limit stands in its window and, were it
 	// refused now, when it resets.
@@ -27,9 +26,9 @@ type UsageReader interface {
 }
 
 // storeUsage answers a sync's views in batches: every viewed customer's
-// money is read at once (prefetch), and their limit rows
-// at once on the first limit read; PostgreSQL in the views' snapshot, then
-// the event store. A window a read finds at capacity is recorded once the
+// money is read at once (prefetch, PostgreSQL alone), and their limit rows at
+// once on the first limit read (PostgreSQL in the views' snapshot, then the
+// event store). A window a read finds at capacity is recorded once the
 // snapshot ends (reached).
 type storeUsage struct {
 	v       *viewing
@@ -60,7 +59,7 @@ func (u *storeUsage) prefetch(ctx context.Context, keys []viewKey) error {
 	}
 	v := u.v
 	for _, currency := range currencies {
-		caps, failed, err := v.money.ViewCapacities(ctx, v.q, byCurrency[currency], currency, &v.run.lease.ID)
+		caps, failed, err := v.money.ViewCapacities(ctx, v.q, byCurrency[currency], currency)
 		if err != nil {
 			return err
 		}

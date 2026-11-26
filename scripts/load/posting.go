@@ -210,7 +210,7 @@ func (e *env) runPosting(ctx context.Context) *PostingResult {
 	logf("[posting] close: %s in %.1fs %s", r.Close.State, r.Close.Seconds, r.Close.Error)
 	var after2, unposted int64
 	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_postings").Scan(&after2)
-	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_unposted WHERE due_at <= $1", clock.Now()).Scan(&unposted)
+	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_pending WHERE due_at <= $1", clock.Now()).Scan(&unposted)
 	r.CloseCustomers = after2 - before
 	r.check("month-end-close-posts-everyone", r.Close.State == "completed" && unposted == 0, "%d postings by the close, %d customers still due", r.CloseCustomers, unposted)
 	e.checkPostedOnce(ctx, r, schema, id)
@@ -284,7 +284,20 @@ func (e *env) cloneHeavy(ctx context.Context, database string, merchant billing.
 		"charges.meter, charges.cell, charges.print, charges.quantity, charges.stated "+
 		"FROM `%[1]s`.usage_events AS src CROSS JOIN numbers(%[4]d) AS num WHERE src.merchant_id = toUUID('%[5]s') AND src.customer_id = toUUID('%[6]s')",
 		database, back, e.plan.UnitPrice, n, merchant, customer)
-	return e.ch.Exec(ctx, q)
+	if err := e.ch.Exec(ctx, q); err != nil {
+		return err
+	}
+	// The copies are numbered past their lease's settled number: they settle
+	// there, as a sync would, or no posting takes them.
+	var lease uuid.UUID
+	var through int64
+	if err := e.ch.QueryRow(ctx, fmt.Sprintf("SELECT lease_id, toInt64(max(n)) FROM `%s`.usage_events WHERE merchant_id = toUUID('%s') AND customer_id = toUUID('%s') GROUP BY lease_id ORDER BY 2 DESC LIMIT 1",
+		database, merchant, customer)).Scan(&lease, &through); err != nil {
+		return fmt.Errorf("the heavy customer's lease: %w", err)
+	}
+	_, err := e.pool.Exec(ctx, "UPDATE "+pgx.Identifier{database}.Sanitize()+".leases SET settled_through_n = GREATEST(settled_through_n, $3) WHERE merchant_id = $1 AND id = $2",
+		uuid.UUID(merchant), lease, through)
+	return err
 }
 
 // runPass runs one billing pass on fleet and waits for it.

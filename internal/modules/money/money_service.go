@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/money/owed"
@@ -72,9 +71,6 @@ type MoneyService struct {
 	clock                 clockwork.Clock
 	// posting is set on the service a running charge's posting runs on.
 	posting *runningChargePosting
-	// usagePosted marks running-charge postings made after the customer's
-	// usage before their instant posted.
-	usagePosted bool
 }
 
 func NewMoneyService(database *db.DB, clocks ...clockwork.Clock) *MoneyService {
@@ -150,8 +146,7 @@ func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity
 	}
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
-	// Derived read without a lock: a stale read never overdrafts, since writers
-	// re-derive under the customers-row lock.
+	// A read without the lock: writers read again under it.
 	return s.deriveBalance(ctx, s.db.Gen(ctx), tenantID, payerID, cur)
 }
 
@@ -159,20 +154,26 @@ func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity
 // service-admit gate.
 type AdmissionCapacity struct {
 	HardCreditLimit bool
-	Balance         int64
-	Held            int64
-	BillingMode     string
-	CreditLimit     int64
+	// Balance is the ledger account; Pending is usage not yet posted, at its
+	// provisional prices; Accrued is running charges' accrual since their
+	// last posting.
+	Balance, Pending, Accrued int64
+	BillingMode               string
+	CreditLimit               int64
 	// OutstandingOwed is the payer's unpaid arrears (positive), read O(1) from
 	// their own arrears account in the same lookup. The credit line caps debt,
 	// so the line still available is CreditLimit - this.
 	OutstandingOwed int64
 }
 
+// Unposted is what the ledger has not taken: pending usage and accrual.
+func (c AdmissionCapacity) Unposted() int64 { return satAdd(c.Pending, c.Accrued) }
+
 func admissionCapacityFromRow(row gen.GetAdmissionCapacityRow) AdmissionCapacity {
 	return AdmissionCapacity{
 		Balance:         row.Balance,
-		Held:            row.Held,
+		Pending:         row.Pending,
+		Accrued:         row.Accrued,
 		BillingMode:     row.BillingMode,
 		CreditLimit:     row.CreditLimitAmount,
 		OutstandingOwed: row.OutstandingOwed,
@@ -575,10 +576,9 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 }
 
 // lockBalance is the per-customer spend mutex: it ensures the customers row
-// exists, FOR UPDATE-locks it, and returns the balance derived under the lock
-// (Balance = ledger counters, HeldBalance = open authorizations + live
-// reservations + running-charge accrual). Every spend/hold/capture/deposit/expiry path calls it first,
-// so mutations on one customer never interleave (no overdraft).
+// exists, FOR UPDATE-locks it, and returns the balance read under the lock.
+// Every spend, deposit and expiry path calls it first, so mutations on one
+// customer never interleave (no overdraft).
 func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string) (*models.MoneyBalance, error) {
 	cur := normalizeCurrency(currency)
 	tid, err := merchant.Require(ctx)
@@ -598,9 +598,9 @@ func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer id
 	return s.deriveBalance(ctx, q, tenantID, payerID, cur)
 }
 
-// deriveBalance computes the balance snapshot: balance = the customer's ledger
-// account counters, held = heldAmount. Writers call it under the customers-row
-// lock.
+// deriveBalance reads a balance: the customer's ledger account, its pending
+// usage and what its running charges accrued, all in PostgreSQL. A posting
+// reads the accrual as of the instant it posts through.
 func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string) (*models.MoneyBalance, error) {
 	l := ledger.New(q, tenantID)
 	// A balance read never creates the account: no account = zero balance.
@@ -608,52 +608,32 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 	if err != nil {
 		return nil, err
 	}
-	var bal int64
-	if found {
-		if bal, err = l.Balance(ctx, acc); err != nil {
-			return nil, err
-		}
-	}
 	now := instant(s.now())
-	var held, accrued int64
-	if found {
-		if held, accrued, err = s.heldAmount(ctx, q, tenantID, payerID, cur, now); err != nil {
-			return nil, err
-		}
+	out := &models.MoneyBalance{MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now}
+	if !found {
+		return out, nil
 	}
-	// One held total covers live request reservations, provider authorizations
-	// and what running charges have accrued. Every ordinary spend path
-	// therefore respects all of them without double counting.
-	return &models.MoneyBalance{
-		MerchantID:  tenantID,
-		CustomerID:  payerID,
-		Currency:    cur,
-		Balance:     bal,
-		HeldBalance: held,
-		Accrued:     accrued,
-		AsOf:        now,
-	}, nil
-}
-
-// heldAmount is the one held total against a customer's balance in a
-// currency as of now (live request reservations, provider authorizations,
-// running-charge accrual and unposted usage), and the accrual apart. A
-// posting after the usage before its instant posted holds no usage: as of
-// that instant there is none, so usage after it never keeps a lot lapsing
-// then from what came before.
-func (s *MoneyService) heldAmount(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string, now time.Time) (held, accrued int64, err error) {
-	row, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now,
-		LeaseLiveSince: limits.LeaseLiveSince(now), AccruedAsOf: s.accruedAsOf(),
+	if out.Balance, err = l.Balance(ctx, acc); err != nil {
+		return nil, err
+	}
+	row, err := q.GetUnpostedAmounts(ctx, gen.GetUnpostedAmountsParams{
+		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now, AccruedAsOf: s.accruedAsOf(),
 	})
 	if err != nil {
-		return 0, 0, err
+		return nil, err
 	}
-	if s.posting != nil && s.posting.usagePosted {
-		return row.Held, row.Accrued, nil
+	out.Pending, out.Accrued = row.Pending, row.Accrued
+	return out, nil
+}
+
+// spendable is what a spend may take of bal before any credit line. A
+// posting takes in time order: the usage it posts is pending, and usage
+// after it is not ahead of it.
+func (s *MoneyService) spendable(bal *models.MoneyBalance) int64 {
+	if s.posting != nil {
+		return satSub(bal.Balance, bal.Accrued)
 	}
-	unposted, err := s.unpostedUsage(ctx, q, tenantID, payerID, cur)
-	return addSat(row.Held, unposted), row.Accrued, err
+	return bal.Available()
 }
 
 // SetDestructiveAdmissions wires the shared staff-command admission boundary.

@@ -152,18 +152,20 @@ func TestLeaseVersions(t *testing.T) {
 		w := newWorld(t)
 		customer, _ := fundedCustomer(t, w)
 		usageMeter(t, w.alpha, 100)
+		grantQuota(t, w, customer)
 		lease := newLease()
-		report := []billing.InFlight{{CustomerID: customer, Limit: "balance", Unit: "USD", Amount: 300}}
+		report := quotaInFlight(customer, 300)
 		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: report})
-		balance(t, w.alpha, customer, 700, 300, 1000)
+		require.EqualValues(t, 300, customerLimit(t, w.alpha, customer, "quota").Held)
 
 		// Past its lifetime the lease's report counts nowhere.
 		w.clock.Advance(limits.LeaseLifetime + time.Second)
-		balance(t, w.alpha, customer, 1000, 0, 1000)
+		require.Zero(t, customerLimit(t, w.alpha, customer, "quota").Held)
 		// Its next sync makes it live again.
 		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: report})
 		require.True(t, out.Lease.ExpiresAt.After(w.clock.Now()))
-		balance(t, w.alpha, customer, 700, 300, 1000)
+		require.EqualValues(t, 300, customerLimit(t, w.alpha, customer, "quota").Held)
+		balance(t, w.alpha, customer, 1000, 0, 1000)
 	})
 	t.Run("OR-J24-S19/lease-ids-are-uuidv7-an-id-past-the-replay-horizon-is-not-found-and-a-usage-only-close-ends-an-earlier-lease", func(t *testing.T) {
 		a := newAuthorityWorld(t)
@@ -250,7 +252,7 @@ func TestLeaseVersions(t *testing.T) {
 		settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "after-it-lapsed", 3))...)
 		fleet := startFleet(t, w)
 		nextMonth(w)
-		closeMonths(t, fleet)
+		postDays(t, fleet)
 		b, err := w.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 		require.NoError(t, err)
 		require.Zero(t, b.BalanceAmount, "the lot paid for the usage before it lapsed and expired with the rest")
@@ -477,12 +479,12 @@ func TestLeaseVersions(t *testing.T) {
 		release()
 		balance(t, w.alpha, customer, 900, 100, 1000)
 
-		// A posting holds the customer's unposted mark past the sync's
+		// A posting holds the customer's queue row past the sync's
 		// timeout: the sync gives up waiting well inside its work budget,
 		// before the commit guard, and is answered a retryable 503.
 		before := lastSync()
 		w.clock.Advance(time.Second)
-		release = hold("SELECT customer_id FROM " + pgx.Identifier{w.schema, "usage_unposted"}.Sanitize() + " WHERE merchant_id = $1 AND customer_id = $2 FOR UPDATE")
+		release = hold("SELECT customer_id FROM " + pgx.Identifier{w.schema, "usage_pending"}.Sanitize() + " WHERE merchant_id = $1 AND customer_id = $2 FOR UPDATE")
 		unlocked := make(chan struct{})
 		unlock := time.AfterFunc(limits.SyncTimeout+time.Second, func() {
 			release()

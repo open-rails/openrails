@@ -187,11 +187,11 @@ func (q *Queries) GetPurchasedCreditRetiredBalance(ctx context.Context, arg GetP
 
 const getPurchasedCreditReversalState = `-- name: GetPurchasedCreditReversalState :one
 SELECT
- COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.transfer_type='credit_refund'),0)::bigint AS withdrawn,
+ (COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.transfer_type='credit_refund'),0)
+  - COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.transfer_type='credit_refund_restore'),0))::bigint AS withdrawn,
  COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='expired_credit'),0)::bigint AS expired,
  COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='revoked_credit'),0)::bigint AS revoked,
- COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='repaid_owed'),0)::bigint AS repaid,
- count(*)::bigint AS legs
+ COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='repaid_owed'),0)::bigint AS repaid
 FROM billing.ledger_transfers lt
 WHERE lt.merchant_id=$1::uuid AND lt.credit_grant_id=$2::uuid
  AND lt.operation='purchased_credit_refund' AND lt.source_id=$3::text
@@ -208,11 +208,11 @@ type GetPurchasedCreditReversalStateRow struct {
 	Expired   int64
 	Revoked   int64
 	Repaid    int64
-	Legs      int64
 }
 
-// Where the units one reversal took of the lot were. legs counts both
-// books', so a reversal posts once.
+// Where the units one reversal took of the lot were: withdrawn from the
+// balance (when it was requested, and as it settled, less what went back),
+// expired, revoked or repaid owed.
 func (q *Queries) GetPurchasedCreditReversalState(ctx context.Context, arg GetPurchasedCreditReversalStateParams) (GetPurchasedCreditReversalStateRow, error) {
 	row := q.db.QueryRow(ctx, getPurchasedCreditReversalState, arg.MerchantID, arg.CreditGrantID, arg.ReversalID)
 	var i GetPurchasedCreditReversalStateRow
@@ -221,9 +221,53 @@ func (q *Queries) GetPurchasedCreditReversalState(ctx context.Context, arg GetPu
 		&i.Expired,
 		&i.Revoked,
 		&i.Repaid,
-		&i.Legs,
 	)
 	return i, err
+}
+
+const listPendingCreditRefunds = `-- name: ListPendingCreditRefunds :many
+SELECT r.id AS reversal_id, COALESCE(sum(CASE lt.transfer_type WHEN 'credit_refund' THEN lt.amount ELSE -lt.amount END), 0)::bigint AS withdrawn
+FROM billing.credit_grants g
+JOIN billing.payments r ON r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id
+    AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL
+LEFT JOIN billing.ledger_transfers lt ON lt.merchant_id = g.merchant_id AND lt.credit_grant_id = g.id AND lt.book = 'units'
+    AND lt.operation = 'purchased_credit_refund' AND lt.source_id = r.id::text
+    AND lt.transfer_type IN ('credit_refund', 'credit_refund_restore')
+WHERE g.merchant_id = $1::uuid AND g.id = $2::uuid
+GROUP BY r.id, r.created_at
+ORDER BY r.created_at DESC, r.id DESC
+`
+
+type ListPendingCreditRefundsParams struct {
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+}
+
+type ListPendingCreditRefundsRow struct {
+	ReversalID uuid.UUID
+	Withdrawn  int64
+}
+
+// The pending refunds of a lot's payment and the units each withdrew from the
+// lot, newest first.
+func (q *Queries) ListPendingCreditRefunds(ctx context.Context, arg ListPendingCreditRefundsParams) ([]ListPendingCreditRefundsRow, error) {
+	rows, err := q.db.Query(ctx, listPendingCreditRefunds, arg.MerchantID, arg.CreditGrantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingCreditRefundsRow
+	for rows.Next() {
+		var i ListPendingCreditRefundsRow
+		if err := rows.Scan(&i.ReversalID, &i.Withdrawn); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const recordCreditReversalShare = `-- name: RecordCreditReversalShare :exec

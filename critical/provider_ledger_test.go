@@ -39,6 +39,7 @@ type providerLedger struct {
 	mu                  sync.Mutex
 	lostResponse        bool
 	lostRefundResponse  bool
+	refuseRefund        bool
 	evidenceUnavailable bool
 	evidenceRequested   chan struct{}
 	responseGate        *wireGate
@@ -79,7 +80,14 @@ func (p *providerLedger) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	p.mu.Lock()
 	noEvidence := p.evidenceUnavailable && r.Method == http.MethodGet && (strings.HasPrefix(r.URL.Path, "/v1/payment_intents") || strings.HasPrefix(r.URL.Path, "/v1/charges"))
+	refuse := p.refuseRefund && r.Method == http.MethodPost && r.URL.Path == "/v1/refunds"
 	p.mu.Unlock()
+	if refuse {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","code":"charge_disputed","message":"fixture refused the refund"}}`))
+		return
+	}
 	if noEvidence {
 		select {
 		case p.evidenceRequested <- struct{}{}:

@@ -7,7 +7,8 @@ package books
 // issued. Its units are worth P at the rate P/U: n units left are worth
 // Worth(n) = P - floor(P*(U-n)/U), so the last unit carries the remainder.
 // After every movement of its units the poster brings the lot's deferred money
-// to the worth of what is left, posting the difference where the units went:
+// to the worth of what is left (and of what pending refunds took, until each
+// settles), posting the difference where the units went:
 // usage revenue (or an invoice line's deferred revenue) for a spend,
 // breakage_revenue for an expiry or a revocation, back from breakage_revenue
 // for a reinstatement. Being cumulative, rounding never drifts.
@@ -58,8 +59,10 @@ type CreditLot struct {
 	PaidCurrency string
 	Product      *uuid.UUID
 	CreatedAt    time.Time
-	// Remaining is the units left on the lot's balance.
-	Remaining                         int64
+	// Remaining is the units left on the lot's balance; Refunding the units
+	// pending refunds took off it, whose money stays deferred until each
+	// refund settles.
+	Remaining, Refunding              int64
 	DeferredCredited, DeferredDebited int64
 }
 
@@ -67,7 +70,7 @@ type CreditLot struct {
 func CreditLotOf(g gen.BillingCreditGrant) CreditLot {
 	lot := CreditLot{
 		ID: g.ID, Customer: g.CustomerID, Unit: g.Unit, Units: g.Units, Funding: g.FundingSource,
-		Product: g.ProductID, CreatedAt: g.CreatedAt, Remaining: g.UnitsCredited - g.UnitsDebited,
+		Product: g.ProductID, CreatedAt: g.CreatedAt, Remaining: g.UnitsCredited - g.UnitsDebited, Refunding: g.UnitsRefunding,
 		DeferredCredited: g.DeferredCredited, DeferredDebited: g.DeferredDebited,
 	}
 	switch {
@@ -91,6 +94,10 @@ func (l CreditLot) Booked() bool { return l.Paid() && l.DeferredCredited > 0 }
 
 // Deferred is the lot's money still deferred.
 func (l CreditLot) Deferred() int64 { return l.DeferredCredited - l.DeferredDebited }
+
+// deferredUnits are the units the lot's deferred money is for: those left,
+// and those pending refunds took.
+func (l CreditLot) deferredUnits() int64 { return l.Remaining + l.Refunding }
 
 // Worth is what n of the lot's units are worth at its rate: P less the money of
 // the units drawn, rounded down, so drawing every unit releases exactly P.
@@ -254,7 +261,7 @@ func (b *Books) MoveCredit(ctx context.Context, l CreditLot, m CreditMove) error
 	if !l.Booked() {
 		return nil
 	}
-	diff := l.Deferred() - l.Worth(l.Remaining)
+	diff := l.Deferred() - l.Worth(l.deferredUnits())
 	switch m.Kind {
 	case CreditSpent:
 		return b.postInto(ctx, l, l.deferredRef(), diff, l.PaidCurrency, CreditReleased, m)
@@ -320,7 +327,7 @@ func (b *Books) RepayFromCredit(ctx context.Context, l CreditLot, units int64, c
 	receivableRef := Ref{Type: UsageReceivable, Customer: ptrUUID(l.Customer)}
 	money, repaid := int64(0), int64(0)
 	if l.Paid() {
-		money = max(l.Deferred()-l.Worth(l.Remaining), 0)
+		money = max(l.Deferred()-l.Worth(l.deferredUnits()), 0)
 		repaid = min(money, accrued)
 		if accrued < units {
 			repaid = min(mulDiv(accrued, l.PaidAmount, l.Units), repaid)
@@ -390,7 +397,7 @@ func (b *Books) ReverseCredit(ctx context.Context, l CreditLot, r CreditReversal
 	coord := func(label string) Coord {
 		return Coord{Operation: OpCreditRefund, Source: label, SourceID: r.Reversal.String()}
 	}
-	deferred := max(l.Deferred()-l.Worth(l.Remaining), 0)
+	deferred := max(l.Deferred()-l.Worth(l.deferredUnits()), 0)
 	paid := min(deferred, r.Cash)
 	repaid := min(mulDiv(r.Repaid, l.PaidAmount, l.Units), r.Cash-paid, r.Repaid)
 	contra, deferredType, recognizedType := Refunds, RefundDeferred, RefundRecognized
@@ -468,7 +475,7 @@ func (b *Books) RecoverCredit(ctx context.Context, l CreditLot, r CreditRecovery
 	if err != nil {
 		return err
 	}
-	deferred := max(l.Worth(l.Remaining+r.Retired)-l.Deferred(), 0)
+	deferred := max(l.Worth(l.deferredUnits()+r.Retired)-l.Deferred(), 0)
 	paid := min(deferred, r.Cash)
 	owed := min(r.Repaid, max(receivable, 0))
 	repaid := min(mulDiv(owed, l.PaidAmount, l.Units), r.Cash-paid, owed)

@@ -328,13 +328,16 @@ func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uu
 		if _, err := d.Gen(ctx).LockPaymentForRefund(ctx, gen.LockPaymentForRefundParams{MerchantID: mid.UUID(), PaymentID: originalPaymentID}); err != nil {
 			return err
 		}
-		if err := purchasedcredits.New(d, s.clock).ValidateRefund(ctx, originalPaymentID, amount); err != nil {
+		credit := purchasedcredits.New(d, s.clock)
+		if err := credit.ValidateRefund(ctx, originalPaymentID, amount); err != nil {
 			return err
 		}
 		if reservation, err = scoped.reserveRefundLocked(ctx, originalPaymentID, reservationTransactionID, amount, reason, metadata); err != nil {
 			return err
 		}
-		return credits.New(d.Gen(ctx), mid.UUID(), s.now).SyncReservation(ctx, originalPaymentID)
+		// The credit the payment bought leaves the balance now, and comes
+		// back if the refund fails.
+		return credit.WithdrawRefund(ctx, originalPaymentID, reservation.ID, amount)
 	})
 	return reservation, err
 }
@@ -494,9 +497,9 @@ func (s *PaymentService) syncPurchasedCreditRefund(ctx context.Context, paymentI
 	if err != nil {
 		return err
 	}
-	// What the payment's pending refunds reserve of its lot follows every
+	// What the payment's pending refunds withdrew of its lot follows every
 	// settled reversal.
-	return credits.New(s.db.Gen(ctx), mid.UUID(), s.now).SyncReservation(ctx, paymentID)
+	return credits.New(s.db.Gen(ctx), mid.UUID(), s.now).SyncRefunding(ctx, paymentID)
 }
 
 func (s *PaymentService) CompleteProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) (*models.Payment, error) {
@@ -623,14 +626,13 @@ func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {
 			}
 			return err
 		}
-		// The released refund reserves nothing. It must not expose a lot which
-		// expired while the provider result was unresolved: retire it in the
-		// same transaction.
-		lots := credits.New(d.Gen(ctx), mid.UUID(), s.now)
-		if err := lots.SyncReservation(ctx, *payment.RefundedPaymentID); err != nil {
+		// What the failed refund withdrew comes back. A lot that lapsed while
+		// the provider result was unresolved expires again in the same
+		// transaction.
+		if err := purchasedcredits.New(d, s.clock).ReleaseRefund(ctx, *payment.RefundedPaymentID, id); err != nil {
 			return err
 		}
-		_, err = lots.ExpireLapsed(ctx, payment.CustomerID, lot.Unit)
+		_, err = credits.New(d.Gen(ctx), mid.UUID(), s.now).ExpireLapsed(ctx, payment.CustomerID, lot.Unit)
 		return err
 	})
 }

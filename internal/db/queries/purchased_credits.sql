@@ -12,14 +12,15 @@ SELECT
      AND lt.book='units' AND lt.operation='purchased_credit_refund')::bigint AS withdrawn;
 
 -- name: GetPurchasedCreditReversalState :one
--- Where the units one reversal took of the lot were. legs counts both
--- books', so a reversal posts once.
+-- Where the units one reversal took of the lot were: withdrawn from the
+-- balance (when it was requested, and as it settled, less what went back),
+-- expired, revoked or repaid owed.
 SELECT
- COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.transfer_type='credit_refund'),0)::bigint AS withdrawn,
+ (COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.transfer_type='credit_refund'),0)
+  - COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.transfer_type='credit_refund_restore'),0))::bigint AS withdrawn,
  COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='expired_credit'),0)::bigint AS expired,
  COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='revoked_credit'),0)::bigint AS revoked,
- COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='repaid_owed'),0)::bigint AS repaid,
- count(*)::bigint AS legs
+ COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='repaid_owed'),0)::bigint AS repaid
 FROM billing.ledger_transfers lt
 WHERE lt.merchant_id=sqlc.arg(merchant_id)::uuid AND lt.credit_grant_id=sqlc.arg(credit_grant_id)::uuid
  AND lt.operation='purchased_credit_refund' AND lt.source_id=sqlc.arg(reversal_id)::text;
@@ -76,3 +77,17 @@ SELECT EXISTS (
 -- decision fails.
 INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, origin_id, cash, units)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(reversal_id)::uuid, sqlc.arg(credit_grant_id)::uuid, sqlc.arg(origin_id)::uuid, sqlc.arg(cash)::bigint, sqlc.arg(units)::bigint);
+
+-- name: ListPendingCreditRefunds :many
+-- The pending refunds of a lot's payment and the units each withdrew from the
+-- lot, newest first.
+SELECT r.id AS reversal_id, COALESCE(sum(CASE lt.transfer_type WHEN 'credit_refund' THEN lt.amount ELSE -lt.amount END), 0)::bigint AS withdrawn
+FROM billing.credit_grants g
+JOIN billing.payments r ON r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id
+    AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL
+LEFT JOIN billing.ledger_transfers lt ON lt.merchant_id = g.merchant_id AND lt.credit_grant_id = g.id AND lt.book = 'units'
+    AND lt.operation = 'purchased_credit_refund' AND lt.source_id = r.id::text
+    AND lt.transfer_type IN ('credit_refund', 'credit_refund_restore')
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.id = sqlc.arg(credit_grant_id)::uuid
+GROUP BY r.id, r.created_at
+ORDER BY r.created_at DESC, r.id DESC;

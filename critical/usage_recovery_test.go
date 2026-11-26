@@ -4,6 +4,8 @@ package critical_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -14,7 +16,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	embedded "github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/modules/leases"
 	"github.com/open-rails/openrails/internal/usageerasure"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
@@ -51,14 +56,14 @@ func awaitErasure(t *testing.T, events <-chan *river.Event) river.EventKind {
 
 // loseLeaseCommit is the fixture of a sync whose events reached the store
 // and whose transaction never committed: the lease settled nothing and the
-// customer has no unposted usage.
+// customer has no pending usage.
 func loseLeaseCommit(t *testing.T, w *world, lease billing.LeaseID) {
 	t.Helper()
-	leases, unposted := pgx.Identifier{w.schema, "leases"}.Sanitize(), pgx.Identifier{w.schema, "usage_unposted"}.Sanitize()
+	leases, pending := pgx.Identifier{w.schema, "leases"}.Sanitize(), pgx.Identifier{w.schema, "usage_pending"}.Sanitize()
 	_, err := w.pool.Exec(t.Context(), "UPDATE "+leases+" SET settled_through_n = 0, receipts = '[]'::jsonb WHERE merchant_id = $1 AND id = $2",
 		w.alpha.MerchantID().UUID(), lease.UUID())
 	require.NoError(t, err)
-	_, err = w.pool.Exec(t.Context(), "DELETE FROM "+unposted+" WHERE merchant_id = $1", w.alpha.MerchantID().UUID())
+	_, err = w.pool.Exec(t.Context(), "DELETE FROM "+pending+" WHERE merchant_id = $1", w.alpha.MerchantID().UUID())
 	require.NoError(t, err)
 }
 
@@ -130,7 +135,7 @@ func TestUsageRecovery(t *testing.T) {
 			balance(t, w.alpha, customer, 700, 300, 1000)
 			fleet := startFleet(t, w)
 			nextMonth(w)
-			closeMonths(t, fleet)
+			postDays(t, fleet)
 			balance(t, w.alpha, customer, 700, 0, 700)
 		})
 	})
@@ -274,27 +279,32 @@ products:
 		usageMeter(t, w.alpha, 100)
 		customer, _ := fundedCustomer(t, w)
 		lease := newLease()
+		day := w.clock.Now().UTC()
 		settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "posted", 3))...)
-		w.clock.Advance(time.Minute)
-		fund(t, w.alpha, customer, "top-up", 100)
-		balance(t, w.alpha, customer, 800, 0, 800)
+		fleet := startFleet(t, w)
+		nextDay(w)
+		postDays(t, fleet)
+		balance(t, w.alpha, customer, 700, 0, 700)
 		// Fixture: the store is restored from a backup older than that usage.
 		for _, table := range []string{"usage_events", "limit_usage", "usage_quantities", "usage_minutes", "usage_history"} {
 			require.NoError(t, w.deps.ClickHouse.Exec(t.Context(), "ALTER TABLE `"+w.schema+"`."+table+" DELETE WHERE merchant_id = toUUID(?) SETTINGS mutations_sync = 2",
 				w.alpha.MerchantID().String()))
 		}
-		settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "after-the-restore", 2))...)
-		fleet := startFleet(t, w)
-		nextMonth(w)
-		closeMonths(t, fleet)
-		balance(t, w.alpha, customer, 600, 0, 600)
+		// Usage of the same day, reported after the restore.
+		after := usageInput(customer, "after-the-restore", 2)
+		after.OccurredAt = day.Add(time.Minute)
+		settleUsage(t, w.alpha, lease, numbered(2, after)...)
+		balance(t, w.alpha, customer, 500, 200, 700)
+		nextDay(w)
+		postDays(t, fleet)
+		balance(t, w.alpha, customer, 500, 0, 500)
 		deductions := usageDeductions(t, w.alpha, customer)
 		require.Len(t, deductions, 2)
 		require.EqualValues(t, -200, deductions[0].Amount, "the usage since the restore is charged on top of what posted")
 		// Its late window closed: nothing that posted is credited back.
 		w.clock.Advance(70 * 24 * time.Hour)
-		closeMonths(t, fleet)
-		balance(t, w.alpha, customer, 600, 0, 600)
+		postDays(t, fleet)
+		balance(t, w.alpha, customer, 500, 0, 500)
 		require.Len(t, usageDeductions(t, w.alpha, customer), 2)
 	})
 
@@ -359,7 +369,7 @@ products:
 			w, customer, _ := orphan(t)
 			fleet := startFleet(t, w)
 			nextMonth(w)
-			closeMonths(t, fleet)
+			postDays(t, fleet)
 			deductions := usageDeductions(t, w.alpha, customer)
 			require.Len(t, deductions, 1)
 			require.EqualValues(t, -500, deductions[0].Amount, "2 at 100, then 1 at 300")
@@ -371,10 +381,133 @@ products:
 			require.NoError(t, err)
 			fleet := startFleet(t, w)
 			nextMonth(w)
-			closeMonths(t, fleet)
+			postDays(t, fleet)
 			deductions := usageDeductions(t, w.alpha, customer)
 			require.Len(t, deductions, 1)
 			require.EqualValues(t, -200, deductions[0].Amount, "the usage that can be priced posts")
 		})
 	})
+
+	t.Run("OR-J24-S72/a-resend-after-a-lost-reply-adds-nothing-to-pending", func(t *testing.T) {
+		w := newWorld(t, earlyInMonth)
+		usageMeter(t, w.alpha, 100)
+		customer, _ := fundedCustomer(t, w)
+		lease := newLease()
+		items := numbered(1, usageInput(customer, "a", 1), usageInput(customer, "b", 2))
+		settleUsage(t, w.alpha, lease, items...)
+		balance(t, w.alpha, customer, 700, 300, 1000)
+
+		// The reply was lost: the gate resends, and the lease's receipts answer.
+		out := settleUsage(t, w.alpha, lease, items...)
+		require.EqualValues(t, 2, out.Usage.ThroughN)
+		require.EqualValues(t, 2, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"), "the resend inserts nothing")
+		balance(t, w.alpha, customer, 700, 300, 1000)
+
+		// Resent with the next item, only the next settles.
+		settleUsage(t, w.alpha, lease, append(items, numbered(3, usageInput(customer, "c", 1))...)...)
+		balance(t, w.alpha, customer, 600, 400, 1000)
+	})
+
+	t.Run("OR-J24-S73/a-sync-that-failed-after-its-insert-leaves-its-usage-unsettled-and-the-resend-adds-it-once", func(t *testing.T) {
+		w := newWorld(t, earlyInMonth)
+		// The first 100 units at 2, the rest at 1.
+		pricedMeter(t, w.alpha, tiers(catalog.TierModeGraduated, 2, 1, 100))
+		customer, _ := fundedCustomer(t, w)
+		lease := newLease()
+		items := unitItems(customer, 1, leases.UsageChunkItems+1)
+		failAfterFirstChunk(t, lease)
+		_, err := w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: items})
+		require.Error(t, err)
+		require.EqualValues(t, leases.UsageChunkItems, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"), "its first chunk reached the store")
+		balance(t, w.alpha, customer, 1000, 0, 1000)
+
+		// The resend settles all of it: each item's price is pending once,
+		// priced from the period's start, as if the failed sync never ran.
+		out := settleUsage(t, w.alpha, lease, items...)
+		require.EqualValues(t, leases.UsageChunkItems+1, out.Usage.ThroughN)
+		require.EqualValues(t, leases.UsageChunkItems+1, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"))
+		balance(t, w.alpha, customer, 649, 351, 1000)
+		fleet := startFleet(t, w)
+		nextDay(w)
+		postDays(t, fleet)
+		balance(t, w.alpha, customer, 649, 0, 649)
+	})
+
+	t.Run("OR-J24-S74/a-posting-before-the-resend-leaves-unsettled-usage-to-it", func(t *testing.T) {
+		w := newWorld(t, earlyInMonth)
+		usageMeter(t, w.alpha, 1)
+		customer, _ := fundedCustomer(t, w)
+		lease := newLease()
+		settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "settled", 10))...)
+		items := unitItems(customer, 2, leases.UsageChunkItems+1)
+		failAfterFirstChunk(t, lease)
+		_, err := w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: items})
+		require.Error(t, err)
+		balance(t, w.alpha, customer, 990, 10, 1000)
+
+		// The day's posting takes what settled and leaves what the failed
+		// sync inserted.
+		fleet := startFleet(t, w)
+		nextDay(w)
+		postDays(t, fleet)
+		balance(t, w.alpha, customer, 990, 0, 990)
+
+		// The resend settles it: pending once, then posted once.
+		settleUsage(t, w.alpha, lease, items...)
+		balance(t, w.alpha, customer, 739, 251, 990)
+		nextDay(w)
+		postDays(t, fleet)
+		balance(t, w.alpha, customer, 739, 0, 739)
+	})
+
+	t.Run("OR-J24-S75/a-resend-older-than-the-kept-receipts-settles-nothing-again", func(t *testing.T) {
+		w := newWorld(t, earlyInMonth)
+		usageMeter(t, w.alpha, 1)
+		customer, _ := fundedCustomer(t, w)
+		lease := newLease()
+		first := numbered(1, usageInput(customer, "first", 1))
+		settleUsage(t, w.alpha, lease, first...)
+		// One settlement per sync until the lease no longer keeps the first's
+		// receipt.
+		table := pgx.Identifier{w.schema, "leases"}.Sanitize()
+		n := int64(1)
+		for kept := int64(1); kept == 1; {
+			n++
+			settleUsage(t, w.alpha, lease, numbered(n, usageInput(customer, fmt.Sprintf("item-%d", n), 1))...)
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT min((r->>'from_n')::bigint) FROM "+table+", jsonb_array_elements(receipts) r WHERE merchant_id = $1 AND id = $2",
+				w.alpha.MerchantID().UUID(), lease.UUID()).Scan(&kept))
+			require.Less(t, n, int64(1000), "the lease keeps a bounded number of receipts")
+		}
+		balance(t, w.alpha, customer, 1000-n, n, 1000)
+
+		// Its settled number still covers it: nothing settles again.
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: first})
+		require.Equal(t, n, out.Usage.ThroughN)
+		require.Empty(t, out.Usage.Refused)
+		require.EqualValues(t, n, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"))
+		balance(t, w.alpha, customer, 1000-n, n, 1000)
+	})
+}
+
+// unitItems are count one-unit reports for a customer, numbered from first.
+func unitItems(customer billing.CustomerID, first int64, count int) []billing.LeaseUsage {
+	items := make([]billing.LeaseUsage, count)
+	for i := range items {
+		items[i] = usageInput(customer, fmt.Sprintf("unit-%d", first+int64(i)), 1)
+	}
+	return numbered(first, items...)
+}
+
+// failAfterFirstChunk fails the lease's next sync once its first chunk is in
+// the store and its transaction holds the chunk's settlement: the sync rolls
+// back, and the store keeps the events.
+func failAfterFirstChunk(t *testing.T, lease billing.LeaseID) {
+	t.Helper()
+	var failed atomic.Bool
+	t.Cleanup(failpoint.Set(func(_ context.Context, site failpoint.Site) error {
+		if site.Point == failpoint.AfterChunk && site.Kind == leases.FailpointKind && site.Operation == lease.UUID() && failed.CompareAndSwap(false, true) {
+			return errors.New("the sync fails after its first chunk")
+		}
+		return nil
+	}))
 }

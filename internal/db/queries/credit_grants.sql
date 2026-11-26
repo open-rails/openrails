@@ -45,11 +45,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND credit_grant_id = sqlc.arg(c
 
 -- name: ListSpendableCreditLots :many
 -- Live lots (started, not lapsed, not revoked) with units left, soonest
--- expiry first. available is what a pending refund does not reserve. A
--- running charge's posting through an instant draws the lots that had not
+-- expiry first. A posting through an instant draws the lots that had not
 -- lapsed just before it (live_at).
-SELECT id, units, expires_at, (units_credited - units_debited)::bigint AS remaining,
-       GREATEST(units_credited - units_debited - units_reserved, 0)::bigint AS available
+SELECT id, units, expires_at, (units_credited - units_debited)::bigint AS available
 FROM billing.credit_grants
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
   AND unit = sqlc.arg(currency)::text AND revoked_at IS NULL AND units_credited > units_debited
@@ -66,24 +64,24 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
   AND expires_at IS NOT NULL AND expires_at <= sqlc.arg(as_of)::timestamptz
 ORDER BY expires_at ASC, id ASC;
 
--- name: SyncCreditGrantReservation :exec
+-- name: SyncCreditGrantRefunding :exec
 -- Written whenever a refund of the lot's payment is reserved, released or
--- settled (billing.credit_grant_reservation).
+-- settled (billing.credit_grant_refunding).
 UPDATE billing.credit_grants g
-SET units_reserved = billing.credit_grant_reservation(g.merchant_id, g.id)
+SET units_refunding = billing.credit_grant_refunding(g.merchant_id, g.id)
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.payment_id = sqlc.arg(payment_id)::uuid
   AND g.paid_amount IS NOT NULL;
 
--- name: ListCreditReservationDrifts :many
--- Purchased lots whose reservation disagrees with their payment's pending
--- refunds. Only lots that reserve something or whose payment has a pending
--- refund can drift: those two indexed sets are read, not every lot. NULL
--- customer_id = merchant-wide. Repair = SyncCreditGrantReservation.
+-- name: ListCreditRefundingDrifts :many
+-- Purchased lots whose refunding units disagree with their payment's pending
+-- refunds. Only lots that have some or whose payment has a pending refund can
+-- drift: those two indexed sets are read, not every lot. NULL customer_id =
+-- merchant-wide. Repair = SyncCreditGrantRefunding.
 WITH candidates AS (
     SELECT g.id FROM billing.credit_grants g
     WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
       AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)
-      AND g.units_reserved > 0
+      AND g.units_refunding > 0
     UNION
     SELECT g.id FROM billing.payments r
     JOIN billing.credit_grants g ON g.merchant_id = r.merchant_id AND g.payment_id = r.refunded_payment_id
@@ -94,7 +92,7 @@ WITH candidates AS (
 SELECT g.* FROM billing.credit_grants g
 JOIN candidates c ON c.id = g.id
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.paid_amount IS NOT NULL
-  AND g.units_reserved <> billing.credit_grant_reservation(g.merchant_id, g.id)
+  AND g.units_refunding <> billing.credit_grant_refunding(g.merchant_id, g.id)
 ORDER BY g.created_at, g.id
 LIMIT sqlc.arg(row_limit)::int;
 
@@ -121,7 +119,7 @@ LIMIT sqlc.arg(row_limit)::int;
 -- name: ListCreditLotDrifts :many
 -- Lots whose counters disagree with the legs on their balance account or, for
 -- their money, on their customer's deferred account in the paid currency, or
--- whose reservation with their payment's pending refunds.
+-- whose refunding units with their payment's pending refunds.
 WITH logged AS (
     SELECT t.credit_grant_id AS id,
            COALESCE(sum(t.amount) FILTER (WHERE t.credit_account_id = g.account_id), 0)::bigint AS credited,
@@ -144,16 +142,16 @@ WITH logged AS (
 SELECT g.id AS credit_grant_id, g.merchant_id, g.customer_id, g.unit,
        g.units_credited AS stored_credited, COALESCE(l.credited, 0)::bigint AS logged_credited,
        g.units_debited AS stored_debited, COALESCE(l.debited, 0)::bigint AS logged_debited,
-       g.units_reserved AS stored_reserved, COALESCE(r.reserved, 0)::bigint AS expected_reserved,
+       g.units_refunding AS stored_refunding, COALESCE(r.refunding, 0)::bigint AS expected_refunding,
        g.deferred_credited AS stored_deferred_credited, COALESCE(d.credited, 0)::bigint AS logged_deferred_credited,
        g.deferred_debited AS stored_deferred_debited, COALESCE(d.debited, 0)::bigint AS logged_deferred_debited
 FROM billing.credit_grants g
 LEFT JOIN logged l ON l.id = g.id
 LEFT JOIN deferred d ON d.id = g.id
-CROSS JOIN LATERAL (SELECT billing.credit_grant_reservation(g.merchant_id, g.id) AS reserved) r
+CROSS JOIN LATERAL (SELECT billing.credit_grant_refunding(g.merchant_id, g.id) AS refunding) r
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (g.units_credited <> COALESCE(l.credited, 0) OR g.units_debited <> COALESCE(l.debited, 0)
-       OR g.units_reserved <> r.reserved
+       OR g.units_refunding <> r.refunding
        OR g.deferred_credited <> COALESCE(d.credited, 0) OR g.deferred_debited <> COALESCE(d.debited, 0))
 ORDER BY g.unit, g.id;
 
@@ -275,13 +273,3 @@ FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general' AND source = 'payment'
   AND source_id = sqlc.arg(payment_id)::text AND transfer_type IN ('cash_received', 'cash_applied', 'usage_collected', 'dispute_won');
 
--- name: ListLapsedRemaining :many
--- What many customers' lots that lapsed and were not yet expired still hold
--- in a currency, beside what pending refunds reserve of them (a capacity
--- read counts those apart): a view offers none of it.
-SELECT customer_id, sum(units_credited - units_debited)::bigint AS remaining
-FROM billing.credit_grants
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
-  AND unit = sqlc.arg(currency)::text AND revoked_at IS NULL AND units_credited > units_debited
-  AND units_reserved = 0 AND expires_at IS NOT NULL AND expires_at <= sqlc.arg(as_of)::timestamptz
-GROUP BY customer_id;

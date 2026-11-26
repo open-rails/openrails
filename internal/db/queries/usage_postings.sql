@@ -1,74 +1,86 @@
 -- What the ledger took of usage, which lives in the event store: who has
--- usage not yet posted, each posting, and the rate cards usage was priced
--- under.
+-- usage not yet posted and what it costs at provisional prices, each posting,
+-- and the rate cards usage was priced under.
 
--- name: UpsertUsageUnposted :exec
--- Intake marks customers' usage in a currency unposted, in the transaction
--- that commits it, in customer order: the oldest instant and the earliest
--- due date win.
-INSERT INTO billing.usage_unposted AS u (merchant_id, customer_id, currency, since_at, due_at, updated_at)
+-- name: UpsertUsagePending :exec
+-- Intake queues customers' usage in a currency for posting, in the
+-- transaction that commits it, in customer order: the oldest instant and the
+-- earliest due date win.
+INSERT INTO billing.usage_pending AS u (merchant_id, customer_id, currency, since_at, due_at, updated_at)
 SELECT sqlc.arg(merchant_id)::uuid, m.customer_id, sqlc.arg(currency)::text, m.since_at, m.due_at, sqlc.arg(now)::timestamptz
 FROM unnest(sqlc.arg(customer_ids)::uuid[], sqlc.arg(since_ats)::timestamptz[], sqlc.arg(due_ats)::timestamptz[]) AS m(customer_id, since_at, due_at)
 ORDER BY m.customer_id
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     since_at = LEAST(u.since_at, EXCLUDED.since_at), due_at = LEAST(u.due_at, EXCLUDED.due_at), updated_at = EXCLUDED.updated_at;
 
--- name: ShareUsageUnposted :many
--- A sync's hold on the unposted marks of its customers in a currency, taken
--- after its events are inserted: a posting, which locks its mark FOR
--- UPDATE, either waits for the sync to commit or has already read its
--- events. Syncs never wait on each other here.
-SELECT customer_id, since_at, due_at FROM billing.usage_unposted
+-- name: ShareUsagePending :many
+-- An intake's hold on the queue rows of its customers in a currency, taken
+-- before it inserts its events and kept until it commits: a posting, which
+-- locks the row FOR UPDATE, waits for every intake that may have inserted
+-- usage, and later intakes insert theirs after it commits. Intakes never
+-- wait on each other here.
+SELECT customer_id, since_at, due_at FROM billing.usage_pending
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND currency = sqlc.arg(currency)::text
   AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
 ORDER BY customer_id
 FOR KEY SHARE;
 
--- name: ListUsageUnpostedOf :many
--- Many customers' unposted marks in a currency.
-SELECT customer_id, since_at FROM billing.usage_unposted
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND currency = sqlc.arg(currency)::text
-  AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[]);
+-- name: AddUsagePendingAmounts :exec
+-- Intake adds what one lease's usage costs at its provisional prices, per
+-- customer, in customer order. Only that lease's syncs write its rows.
+INSERT INTO billing.usage_pending_amounts AS p (merchant_id, customer_id, currency, lease_id, amount, updated_at)
+SELECT sqlc.arg(merchant_id)::uuid, m.customer_id, sqlc.arg(currency)::text, sqlc.arg(lease_id)::uuid, m.amount, sqlc.arg(now)::timestamptz
+FROM unnest(sqlc.arg(customer_ids)::uuid[], sqlc.arg(amounts)::bigint[]) AS m(customer_id, amount)
+WHERE m.amount > 0
+ORDER BY m.customer_id
+ON CONFLICT (merchant_id, customer_id, currency, lease_id) DO UPDATE SET
+    amount = p.amount + EXCLUDED.amount, updated_at = EXCLUDED.updated_at;
 
--- name: LockUsageUnposted :one
-SELECT * FROM billing.usage_unposted
+-- name: DeleteUsagePendingAmounts :exec
+-- A posting that took all the event store held clears what was pending.
+DELETE FROM billing.usage_pending_amounts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text;
+
+-- name: LockUsagePending :one
+SELECT * FROM billing.usage_pending
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text
 FOR UPDATE;
 
--- name: GetUsageUnposted :one
-SELECT * FROM billing.usage_unposted
+-- name: GetUsagePending :one
+SELECT * FROM billing.usage_pending
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text;
 
--- name: SetUsageUnposted :exec
-UPDATE billing.usage_unposted
+-- name: SetUsagePending :exec
+UPDATE billing.usage_pending
 SET since_at = sqlc.arg(since_at)::timestamptz, due_at = sqlc.arg(due_at)::timestamptz, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text;
 
--- name: DeleteUsageUnposted :exec
-DELETE FROM billing.usage_unposted
+-- name: DeleteUsagePending :exec
+DELETE FROM billing.usage_pending
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text;
 
--- name: ListDueUsageUnposted :many
--- CROSS-MERCHANT: the close's due work, in due order. An idle pass reads no
--- row.
+-- name: ListDueUsagePending :many
+-- CROSS-MERCHANT: the daily posting's due work, in due order. An idle pass
+-- reads no row.
 SELECT u.due_at, u.merchant_id, u.customer_id, u.currency
-FROM billing.usage_unposted u
+FROM billing.usage_pending u
 WHERE u.due_at <= sqlc.arg(due_at)::timestamptz
   AND (sqlc.narg(after_due_at)::timestamptz IS NULL
        OR (u.due_at, u.merchant_id, u.customer_id, u.currency) > (sqlc.narg(after_due_at)::timestamptz, sqlc.narg(after_merchant_id)::uuid, sqlc.narg(after_customer_id)::uuid, sqlc.narg(after_currency)::text))
 ORDER BY u.due_at, u.merchant_id, u.customer_id, u.currency
 LIMIT sqlc.arg(row_limit)::int;
 
--- name: CountUsageUnpostedByMerchant :many
+-- name: CountUsagePendingByMerchant :many
 -- CROSS-MERCHANT: whose usage only the event store can post.
 SELECT merchant_id, count(*)::bigint AS customers
-FROM billing.usage_unposted
+FROM billing.usage_pending
 GROUP BY merchant_id
 ORDER BY merchant_id;
 
--- name: DiscardUsageUnposted :many
--- An operator's discard of one merchant's unposted usage.
-DELETE FROM billing.usage_unposted
+-- name: DiscardUsagePending :many
+-- An operator's discard of one merchant's pending usage; its amounts go with
+-- it.
+DELETE FROM billing.usage_pending
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 RETURNING customer_id, currency, since_at;
 
@@ -95,12 +107,6 @@ SELECT * FROM billing.usage_postings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text AND period_starts_at >= sqlc.arg(period_starts_at)::timestamptz
 ORDER BY period_starts_at, created_at, id;
-
--- name: ListUsagePostingsOf :many
--- Many customers' postings in a currency of the periods from one start on.
-SELECT customer_id, period_starts_at, amount FROM billing.usage_postings
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
-  AND currency = sqlc.arg(currency)::text AND period_starts_at >= sqlc.arg(period_starts_at)::timestamptz;
 
 -- name: ListUsagePostingsByIDs :many
 SELECT * FROM billing.usage_postings
@@ -144,14 +150,14 @@ FROM (SELECT DISTINCT unnest(sqlc.arg(event_types)::text[]) AS event_type ORDER 
 SELECT pg_advisory_xact_lock_shared(hashtextextended('openrails.usage_activity:' || sqlc.arg(merchant_id)::uuid::text || ':' || e.event_type, 0))
 FROM (SELECT DISTINCT unnest(sqlc.arg(event_types)::text[]) AS event_type ORDER BY 1) e;
 
--- name: ListMerchantUsageUnposted :many
+-- name: ListMerchantUsagePending :many
 -- One merchant's customers whose usage is not posted.
-SELECT customer_id, currency FROM billing.usage_unposted
+SELECT customer_id, currency FROM billing.usage_pending
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY customer_id, currency;
 
 -- name: RecordUsageDiscard :one
--- An operator's discard of a merchant's unposted usage, with what was
+-- An operator's discard of a merchant's pending usage, with what was
 -- discarded.
 INSERT INTO billing.maintenance_runs (merchant_id, kind, actor, status, started_at, finished_at, affected, note)
 VALUES (sqlc.arg(merchant_id)::uuid, 'usage_discard', sqlc.arg(actor)::text, 'completed', sqlc.arg(now)::timestamptz,

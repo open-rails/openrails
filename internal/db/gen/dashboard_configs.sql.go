@@ -37,7 +37,7 @@ func (q *Queries) GetDashboardConfig(ctx context.Context, merchantID uuid.UUID) 
 const getDashboardProfile = `-- name: GetDashboardProfile :one
 SELECT EXISTS (SELECT 1 FROM billing.subscriptions WHERE subscriptions.merchant_id = $1::uuid)::boolean AS has_subscriptions,
     EXISTS (SELECT 1 FROM billing.payments WHERE payments.merchant_id = $1::uuid AND payments.rail IN ('nmi', 'ccbill', 'stripe'))::boolean AS has_card_payments,
-    (EXISTS (SELECT 1 FROM billing.usage_unposted WHERE usage_unposted.merchant_id = $1::uuid)
+    (EXISTS (SELECT 1 FROM billing.usage_pending WHERE usage_pending.merchant_id = $1::uuid)
      OR EXISTS (SELECT 1 FROM billing.usage_postings WHERE usage_postings.merchant_id = $1::uuid))::boolean AS has_usage,
     EXISTS (SELECT 1 FROM billing.credit_grants WHERE credit_grants.merchant_id = $1::uuid AND funding_source IN ('purchase', 'recurring'))::boolean AS has_credits,
     EXISTS (SELECT 1 FROM billing.invoices WHERE invoices.merchant_id = $1::uuid AND purchase_number IS NOT NULL)::boolean AS has_checkouts

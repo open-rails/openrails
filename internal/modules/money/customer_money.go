@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
 
@@ -25,8 +24,8 @@ type CustomerMoney struct {
 }
 
 // CustomersMoney reads the named customers' money: the ledger counters and
-// settings in one read each, then the held total of each balance account and
-// the run-out of each that a running charge draws.
+// settings in one read each, then each balance account's pending usage and
+// accrual, and the run-out of each that a running charge draws.
 func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID) (map[uuid.UUID]*CustomerMoney, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -86,9 +85,11 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 			k := key{c.CustomerID, c.Currency}
 			bal := &models.MoneyBalance{MerchantID: mid.UUID(), CustomerID: k.customer, Currency: k.currency, Balance: balance[k], AsOf: now}
 			if hasBalance[k] {
-				if bal.HeldBalance, bal.Accrued, err = s.heldAmount(ctx, q, mid.UUID(), k.customer, k.currency, now); err != nil {
+				row, err := q.GetUnpostedAmounts(ctx, gen.GetUnpostedAmountsParams{MerchantID: mid.UUID(), CustomerID: k.customer, Currency: k.currency, AsOf: now})
+				if err != nil {
 					return err
 				}
+				bal.Pending, bal.Accrued = row.Pending, row.Accrued
 			}
 			billingMode := mode[k]
 			if billingMode == "" {
@@ -109,9 +110,8 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 // BalanceLimits are the customer's built-in limit balance in each currency
 // it holds a balance in, as admission sees it: capacity is the balance plus
 // the credit line usage billing gives (none when prepaid), used what it owes,
-// and held what live holds, pending refunds and running charges' unposted
-// accruals set aside. Display values: a billing policy's own cap is not
-// applied.
+// and held its pending usage and running charges' accrual. Display values: a
+// billing policy's own cap is not applied.
 func (s *MoneyService) BalanceLimits(ctx context.Context, q *gen.Queries, customer uuid.UUID) ([]billing.CustomerLimit, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -127,20 +127,16 @@ func (s *MoneyService) BalanceLimits(ctx context.Context, q *gen.Queries, custom
 		if ledger.AccountType(a.AccountType) != ledger.CustomerUnits {
 			continue
 		}
-		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: a.Currency,
-			AsOf: now, LeaseLiveSince: limits.LeaseLiveSince(now)})
+		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: a.Currency, AsOf: now})
 		if err != nil {
 			return nil, err
 		}
-		capacity, err := s.withUnposted(ctx, q, mid.UUID(), customer, a.Currency, admissionCapacityFromRow(row))
+		capacity, err := s.usageAdmissionCapacity(ctx, q, identity.CustomerID(customer), a.Currency, admissionCapacityFromRow(row))
 		if err != nil {
-			return nil, err
-		}
-		if capacity, err = s.usageAdmissionCapacity(ctx, q, identity.CustomerID(customer), a.Currency, capacity); err != nil {
 			return nil, err
 		}
 		line := billing.CustomerLimit{CustomerID: billing.CustomerID(customer), Limit: catalog.BalanceLimit, Unit: a.Currency,
-			Capacity: capacity.Balance, Used: capacity.OutstandingOwed, Held: capacity.Held}
+			Capacity: capacity.Balance, Used: capacity.OutstandingOwed, Held: capacity.Unposted()}
 		if capacity.BillingMode == BillingModeArrears && capacity.CreditLimit > 0 {
 			line.Capacity += capacity.CreditLimit
 		}

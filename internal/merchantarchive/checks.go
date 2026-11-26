@@ -431,7 +431,8 @@ var referenceChecks = []rowCheck{
 	{"subscriptions", `deleted_at IS NULL
 	 AND (status IN ('active','pending','past_due','unknown') OR COALESCE(current_period_ends_at,ended_at)>now())
 	 AND EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=subscriptions.product_id AND p.tier_group IS DISTINCT FROM subscriptions.tier_group)`},
-	{"usage_unposted", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=usage_unposted.customer_id)`},
+	{"usage_pending", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=usage_pending.customer_id)`},
+	{"usage_pending_amounts", `NOT EXISTS(SELECT 1 FROM billing.usage_pending u WHERE u.merchant_id=$1 AND u.customer_id=usage_pending_amounts.customer_id AND u.currency=usage_pending_amounts.currency)`},
 	{"usage_postings", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=usage_postings.customer_id)`},
 	{"ledger_transfers", `source_id LIKE 'order_collection:%' AND
 	 (source<>'invoice_charge' OR operation<>'invoice_payment' OR transfer_type<>'owed_payment' OR

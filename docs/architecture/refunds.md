@@ -10,7 +10,9 @@ This system reverses charges: a staff refund OpenRails sends to the provider, a 
   `payments_reversal_check` and `payments_sign_check`. The refunded-payment
   foreign key includes customer and currency.
 - **Reservation**: a pending negative refund row (`PaymentService.ReserveRefund`)
-  holding its amount until the provider answers; `MarkFailed` releases it.
+  holding its amount until the provider answers; `MarkFailed` releases it. The
+  credit the payment bought leaves the balance at once and comes back on a
+  release ([credits](credits.md#refunds-and-chargebacks)).
 - **Refund intent**: a `provider_intents` row of type `nmi_refund` or
   `stripe_refund` carrying `intents.RefundPayload`, keyed by
   `intents.RefundIdempotencyKey`.
@@ -45,7 +47,8 @@ This system reverses charges: a staff refund OpenRails sends to the provider, a 
    `destructive.AdmitCommand` admits a `destructive.Refund`.
 3. One transaction under `LockAdminRefund` (an advisory lock per payment):
    `ReserveRefund` takes the customer and payment locks, runs
-   `purchasedcredits.Service.ValidateRefund` and inserts the pending row, and the
+   `purchasedcredits.Service.ValidateRefund`, inserts the pending row and takes
+   the credit it returns off the balance (`WithdrawRefund`), and the
    intent is enqueued with `AmountCents` from `NativeToRailMinorExact`. Both commit
    before any request leaves.
 4. `issuePreparedAdminRefund` runs the intent inline: `201` once the reservation

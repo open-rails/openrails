@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
@@ -30,15 +29,13 @@ func InMerchantUnit(code string) bool { return currency.IsUnitCode(code) }
 // customer's balance in that unit, then settles it: each line draws the live
 // lots, soonest expiry first, one credit_spend per lot at (invoice,
 // invoice_line, line), naming the invoice, and its money moves into the line's
-// deferred revenue at each lot's rate. Usage the customer accrued draws the
-// balance first; what holds and pending refunds keep is not spent.
+// deferred revenue at each lot's rate. The customer's usage and running
+// charges post first, lapsed lots expiring in turn, so lots are spent in time
+// order.
 func (s *Service) payFromBalance(ctx context.Context, d *db.DB, invoice *Invoice) (Outcome, error) {
 	q := d.Gen(ctx)
 	now := s.now()
 	lots := credits.New(q, invoice.MerchantID, s.now)
-	if _, err := lots.ExpireLapsed(ctx, invoice.CustomerID, invoice.Currency); err != nil {
-		return "", err
-	}
 	if _, err := lots.SettleRunningCharges(ctx, invoice.CustomerID, invoice.Currency, now); err != nil {
 		return "", err
 	}
@@ -65,8 +62,8 @@ func (s *Service) payFromBalance(ctx context.Context, d *db.DB, invoice *Invoice
 	return s.settle(ctx, d, invoice, nil)
 }
 
-// availableUnits is the customer's balance in the invoice's unit less what
-// admissions, usage not yet posted and pending refunds hold of it.
+// availableUnits is the customer's balance in the invoice's unit less its
+// pending usage and running charges' accrual.
 func availableUnits(ctx context.Context, q *gen.Queries, invoice *Invoice, now time.Time) (int64, error) {
 	l := ledger.New(q, invoice.MerchantID)
 	account, found, err := l.CustomerBalanceAccountID(ctx, invoice.CustomerID, invoice.Currency)
@@ -77,10 +74,9 @@ func availableUnits(ctx context.Context, q *gen.Queries, invoice *Invoice, now t
 	if err != nil {
 		return 0, err
 	}
-	held, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{MerchantID: invoice.MerchantID, CustomerID: invoice.CustomerID, Currency: invoice.Currency,
-		AsOf: now, LeaseLiveSince: limits.LeaseLiveSince(now)})
+	unposted, err := q.GetUnpostedAmounts(ctx, gen.GetUnpostedAmountsParams{MerchantID: invoice.MerchantID, CustomerID: invoice.CustomerID, Currency: invoice.Currency, AsOf: now})
 	if err != nil {
 		return 0, err
 	}
-	return balance - held.Held, nil
+	return balance - unposted.Pending - unposted.Accrued, nil
 }

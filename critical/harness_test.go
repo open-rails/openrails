@@ -249,13 +249,15 @@ func setCfgMerchant(cfg *openrails.Config, slug string, m billing.MerchantDeclar
 	cfg.Merchants = append(cfg.Merchants, m)
 }
 
-func balance(t *testing.T, client *openrails.Client, customer billing.CustomerID, available, held, posted int64) {
+// balance asserts a customer's USD balance: what it may spend, its usage
+// not yet posted (at provisional prices) and the ledger's balance.
+func balance(t *testing.T, client *openrails.Client, customer billing.CustomerID, available, pending, posted int64) {
 	t.Helper()
 	b, err := client.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 	require.NoError(t, err)
 	require.Equal(t, customer, b.CustomerID)
 	require.Equal(t, catalog.Currency("USD"), b.Currency)
 	require.Equal(t, available, b.AvailableAmount)
-	require.Equal(t, held, b.HeldAmount)
+	require.Equal(t, pending, b.PendingAmount)
 	require.Equal(t, posted, b.BalanceAmount)
 }

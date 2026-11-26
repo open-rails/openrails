@@ -124,15 +124,16 @@ func TestUsageStore(t *testing.T) {
 		balance(t, w.alpha, customer, 700, 300, 1000)
 		// Fixture: the sync's events reached the store, its transaction never
 		// committed.
-		leases, unposted := pgx.Identifier{w.schema, "leases"}.Sanitize(), pgx.Identifier{w.schema, "usage_unposted"}.Sanitize()
+		leases, pending := pgx.Identifier{w.schema, "leases"}.Sanitize(), pgx.Identifier{w.schema, "usage_pending"}.Sanitize()
 		_, err := w.pool.Exec(t.Context(), "UPDATE "+leases+" SET settled_through_n = 0, receipts = '[]'::jsonb WHERE merchant_id = $1 AND id = $2",
 			w.alpha.MerchantID().UUID(), lease.UUID())
 		require.NoError(t, err)
-		_, err = w.pool.Exec(t.Context(), "DELETE FROM "+unposted+" WHERE merchant_id = $1", w.alpha.MerchantID().UUID())
+		_, err = w.pool.Exec(t.Context(), "DELETE FROM "+pending+" WHERE merchant_id = $1", w.alpha.MerchantID().UUID())
 		require.NoError(t, err)
 		balance(t, w.alpha, customer, 1000, 0, 1000)
 
-		// The resend finds them and redoes only PostgreSQL's side.
+		// The resend finds them and redoes only PostgreSQL's side, its pending
+		// amount included.
 		settleUsage(t, w.alpha, lease, items...)
 		balance(t, w.alpha, customer, 700, 300, 1000)
 		require.EqualValues(t, 3, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"), "raw holds each item once")
@@ -141,7 +142,7 @@ func TestUsageStore(t *testing.T) {
 		require.EqualValues(t, 3, storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"))
 	})
 
-	t.Run("OR-J24-S48/while-clickhouse-is-out-of-reach-usage-settles-nothing-and-other-money-moves", func(t *testing.T) {
+	t.Run("OR-J24-S48/while-clickhouse-is-out-of-reach-usage-settles-nothing-and-balances-read-and-move", func(t *testing.T) {
 		var conn *downConn
 		w := newWorld(t, func(w *world) {
 			conn = &downConn{Conn: w.deps.ClickHouse}
@@ -157,21 +158,18 @@ func TestUsageStore(t *testing.T) {
 		conn.down.Store(true)
 		_, err := w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(2, usageInput(user, "during", 2))})
 		requireUnavailable(t, err)
-		_, err = w.alpha.GetBalance(t.Context(), user, billing.GetBalanceParams{Currency: "USD"})
-		requireUnavailable(t, err)
-		_, err = w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: user, Currency: "USD", Amount: 500, Source: "critical", SourceID: "top-up"}})
-		requireUnavailable(t, err)
-		// A customer without usage is unaffected.
+		// A balance is PostgreSQL's alone: it reads and moves, its pending
+		// usage included.
+		balance(t, w.alpha, user, 900, 100, 1000)
+		fund(t, w.alpha, user, "top-up", 500)
+		balance(t, w.alpha, user, 1400, 100, 1500)
 		fund(t, w.alpha, other, "other-top-up", 500)
 		balance(t, w.alpha, other, 1500, 0, 1500)
 
 		conn.down.Store(false)
-		w.clock.Advance(time.Minute)
-		fund(t, w.alpha, user, "top-up", 500)
-		balance(t, w.alpha, user, 1400, 0, 1400)
 		out := settleUsage(t, w.alpha, lease, numbered(2, usageInput(user, "during", 2))...)
 		require.EqualValues(t, 2, out.Usage.ThroughN)
-		balance(t, w.alpha, user, 1200, 200, 1400)
+		balance(t, w.alpha, user, 1200, 300, 1500)
 		require.EqualValues(t, 2, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"), "every item settled once")
 	})
 
@@ -181,19 +179,22 @@ func TestUsageStore(t *testing.T) {
 			pricedMeter(t, w.alpha, tiers(catalog.TierModeGraduated, 10, 5, 10))
 			customer, _ := fundedCustomer(t, w)
 			lease := newLease()
+			day := w.clock.Now().UTC()
 			settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "first", 6))...)
 			balance(t, w.alpha, customer, 940, 60, 1000)
-			// Usage at a movement's instant is not before its cut: the top-up
-			// comes a minute later.
-			w.clock.Advance(time.Minute)
-			fund(t, w.alpha, customer, "top-up", 100)
-			balance(t, w.alpha, customer, 1040, 0, 1040)
-			settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "second", 6))...)
-			balance(t, w.alpha, customer, 990, 50, 1040)
 			fleet := startFleet(t, w)
-			nextMonth(w)
-			closeMonths(t, fleet)
-			balance(t, w.alpha, customer, 990, 0, 990)
+			nextDay(w)
+			postDays(t, fleet)
+			balance(t, w.alpha, customer, 940, 0, 940)
+			// Six more of the same day, reported late, are pending at their
+			// marginal price: 12 units cost 110.
+			second := usageInput(customer, "second", 6)
+			second.OccurredAt = day.Add(time.Hour)
+			settleUsage(t, w.alpha, lease, numbered(2, second)...)
+			balance(t, w.alpha, customer, 890, 50, 940)
+			nextDay(w)
+			postDays(t, fleet)
+			balance(t, w.alpha, customer, 890, 0, 890)
 			deductions := usageDeductions(t, w.alpha, customer)
 			require.Len(t, deductions, 2)
 			require.EqualValues(t, -50, deductions[0].Amount, "12 units cost 110; the first posting took 60")
@@ -204,20 +205,25 @@ func TestUsageStore(t *testing.T) {
 			pricedMeter(t, w.alpha, tiers(catalog.TierModeVolume, 10, 5, 10))
 			customer, _ := fundedCustomer(t, w)
 			lease := newLease()
+			day := w.clock.Now().UTC()
 			settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "first", 8))...)
-			w.clock.Advance(time.Minute)
-			fund(t, w.alpha, customer, "top-up", 100)
-			balance(t, w.alpha, customer, 1020, 0, 1020)
-			// 12 units cost 60 at the cheaper band: 20 less than posted.
-			settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "second", 4))...)
-			balance(t, w.alpha, customer, 1020, 0, 1020)
+			balance(t, w.alpha, customer, 920, 80, 1000)
 			fleet := startFleet(t, w)
-			nextMonth(w)
-			closeMonths(t, fleet)
+			nextDay(w)
+			postDays(t, fleet)
+			balance(t, w.alpha, customer, 920, 0, 920)
+			// 12 units cost 60 at the cheaper band: 20 less than posted. Their
+			// marginal price is never below zero.
+			second := usageInput(customer, "second", 4)
+			second.OccurredAt = day.Add(time.Hour)
+			settleUsage(t, w.alpha, lease, numbered(2, second)...)
+			balance(t, w.alpha, customer, 920, 0, 920)
+			nextDay(w)
+			postDays(t, fleet)
 			require.Len(t, usageDeductions(t, w.alpha, customer), 1, "the remainder is carried while late usage may come")
 			w.clock.Advance(70 * 24 * time.Hour)
-			closeMonths(t, fleet)
-			balance(t, w.alpha, customer, 1040, 0, 1040)
+			postDays(t, fleet)
+			balance(t, w.alpha, customer, 940, 0, 940)
 			deductions := usageDeductions(t, w.alpha, customer)
 			require.Len(t, deductions, 2)
 			require.EqualValues(t, 20, deductions[0].Amount, "the period's close credits it back")
@@ -235,7 +241,7 @@ func TestUsageStore(t *testing.T) {
 			settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "new-card", 1))...)
 			fleet := startFleet(t, w)
 			nextMonth(w)
-			closeMonths(t, fleet)
+			postDays(t, fleet)
 			deductions := usageDeductions(t, w.alpha, customer)
 			require.Len(t, deductions, 1)
 			require.EqualValues(t, -500, deductions[0].Amount)
@@ -243,7 +249,7 @@ func TestUsageStore(t *testing.T) {
 		})
 	})
 
-	t.Run("OR-J24-S56/a-month-closes-at-its-end-in-the-merchants-accounting-zone", func(t *testing.T) {
+	t.Run("OR-J24-S56/a-day-posts-once-it-ends-in-the-merchants-accounting-zone", func(t *testing.T) {
 		ny, err := time.LoadLocation("America/New_York")
 		require.NoError(t, err)
 		w := newWorld(t, func(w *world) {
@@ -258,16 +264,16 @@ func TestUsageStore(t *testing.T) {
 		customer, _ := fundedCustomer(t, w)
 		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "last-evening", 2))...)
 		fleet := startFleet(t, w)
-		closeMonths(t, fleet)
-		require.Empty(t, usageDeductions(t, w.alpha, customer), "New York's month has not ended")
+		postDays(t, fleet)
+		require.Empty(t, usageDeductions(t, w.alpha, customer), "New York's day has not ended")
 		local := w.clock.Now().In(ny)
 		end := time.Date(local.Year(), local.Month()+1, 1, 0, 0, 0, 0, ny)
 		w.clock.Advance(end.Add(time.Minute).Sub(w.clock.Now()))
-		closeMonths(t, fleet)
+		postDays(t, fleet)
 		deductions := usageDeductions(t, w.alpha, customer)
 		require.Len(t, deductions, 1)
 		require.EqualValues(t, -200, deductions[0].Amount)
-		require.True(t, end.Equal(deductions[0].Usage.Through), "cut at New York's month end, not UTC's: %s", deductions[0].Usage.Through)
+		require.True(t, deductions[0].Usage.Through.After(end), "posted once New York's day ended: %s", deductions[0].Usage.Through)
 	})
 
 	t.Run("OR-J24-S57/usage-history-folds-into-the-merchants-days-and-regroups-when-its-zone-changes", func(t *testing.T) {
@@ -314,11 +320,11 @@ func TestUsageStore(t *testing.T) {
 
 		fleet := startFleet(t, a.world)
 		nextMonth(a.world)
-		closeMonths(t, fleet)
+		postDays(t, fleet)
 		require.EqualValues(t, first.Amount+second.Amount, owed(t, a.alphaRemote, alice), "the days sum to what posts")
 	})
 
-	t.Run("OR-J24-S50/late-usage-after-its-month-posted-posts-the-difference", func(t *testing.T) {
+	t.Run("OR-J24-S50/late-usage-after-its-day-posted-posts-the-difference", func(t *testing.T) {
 		w := newWorld(t, earlyInMonth)
 		usageMeter(t, w.alpha, 100)
 		customer := billing.CustomerID(uuid.New())
@@ -327,15 +333,15 @@ func TestUsageStore(t *testing.T) {
 		occurred := w.clock.Now().UTC()
 		settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "in-month", 2))...)
 		nextMonth(w)
-		closeMonths(t, fleet)
+		postDays(t, fleet)
 		require.EqualValues(t, 200, owed(t, w.alpha, customer))
 		// Late, and still within the 35-day ingest window of its occurrence.
 		w.clock.Advance(2 * 24 * time.Hour)
 		late := usageInput(customer, "late", 1)
 		late.OccurredAt = occurred
 		settleUsage(t, w.alpha, lease, numbered(2, late)...)
-		closeMonths(t, fleet)
-		require.EqualValues(t, 300, owed(t, w.alpha, customer), "the late item posts at once: its month ended")
+		postDays(t, fleet)
+		require.EqualValues(t, 300, owed(t, w.alpha, customer), "the late item posts at once: its day ended")
 		require.Len(t, usageDeductions(t, w.alpha, customer), 2)
 	})
 
@@ -377,11 +383,11 @@ products:
 		require.Zero(t, customerLimit(t, w.alpha, customer, "rolling").Used, "the rolling window passed")
 	})
 
-	t.Run("OR-J24-S52/a-database-with-unposted-usage-starts-without-its-store-and-opens-a-finding", func(t *testing.T) {
+	t.Run("OR-J24-S52/a-database-with-pending-usage-starts-without-its-store-and-opens-a-finding", func(t *testing.T) {
 		w := newWorld(t)
 		usageMeter(t, w.alpha, 100)
 		customer, _ := fundedCustomer(t, w)
-		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "unposted", 2))...)
+		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "pending", 2))...)
 		other := billing.CustomerID(uuid.New())
 		fund(t, w.alpha, other, "funded", 500)
 		ctx := t.Context()
@@ -390,36 +396,35 @@ products:
 
 		// Without its store the deployment starts: the merchant's usage is
 		// refused and named in a finding, the customer whose usage waits for
-		// the store cannot read or move its balance, and every other customer
-		// bills as before.
+		// the store reads its balance (PostgreSQL's), pending usage and all,
+		// and every other customer bills as before.
 		without := w.deps
 		without.ClickHouse = nil
 		degraded, err := openrails.New(ctx, w.cfg, without)
 		require.NoError(t, err)
 		client, err := declaredMerchant(degraded, "alpha")
 		require.NoError(t, err)
-		findings, err := client.ListFindings(ctx, billing.FindingListParams{Type: "consistency.unposted_usage"})
+		findings, err := client.ListFindings(ctx, billing.FindingListParams{Type: "consistency.pending_usage"})
 		require.NoError(t, err)
-		require.Len(t, findings.Items, 1, "the merchant's unposted usage is a finding")
+		require.Len(t, findings.Items, 1, "the merchant's pending usage is a finding")
 		_, err = client.SyncLeases(ctx, billing.SyncLeasesParams{LeaseID: newLease(), Usage: numbered(1, usageInput(other, "metered", 1))})
 		requireNoStore(t, err)
-		_, err = client.GetBalance(ctx, customer, billing.GetBalanceParams{Currency: "USD"})
-		requireNoStore(t, err)
+		balance(t, client, customer, 800, 200, 1000)
 		balance(t, client, other, 500, 0, 500)
 		_, err = client.StartRunningCharge(ctx, billing.StartRunningChargeParams{Reference: "without-the-store", CustomerID: other, Currency: "USD", RatePerHour: 3600})
 		require.NoError(t, err, "running charges need only PostgreSQL")
 		require.NoError(t, degraded.Close(context.Background()))
 
 		// A lost store: an empty one is refused, and attaching it discards the
-		// unposted usage only when told to, on the record.
+		// pending usage only when told to, on the record.
 		emptied := w.cfg
 		emptied.ClickHouse.Database = w.schema + "_replacement"
 		require.ErrorContains(t, openrailsNewErr(ctx, emptied, w.deps), "empty or different ClickHouse")
 		attach := map[string]any{"clickhouse": map[string]string{"url": "clickhouse://" + os.Getenv("OPENRAILS_CRITICAL_CLICKHOUSE_ADDR") + "/" + emptied.ClickHouse.Database}}
 		out, err := hostCLICommand(t, w, attach, "usage", "attach", "--actor", "critical", "--reason", "drill").CombinedOutput()
 		require.Error(t, err)
-		require.Contains(t, string(out), "--discard-unposted")
-		out, err = hostCLICommand(t, w, attach, "usage", "attach", "--actor", "critical", "--reason", "drill", "--discard-unposted").CombinedOutput()
+		require.Contains(t, string(out), "--discard-pending")
+		out, err = hostCLICommand(t, w, attach, "usage", "attach", "--actor", "critical", "--reason", "drill", "--discard-pending").CombinedOutput()
 		require.NoError(t, err, string(out))
 		require.Contains(t, string(out), w.alpha.MerchantID().String())
 		t.Cleanup(func() {

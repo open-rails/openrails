@@ -41,9 +41,7 @@ const (
 	UnitsRevoked = books.UnitsRevoked
 	UnitsGranted = books.UnitsGranted
 	// UnitsRefunded is where a refunded lot's units go.
-	UnitsRefunded       = books.UnitsRefunded
-	UnitsRefundClearing = books.UnitsRefundClearing
-	UnitsRefundLoss     = books.UnitsRefundLoss
+	UnitsRefunded = books.UnitsRefunded
 )
 
 // TransferType is ledger_transfers.transfer_type; these are the units book's,

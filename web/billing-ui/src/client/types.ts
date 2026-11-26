@@ -615,16 +615,17 @@ export type CustomerLimit = wire.CustomerLimit
 export type InvoiceAttribution = Partial<wire.InvoiceAttribution>
 
 /**
- * A customer's money in one currency, as of `as_of`. `accrued_amount` is what
- * its running charges have charged and the ledger does not hold yet, already
- * taken off `available_amount`; until `depletes_at` (null with no running
- * charge) show `available_amount - accrual_rate_per_hour x hours since as_of`.
+ * A customer's money in one currency, as of `as_of`. `pending_amount` is usage
+ * and `accrued_amount` what its running charges have charged that the ledger
+ * has not taken yet, both already taken off `available_amount`; until
+ * `depletes_at` (null with no running charge) show `available_amount -
+ * accrual_rate_per_hour x hours since as_of`.
  */
 export const balanceSchema = z.object({
   currency: z.string(),
   billing_mode: z.string(),
   balance_amount: amount,
-  held_amount: amount,
+  pending_amount: amount,
   accrued_amount: amount,
   available_amount: amount,
   owed_amount: amount,

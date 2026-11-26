@@ -25,12 +25,12 @@ const eventStorePrefix = "event_store."
 func exportUsage(ctx context.Context, database *db.DB, q *gen.Queries, id billing.MerchantID, w *archivewire.Writer) error {
 	store := database.EventStore()
 	if store == nil {
-		unposted, err := q.ListMerchantUsageUnposted(ctx, id.UUID())
+		pending, err := q.ListMerchantUsagePending(ctx, id.UUID())
 		if err != nil {
 			return err
 		}
-		if len(unposted) > 0 {
-			return &Error{Code: "unsupported_state", Table: "usage_unposted", Count: int64(len(unposted)), Err: billing.ErrEventStoreRequired}
+		if len(pending) > 0 {
+			return &Error{Code: "unsupported_state", Table: "usage_pending", Count: int64(len(pending)), Err: billing.ErrEventStoreRequired}
 		}
 		return nil
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/modules/limits"
 )
 
@@ -596,7 +597,8 @@ func headLocked(q *usageQueue, limit int) []*queued {
 // inFlightLocked is what the gate reports in flight: the takes of tickets
 // open since before the previous sync (number prev) was built, and the costs
 // of usage captured before it that no sync has settled, by customer and
-// limit. carried is this sync's usage: an item it carries is never also
+// limit. The balance is never reported: other gates see usage once it
+// settles. carried is this sync's usage: an item it carries is never also
 // reported, first send or resend, so no view counts it twice. What the
 // server had no time to settle is carried again by the next sync, at once.
 func (g *gateState) inFlightLocked(carried map[*queued]bool, prev int64) []billing.InFlight {
@@ -611,6 +613,9 @@ func (g *gateState) inFlightLocked(carried map[*queued]bool, prev int64) []billi
 			return
 		}
 		for _, t := range takes {
+			if t.limit == catalog.BalanceLimit {
+				continue
+			}
 			k := key{v.key.customer, t.limit, t.unit}
 			if _, ok := sum[k]; !ok {
 				order = append(order, k)

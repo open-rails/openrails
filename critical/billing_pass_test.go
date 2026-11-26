@@ -371,10 +371,13 @@ func TestBillingPass(t *testing.T) {
 		advanceTo(w, midnight.Add(-time.Second))
 		require.Zero(t, lotExpired(t, w.alpha, lots[0].ID))
 		require.EqualValues(t, 1000, remaining(), "the lot is spendable before it lapses")
+		// Until its expiry posts, the lapsed lot is in the balance: the 00:00
+		// pass books it.
 		advanceTo(w, midnight)
-		require.Zero(t, remaining(), "a view never offers a lapsed lot, pass or no pass")
+		require.EqualValues(t, 1000, remaining())
 		require.False(t, runPass(t, fleet))
 		require.EqualValues(t, 1000, lotExpired(t, w.alpha, lots[0].ID), "the 00:00 pass books the lapse")
+		require.Zero(t, remaining())
 	})
 	t.Run("OR-J04-S45/a-delinquency-grace-ends-on-the-next-pass", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, func(w *world) {

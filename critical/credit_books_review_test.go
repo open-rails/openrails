@@ -181,7 +181,7 @@ func restoresCreditBooks(t *testing.T) {
 // with its money, and the receivable keeps its sign. The payment refunds
 // after.
 func wonDisputeAfterOwedRepaidAgain(t *testing.T) {
-	s := newCreditShop(t)
+	s := newPostingShop(t)
 	a, w := s.a, s.a.world
 	s.owes(t, 11_000_000, "owed-before-the-pack")
 	payment, lot := s.buy(t, s.pack(t, "pack-55", 55_000_000, 50_000_000, 365), 50_000_000, "pack-55")
@@ -235,7 +235,7 @@ func partialRecoveriesEndExact(t *testing.T) {
 		booksAudited(t, w)
 	})
 	t.Run("with-reopened-owed", func(t *testing.T) {
-		s := newCreditShop(t)
+		s := newPostingShop(t)
 		w := s.a.world
 		s.owes(t, 11_000_000, "owed-before-the-pack")
 		payment, lot := s.buy(t, s.pack(t, "pack-55", 55_000_000, 50_000_000, 365), 50_000_000, "pack-55")
@@ -282,7 +282,7 @@ func owedBeforeTheBooks(t *testing.T, w *world, customer billing.CustomerID, amo
 // Of owed that accrued partly before the books, credit repays the
 // receivable a usage posting accrued first and the rest as revenue.
 func repaymentSplitsAtTheReceivable(t *testing.T) {
-	s := newCreditShop(t)
+	s := newPostingShop(t)
 	a, w := s.a, s.a.world
 	_, err := a.alpha.UpdateCustomer(t.Context(), s.customer, billing.UpdateCustomerParams{})
 	require.NoError(t, err)

@@ -97,7 +97,8 @@ func reservation(customer billing.CustomerID, id string, amount int64) billing.A
 var computeUsage = billing.CaptureUsage{EventType: "compute", Dimensions: map[string]int64{"units": 1}}
 
 // decided is one request a gate of its own decided on a view it read for
-// it. An admitted request is reported in flight before admitOne returns.
+// it. An admitted request's limit windows are reported in flight before
+// admitOne returns; the balance never is.
 type decided struct {
 	g *openrails.Gate
 	*openrails.Ticket
@@ -295,26 +296,27 @@ func TestLimitDecisions(t *testing.T) {
 		customer := billing.CustomerID(uuid.New())
 		fund(t, w.alpha, customer, "funded", 8000)
 
+		// An open ticket holds nothing of the balance on the server: its
+		// usage counts once it settles. The spend window counts it in flight.
 		a := admitOne(t, w.alpha, reservation(customer, "a", 4000))
 		require.True(t, a.Allowed())
-		balance(t, w.alpha, customer, 4000, 4000, 8000)
+		balance(t, w.alpha, customer, 8000, 0, 8000)
 		line := customerLimit(t, w.alpha, customer, "balance")
 		require.Equal(t, "USD", line.Unit)
-		require.Equal(t, billing.CustomerLimit{CustomerID: customer, Limit: "balance", Unit: "USD", Capacity: 8000, Held: 4000, Remaining: 4000}, line,
-			"balance is a limit: the prepaid balance, what gates have in flight and what remains")
+		require.Equal(t, billing.CustomerLimit{CustomerID: customer, Limit: "balance", Unit: "USD", Capacity: 8000, Held: 0, Remaining: 8000}, line,
+			"balance is a limit: the prepaid balance, its pending usage and what remains")
 
 		refusal := requireDenied(t, admitOne(t, w.alpha, reservation(customer, "b", 2000)), billing.DenyBudgetExceeded)
 		require.NotNil(t, refusal.RetryAfterSeconds)
 		require.Positive(t, *refusal.RetryAfterSeconds)
-		balance(t, w.alpha, customer, 4000, 4000, 8000)
+		balance(t, w.alpha, customer, 8000, 0, 8000)
 
 		c := admitOne(t, w.alpha, reservation(customer, "c", 1000))
 		require.True(t, c.Allowed(), "the window has exactly 1000 left")
-		balance(t, w.alpha, customer, 3000, 5000, 8000)
 		c.release(t)
-		balance(t, w.alpha, customer, 4000, 4000, 8000)
+		balance(t, w.alpha, customer, 8000, 0, 8000)
 
-		// The capture accrues against the balance and settles in the window.
+		// The capture is pending against the balance and settles in the window.
 		a.capture(t, computeUsage)
 		balance(t, w.alpha, customer, 4000, 4000, 8000)
 		requireDenied(t, admitOne(t, w.alpha, reservation(customer, "d", 1500)), billing.DenyBudgetExceeded)
@@ -330,7 +332,7 @@ func TestLimitDecisions(t *testing.T) {
 		require.True(t, admitOne(t, w.alpha, reservation(thin, "z", 4500)).Allowed(), "the refused 800 took nothing from the window")
 		fund(t, w.alpha, thin, "spare", 1000)
 		requireDenied(t, admitOne(t, w.alpha, reservation(thin, "q", 1)), billing.DenyBudgetExceeded)
-		balance(t, w.alpha, thin, 1000, 5000, 6000)
+		balance(t, w.alpha, thin, 6000, 0, 6000)
 	})
 
 	t.Run("OR-J23-S16/an-overrun-settles-past-capacity-and-records-reached-once", func(t *testing.T) {
@@ -420,7 +422,8 @@ func TestLimitDecisions(t *testing.T) {
 			"two keys with the same limits share one window")
 		require.True(t, admitOne(t, w.alpha, key(reservation(customer, "gold-key", 600), "apiKey:three", "gold")).Allowed(),
 			"another trust level is decided against its own window")
-		balance(t, w.alpha, customer, 8400, 1600, 10_000)
+		// Open tickets hold their windows, never the balance on the server.
+		balance(t, w.alpha, customer, 10_000, 0, 10_000)
 	})
 
 	t.Run("OR-J23-S33/a-spend-window-that-names-no-currency-is-in-its-policys-currency", func(t *testing.T) {
@@ -436,7 +439,7 @@ func TestLimitDecisions(t *testing.T) {
 		fund(t, w.alpha, customer, "funded", 300_000_000)
 		require.True(t, admitOne(t, w.alpha, reservation(customer, "within", 60_000_000)).Allowed(), "$60 is within ¥100, not past 1,000,000 USD units")
 		requireDenied(t, admitOne(t, w.alpha, reservation(customer, "past", 50_000_000)), billing.DenyBudgetExceeded)
-		balance(t, w.alpha, customer, 240_000_000, 60_000_000, 300_000_000)
+		balance(t, w.alpha, customer, 300_000_000, 0, 300_000_000)
 	})
 
 	t.Run("OR-J23-S34/a-policys-accrual-rate-cap-is-in-its-policy-currency", func(t *testing.T) {

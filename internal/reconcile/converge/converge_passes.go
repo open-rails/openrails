@@ -122,18 +122,18 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 		out = append(out, creditLotFinding("derive.grant_effect.excess", ShapeExcess, lot, "terminated_grant",
 			func(ctx context.Context) error { return p.lockedMaterializeLot(ctx, scope, lot) }))
 	}
-	// derive.credit_reservation.mismatch — a purchased lot whose reservation
-	// disagrees with its payment's pending refunds (a refund row changed
-	// without its writer). Repair = writing the reservation again.
-	drifted, err := lots.ReservationDrifts(ctx, customer, convergeScanCap)
+	// derive.credit_refunding.mismatch — a purchased lot whose refunding
+	// units disagree with its payment's pending refunds (a refund row changed
+	// without its writer). Repair = writing them again.
+	drifted, err := lots.RefundingDrifts(ctx, customer, convergeScanCap)
 	if err != nil {
-		return nil, fmt.Errorf("derive: scan credit reservations: %w", err)
+		return nil, fmt.Errorf("derive: scan credit refunds: %w", err)
 	}
-	markTruncated(ctx, len(drifted), findingCreditReservation)
+	markTruncated(ctx, len(drifted), findingCreditRefunding)
 	for i := range drifted {
 		lot := drifted[i]
-		out = append(out, creditLotFinding(findingCreditReservation, ShapeMismatch, lot, "pending_refunds",
-			func(ctx context.Context) error { return p.lockedSyncReservation(ctx, scope, lot) }))
+		out = append(out, creditLotFinding(findingCreditRefunding, ShapeMismatch, lot, "pending_refunds",
+			func(ctx context.Context) error { return p.lockedSyncRefunding(ctx, scope, lot) }))
 	}
 
 	// derive.grant.excess (grant tier) — a live grant whose backing payment
@@ -430,16 +430,16 @@ func (p *derivePass) lockedMaterializeLot(ctx context.Context, scope Scope, lot 
 	})
 }
 
-// lockedSyncReservation writes a lot's reservation again under the customer's
-// lock, which every refund of its payment takes.
-func (p *derivePass) lockedSyncReservation(ctx context.Context, scope Scope, lot gen.BillingCreditGrant) error {
+// lockedSyncRefunding writes a lot's refunding units again under the
+// customer's lock, which every refund of its payment takes.
+func (p *derivePass) lockedSyncRefunding(ctx context.Context, scope Scope, lot gen.BillingCreditGrant) error {
 	ctx = merchant.WithID(ctx, scope.Merchant)
 	return p.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		lots := credits.New(gen.New(tx), scope.Merchant.UUID(), p.e.Now)
 		if err := lots.LockCustomer(ctx, lot.CustomerID); err != nil {
 			return err
 		}
-		return lots.SyncReservation(ctx, *lot.PaymentID)
+		return lots.SyncRefunding(ctx, *lot.PaymentID)
 	})
 }
 
@@ -1016,12 +1016,12 @@ const (
 	findingDunningFunnel        = "life.dunning.funnel"
 	findingRenewalHeld          = "life.renewal.held"
 	findingDuplicateCharge      = "consistency.duplicate.provider_charge"
-	findingCreditReservation    = "derive.credit_reservation.mismatch"
+	findingCreditRefunding      = "derive.credit_refunding.mismatch"
 )
 
 func (*derivePass) Standing() []string {
 	return []string{"derive.grant_effect.missing", "derive.grant_effect.excess", "derive.grant.missing", "derive.grant.excess",
-		"derive.subscription.missing", "derive.wallet.missing", "derive.grant_effect.mismatch", findingCreditReservation, reconcile.FindingAccessUnjustified}
+		"derive.subscription.missing", "derive.wallet.missing", "derive.grant_effect.mismatch", findingCreditRefunding, reconcile.FindingAccessUnjustified}
 }
 
 // Standing leaves out the stuck and abandoned provider operations, which

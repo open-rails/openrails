@@ -27,8 +27,8 @@ import (
 )
 
 // A running charge is (customer, currency, rate per hour, started_at) until it
-// is stopped. Nothing is written while it runs: what it has accrued is part of
-// the held total, and reaches the ledger in a posting (running_charge_posting.go).
+// is stopped. Nothing is written while it runs: a balance read deducts what it
+// has accrued, and it reaches the ledger in a posting (running_charge_posting.go).
 // The customer row is the money lock: start, stop and every posting hold it.
 
 const (
@@ -138,7 +138,7 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 		if err != nil {
 			return nil, false, err
 		}
-		if satSub(satSub(bal.Balance, bal.HeldBalance), floor) < in.MinimumAmount {
+		if satSub(bal.Available(), floor) < in.MinimumAmount {
 			return nil, false, ErrInsufficientCredits
 		}
 	}
@@ -435,71 +435,27 @@ func (s *MoneyService) capacityFloor(ctx context.Context, q *gen.Queries, mercha
 	return floor, owed, nil
 }
 
-// lapsedUnspent is what bal's lots that lapsed and were not yet expired will
-// expire with: each first funds what the running charges accrued until it
-// lapsed, as its expiry posts it (credits.Lots.ExpireLapsedBy).
-func lapsedUnspent(ctx context.Context, q *gen.Queries, bal *models.MoneyBalance, charges []gen.BillingRunningCharge) (int64, error) {
-	lapsed, err := q.ListLapsedCreditLots(ctx, gen.ListLapsedCreditLotsParams{
-		MerchantID: bal.MerchantID, CustomerID: bal.CustomerID, Currency: bal.Currency, AsOf: bal.AsOf,
-	})
-	if err != nil {
-		return 0, err
-	}
-	posted := make([]int64, len(charges))
-	for i, c := range charges {
-		posted[i] = c.PostedAmount
-	}
-	var unspent int64
-	for _, lot := range lapsed {
-		if lot.Remaining <= 0 {
-			continue
-		}
-		var accrued int64
-		for i, c := range charges {
-			total, err := RunningChargeTotal(c.RatePerHour, c.StartedAt, lot.ExpiresAt)
-			if err != nil {
-				return 0, err
-			}
-			if total > posted[i] {
-				accrued = satAdd(accrued, total-posted[i])
-				posted[i] = total
-			}
-		}
-		unspent = satAdd(unspent, max(satSub(lot.Remaining, accrued), 0))
-	}
-	return unspent, nil
-}
-
-// PublicBalance is bal as a customer's money in one currency: what its
-// running charges have accrued apart from its other holds, the rate they draw
-// it at and when its capacity reaches zero. A lot stops being available at
-// its lapse, before its expiry is posted. It reads through s's own
-// connection.
+// PublicBalance is bal as a customer's money in one currency: its pending
+// usage and what its running charges accrued, the rate they draw it at and
+// when its capacity reaches zero. It reads through s's own connection.
 func (s *MoneyService) PublicBalance(ctx context.Context, bal *models.MoneyBalance, mode billing.BillingMode, owed int64) (*billing.Balance, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	out := &billing.Balance{
 		CustomerID: billing.CustomerID(bal.CustomerID), Currency: catalog.Currency(bal.Currency), BillingMode: mode,
-		BalanceAmount: bal.Balance, HeldAmount: bal.HeldBalance - bal.Accrued, AccruedAmount: bal.Accrued,
-		AvailableAmount: bal.Balance - bal.HeldBalance, OwedAmount: owed, AsOf: bal.AsOf,
+		BalanceAmount: bal.Balance, PendingAmount: bal.Pending, AccruedAmount: bal.Accrued,
+		AvailableAmount: bal.Available(), OwedAmount: owed, AsOf: bal.AsOf,
 	}
 	q := s.db.Gen(ctx)
 	charges, err := runningCharges(ctx, q, bal)
-	if err != nil {
-		return out, err
-	}
-	// With no running charge there is nothing to project.
-	if len(charges) == 0 {
-		lapsed, err := lapsedUnspent(ctx, q, bal, nil)
-		out.AvailableAmount = satSub(out.AvailableAmount, lapsed)
+	if err != nil || len(charges) == 0 {
 		return out, err
 	}
 	view, err := s.viewBalance(ctx, q, bal, charges)
 	if err != nil {
 		return out, err
 	}
-	out.AvailableAmount = view.available
 	out.AccrualRatePerHour, out.DepletesAt = view.accrualRate, view.project(lowBalanceLine{}, 0).depletesAt
 	return out, nil
 }

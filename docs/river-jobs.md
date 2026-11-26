@@ -57,7 +57,7 @@ Each `openrails.billing_pass` job runs these scans in order within its own River
 
 | Scan | What it looks for |
 | --- | --- |
-| `openrails.usage_close` | The month-end close: posts each customer's usage from ended months to the ledger, one posting per pricing period, priced from the period's total in the event store less what earlier postings took; and credits a period whose volume price fell once its late usage window closed. Until then the usage is held, not posted. The read is indexed on when each customer is due. [Source](../internal/river/jobs_usage_close.go) |
+| `openrails.usage_posting` | The daily posting: once the accounting-zone day of a customer's oldest pending usage ends, posts all of it to the ledger, one posting per pricing period, priced from the period's total in the event store less what earlier postings took, and clears its pending amount; a month's last day's posting is its close. It also credits a period whose volume price fell once its late usage window closed. The read is indexed on when each customer is due. [Source](../internal/river/jobs_usage_posting.go) |
 | `openrails.dunning` | Due subscription renewals and collection retries. [Source](../internal/river/jobs_dunning.go) |
 | `openrails.subscription_verification_retry` | Flagged `unverified` subscriptions that still need a targeted provider check after a missed notification or failed read. [Source](../internal/reconcile/verify.go) |
 | `openrails.balance_watch` | Due balance checks and failed or missed balance looks. [Source](../internal/river/jobs_balance_watch.go) |

@@ -22,7 +22,7 @@ import (
 //     conservation still holds; recomputing from ledger_transfers catches it.
 //  3. Lot drift: a credit lot's units_credited and units_debited are the legs
 //     on its balance account, kept by their own trigger; recomputed likewise.
-//     Its units_reserved is what its payment's pending refunds reserve.
+//     Its units_refunding is what its payment's pending refunds withdrew.
 //  4. Rollup drift: ledger_type_totals and ledger_daily, recomputed from
 //     ledger_transfers.
 //  5. Sign breaches: a general-ledger account across its sign rule, a
@@ -76,18 +76,18 @@ func (d CounterDrift) String() string {
 }
 
 // LotDrift is one credit lot whose counters disagree with its logged legs, or
-// whose reservation with its payment's pending refunds.
+// whose refunding units with its payment's pending refunds.
 type LotDrift struct {
-	CreditGrantID    uuid.UUID `json:"credit_grant_id"`
-	MerchantID       uuid.UUID `json:"merchant_id"`
-	CustomerID       uuid.UUID `json:"customer_id"`
-	Unit             string    `json:"unit"`
-	StoredCredited   int64     `json:"stored_credited"`
-	LoggedCredited   int64     `json:"logged_credited"`
-	StoredDebited    int64     `json:"stored_debited"`
-	LoggedDebited    int64     `json:"logged_debited"`
-	StoredReserved   int64     `json:"stored_reserved"`
-	ExpectedReserved int64     `json:"expected_reserved"`
+	CreditGrantID     uuid.UUID `json:"credit_grant_id"`
+	MerchantID        uuid.UUID `json:"merchant_id"`
+	CustomerID        uuid.UUID `json:"customer_id"`
+	Unit              string    `json:"unit"`
+	StoredCredited    int64     `json:"stored_credited"`
+	LoggedCredited    int64     `json:"logged_credited"`
+	StoredDebited     int64     `json:"stored_debited"`
+	LoggedDebited     int64     `json:"logged_debited"`
+	StoredRefunding   int64     `json:"stored_refunding"`
+	ExpectedRefunding int64     `json:"expected_refunding"`
 	// The lot's money in its paid currency: legs on its deferred account.
 	StoredDeferredCredited int64 `json:"stored_deferred_credited"`
 	LoggedDeferredCredited int64 `json:"logged_deferred_credited"`
@@ -96,8 +96,8 @@ type LotDrift struct {
 }
 
 func (d LotDrift) String() string {
-	return fmt.Sprintf("lot drift: credit_grant=%s credited stored=%d logged=%d, debited stored=%d logged=%d, reserved stored=%d expected=%d, deferred credited stored=%d logged=%d, deferred debited stored=%d logged=%d",
-		d.CreditGrantID, d.StoredCredited, d.LoggedCredited, d.StoredDebited, d.LoggedDebited, d.StoredReserved, d.ExpectedReserved,
+	return fmt.Sprintf("lot drift: credit_grant=%s credited stored=%d logged=%d, debited stored=%d logged=%d, refunding stored=%d expected=%d, deferred credited stored=%d logged=%d, deferred debited stored=%d logged=%d",
+		d.CreditGrantID, d.StoredCredited, d.LoggedCredited, d.StoredDebited, d.LoggedDebited, d.StoredRefunding, d.ExpectedRefunding,
 		d.StoredDeferredCredited, d.LoggedDeferredCredited, d.StoredDeferredDebited, d.LoggedDeferredDebited)
 }
 
@@ -270,9 +270,9 @@ func CheckSignBreaches(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]S
 }
 
 // CheckLotDrift recomputes every credit lot's counters from the legs on its
-// balance account, and its reservation from its payment's pending refunds,
+// balance account, and its refunding units from its payment's pending refunds,
 // and returns the lots whose stored values disagree. An empty slice is the
-// healthy answer; convergence repairs a reservation.
+// healthy answer; convergence repairs refunding units.
 func CheckLotDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]LotDrift, error) {
 	if merchant == uuid.Nil {
 		return nil, fmt.Errorf("ledger: merchant is required")
@@ -287,7 +287,7 @@ func CheckLotDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]LotDr
 			CreditGrantID: row.CreditGrantID, MerchantID: row.MerchantID, CustomerID: row.CustomerID, Unit: row.Unit,
 			StoredCredited: row.StoredCredited, LoggedCredited: row.LoggedCredited,
 			StoredDebited: row.StoredDebited, LoggedDebited: row.LoggedDebited,
-			StoredReserved: row.StoredReserved, ExpectedReserved: row.ExpectedReserved,
+			StoredRefunding: row.StoredRefunding, ExpectedRefunding: row.ExpectedRefunding,
 			StoredDeferredCredited: row.StoredDeferredCredited, LoggedDeferredCredited: row.LoggedDeferredCredited,
 			StoredDeferredDebited: row.StoredDeferredDebited, LoggedDeferredDebited: row.LoggedDeferredDebited,
 		})

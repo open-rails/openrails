@@ -1373,8 +1373,8 @@ pkg openrails/billing, type Balance struct, BillingMode BillingMode `json:"billi
 pkg openrails/billing, type Balance struct, Currency catalog.Currency `json:"currency"`
 pkg openrails/billing, type Balance struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type Balance struct, DepletesAt *time.Time `json:"depletes_at"`
-pkg openrails/billing, type Balance struct, HeldAmount int64 `json:"held_amount,string"`
 pkg openrails/billing, type Balance struct, OwedAmount int64 `json:"owed_amount,string"`
+pkg openrails/billing, type Balance struct, PendingAmount int64 `json:"pending_amount,string"`
 pkg openrails/billing, type Balance struct, Unit *MerchantCurrency `json:"unit"`
 pkg openrails/billing, type BalanceHostEvent struct
 pkg openrails/billing, type BalanceHostEvent struct, AccrualRatePerHour int64 `json:"accrual_rate_per_hour,string"`
