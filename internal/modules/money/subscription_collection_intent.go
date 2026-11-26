@@ -640,7 +640,16 @@ func (h *SubscriptionCollectionHandler) completeNotExecuted(ctx context.Context,
 		}
 	}
 	outcome := intents.TerminalWithEvidence(reason, map[string]any{"not_executed": true, "declined": false, "not_executed_code": code})
-	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, _ *models.Subscription) error {
+	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
+		current, err := intents.NewStore(d).Get(ctx, in.ID)
+		if err != nil {
+			return err
+		}
+		if intents.EvidenceString(current, unresolvedRenewalGraceKey) != "" && sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) {
+			if err := h.lifecycle(d).SetSubmittedRenewalGrace(ctx, d, sub, false); err != nil {
+				return err
+			}
+		}
 		return h.renewalInvoiceUnpaid(ctx, d, in, p, billing.DeclineReason("try_again_later").Failure())
 	})
 }

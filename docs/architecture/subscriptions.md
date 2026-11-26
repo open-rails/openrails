@@ -43,8 +43,11 @@ the operation keyed by `SubscriptionCollectionKey`. The
 `openrails.provider_operation` job charges; payment, invoice and `RenewMembership`
 commit with its terminal outcome (`CommitsTerminalOutcome`). An unchargeable
 card leaves the invoice to the customer (`awaiting_method`). A renewal past grace
-with no outcome is held, access kept by default (`access_while_renewal_held`),
-and reported as `life.renewal.held`.
+with nothing sent is held, access kept by default (`access_while_renewal_held`),
+and reported as `life.renewal.held`. With `suspend`, access ends at the allowance
+while nothing is sent. A sent charge awaiting its answer keeps access under
+either policy. Payment supersedes that grace; a decline follows
+`access_during_dunning`; proven nonexecution restores the held-renewal allowance.
 
 **Provider-owned renewal.** Webhooks wake `openrails.subscription_converge`,
 which applies the provider's state. `openrails.rebill_watch` reads NMI schedules

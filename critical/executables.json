@@ -2665,6 +2665,18 @@
     ],
     "OR-J14-S14": [
       "TestRenewal/OR-J14-S14/stuck-renewal-verification-slows-with-age-and-stops-at-the-cap"
+    ],
+    "OR-J04-S90": [
+      "TestSubmittedRenewalGrace/OR-J04-S90/a-sent-renewal-keeps-access-until-its-answer"
+    ],
+    "OR-J04-S91": [
+      "TestSubmittedRenewalGrace/OR-J04-S91/releasing-a-sent-renewal-restores-the-suspend-allowance"
+    ],
+    "OR-J04-S92": [
+      "TestSubmittedRenewalGrace/OR-J04-S92/an-unsent-renewal-still-suspends-at-its-allowance"
+    ],
+    "OR-J04-S93": [
+      "TestSubmittedRenewalGrace/OR-J04-S93/a-successful-renewal-keeps-its-access-write-count"
     ]
   }
 }

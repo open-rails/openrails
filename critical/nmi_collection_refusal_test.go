@@ -414,3 +414,174 @@ func TestNMIEngineRenewalRecovery(t *testing.T) {
 		require.Len(t, p.effects(t), 1)
 	})
 }
+
+func TestSubmittedRenewalGrace(t *testing.T) {
+	t.Run("OR-J04-S93/a-successful-renewal-keeps-its-access-write-count", func(t *testing.T) {
+		a, _, sub := nmiEngineMembership(t, suspendHeld)
+		counts := func() (int, int) {
+			var g, w int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM "+pgx.Identifier{a.schema, "grants"}.Sanitize()+" WHERE customer_id=$1), (SELECT count(*) FROM "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" WHERE customer_id=$1)", sub.CustomerID.UUID()).Scan(&g, &w))
+			return g, w
+		}
+		beforeGrants, beforeWindows := counts()
+		row := executeEngineRenewal(t, a, sub)
+		require.Equal(t, intents.StatusSucceeded, row.Status)
+		afterGrants, afterWindows := counts()
+		require.Equal(t, 3, afterGrants-beforeGrants)
+		require.Equal(t, 2, afterWindows-beforeWindows)
+		t.Logf("normal renewal: grants %d -> %d; product_access %d -> %d", beforeGrants, afterGrants, beforeWindows, afterWindows)
+	})
+	t.Run("OR-J04-S90/a-sent-renewal-keeps-access-until-its-answer", func(t *testing.T) {
+		for _, late := range []bool{false, true} {
+			for _, answer := range []string{"paid", "declined-keep", "declined-suspend"} {
+				declined := answer != "paid"
+				suspendDunning := answer == "declined-suspend"
+				t.Run(fmt.Sprintf("late=%t/%s", late, answer), func(t *testing.T) {
+					a, p, sub := nmiEngineMembership(t, func(w *world) {
+						suspendHeld(w)
+						if suspendDunning {
+							m := cfgMerchant(w.cfg, "alpha")
+							m.MerchantSettings.DunningPolicy.AccessDuringDunning = billing.DunningAccessSuspend
+							setCfgMerchant(&w.cfg, "alpha", m)
+						}
+					})
+					rt := embedded.Graph(a.engine).Runtime
+					ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+					var row gen.BillingProviderIntent
+					if late {
+						p.core.QueryUnavailable(true)
+						row = executeEngineRenewal(t, a, sub)
+						require.Empty(t, intents.EvidenceString(row, "submitted_at"))
+						a.clock.Advance(17 * time.Hour)
+						require.False(t, entitled(t, a.alpha, sub.CustomerID, "nmi:engine"))
+						p.core.QueryUnavailable(false)
+						require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+							var err error
+							row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+							return err
+						}))
+						require.Equal(t, intents.StatusFailedRetryable, row.Status)
+					}
+					if declined {
+						p.core.SetDecline("4242", "202")
+					}
+					p.core.Intercept(nmiSaleRequest, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
+						response := serve()
+						response.StatusCode = http.StatusBadGateway
+						p.core.QueryUnavailable(true)
+						return response, nil
+					})
+					if late {
+						require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+							var err error
+							row, err = rt.IntentRunner().ExecuteNowByID(ctx, row.ID)
+							return err
+						}))
+					} else {
+						row = executeEngineRenewal(t, a, sub)
+					}
+					require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+					require.NotEmpty(t, intents.EvidenceString(row, "submitted_at"))
+					// The first verification past the settle delay keeps access open.
+					a.clock.Advance(intents.LostSubmissionSettle)
+					require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+						var err error
+						row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+						return err
+					}))
+					require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+					require.True(t, entitled(t, a.alpha, sub.CustomerID, "nmi:engine"), "an unanswered sent charge restores access")
+					advanceTo(a.world, sub.CurrentPeriodEndsAt.Add(18*time.Hour))
+					require.True(t, entitled(t, a.alpha, sub.CustomerID, "nmi:engine"), "a sent charge outlasts the suspend allowance")
+					var grants, windows int
+					counts := func() (int, int) {
+						var g, w int
+						require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM "+pgx.Identifier{a.schema, "grants"}.Sanitize()+" WHERE customer_id=$1), (SELECT count(*) FROM "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" WHERE customer_id=$1)", sub.CustomerID.UUID()).Scan(&g, &w))
+						return g, w
+					}
+					grants, windows = counts()
+					for range 2 {
+						require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+							var err error
+							row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+							return err
+						}))
+						require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+					}
+					g, w := counts()
+					require.Equal(t, grants, g, "verification adds no grants")
+					require.Equal(t, windows, w, "verification adds no access windows")
+					p.core.QueryUnavailable(false)
+					require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+						var err error
+						row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+						return err
+					}))
+					if declined {
+						require.Equal(t, intents.StatusFailedTerminal, row.Status)
+						subscriptionState(t, a, sub.ID, "past_due")
+					} else {
+						require.Equal(t, intents.StatusSucceeded, row.Status)
+						current := subscriptionState(t, a, sub.ID, "active")
+						require.Equal(t, *sub.CurrentPeriodEndsAt, *current.CurrentPeriodStartsAt)
+					}
+					require.Equal(t, !suspendDunning, entitled(t, a.alpha, sub.CustomerID, "nmi:engine"), "the answer applies payment or dunning access rules")
+				})
+			}
+		}
+	})
+	t.Run("OR-J04-S91/releasing-a-sent-renewal-restores-the-suspend-allowance", func(t *testing.T) {
+		for _, late := range []bool{false, true} {
+			t.Run(fmt.Sprint(late), func(t *testing.T) {
+				a, p, sub := nmiEngineMembership(t, suspendHeld)
+				p.core.LoseSales(1)
+				row := executeEngineRenewal(t, a, sub)
+				require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+				if late {
+					a.clock.Advance(18 * time.Hour)
+				} else {
+					a.clock.Advance(6 * time.Minute)
+				}
+				rt := embedded.Graph(a.engine).Runtime
+				ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+				require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+					var err error
+					row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+					return err
+				}))
+				require.True(t, entitled(t, a.alpha, sub.CustomerID, "nmi:engine"))
+				setControl(t, a.world, "rebills_held", true, a.alpha.MerchantID())
+				require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+					var err error
+					row, err = rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Confirmed empty order"})
+					return err
+				}))
+				require.Equal(t, intents.StatusFailedTerminal, row.Status)
+				require.Equal(t, !late, entitled(t, a.alpha, sub.CustomerID, "nmi:engine"))
+				advanceTo(a.world, sub.CurrentPeriodEndsAt.Add(19*time.Hour))
+				require.False(t, entitled(t, a.alpha, sub.CustomerID, "nmi:engine"))
+				subscriptionState(t, a, sub.ID, "active")
+			})
+		}
+	})
+	t.Run("OR-J04-S92/an-unsent-renewal-still-suspends-at-its-allowance", func(t *testing.T) {
+		for _, held := range []bool{false, true} {
+			t.Run(fmt.Sprint(held), func(t *testing.T) {
+				a, p, sub := nmiEngineMembership(t, suspendHeld)
+				if held {
+					setControl(t, a.world, "rebills_held", true, a.alpha.MerchantID())
+					advanceTo(a.world, *sub.CurrentPeriodEndsAt)
+				} else {
+					p.core.QueryUnavailable(true)
+					row := executeEngineRenewal(t, a, sub)
+					require.Empty(t, intents.EvidenceString(row, "submitted_at"))
+				}
+				advanceTo(a.world, sub.CurrentPeriodEndsAt.Add(16*time.Hour+47*time.Minute))
+				require.True(t, entitled(t, a.alpha, sub.CustomerID, "nmi:engine"))
+				a.clock.Advance(2 * time.Minute)
+				require.False(t, entitled(t, a.alpha, sub.CustomerID, "nmi:engine"))
+				p.money(t, 1, 1000)
+			})
+		}
+	})
+}

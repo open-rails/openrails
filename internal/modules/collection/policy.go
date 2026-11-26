@@ -20,7 +20,8 @@ type Policy struct {
 	// is retried. By default access lasts until a confirmed outcome.
 	SuspendAccess bool
 	// SuspendWhenHeld ends an engine member's access at the renewal allowance
-	// when collection is stopped and the renewal has no outcome. By default
+	// when collection is stopped and nothing was sent. A submitted charge
+	// awaiting its answer keeps access under either policy. By default
 	// access lasts until the renewal is attempted.
 	SuspendWhenHeld bool
 }

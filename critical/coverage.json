@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 829,
+  "scenario_count": 833,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -4147,6 +4147,26 @@
       "id": "OR-J14-S14",
       "journey": "J14",
       "name": "Stuck renewal verification grows with operation age up to two hours without consuming execution attempts"
+    },
+    {
+      "id": "OR-J04-S90",
+      "journey": "J04",
+      "name": "A submitted renewal with an unknown answer keeps access under suspend, including a late submission, then follows payment or dunning"
+    },
+    {
+      "id": "OR-J04-S91",
+      "journey": "J04",
+      "name": "Operator release of an unanswered renewal restores bounded suspend access while rebills are held"
+    },
+    {
+      "id": "OR-J04-S92",
+      "journey": "J04",
+      "name": "Held renewals and pre-submission read failures suspend access at the renewal allowance"
+    },
+    {
+      "id": "OR-J04-S93",
+      "journey": "J04",
+      "name": "A normal successful renewal adds only its existing three grant rows and two product access rows"
     }
   ]
 }
