@@ -18,7 +18,7 @@ import (
 
 // FindingSubmissionUnresolved is a submitted engine charge the provider's
 // reads cannot settle: the read is unavailable or contradictory, or the
-// Stripe resend cap is spent. The member keeps access while awaiting its answer.
+// Stripe resend cap is spent. The member keeps the renewal allowance meanwhile.
 const FindingSubmissionUnresolved = "life.submission.unresolved"
 
 const unresolvedRenewalGraceKey = "unresolved_renewal_grace_at"
