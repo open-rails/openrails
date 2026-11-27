@@ -2,17 +2,20 @@
 -- expires. Only a customer's own purchase expires, a day after it is made; its
 -- pay URL lasts as long. A merchant invoice's pay URL expires on its own.
 
+-- The old checks require a merchant invoice's expiry: they go before it does.
+ALTER TABLE billing.invoices DROP CONSTRAINT invoices_period_check, DROP CONSTRAINT invoices_pay_url_check;
+
 UPDATE billing.invoices SET expires_at = NULL, updated_at = now()
 WHERE origin = 'merchant' AND expires_at IS NOT NULL;
 
-ALTER TABLE billing.invoices DROP CONSTRAINT invoices_period_check, ADD CONSTRAINT invoices_period_check CHECK (
+ALTER TABLE billing.invoices ADD CONSTRAINT invoices_period_check CHECK (
     (origin IN ('subscription', 'usage')) = (period_starts_at IS NOT NULL AND period_ends_at IS NOT NULL AND due_at IS NOT NULL)
     AND (origin = 'subscription') = (subscription_id IS NOT NULL)
     AND (collection_owner <> 'engine' OR (origin = 'customer') = (expires_at IS NOT NULL))
     AND (period_ends_at IS NULL OR period_ends_at > period_starts_at)
 );
 
-ALTER TABLE billing.invoices DROP CONSTRAINT invoices_pay_url_check, ADD CONSTRAINT invoices_pay_url_check CHECK (
+ALTER TABLE billing.invoices ADD CONSTRAINT invoices_pay_url_check CHECK (
     (pay_url_secret_hash IS NULL) = (pay_url_expires_at IS NULL)
     AND (pay_url_secret_hash IS NULL) = (saved_payment_methods IS NULL)
     AND (pay_url_secret_hash IS NULL) = (embedded IS NULL)
