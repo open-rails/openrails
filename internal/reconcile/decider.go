@@ -19,8 +19,8 @@ import (
 )
 
 // The one subscription state-machine decider. Every plane (bulk pull
-// snapshots, per-sub probes, the rebill watch's evidence, webhook-triggered
-// fetches) produces an EvidenceBundle; only Decide maps (row, evidence) →
+// snapshots, per-sub probes, verifier reads, webhook-triggered fetches)
+// produces an EvidenceBundle; only Decide maps (row, evidence) →
 // transition, and only ApplyDecision moves state. Decide is pure (no DB, no
 // IO), so the decision table is fixture-testable and scheduler ordering cannot
 // change outcomes; an evidence-less bundle can only park.

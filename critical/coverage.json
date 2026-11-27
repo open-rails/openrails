@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 880,
+  "scenario_count": 882,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2136,7 +2136,7 @@
     {
       "id": "OR-J15-S30",
       "journey": "J15",
-      "name": "Rebill watch backs off a failing provider probe"
+      "name": "A failed NMI verification read waits for the hourly verification retry"
     },
     {
       "id": "OR-J26-S30",
@@ -2426,7 +2426,12 @@
     {
       "id": "OR-J16-S71",
       "journey": "J16",
-      "name": "An overdue provider-billed renewal is asked by id from the due pass before the rebill watch reads NMI"
+      "name": "An overdue NMI renewal is unverified by the due pass before NMI is read"
+    },
+    {
+      "id": "OR-J16-S72",
+      "journey": "J16",
+      "name": "A Stripe or CCBill renewal unpaid a day past its period stays active; two days past, it is unverified with access kept"
     },
     {
       "id": "OR-J16-S54",
@@ -2451,7 +2456,7 @@
     {
       "id": "OR-J15-S70",
       "journey": "J15",
-      "name": "An NMI renewal the probe cannot settle is read by id once its grace passes"
+      "name": "An NMI renewal unpaid a day past its period is unverified by the due pass, access kept"
     },
     {
       "id": "OR-J15-S72",
@@ -2967,6 +2972,11 @@
       "id": "OR-J15-S75",
       "journey": "J15",
       "name": "Prune keeps a pending refund and a booked NMI chargeback"
+    },
+    {
+      "id": "OR-J15-S76",
+      "journey": "J15",
+      "name": "An overdue NMI schedule NMI no longer holds ends, and its cycle is missed as schedule_gone"
     },
     {
       "id": "OR-J28-S13",

@@ -235,6 +235,35 @@ func nmiRenewalReadback(t *testing.T, a *authorityWorld, p *nmiJournal, sub *bil
 	p.money(t, 2, 2000)
 }
 
+// renewalMiss is why the subscription's one renewal was missed, empty while
+// it is not.
+func renewalMiss(t *testing.T, a *authorityWorld, id billing.SubscriptionID) string {
+	t.Helper()
+	cycles, err := a.alpha.ListRenewals(t.Context(), billing.RenewalListParams{SubscriptionID: id})
+	require.NoError(t, err)
+	if len(cycles.Items) != 1 {
+		return ""
+	}
+	return cycles.Items[0].MissReason
+}
+
+// verificationRead is how often the verifier read the unverified
+// subscription and its last read's error; zero and empty while none.
+func verificationRead(t *testing.T, a *authorityWorld, id billing.SubscriptionID) (int, string) {
+	t.Helper()
+	var reads int
+	var failed *string
+	err := a.pool.QueryRow(t.Context(), "SELECT reads, last_error FROM "+pgx.Identifier{a.schema, "subscription_verifications"}.Sanitize()+" WHERE subscription_id = $1", id.UUID()).Scan(&reads, &failed)
+	if err == pgx.ErrNoRows {
+		return 0, ""
+	}
+	require.NoError(t, err)
+	if failed == nil {
+		return reads, ""
+	}
+	return reads, *failed
+}
+
 func TestNMIRecovery(t *testing.T) {
 	t.Run("OR-J15-S01/missing-callback-is-repaired-from-provider-query", func(t *testing.T) {
 		a, p, sub := nmiMembership(t)
@@ -273,27 +302,33 @@ func TestNMIRecovery(t *testing.T) {
 					p.core.EditSale(sale.TransactionID, func(s *nmimock.Sale) { s.Hidden = true })
 				}
 				a.clock.Advance(due.Sub(a.clock.Now()) + 25*time.Hour)
-				// Only the watch's passes run: a provider pull on start would record
+				// Only the billing pass runs: a provider pull on start would record
 				// the revealed charge itself.
-				fleet := hostFleet(t, a.world)
-				fleet.PeriodicJobs().Clear()
-				require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
-				require.NoError(t, fleet.Start(t.Context()))
+				fleet := quietFleet(t, a.world)
 				runRegistered(t, fleet, "openrails.billing_pass", 2)
+				if profile == "unavailable-query" {
+					require.Eventually(t, func() bool {
+						_, failed := verificationRead(t, a, sub.ID)
+						return failed != ""
+					}, 20*time.Second, 20*time.Millisecond, "the verifier's read of the overdue renewal failed")
+				} else {
+					require.Eventually(t, func() bool { return renewalMiss(t, a, sub.ID) == "provider_stalled" }, 20*time.Second, 20*time.Millisecond,
+						"the read found nothing: the cycle is missed, not collected")
+				}
 				p.money(t, 2, 2000)
-				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
-				require.NoError(t, err)
+				current := subscriptionState(t, a, sub.ID, "unverified")
 				require.Equal(t, due, *current.CurrentPeriodEndsAt)
+				require.True(t, entitled(t, a.alpha, sub.CustomerID, "nmi:member"), "unverified keeps access")
 				p.core.QueryUnavailable(false)
 				p.core.Reveal()
 				p.core.EditSchedule(*sub.RailSubscriptionID, func(s *nmimock.Schedule) { s.NextBilling = due.Add(7 * 24 * time.Hour) })
 				if profile == "unavailable-query" {
-					// A failed look waits out its backoff, then reads the charge.
-					a.clock.Advance(15 * time.Minute)
+					// A failed read waits for the hourly verification retry, which
+					// reads the charge.
+					a.clock.Advance(time.Hour)
 					runRegistered(t, fleet, "openrails.billing_pass", 2)
 				} else {
-					// The look found nothing and parked the row for verification; NMI's
-					// notice of the moved schedule is what reads the charge again.
+					// NMI's notice of the moved schedule is what reads the charge again.
 					nmiScheduleNotice(t, a, "evt_lagging_index", *sub.RailSubscriptionID)
 				}
 				nmiRenewalReadback(t, a, p, sub)
@@ -307,6 +342,12 @@ func TestNMIRecovery(t *testing.T) {
 		a.clock.Advance(due.Sub(a.clock.Now()) + 25*time.Hour)
 		fleet := startFleet(t, a.world)
 		runRegistered(t, fleet, "openrails.billing_pass", 2)
+		// The verifier read the unverified renewal: NMI holds nothing and moved
+		// on, so OpenRails collects the period, with the miss's commit.
+		require.Eventually(t, func() bool { return renewalMiss(t, a, sub.ID) == "provider_skipped" }, 20*time.Second, 20*time.Millisecond)
+		collecting, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionPastDue, collecting.Status)
 		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		nmiRenewalReadback(t, a, p, sub)
 		runRegistered(t, fleet, "openrails.billing_pass", 2)
@@ -332,16 +373,35 @@ func TestNMIRecovery(t *testing.T) {
 				a.clock.Advance(due.Sub(a.clock.Now()) + 25*time.Hour)
 				fleet := startFleet(t, a.world)
 				runRegistered(t, fleet, "openrails.billing_pass", 2)
+				require.Eventually(t, func() bool { return renewalMiss(t, a, sub.ID) == profile }, 20*time.Second, 20*time.Millisecond)
 				runRegistered(t, fleet, "openrails.billing_pass", 2)
 				p.money(t, 2, net)
-				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
-				require.NoError(t, err)
+				// A day on, the renewal is unverified with access kept, and stays so.
+				current := subscriptionState(t, a, sub.ID, "unverified")
 				require.Equal(t, due, *current.CurrentPeriodEndsAt)
+				require.True(t, entitled(t, a.alpha, sub.CustomerID, "nmi:member"))
 				cycles, err := a.alpha.ListRenewals(t.Context(), billing.RenewalListParams{SubscriptionID: sub.ID})
 				require.NoError(t, err)
 				require.Len(t, cycles.Items, 1)
 				require.Equal(t, profile, cycles.Items[0].MissReason)
 			})
 		}
+	})
+	t.Run("OR-J15-S76/a-schedule-nmi-no-longer-holds-ends-and-its-cycle-is-missed-as-gone", func(t *testing.T) {
+		a, p, sub := nmiMembership(t)
+		armDestructive(t, a, true)
+		due := *sub.CurrentPeriodEndsAt
+		p.core.DeleteSchedule(*sub.RailSubscriptionID)
+		a.clock.Advance(due.Sub(a.clock.Now()) + 25*time.Hour)
+		fleet := quietFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		subscriptionState(t, a, sub.ID, "canceled")
+		require.Eventually(t, func() bool { return renewalMiss(t, a, sub.ID) == "schedule_gone" }, 20*time.Second, 20*time.Millisecond)
+		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.rebill.missed"})
+		require.NoError(t, err)
+		require.Len(t, findings.Items, 1)
+		require.Equal(t, "schedule_gone", findings.Items[0].Evidence["reason"])
+		require.Equal(t, false, findings.Items[0].Evidence["collected"])
+		p.money(t, 1, 1000)
 	})
 }

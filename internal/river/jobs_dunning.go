@@ -270,20 +270,22 @@ func (w *DunningWorker) DueBy(ctx context.Context, at time.Time) (bool, error) {
 	return len(ids) > 0, err
 }
 
-// overdueRenewals moves each provider-billed renewal still unconfirmed
-// reconcile.PeriodGrace after its period to unverified: a clock reading is
-// not evidence, so it only asks the provider. The row leaves the due set.
+// overdueRenewals moves each provider-billed renewal still unpaid past its
+// rail's deadline to unverified, access kept: reconcile.NMIRebillDeadline for
+// an NMI schedule, reconcile.PeriodGrace for Stripe and CCBill. A clock
+// reading is not evidence, so it only asks the provider: the verifier reads
+// the row at once. The row leaves the due set.
 func (w *DunningWorker) overdueRenewals(ctx context.Context, now time.Time) error {
 	if w.Lifecycle == nil {
 		return errors.New("overdue renewals: lifecycle not wired")
 	}
-	before := now.Add(-reconcile.PeriodGrace)
+	cutoffs := overdueCutoffs{nmi: now.Add(-reconcile.NMIRebillDeadline), other: now.Add(-reconcile.PeriodGrace)}
 	postures := controls.View{DB: w.DB}
 	var workErr error
 	after := uuid.Nil
 	for {
 		merchantIDs, err := w.DB.GenDirectory().ListOverdueRenewalMerchants(ctx, gen.ListOverdueRenewalMerchantsParams{
-			OverdueBefore: before, AfterMerchantID: after, MerchantLimit: dunningMerchantBatch,
+			NmiOverdueBefore: cutoffs.nmi, OverdueBefore: cutoffs.other, AfterMerchantID: after, MerchantLimit: dunningMerchantBatch,
 		})
 		if err != nil {
 			return errors.Join(workErr, fmt.Errorf("overdue renewals: list merchants: %w", err))
@@ -293,7 +295,7 @@ func (w *DunningWorker) overdueRenewals(ctx context.Context, now time.Time) erro
 				if p := postures.Posture(ctx, mid); p.ReadOnly() {
 					return nil
 				}
-				return w.overdueMerchantRenewals(ctx, mid, before)
+				return w.overdueMerchantRenewals(ctx, mid, cutoffs)
 			}); err != nil {
 				workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", mid, err))
 			}
@@ -305,13 +307,17 @@ func (w *DunningWorker) overdueRenewals(ctx context.Context, now time.Time) erro
 	}
 }
 
-func (w *DunningWorker) overdueMerchantRenewals(ctx context.Context, mid uuid.UUID, before time.Time) error {
+// overdueCutoffs are the period ends a provider-billed renewal unpaid since
+// is overdue before: NMI's, and Stripe's and CCBill's.
+type overdueCutoffs struct{ nmi, other time.Time }
+
+func (w *DunningWorker) overdueMerchantRenewals(ctx context.Context, mid uuid.UUID, cutoffs overdueCutoffs) error {
 	var merchantErr error
 	var afterAt time.Time
 	afterID := uuid.Nil
 	for {
 		rows, err := w.DB.Gen(ctx).ListOverdueRenewals(ctx, gen.ListOverdueRenewalsParams{
-			MerchantID: mid, OverdueBefore: before, AfterDueAt: afterAt, AfterID: afterID, RowLimit: subscriptions.DueDunningBatch,
+			MerchantID: mid, NmiOverdueBefore: cutoffs.nmi, OverdueBefore: cutoffs.other, AfterDueAt: afterAt, AfterID: afterID, RowLimit: subscriptions.DueDunningBatch,
 		})
 		if err != nil {
 			return errors.Join(merchantErr, err)

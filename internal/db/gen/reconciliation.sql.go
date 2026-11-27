@@ -1101,10 +1101,11 @@ const listOverdueRenewalMerchants = `-- name: ListOverdueRenewalMerchants :many
 SELECT DISTINCT s.merchant_id
 FROM billing.subscriptions s
 WHERE s.status = 'active'
-  AND s.current_period_ends_at < $1::timestamptz
+  AND ((s.rail = 'nmi' AND s.current_period_ends_at < $1::timestamptz)
+       OR (s.rail <> 'nmi' AND s.current_period_ends_at < $2::timestamptz))
   AND s.collection_policy <> 'engine'
   AND s.deleted_at IS NULL
-  AND s.merchant_id > $2::uuid
+  AND s.merchant_id > $3::uuid
   AND NOT EXISTS (
       SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
@@ -1112,20 +1113,26 @@ WHERE s.status = 'active'
         AND p.purchased_at >= s.current_period_ends_at
   )
 ORDER BY s.merchant_id
-LIMIT $3::int
+LIMIT $4::int
 `
 
 type ListOverdueRenewalMerchantsParams struct {
-	OverdueBefore   time.Time
-	AfterMerchantID uuid.UUID
-	MerchantLimit   int32
+	NmiOverdueBefore time.Time
+	OverdueBefore    time.Time
+	AfterMerchantID  uuid.UUID
+	MerchantLimit    int32
 }
 
 // CROSS-MERCHANT: merchants holding an active provider-billed subscription
-// whose paid period ended before overdue_before with no renewal payment (see
-// ListOverdueRenewals), ids in order after a cursor.
+// past its rail's deadline with no renewal payment (see ListOverdueRenewals),
+// ids in order after a cursor.
 func (q *Queries) ListOverdueRenewalMerchants(ctx context.Context, arg ListOverdueRenewalMerchantsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listOverdueRenewalMerchants, arg.OverdueBefore, arg.AfterMerchantID, arg.MerchantLimit)
+	rows, err := q.db.Query(ctx, listOverdueRenewalMerchants,
+		arg.NmiOverdueBefore,
+		arg.OverdueBefore,
+		arg.AfterMerchantID,
+		arg.MerchantLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1151,8 +1158,9 @@ WHERE s.merchant_id = $1::uuid
   AND s.deleted_at IS NULL
   AND s.status = 'active'
   AND s.collection_policy <> 'engine'
-  AND s.current_period_ends_at < $2::timestamptz
-  AND (s.current_period_ends_at, s.id) > ($3::timestamptz, $4::uuid)
+  AND ((s.rail = 'nmi' AND s.current_period_ends_at < $2::timestamptz)
+       OR (s.rail <> 'nmi' AND s.current_period_ends_at < $3::timestamptz))
+  AND (s.current_period_ends_at, s.id) > ($4::timestamptz, $5::uuid)
   AND NOT EXISTS (
       SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
@@ -1160,15 +1168,16 @@ WHERE s.merchant_id = $1::uuid
         AND p.purchased_at >= s.current_period_ends_at
   )
 ORDER BY s.current_period_ends_at, s.id
-LIMIT $5::int
+LIMIT $6::int
 `
 
 type ListOverdueRenewalsParams struct {
-	MerchantID    uuid.UUID
-	OverdueBefore time.Time
-	AfterDueAt    time.Time
-	AfterID       uuid.UUID
-	RowLimit      int32
+	MerchantID       uuid.UUID
+	NmiOverdueBefore time.Time
+	OverdueBefore    time.Time
+	AfterDueAt       time.Time
+	AfterID          uuid.UUID
+	RowLimit         int32
 }
 
 type ListOverdueRenewalsRow struct {
@@ -1177,13 +1186,15 @@ type ListOverdueRenewalsRow struct {
 	CurrentPeriodEndsAt *time.Time
 }
 
-// An active provider-billed subscription whose paid period ended before
-// overdue_before with no renewal payment. A clock reading only: the due pass
+// An active provider-billed subscription with no renewal payment whose paid
+// period ended before its rail's cutoff: nmi_overdue_before for an NMI
+// schedule, overdue_before for the rest. A clock reading only: the due pass
 // asks the provider (RenewalOverdue -> unverified). Oldest lapse first, a page
 // after the (period end, id) cursor.
 func (q *Queries) ListOverdueRenewals(ctx context.Context, arg ListOverdueRenewalsParams) ([]ListOverdueRenewalsRow, error) {
 	rows, err := q.db.Query(ctx, listOverdueRenewals,
 		arg.MerchantID,
+		arg.NmiOverdueBefore,
 		arg.OverdueBefore,
 		arg.AfterDueAt,
 		arg.AfterID,

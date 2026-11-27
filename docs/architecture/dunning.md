@@ -91,7 +91,8 @@ admitted ([subscriptions](subscriptions.md)); an expired wait ends
 (`ExpireAwaitingMethod`), and so does a case the advice deferred to its renewal
 (`EndAdviceDeferred`); a stale row parks `unverified` (`ApplyLocalUnknown`);
 or the provider is asked by id (`AskProviderPastGrace`). A second scan asks about
-provider-billed renewals 48 hours overdue (`AskProviderOverdueRenewal`). A row
+provider-billed renewals unpaid past their rail's deadline, 24 hours for an NMI
+schedule and 48 for Stripe and CCBill (`AskProviderOverdueRenewal`). A row
 whose processing fails raises `life.due_pass.refused`; every row left unchanged
 gets `due_recheck_at` from `deferDue`.
 
@@ -233,7 +234,7 @@ Checks:
 ## Tests
 
 Journeys:
-- OR-J16-S01 to S05 (schedule), S30 to S32, S70, S71 (provider-seen declines, due work), S40 to S43 (do-not-retry), S50 to S53 (policy limits), S54, S55 (a failure's window is its own policy's, for its cycle).
+- OR-J16-S01 to S05 (schedule), S30 to S32, S70 to S72 (provider-seen declines, due work), S40 to S43 (do-not-retry), S50 to S53 (policy limits), S54, S55 (a failure's window is its own policy's, for its cycle).
 - OR-J26-S01 to S04, S30, S40, S50, S51, S53, S55, S59 (usage collection, delinquency); the rest of J26 is in [usage billing](usage-billing.md).
 - Related: OR-J04-S42 (`access_while_renewal_held: suspend`), OR-J04-S43, S45,
   S70, and OR-J12-S08 to S11 (expired-card refresh).

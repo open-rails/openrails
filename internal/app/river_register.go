@@ -205,8 +205,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	balances := &riverjobs.BalanceWatchWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
 	delinquency := &riverjobs.DelinquencyWorker{DB: r.DB, Clock: clock, Log: r.Log}
 	expiry := &riverjobs.InvoiceExpiryWorker{DB: r.DB, Invoices: r.Invoices, Clock: clock}
-	// Overdue NMI rebills are probed.
-	rebills := &riverjobs.RebillWatchWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, Lifecycle: r.SubscriptionLifecycleService, Log: r.Log}
 	// Undeclared accounts alert their operator again while unresolved.
 	realerts := &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}
 	storedCards := &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture(), Log: r.Log}
@@ -226,7 +224,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}
 	scans = append(scans,
 		riverjobs.Scan{Kind: money.KindUsageInvoices, Run: usage.Pass, DueBy: usage.DueBy},
-		riverjobs.Scan{Kind: riverjobs.KindRebillWatch, Run: rebills.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindConfigRealerts, Run: realerts.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindStoredCardRefreshDue, Run: storedCards.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindOperationWakes, Run: (&riverjobs.OperationWakes{DB: r.DB, Clock: clock, Log: r.Log}).Pass},

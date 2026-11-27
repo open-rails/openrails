@@ -122,9 +122,11 @@ func TestEnrollmentContracts(t *testing.T) {
 				a.clock.Advance(due.Sub(a.clock.Now()) + 25*time.Hour)
 				fleet := startFleet(t, a.world)
 				runRegistered(t, fleet, "openrails.billing_pass", 2)
-				observed, err := a.alpha.GetSubscription(t.Context(), sub.ID)
-				require.NoError(t, err)
-				require.Equal(t, due, *observed.CurrentPeriodStartsAt)
+				var observed *billing.Subscription
+				require.Eventually(t, func() bool {
+					observed, err = a.alpha.GetSubscription(t.Context(), sub.ID)
+					return err == nil && observed.CurrentPeriodStartsAt.Equal(due)
+				}, 20*time.Second, 20*time.Millisecond, "the verifier's read of the overdue renewal records NMI's charge")
 				t.Logf("intro %d days: settled public period %s through %s; accepted recurring end %s", introDays, observed.CurrentPeriodStartsAt.Format(time.RFC3339), observed.CurrentPeriodEndsAt.Format(time.RFC3339), due.Add(7*24*time.Hour).Format(time.RFC3339))
 				history, err := a.alpha.ListRenewals(t.Context(), billing.RenewalListParams{SubscriptionID: sub.ID})
 				require.NoError(t, err)
