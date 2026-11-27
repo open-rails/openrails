@@ -261,7 +261,7 @@ func (s *PurchaseService) previewSubscriptionChange(ctx context.Context, req *Su
 		case c.deferred():
 			return s.previewEngineSchedule(ctx, resp, c)
 		case c.tier:
-			return s.previewEngineUpgrade(resp, c)
+			return s.previewEngineUpgrade(ctx, resp, c)
 		default:
 			return s.previewEngineSeats(resp, c)
 		}

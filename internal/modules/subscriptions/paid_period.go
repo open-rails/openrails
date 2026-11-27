@@ -11,7 +11,8 @@ import (
 // one subscription are a duplicate; charges for distinct periods never are.
 const PaidPeriodKey = "period_start"
 
-func withPaidPeriod(metadata map[string]any, start time.Time) map[string]any {
+// WithPaidPeriod is metadata with the paid period start set.
+func WithPaidPeriod(metadata map[string]any, start time.Time) map[string]any {
 	out := make(map[string]any, len(metadata)+1)
 	for k, v := range metadata {
 		out[k] = v
