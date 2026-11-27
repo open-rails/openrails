@@ -255,16 +255,16 @@ func (e *env) checkLedger(ctx context.Context, w *WorldResult, schema string, se
 // RowStats is what the run left in PostgreSQL: ledger rows grow with
 // customers and balance movements, not with requests.
 type RowStats struct {
-	Customers        int64            `json:"customers_with_transfers"`
-	LedgerTransfers  int64            `json:"ledger_transfers"`
-	ByType           map[string]int64 `json:"ledger_transfers_by_type"`
-	UsageReceipts    int64            `json:"usage_receipts"`
-	UsageTotals      int64            `json:"usage_totals"`
-	Unposted         int64            `json:"usage_pending"`
-	UsageEvents      int64            `json:"usage_events"`
-	PerCustomerMax   int64            `json:"ledger_transfers_per_customer_max"`
-	TableBytes       map[string]int64 `json:"table_bytes"`
-	TransfersPerUser float64          `json:"ledger_transfers_per_customer"`
+	Customers            int64            `json:"customers_with_transfers"`
+	LedgerTransfers      int64            `json:"ledger_transfers"`
+	ByType               map[string]int64 `json:"ledger_transfers_by_type"`
+	UsageReceipts        int64            `json:"usage_receipts"`
+	UsageTotals          int64            `json:"usage_totals"`
+	Pending              int64            `json:"usage_pending"`
+	UsageEvents          int64            `json:"usage_events"`
+	PerCustomerMax       int64            `json:"ledger_transfers_per_customer_max"`
+	TableBytes           map[string]int64 `json:"table_bytes"`
+	TransfersPerCustomer float64          `json:"ledger_transfers_per_customer"`
 }
 
 func (e *env) rowStats(ctx context.Context, w *WorldResult, schema string) *RowStats {
@@ -279,7 +279,7 @@ func (e *env) rowStats(ctx context.Context, w *WorldResult, schema string) *RowS
 	q("SELECT coalesce(max(n), 0) FROM (SELECT count(*) n FROM "+t+".ledger_transfers WHERE customer_id IS NOT NULL GROUP BY customer_id) x", &r.PerCustomerMax)
 	q("SELECT count(*) FROM "+t+".usage_receipts", &r.UsageReceipts)
 	q("SELECT count(*) FROM "+t+".usage_totals", &r.UsageTotals)
-	q("SELECT count(*) FROM "+t+".usage_pending", &r.Unposted)
+	q("SELECT count(*) FROM "+t+".usage_pending", &r.Pending)
 	if rows, err := e.pool.Query(ctx, "SELECT transfer_type, count(*) FROM "+t+".ledger_transfers GROUP BY 1"); err == nil {
 		for rows.Next() {
 			var k string
@@ -304,7 +304,7 @@ func (e *env) rowStats(ctx context.Context, w *WorldResult, schema string) *RowS
 		r.UsageEvents = n
 	}
 	if r.Customers > 0 {
-		r.TransfersPerUser = float64(r.LedgerTransfers) / float64(r.Customers)
+		r.TransfersPerCustomer = float64(r.LedgerTransfers) / float64(r.Customers)
 	}
 	return r
 }
