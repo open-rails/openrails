@@ -24,7 +24,7 @@ npm with provenance. Guides: [frontend](../client.md#invoices-and-checkout),
 
 **Customer components.** `BuyButton`, `ProductList`, `InvoicePayment`,
 `EmbeddedPayment` and `Cart` buy through invoices (`BuyButton`, `ProductList` and `Cart` pass the host's `attribution` to the invoice, and requests carry the provider's `locale` as `Accept-Language`); `AccountBilling` shows
-subscriptions, payment methods and history and runs cancel, resume, plan and card
+subscriptions, payment methods, history and (`UsagePanel`) usage over time by interval in a zone the customer picks, and runs cancel, resume, plan and card
 changes. Card data is tokenized in the PSP's own fields (Collect.js, Stripe
 Elements, Basis Theory) and never enters the host page. `InvoicePayment` pays with
 `expectedTotal` set to the invoice's total. Amounts are formatted with BigInt

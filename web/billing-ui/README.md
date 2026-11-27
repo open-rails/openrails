@@ -97,10 +97,13 @@ contract](docs/payment-form-contract.md).
 ```
 
 `AccountBilling` stacks `SubscriptionsPanel` (cancel, resume, change card,
-change plan), `PaymentMethodsPanel` and `PaymentHistory`; `RenewalPrompt` invites
-a customer whose subscriptions all ended back to `plansHref`. The hooks
-(`useSubscriptions`, `useChangeOptions`, `usePaymentMethods`, `usePayments`)
-resolve to `null` or a `BillingError`, never throwing.
+change plan), `PaymentMethodsPanel`, `PaymentHistory` and, with `usageCurrency`,
+`UsagePanel`; `RenewalPrompt` invites a customer whose subscriptions all ended
+back to `plansHref`. `UsagePanel` charts the customer's usage by hour, day, week
+or month in a zone it picks (the browser's by default), from
+`client.getUsageSeries`; it loads its chart only where it is shown. The hooks
+(`useSubscriptions`, `useChangeOptions`, `usePaymentMethods`, `usePayments`,
+`useUsageSeries`) resolve to `null` or a `BillingError`, never throwing.
 
 - **Configuration.** The panels read `GET /v1/config` and `GET /v1/me/config`
   once per provider (`useConfig()`, `useCustomerConfig()`). A page your server
