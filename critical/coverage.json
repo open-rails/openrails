@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 855,
+  "scenario_count": 864,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -916,7 +916,7 @@
     {
       "id": "OR-J24-S53",
       "journey": "J24",
-      "name": "A SCIM user erasure clears its usage events' invoker and metadata and its history's invokers, and keeps quantities and money"
+      "name": "A SCIM user erasure clears its usage events' invoker and metadata, leaves usage history (which names no invoker) as it was, and keeps quantities and money"
     },
     {
       "id": "OR-J24-S54",
@@ -966,7 +966,7 @@
     {
       "id": "OR-J24-S63",
       "journey": "J24",
-      "name": "A usage erasure that stopped between folding the history and deleting its invokers' rows, run again, leaves each event in the history once"
+      "name": "A usage erasure that stopped at its events' update, run again, clears them and leaves the history as it was: each event in it once"
     },
     {
       "id": "OR-J24-S64",
@@ -3931,7 +3931,7 @@
     {
       "id": "OR-J24-S67",
       "journey": "J24",
-      "name": "Usage history is UTC hours grouped into the accounting zone's days as it is read: a 25-hour day holds its 25th hour, depletion burn reads the same days, and a zone change regroups all of it"
+      "name": "Usage history is UTC quarter hours grouped into the accounting zone's days as it is read: a 25-hour day holds its 25th hour, depletion burn reads the same days, and a zone change regroups all of it"
     },
     {
       "id": "OR-J24-S68",
@@ -4202,6 +4202,51 @@
       "id": "OR-J38-S97",
       "journey": "J38",
       "name": "A second CCBill rebill callback inside a settled cycle, its next renewal date a day off the accepted cadence, is kept as an extra capture of that cycle, not refused with a 500"
+    },
+    {
+      "id": "OR-J24-S76",
+      "journey": "J24",
+      "name": "An hourly usage series across a clock change has the local day's 25 hours, the repeated 01:00 twice, each its own usage; by day the same window is one bucket"
+    },
+    {
+      "id": "OR-J24-S77",
+      "journey": "J24",
+      "name": "A day series in Asia/Kolkata puts usage at 23:45 and 00:15 there, one UTC hour, on two days: history's quarter hours make a half-hour offset exact; the report agrees, and without a zone both are on the merchant's UTC day"
+    },
+    {
+      "id": "OR-J24-S78",
+      "journey": "J24",
+      "name": "Usage whose raw events expired after 90 days stays in the usage series from history; read by invoker, the series and the report refuse a window before the raw events with usage_events_expired, and answer within them"
+    },
+    {
+      "id": "OR-J24-S79",
+      "journey": "J24",
+      "name": "A usage series of more than 1,000 buckets is refused 400 too_many_buckets on interval; a month by hour is answered; an unknown interval is invalid_query"
+    },
+    {
+      "id": "OR-J24-S80",
+      "journey": "J24",
+      "name": "GET /v1/me/usage/series answers only the signed-in customer's usage whatever the query names; staff read the same series with GetUsageSeries, and a customer's token cannot"
+    },
+    {
+      "id": "OR-J24-S81",
+      "journey": "J24",
+      "name": "Usage is taken into history at intake's price; a volume tier's fall is the report's and the bucket's discount, in the hour of the usage that crossed the band, so the report and series less it equal what the period posted"
+    },
+    {
+      "id": "OR-J24-S82",
+      "journey": "J24",
+      "name": "Failed usage is counted on its bucket's one event row (failed_requests, failed_amount, forgiven), never a row of its own; the report counts both items and metrics still split them by outcome"
+    },
+    {
+      "id": "OR-J24-S83",
+      "journey": "J24",
+      "name": "An item settled days after its admission, its limit window over, settles without error and counts toward no window: no limit_usage row and no window row; usage admitted now counts in its live window"
+    },
+    {
+      "id": "OR-J25-S44",
+      "journey": "J25",
+      "name": "The balance watch's burn rate reads usage history's quarter hours once each has ended: a look inside the quarter hour sees none of it, the next look all of it, once"
     },
     {
       "id": "OR-J14-S08",

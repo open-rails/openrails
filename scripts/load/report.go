@@ -203,7 +203,7 @@ func storageSection(p func(string, ...any), st *StorageResult) {
 		p("")
 		perEvent(p, w.Tables, uint64(max(w.Events, 1)))
 		if h := w.History; h != nil {
-			p("usage_history: %d rows; one a UTC day would be %d rows, %d without the invoker.", h.Rows, h.DayRows, h.DayRowsNoInvoker)
+			p("usage_history: %d rows; one a UTC day would be %d rows.", h.Rows, h.DayRows)
 			p("")
 		}
 		if len(w.Columns) > 0 {

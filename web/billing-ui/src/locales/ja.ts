@@ -249,6 +249,23 @@ export const ja: BillingUiMessageBundle = {
       stripe: "カード",
     },
   },
+  usage: {
+    title: "利用状況",
+    description: "期間ごとの利用料金です。",
+    intervalLabel: "間隔",
+    interval: {
+      hour: "時間別",
+      day: "日別",
+      week: "週別",
+      month: "月別",
+    },
+    timezone: "タイムゾーン",
+    total: "合計",
+    requests: "リクエスト",
+    discount: "ボリューム割引",
+    empty: "この期間の利用はありません",
+    emptyDescription: "利用は記録されるとここに表示されます。",
+  },
   errors: {
     generic: "問題が発生しました。もう一度お試しください。",
     network_error:

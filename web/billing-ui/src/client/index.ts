@@ -15,7 +15,11 @@ export {
   type InvoiceResult,
   type SendSolanaTransaction,
   type SubscriptionChangeInput,
+  MAX_USAGE_BUCKETS,
+  type UsageGroupBy,
+  type UsageInterval,
   type UsageOptions,
+  type UsageSeriesOptions,
 } from "./client"
 export {
   redeemAssertion,
@@ -75,7 +79,9 @@ export type {
   SubscriptionChangeOption,
   SubscriptionChangePreview,
   Usage,
+  UsageBucket,
   UsageRow,
+  UsageSeries,
 } from "./types"
 export {
   amountToDecimal,
