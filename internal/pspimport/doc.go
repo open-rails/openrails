@@ -11,9 +11,15 @@
 // Nothing pulls on its own: each import is created by a person or the host
 // (CreatePSPImport), and runs even under readonly. Sources: NMI v5 plans,
 // customers and subscriptions plus the Query API reports (a schedule's amount
-// is read in the mapped price's currency; a paused one lands canceled);
-// Stripe products, prices, customers, subscriptions and the window's charges
-// and refunds; CCBill DataLink active members and rebills, a day at a time.
+// is read in the mapped price's currency; a paused one ends at its next
+// billing date); Stripe products, prices, customers, subscriptions in every
+// status and the window's charges and refunds; CCBill DataLink active members
+// and, a day at a time, signups, rebills, cancellations and expiries.
+//
+// History: an ended subscription lands canceled where its paid service ended
+// (Stripe's ended_at, else its last paid invoice's period; CCBill's expire
+// date) for the provider's reason, with its charges; nothing is canceled or
+// deleted at the provider.
 //
 // Steps run on the psp_import River queue. Transient failures (network,
 // timeout, 5xx, 429, an unreachable secret store) retry attempt^4 seconds

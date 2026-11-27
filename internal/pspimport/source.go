@@ -22,6 +22,9 @@ type staged struct {
 	// stated is the plan a subscription carries a copy of (NMI): what the
 	// pull records when the provider no longer has the plan itself.
 	stated *providerobjects.Object
+	// merge fills a record other reads also fill: its data and facts replace
+	// only their own keys (data is then a partial object).
+	merge bool
 }
 
 // source reads one PSP. Implementations only read: list, report and get
@@ -50,8 +53,8 @@ type cardData struct {
 	ExpYear   int    `json:"exp_year,omitempty"`
 }
 
-// subscriptionData is a live provider subscription's terms. Amount is in the
-// currency's native units.
+// subscriptionData is a provider subscription's terms and, once it ended, its
+// end. Amount is in the currency's native units.
 type subscriptionData struct {
 	Plan     string `json:"plan,omitempty"`
 	Amount   int64  `json:"amount,string"`
@@ -63,17 +66,28 @@ type subscriptionData struct {
 	IntervalMonths int        `json:"interval_months,omitempty"`
 	StartedAt      time.Time  `json:"started_at"`
 	NextBillingAt  *time.Time `json:"next_billing_at,omitempty"`
-	Paused         bool       `json:"paused,omitempty"`
-	// Ended is a subscription the provider no longer bills: EndedAt is when,
-	// UserCanceled whether the subscriber ended it.
-	Ended        bool       `json:"ended,omitempty"`
-	EndedAt      *time.Time `json:"ended_at,omitempty"`
-	UserCanceled bool       `json:"user_canceled,omitempty"`
+	// Ended is a subscription the provider no longer bills. EndedAt is when
+	// its paid service ended; CanceledAt when someone canceled it; EndKind
+	// why it ended (billing.CancelEvidence's kinds), "" for a cancel when
+	// CanceledAt is known, else a provider's end.
+	Ended      bool       `json:"ended,omitempty"`
+	EndedAt    *time.Time `json:"ended_at,omitempty"`
+	CanceledAt *time.Time `json:"canceled_at,omitempty"`
+	EndKind    string     `json:"end_kind,omitempty"`
+	// Stated are the recurring terms a provider stated at signup (CCBill),
+	// which price a subscription that never rebilled.
+	Stated *statedTerms `json:"stated,omitempty"`
 	// MethodRef is the saved card the provider bills, when it names one.
 	MethodRef string          `json:"method_ref,omitempty"`
 	Evidence  json.RawMessage `json:"evidence,omitempty"`
 	// Remote is the subscription as a pull reads it.
 	Remote *reconcile.RemoteSubscription `json:"remote,omitempty"`
+}
+
+// statedTerms are recurring terms a provider states without a currency.
+type statedTerms struct {
+	Decimal       string `json:"decimal"`
+	IntervalHours int    `json:"interval_hours"`
 }
 
 // transactionData is one charge, decline or refund. Amount is in the

@@ -6,21 +6,25 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // DataLink transaction-type batch exports: per-event CSV batches over a date
-// range (rebills, cancellations, expirations, refunds, chargebacks). CCBill's
-// public docs omit the DataLink spec, so transactionTypes and column meanings
-// follow long-standing integrations (s2member, aMember): column 0 = type,
-// 3 = subscription id; REBILL 5 = transaction id, 6 = amount; REFUND/CHARGEBACK
-// 5 = amount; CANCELLATION/EXPIRE 4 = expire date, 5 = cancel date (the
-// DataLink guide's default fields). Unvalidated against a live account: the
-// typed accessors are best-effort, the verbatim Fields authoritative.
+// range (signups, rebills, cancellations, expirations, refunds, chargebacks).
+// Columns follow the DataLink guide's default fields after the type and
+// account (https://ccbill.com/doc/?p=173): column 0 = type, 3 = subscription
+// id; NEW 4 = timestamp, 7 = username, 14 = email, 17/18 = initial amount and
+// days, 19/20 = recurring amount and days; REBILL 5 = transaction id,
+// 6 = amount; REFUND/CHARGEBACK 5 = amount; CANCELLATION/EXPIRE 4 = expire
+// date, 5 = cancel date. An account can customize them. Unvalidated against a
+// live account: the typed accessors are best-effort, the verbatim Fields
+// authoritative.
 type DataLinkTxnType string
 
 const (
+	DataLinkTxnNew          DataLinkTxnType = "NEW"
 	DataLinkTxnRebill       DataLinkTxnType = "REBILL"
 	DataLinkTxnCancellation DataLinkTxnType = "CANCELLATION"
 	DataLinkTxnExpire       DataLinkTxnType = "EXPIRE"
@@ -98,6 +102,41 @@ func (r DataLinkExportRow) ExpireDate() string {
 	default:
 		return ""
 	}
+}
+
+// CancelDate is a CANCELLATION or EXPIRE row's cancel date (column 5), when
+// the member stopped rebilling; "" when it expired without a cancel.
+func (r DataLinkExportRow) CancelDate() string {
+	switch r.TransactionType {
+	case DataLinkTxnCancellation, DataLinkTxnExpire:
+		return r.field(5)
+	default:
+		return ""
+	}
+}
+
+// Signup is a NEW row's member and terms: amounts are decimals in major
+// units with no currency, periods whole days.
+type Signup struct {
+	Username, Email                string
+	InitialAmount, RecurringAmount string
+	InitialDays, RecurringDays     int
+}
+
+// Signup reads a NEW row; false for any other type.
+func (r DataLinkExportRow) Signup() (Signup, bool) {
+	if r.TransactionType != DataLinkTxnNew {
+		return Signup{}, false
+	}
+	days := func(i int) int {
+		n, err := strconv.Atoi(r.field(i))
+		if err != nil || n < 0 {
+			return 0
+		}
+		return n
+	}
+	return Signup{Username: r.field(7), Email: r.field(14), InitialAmount: r.field(17), InitialDays: days(18),
+		RecurringAmount: r.field(19), RecurringDays: days(20)}, true
 }
 
 // TransactionID returns the per-charge transaction id for REBILL rows
