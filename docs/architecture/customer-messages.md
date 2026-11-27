@@ -10,7 +10,7 @@ OpenRails emails a merchant's customers about their billing: receipts, payment p
 
 ## How it works
 
-**Queueing and sending.** The `AFTER INSERT` trigger `notification_event_customer_message` runs `billing.queue_customer_message`: in the fact's own transaction it inserts one `pending` `customer_messages` row per channel (`ON CONFLICT (merchant_id, event_id, channel) DO NOTHING`) and `pg_notify`s `openrails_customer_messages` with the schema; it inserts nothing while `billing_restore_active`. `messages.Service.Run` (started by `Runtime.StartWorkers` on worker processes) listens and calls `Drain` on every wake and reconnect; `openrails.customer_messages_dispatch` (`DispatchArgs`, every `DispatchInterval`, five minutes) drains what no listener saw. `Drain` claims pending rows oldest first through `customer_messages_pending_idx` (`ClaimPendingCustomerMessages`, `FOR UPDATE SKIP LOCKED`, 100 per transaction), marks them `queued` and inserts each one's `openrails.customer_message` job (`SendArgs`, unique by args, completed included; `SendAttempts`, ten) in the same transaction.
+**Queueing and sending.** Every writer of `notification_events` goes through `billingfact.Record`, in the transaction that records the fact: `RecordNotification` inserts the fact once by its id and its `queued` `customer_messages` row on `email` (`ON CONFLICT (merchant_id, event_id, channel) DO NOTHING`; none while `billing_restore_active`), and `Record` inserts the message's `openrails.customer_message` job (`billingfact.SendArgs`, unique by args, completed included; `SendAttempts`, ten, with River's backoff) in the same transaction, so the job exists exactly when the fact commits. A fact recorded before writes nothing. Without a River producer bound to the transaction the fact, and the work recording it, is refused (`db.ErrNoRiverProducer`): every engine binds one, and so do the operator commands that can record one (`openrails prune`, `openrails undo-run`, `openrails catalog apply`, `openrails proposals`).
 
 `Service.Send` settles a message in order, each stop where it ends: `Enabled` (the document's `enabled`, else the default: `defaults`, refined by `byDefault`, which turns `premium_ended` on for `confirmedEndings` and off a `payment_method_failed` whose `recovery_action` is `resubscribe` and a payment issue from `checkoutSources`) or `disabled`; `CustomerMessageOnTestPSP` (the fact's `psp_id`, or any PSP of its payment, invoice or subscription, with `psps.live` false) or `test_environment`; no `Deps.Email`, `failed`/`no_sender`; the directory's contact (`identity.Directory.Contacts`) or `no_contact`; an address `net/mail` parses within 320 bytes or `failed`/`invalid_recipient`. It renders (`Deps.MessageRenderer` when it takes the message, else `Render`), then `claim` takes `LockCustomerMessages` (a per-customer transaction advisory lock), counts `CountCustomerMessagesSince` and either marks it `sending` with the recipient or, past `RateCap` (ten an hour), `rate_limited` with `alerting.RecordMessageRateLimit`'s `life.customer.messages_rate_limited` finding. `config.EmailSender.Send` follows; `SettleCustomerMessage` marks `sent`, back to `queued` for a retry, or `failed`: `refused` on a 5xx to `RCPT TO` (`refusalOf` reads helpers/smtp's step text), `send_failed` or `unavailable` on the last attempt. A 5xx to `AUTH` or `MAIL FROM` retries and raises `alerting.RecordMessageSenderRefused`'s `life.customer.messages_sender_refused`, which `alerting.ResolveMessageSenderRefused` closes on the next send or test the sender accepts. `settle` runs on `context.WithoutCancel` with its own timeout, so a timed-out last attempt still ends. From is the profile's `from_email` and display name, else the sender's own.
 
@@ -27,7 +27,7 @@ OpenRails emails a merchant's customers about their billing: receipts, payment p
 - Go: `Client.ListCustomerMessages`, `PreviewMessage`, `CreateTestMessage`; `LocalClient.ExportNotificationOrdering`, `RestoreNotificationOrdering`; `Deps.Notifications` (`openrails.NotificationChannel`), `Deps.Email`, `Deps.MessageRenderer`; `billing.MerchantProfile.NotificationURL`.
 - HTTP: `GET /v1/admin/customers/{customer_id}/messages` (`merchant:customer:read`), `POST /v1/merchant/messages/preview` (`merchant:config:read`), `POST /v1/merchant/messages/test` (`merchant:config:manage`).
 - Configuration: the merchant's `messages` document and `alert_email`, `email_smtp`.
-- Jobs: `openrails.customer_messages_dispatch`, `openrails.customer_message`, `openrails.cleanup_expired_data`.
+- Jobs: `openrails.customer_message`, `openrails.cleanup_expired_data`.
 
 ## Guarantees
 
@@ -50,7 +50,7 @@ Checks:
 The message log is a support read (`merchant:customer:read`); a preview is a configuration read and a test a configuration change. A send job binds its merchant (`merchant.WithID`) before it reads. Inbox recipients are mapped by exact issuer and UUID.
 
 Checks:
-- Every query in `customer_messages.sql` but `ClaimPendingCustomerMessages` (marked `CROSS-MERCHANT`) names `merchant_id`.
+- Every query in `customer_messages.sql` names `merchant_id`.
 - OR-J39-S16: another merchant's credential lists none of the customer's messages.
 - `adapters/authkit.Notifications` skips another merchant and an unlisted issuer.
 
@@ -70,10 +70,10 @@ Checks:
 - `merchantarchive` excludes `customer_messages` and the inbox ordering state (`excludedTables`: a restore sends nothing again).
 
 ### 7. Work scales with activity
-A message is queued by its fact's insert and dispatched on its commit's notify; the backstop reads only pending rows.
+A message and its send job are written by its fact's transaction; nothing reads for messages to queue.
 
 Checks:
-- `ClaimPendingCustomerMessages` reads `customer_messages_pending_idx` (`WHERE status = 'pending'`) in batches of 100.
+- `billingfact.Record` queues the job with the fact (OR-J39-S26: a fleet the engine never started sends it; OR-J39-S27: a fact recorded twice queues one message and one job).
 - `CountCustomerMessagesSince` is one customer's messages, on `customer_messages_customer_idx`.
 - `SendArgs.InsertOpts` deduplicates by args across states, completed included.
 
@@ -91,10 +91,10 @@ Checks:
 A billing restore sends customers nothing again, and a fact on a test PSP sends nothing.
 
 Checks:
-- `billing.queue_customer_message` returns before inserting while `billing_restore_active`: OR-J39-S02 writes a fact inside a restore's transaction and outside one.
+- `RecordNotification` inserts no message while `billing_restore_active`, so `billingfact.Record` queues no job: OR-J39-S02 writes a fact inside a restore's transaction and outside one.
 
 ## Tests
 
-- `critical/customer_messages_test.go`: OR-J39-S01 (one receipt across a replayed fact and a refused send), S02 (a restore sends nothing), S03 to S05 (`no_contact`, `test_environment`, `rate_limited` with its finding), S06 (erasure), S07 and S08 (a merchant template; a refused document), S09, S13, S14 and S15 (each cancellation cause sends one confirmation; a refund's access end none), S10 (price change), S11 (refund receipts), S12 (`Deps.MessageRenderer`), S16 (the log route), S17 (preview), S18 (test send and its cap), S19 (SMTP refusals through helpers/smtp), S20 (a last attempt cut off mid-send), S21 (a declined checkout), S22 (a refund found late), S23 (a void), S24 (the subscription receipt), S25 (a staff refund completed late). `internal/modules/messages` has unit tests of rendering, defaults, `Check`, template bounds and type checks, and `refusalOf`.
+- `critical/customer_messages_test.go`: OR-J39-S01 (one receipt across a replayed fact and a refused send), S02 (a restore sends nothing), S03 to S05 (`no_contact`, `test_environment`, `rate_limited` with its finding), S06 (erasure), S07 and S08 (a merchant template; a refused document), S09, S13, S14 and S15 (each cancellation cause sends one confirmation; a refund's access end none), S10 (price change), S11 (refund receipts), S12 (`Deps.MessageRenderer`), S16 (the log route), S17 (preview), S18 (test send and its cap), S19 (SMTP refusals through helpers/smtp), S20 (a last attempt cut off mid-send), S21 (a declined checkout), S22 (a refund found late), S23 (a void), S24 (the subscription receipt), S25 (a staff refund completed late), S26 (a message sent with no dispatcher running), S27 (a fact recorded twice). `internal/modules/messages` has unit tests of rendering, defaults, `Check`, template bounds and type checks, and `refusalOf`.
 - Inbox: OR-J31-S01 (a restore awaits its ordering snapshot). `TestAccountNotificationChannel` and `TestInvoiceNotificationRecovery` (`critical/account_notifications_test.go`) publish and withdraw against AuthKit's real store; they run with the suite but map to no scenario id.
-- Gaps: no test refuses a message with an SMTP 5xx (`refused`), fails the host's renderer to `render_failed`, drops the dispatcher's connection, or ends a provider-mirrored subscription (told as `access_ended`).
+- Gaps: no test refuses a message with an SMTP 5xx (`refused`), fails the host's renderer to `render_failed`, or ends a provider-mirrored subscription (told as `access_ended`).

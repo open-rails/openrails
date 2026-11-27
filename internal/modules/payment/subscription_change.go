@@ -101,7 +101,7 @@ func (c *changeTarget) deferred() bool {
 
 // ChangeSubscription changes a subscription's price, seats or both; every
 // instant in the answer is UTC.
-func (s *PurchaseService) ChangeSubscription(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
+func (s *PurchaseService) ChangeSubscription(ctx context.Context, req *SubscriptionChangeRequest, user *CustomerIdentity) (*TierChangeResponse, error) {
 	resp, err := s.changeSubscription(ctx, req, user)
 	if err != nil {
 		return nil, err
@@ -112,7 +112,7 @@ func (s *PurchaseService) ChangeSubscription(ctx context.Context, req *Subscript
 // ConfirmSubscriptionChange reads the provider for the subscription's
 // unresolved change after its customer completed the change's next_action,
 // and answers the change as it now stands.
-func (s *PurchaseService) ConfirmSubscriptionChange(ctx context.Context, subscriptionID uuid.UUID, user *UserIdentity, payer billingauth.Payer) (*TierChangeResponse, error) {
+func (s *PurchaseService) ConfirmSubscriptionChange(ctx context.Context, subscriptionID uuid.UUID, user *CustomerIdentity, payer billingauth.Payer) (*TierChangeResponse, error) {
 	if s.SubscriptionService == nil {
 		return nil, errors.New("subscription change services unavailable")
 	}
@@ -175,7 +175,7 @@ func (s *PurchaseService) answerChange(ctx context.Context, subscriptionID uuid.
 	return resp, nil
 }
 
-func (s *PurchaseService) changeSubscription(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
+func (s *PurchaseService) changeSubscription(ctx context.Context, req *SubscriptionChangeRequest, user *CustomerIdentity) (*TierChangeResponse, error) {
 	if response, found, err := s.ReplayTierChange(ctx, req, user); found || err != nil {
 		return response, err
 	}
@@ -191,7 +191,7 @@ func (s *PurchaseService) changeSubscription(ctx context.Context, req *Subscript
 	return s.routeChange(ctx, req, user, c)
 }
 
-func (s *PurchaseService) routeChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity, c *changeTarget) (*TierChangeResponse, error) {
+func (s *PurchaseService) routeChange(ctx context.Context, req *SubscriptionChangeRequest, user *CustomerIdentity, c *changeTarget) (*TierChangeResponse, error) {
 	sub := c.sub
 	if sub.CollectionPolicy == models.CollectionPolicyEngine && sub.Rail != models.RailSolana {
 		switch {
@@ -239,7 +239,7 @@ func (s *PurchaseService) routeChange(ctx context.Context, req *SubscriptionChan
 // PreviewSubscriptionChange quotes what ChangeSubscription would charge now
 // and at the next renewal, without changing anything. A Stripe provider
 // subscription's charge now is an estimate: Stripe finalizes the proration.
-func (s *PurchaseService) PreviewSubscriptionChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity) (*TierChangePreviewResponse, error) {
+func (s *PurchaseService) PreviewSubscriptionChange(ctx context.Context, req *SubscriptionChangeRequest, user *CustomerIdentity) (*TierChangePreviewResponse, error) {
 	resp, err := s.previewSubscriptionChange(ctx, req, user)
 	if resp != nil {
 		resp.NextChargeDate = utcPtr(resp.NextChargeDate)
@@ -247,7 +247,7 @@ func (s *PurchaseService) PreviewSubscriptionChange(ctx context.Context, req *Su
 	return resp, err
 }
 
-func (s *PurchaseService) previewSubscriptionChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity) (*TierChangePreviewResponse, error) {
+func (s *PurchaseService) previewSubscriptionChange(ctx context.Context, req *SubscriptionChangeRequest, user *CustomerIdentity) (*TierChangePreviewResponse, error) {
 	c, err := s.resolveChange(ctx, req, user)
 	if err != nil {
 		return nil, err
@@ -261,7 +261,7 @@ func (s *PurchaseService) previewSubscriptionChange(ctx context.Context, req *Su
 		case c.deferred():
 			return s.previewEngineSchedule(ctx, resp, c)
 		case c.tier:
-			return s.previewEngineUpgrade(resp, c)
+			return s.previewEngineUpgrade(ctx, resp, c)
 		default:
 			return s.previewEngineSeats(resp, c)
 		}
@@ -317,7 +317,7 @@ func (s *PurchaseService) previewSubscriptionChange(ctx context.Context, req *Su
 
 // resolveChange reads the subscription the customer owns and what the request
 // moves it to, refusing what no rail can do.
-func (s *PurchaseService) resolveChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity) (*changeTarget, error) {
+func (s *PurchaseService) resolveChange(ctx context.Context, req *SubscriptionChangeRequest, user *CustomerIdentity) (*changeTarget, error) {
 	if strings.TrimSpace(req.PriceID) == "" && req.Quantity == nil {
 		return nil, &TierChangeError{Code: billing.CodeInvalidParam, Message: "a change names a price_id, a quantity or both"}
 	}
@@ -326,7 +326,7 @@ func (s *PurchaseService) resolveChange(ctx context.Context, req *SubscriptionCh
 	if req.SubscriptionID != uuid.Nil {
 		sub, err = s.SubscriptionService.GetByID(ctx, req.SubscriptionID)
 		// Ownership compares parsed customer ids, not their spelling.
-		if payer := identity.CustomerIDFromString(user.ID); err != nil || payer.IsZero() || sub.CustomerID != payer.UUID() {
+		if customer := identity.CustomerIDFromString(user.ID); err != nil || customer.IsZero() || sub.CustomerID != customer.UUID() {
 			return nil, &TierChangeError{Code: billing.CodeSubscriptionNotFound, Message: "subscription not found"}
 		}
 	} else if sub, err = s.SubscriptionService.GetActiveSubscription(ctx, user.ID); err != nil {

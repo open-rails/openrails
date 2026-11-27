@@ -25,7 +25,7 @@ type ConvergeRequest struct {
 	// Rail is the canonical rail the event arrived on.
 	Rail string
 	// SubscriptionReference is the provider subscription id, or (NMI) an
-	// invoice/PO reference that resolves to one — identity only, never state.
+	// order/PO reference that resolves to one — identity only, never state.
 	SubscriptionReference string
 	// EventType/EventCreated are carried for logging/forensics only; the fetch
 	// decides from provider truth, so ordering is structurally irrelevant.

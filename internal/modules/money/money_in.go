@@ -17,7 +17,7 @@ func (f PreparedCharge) Submit(ctx context.Context) (ChargeResult, error) { retu
 
 type ChargeRequest struct {
 	MerchantID      uuid.UUID
-	Payer           identity.CustomerID
+	Customer        identity.CustomerID
 	Invoker         string
 	InvoiceID       *uuid.UUID
 	PaymentMethodID uuid.UUID

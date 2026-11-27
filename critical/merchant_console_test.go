@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -31,7 +30,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/ccbillmock"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -133,34 +131,43 @@ func consoleBrowser(t *testing.T, a *authorityWorld, config map[string]any, acti
 	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
+	playwright(t, directory, "playwright.admin.config.ts", []string{"OPENRAILS_BROWSER_URL=" + server.URL}, cases...)
+	mu.Lock()
+	defer mu.Unlock()
+	return maps.Clone(counts)
+}
+
+// playwright runs the selected cases of a browser suite under directory with
+// config and env, and requires each to have run and passed once. Its
+// results, screenshots among them, go to the critical report when one is
+// kept.
+func playwright(t *testing.T, directory, config string, env []string, cases ...string) {
+	t.Helper()
 	results := t.TempDir()
 	if root := os.Getenv("OPENRAILS_CRITICAL_REPORT_DIR"); root != "" {
-		root, err = filepath.Abs(filepath.Join(root, "browser"))
+		root, err := filepath.Abs(filepath.Join(root, "browser"))
 		require.NoError(t, err)
 		require.NoError(t, os.MkdirAll(root, 0700))
 		results, err = os.MkdirTemp(root, strings.Join(cases, "_")+"-")
 		require.NoError(t, err)
 	}
 	report := filepath.Join(results, "report.json")
-	command := exec.CommandContext(t.Context(), "pnpm", "exec", "playwright", "test", "-c", "playwright.admin.config.ts", "--grep", strings.Join(cases, "|"))
+	command := exec.CommandContext(t.Context(), "pnpm", "exec", "playwright", "test", "-c", config, "--grep", strings.Join(cases, "|"))
 	command.Dir = directory
-	command.Env = append(os.Environ(), "OPENRAILS_BROWSER_URL="+server.URL, "OPENRAILS_BROWSER_RESULTS="+results, "OPENRAILS_BROWSER_REPORT="+report)
+	command.Env = append(append(os.Environ(), env...), "OPENRAILS_BROWSER_RESULTS="+results, "OPENRAILS_BROWSER_REPORT="+report)
 	output, err := command.CombinedOutput()
 	t.Log(string(output))
-	require.NoError(t, err, "built console browser assertions failed")
+	require.NoError(t, err, "browser assertions failed")
 	raw, err := os.ReadFile(report)
 	require.NoError(t, err)
 	var receipt struct {
 		Stats struct{ Expected, Unexpected, Flaky, Skipped int }
 	}
 	require.NoError(t, json.Unmarshal(raw, &receipt))
-	require.Equal(t, len(cases), receipt.Stats.Expected, "every selected console case ran and passed")
+	require.Equal(t, len(cases), receipt.Stats.Expected, "every selected browser case ran and passed")
 	require.Zero(t, receipt.Stats.Unexpected)
 	require.Zero(t, receipt.Stats.Flaky)
 	require.Zero(t, receipt.Stats.Skipped)
-	mu.Lock()
-	defer mu.Unlock()
-	return maps.Clone(counts)
 }
 
 // consoleStart is the world's start as a fixture action.
@@ -502,7 +509,7 @@ func TestMerchantConsole(t *testing.T) {
 		require.Len(t, holds.Items, 1)
 		// An open finding with a long recommendation, as an undeclared PSP
 		// account raises.
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		require.NoError(t, database.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
 			_, err := (&reconcile.PGStore{DB: database, Now: a.clock.Now}).RaiseFinding(ctx, reconcile.RaisedFinding{Type: "consistency.merchant_config.undeclared_account", SubjectKey: "accounts/nmi/0000000", Severity: reconcile.SeverityHigh,
@@ -540,6 +547,23 @@ func TestMerchantConsole(t *testing.T) {
 		staff := consoleStaff(t, s.a, "console-metrics", billing.MerchantMetricsRead, billing.MerchantConfigRead)
 		counts := consoleBrowser(t, s.a, map[string]any{"tokens": map[string]string{"staff": staff}}, nil, "console-dashboard-shows-merchant-units")
 		require.NotZero(t, counts["GET /v1/merchant/configuration"], "the dashboard reads the declared units")
+	})
+
+	t.Run("OR-J38-S99/console-overview-asks-for-a-payment-provider-until-one-is-armed", func(t *testing.T) {
+		a, _ := newPSPWorld(t)
+		staff := consoleStaff(t, a, "console-setup", billing.MerchantMetricsRead, billing.MerchantConfigRead, billing.MerchantConfigManage)
+		counts := consoleBrowser(t, a, map[string]any{"tokens": map[string]string{"staff": staff}},
+			map[string]consoleAction{"arm": func(ctx context.Context) (any, error) { return a.alphaRemote.CreatePSP(ctx, pspInput()) }},
+			"console-overview-asks-for-a-payment-provider-until-one-is-armed")
+		require.NotZero(t, counts["GET /v1/merchant/psps"], "the overview reads the PSPs")
+		status, raw := a.request(t, http.MethodGet, "/v1/merchant/psps", staff, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var psps struct {
+			Data []struct{ Armed bool }
+		}
+		require.NoError(t, json.Unmarshal(raw, &psps))
+		require.Len(t, psps.Data, 1)
+		require.True(t, psps.Data[0].Armed, "the PSP the fixture added is armed: %s", raw)
 	})
 
 	t.Run("OR-J38-S34/console-failed-pull-and-read-only-access", func(t *testing.T) {

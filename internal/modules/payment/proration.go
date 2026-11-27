@@ -10,7 +10,9 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/calendarutil"
@@ -27,11 +29,38 @@ func QuoteSolanaUpgrade(ctx context.Context, database *db.DB, sub *models.Subscr
 	if err != nil {
 		return ModelBUpgradeQuote{}, fmt.Errorf("read Solana paid period: %w", err)
 	}
+	kept, err := periodKept(ctx, database, sub, current.Currency)
+	if err != nil {
+		return ModelBUpgradeQuote{}, err
+	}
 	return QuoteModelBUpgrade(ModelBUpgrade{
 		Old: PriceAmount{Micros: paid, Currency: current.Currency}, New: PriceAmountOf(next),
 		PeriodStart: sub.CurrentPeriodStartsAt, PeriodEnd: sub.CurrentPeriodEndsAt,
-		NewCycleHours: next.RecurringCycleHours(),
+		NewCycleHours: next.RecurringCycleHours(), Paid: kept,
 	}, now)
+}
+
+// PeriodPaid is what a subscription's recorded charges for its current period
+// took (Charged) and what they keep after refunds and chargebacks (Kept).
+type PeriodPaid struct{ Charged, Kept int64 }
+
+// periodKept reads the subscription's current period's PeriodPaid.
+func periodKept(ctx context.Context, database *db.DB, sub *models.Subscription, currency string) (PeriodPaid, error) {
+	if sub.CurrentPeriodStartsAt == nil {
+		return PeriodPaid{}, nil
+	}
+	m, err := merchant.Require(ctx)
+	if err != nil {
+		return PeriodPaid{}, err
+	}
+	row, err := database.Gen(ctx).GetPeriodChargedAndKept(ctx, gen.GetPeriodChargedAndKeptParams{
+		MerchantID: m.UUID(), SubscriptionID: sub.ID, Currency: moneyutil.NormalizeCurrency(currency),
+		PeriodStart: sub.CurrentPeriodStartsAt.UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return PeriodPaid{}, fmt.Errorf("read the period's kept charges: %w", err)
+	}
+	return PeriodPaid{Charged: row.Charged, Kept: row.Kept}, nil
 }
 
 var (
@@ -55,6 +84,20 @@ type ModelBUpgrade struct {
 	PeriodStart, PeriodEnd *time.Time
 	NewCycleHours          *int
 	NewCycleMonths         *int
+	// Paid scales the credit by the share of the period's charges the
+	// customer kept; with no recorded charge Old stands.
+	Paid PeriodPaid
+}
+
+// credited is the old plan's value the credit is measured from: Old, less
+// the share of the period's charges given back.
+func (u ModelBUpgrade) credited() PriceAmount {
+	if u.Paid.Charged <= 0 || u.Paid.Kept >= u.Paid.Charged {
+		return u.Old
+	}
+	scaled := new(big.Int).Mul(big.NewInt(u.Old.Micros), big.NewInt(max(u.Paid.Kept, 0)))
+	scaled.Quo(scaled, big.NewInt(u.Paid.Charged))
+	return PriceAmount{Micros: scaled.Int64(), Currency: u.Old.Currency}
 }
 
 // ModelBUpgradeQuote is what an upgrade charges now and the period it opens.
@@ -103,7 +146,7 @@ func QuoteModelBUpgrade(u ModelBUpgrade, now time.Time) (ModelBUpgradeQuote, err
 	if remaining < 0 {
 		remaining = 0
 	}
-	credit, err := prorateCredit(u.Old, remaining, u.PeriodEnd.Sub(*u.PeriodStart))
+	credit, err := prorateCredit(u.credited(), remaining, u.PeriodEnd.Sub(*u.PeriodStart))
 	if err != nil {
 		return ModelBUpgradeQuote{}, err
 	}
@@ -145,7 +188,7 @@ func QuoteKeepBoundaryUpgrade(u ModelBUpgrade, now time.Time) (ModelBUpgradeQuot
 	}
 	remaining := max(u.PeriodEnd.Sub(from), 0)
 	period := u.PeriodEnd.Sub(*u.PeriodStart)
-	credit, err := prorate(u.Old, remaining, period, true)
+	credit, err := prorate(u.credited(), remaining, period, true)
 	if err != nil {
 		return ModelBUpgradeQuote{}, err
 	}

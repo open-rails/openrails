@@ -14,7 +14,7 @@ type MerchantConfiguration struct {
 	// Missing values use money service defaults.
 	BillingPeriodBoundary string `json:"billing_period_boundary,omitempty"`
 
-	// ArrearsGraceDays is how many days past a usage invoice's due_at a payer keeps
+	// ArrearsGraceDays is how many days past a usage invoice's due_at a customer keeps
 	// before its debt is delinquent. Nil ⇒ delinquency.DefaultGraceDays; zero
 	// is a valid choice.
 	ArrearsGraceDays *int `json:"arrears_grace_days,omitempty"`
@@ -67,11 +67,9 @@ type MerchantConfiguration struct {
 }
 
 // BalanceNoticeConfiguration is a merchant's validated default low-balance
-// lines: RunwayHours nil ⇒ the built-in 24; a currency absent from LowAmounts
-// has no amount line.
+// lines: a currency absent from LowAmounts has none.
 type BalanceNoticeConfiguration struct {
-	RunwayHours *int             `json:"runway_hours,omitempty"`
-	LowAmounts  map[string]int64 `json:"low_amounts,omitempty"`
+	LowAmounts map[string]int64 `json:"low_amounts,omitempty"`
 }
 
 type PSPRoutingRule = billing.PSPRoutingRule

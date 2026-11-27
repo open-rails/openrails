@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingfact"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -28,7 +29,7 @@ import (
 // customer's address and the hourly cap; each that stops it is where it
 // ends. Otherwise it renders and sends it. On the last attempt an error
 // fails it.
-func (s *Service) Send(ctx context.Context, args SendArgs, last bool) error {
+func (s *Service) Send(ctx context.Context, args billingfact.SendArgs, last bool) error {
 	ctx = merchant.WithID(ctx, billing.MerchantID(args.MerchantID))
 	m, err := s.DB.Gen(ctx).GetCustomerMessage(ctx, gen.GetCustomerMessageParams{MerchantID: args.MerchantID, ID: args.MessageID})
 	if errors.Is(err, pgx.ErrNoRows) {

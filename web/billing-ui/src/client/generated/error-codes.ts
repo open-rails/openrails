@@ -192,9 +192,11 @@ export type OpenRailsErrorCode =
   | "subscription_not_found"
   | "subscription_paid_through"
   | "subscription_resumable"
+  | "too_many_buckets"
   | "trial_unsupported_on_rail"
   | "unknown_field"
   | "unsupported_media_type"
+  | "usage_events_expired"
   | "usage_meter_invalid"
   | "usage_meter_not_found"
   | "usage_not_priced"
@@ -346,7 +348,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   product_not_found: { status: 404, type: "invalid_request_error", meaning: "The product does not exist." },
   product_tier_group_conflict: { status: 409, type: "invalid_request_error", meaning: "A customer holds live subscriptions to more than one product of the tier group." },
   product_tier_group_in_use: { status: 409, type: "invalid_request_error", meaning: "The tier group cannot change while a subscription has a plan change in flight." },
-  provider_cancel_held: { status: 409, type: "invalid_request_error", meaning: "Cancelling needs a destructive provider action that is not armed for this merchant." },
+  provider_cancel_held: { status: 409, type: "invalid_request_error", meaning: "Canceling needs a destructive provider action that is not armed for this merchant." },
   provider_outcome_unknown: { status: 409, type: "api_error", meaning: "The provider did not confirm the outcome; read the resource before retrying." },
   provider_price_unreadable: { status: 502, type: "api_error", meaning: "The provider did not answer for the provider price's terms; retry." },
   provider_writes_disabled: { status: 503, type: "api_error", meaning: "Provider writes are off for the merchant, so it takes no payment; the message names why (the merchant's write posture)." },
@@ -401,9 +403,11 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   subscription_not_found: { status: 404, type: "invalid_request_error", meaning: "The subscription does not exist." },
   subscription_paid_through: { status: 409, type: "invalid_request_error", meaning: "A canceled subscription to this product is still paid; buy again once its paid period ends." },
   subscription_resumable: { status: 409, type: "invalid_request_error", meaning: "A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again." },
+  too_many_buckets: { status: 400, type: "invalid_request_error", meaning: "The window at the interval holds more buckets than a series answers (a usage series: 1,000); shorten the window or widen the interval. param is interval." },
   trial_unsupported_on_rail: { status: 400, type: "invalid_request_error", meaning: "This rail cannot run a trial first phase." },
   unknown_field: { status: 400, type: "invalid_request_error", meaning: "The JSON body names a field the route does not accept; param is the field." },
   unsupported_media_type: { status: 415, type: "invalid_request_error", meaning: "The request body is not application/json." },
+  usage_events_expired: { status: 400, type: "invalid_request_error", meaning: "Usage by invoker reads raw usage events, kept 90 days; the window starts before them. History by event type and meter reaches back further. param is the window's start." },
   usage_meter_invalid: { status: 400, type: "invalid_request_error", meaning: "The meter definition is invalid." },
   usage_meter_not_found: { status: 404, type: "invalid_request_error", meaning: "The usage meter does not exist." },
   usage_not_priced: { status: 422, type: "invalid_request_error", meaning: "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field." },

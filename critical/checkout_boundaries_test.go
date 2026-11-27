@@ -403,7 +403,8 @@ func (f nmiCheckoutWire) RoundTrip(r *http.Request) (*http.Response, error) { re
 
 func nmiSaleRequest(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/transact.php") }
 
-func nmiCheckoutInvoice(t *testing.T, a *authorityWorld, key string, recurring bool, ttl time.Duration) billing.Invoice {
+// nmiCheckoutPrice is a unique product's price for alice to buy.
+func nmiCheckoutPrice(t *testing.T, a *authorityWorld, key string, recurring bool) billing.PriceID {
 	t.Helper()
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, Ownership: catalog.OwnershipUnique, Entitlements: []string{key + ":owned"}})
 	require.NoError(t, err)
@@ -413,8 +414,14 @@ func nmiCheckoutInvoice(t *testing.T, a *authorityWorld, key string, recurring b
 	}
 	price, err := a.alpha.CreatePrice(t.Context(), params)
 	require.NoError(t, err)
-	expires := a.clock.Now().Add(ttl)
-	invoice, err := a.alpha.CreateInvoice(t.Context(), key, billing.CreateInvoiceParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
+	return price.ID
+}
+
+// nmiCheckoutInvoice is the merchant's bill to alice for a new price: it never
+// expires.
+func nmiCheckoutInvoice(t *testing.T, a *authorityWorld, key string, recurring bool) billing.Invoice {
+	t.Helper()
+	invoice, err := a.alpha.CreateInvoice(t.Context(), key, billing.CreateInvoiceParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.InvoiceLineParams{{PriceID: nmiCheckoutPrice(t, a, key, recurring)}}})
 	require.NoError(t, err)
 	return *invoice
 }
@@ -452,7 +459,7 @@ func nmiCheckoutOperation(t *testing.T, a *authorityWorld, invoice billing.Invoi
 func testNMISaleBoundaries(t *testing.T) {
 	t.Run("OR-J09-S71/gateway-refusal-reopens-the-invoice", func(t *testing.T) {
 		a, p := newNMIWorld(t)
-		invoice := nmiCheckoutInvoice(t, a, "refusal", false, 48*time.Hour)
+		invoice := nmiCheckoutInvoice(t, a, "refusal", false)
 		invoice = payNMICheckout(t, a, invoice, "invalid-payment-token", true)
 		require.Equal(t, billing.InvoiceOpen, invoice.Status)
 		require.NotNil(t, invoice.Payment.LastPaymentError)
@@ -483,7 +490,7 @@ func testNMISaleBoundaries(t *testing.T) {
 				response.Body = io.NopCloser(strings.NewReader(fields.Encode()))
 				return response, nil
 			})
-			invoice := nmiCheckoutInvoice(t, a, "refusal-"+code, false, 48*time.Hour)
+			invoice := nmiCheckoutInvoice(t, a, "refusal-"+code, false)
 			invoice = payNMICheckout(t, a, invoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Decline: code, VaultsDeclined: true}), true)
 			require.Equal(t, billing.InvoiceOpen, invoice.Status)
 			reason := billing.DeclineProcessingError
@@ -500,6 +507,34 @@ func testNMISaleBoundaries(t *testing.T) {
 			require.Equal(t, code, fmt.Sprint(proof["response_code"]))
 			require.NotEmpty(t, proof["localization_id"])
 			require.Empty(t, p.core.Vaults())
+		}
+		for _, resolve := range []bool{false, true} {
+			invoice := nmiCheckoutInvoice(t, a, fmt.Sprintf("lost-refusal-%t", resolve), false)
+			p.core.DropSaleResponses(1)
+			invoice = payNMICheckout(t, a, invoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Decline: "410"}), false)
+			require.Equal(t, billing.InvoiceProcessing, invoice.Status)
+			row := nmiCheckoutOperation(t, a, invoice, false)
+			a.clock.Advance(intents.LostSubmissionSettle)
+			if resolve {
+				rt := embedded.Graph(a.engine).Runtime
+				require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+					var err error
+					row, err = rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Confirmed gateway refusal"})
+					return err
+				}))
+			} else {
+				row = nmiCheckoutOperation(t, a, invoice, true)
+			}
+			require.Equal(t, intents.StatusFailedTerminal, row.Status)
+			require.NoError(t, intents.ValidateNMISaleTerminal(row))
+			proof = nil
+			require.NoError(t, json.Unmarshal(row.ResultEvidence, &proof))
+			require.Equal(t, true, proof["request_refused"])
+			require.Equal(t, true, proof["gateway_refused"])
+			require.NotContains(t, proof, "declined")
+			current, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
+			require.NoError(t, err)
+			require.Equal(t, billing.InvoiceOpen, current.Status)
 		}
 		attempts, err = a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
 		require.NoError(t, err)
@@ -522,7 +557,7 @@ func testNMISaleBoundaries(t *testing.T) {
 				return original.RoundTrip(r)
 			})
 		})
-		invoice := nmiCheckoutInvoice(t, a, "unsent", false, 48*time.Hour)
+		invoice := nmiCheckoutInvoice(t, a, "unsent", false)
 		invoice = payNMICheckout(t, a, invoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), false)
 		require.Equal(t, billing.InvoiceOpen, invoice.Status)
 		row := nmiCheckoutOperation(t, a, invoice, false)
@@ -533,7 +568,7 @@ func testNMISaleBoundaries(t *testing.T) {
 	})
 	t.Run("OR-J09-S73/disconnected-client-keeps-the-sale-running", func(t *testing.T) {
 		a, p := newNMIWorld(t)
-		invoice := nmiCheckoutInvoice(t, a, "disconnected", false, 48*time.Hour)
+		invoice := nmiCheckoutInvoice(t, a, "disconnected", false)
 		hold := p.core.Hold(nmiSaleRequest, nmimock.HoldResponse)
 		defer hold.Release()
 		ctx, cancel := context.WithCancel(t.Context())
@@ -565,8 +600,8 @@ func testNMISaleBoundaries(t *testing.T) {
 	})
 	t.Run("OR-J09-S74/empty-order-releases-after-a-day-and-expires", func(t *testing.T) {
 		a, p := newNMIWorld(t)
-		first := nmiCheckoutInvoice(t, a, "released", false, 48*time.Hour)
-		expiring := nmiCheckoutInvoice(t, a, "released-expiring", false, time.Hour)
+		first := nmiCheckoutInvoice(t, a, "released", false)
+		expiring := openPurchase(t, a, nmiCheckoutPrice(t, a, "released-expiring", false), 1)
 		p.core.FailRequests(nmiSaleRequest, http.StatusBadGateway, 2)
 		first = payNMICheckout(t, a, first, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), false)
 		expiring = payNMICheckout(t, a, expiring, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), false)
@@ -617,7 +652,7 @@ func testNMISaleBoundaries(t *testing.T) {
 	})
 	t.Run("OR-J09-S75/operator-attests-an-empty-order-release", func(t *testing.T) {
 		a, p := newNMIWorld(t)
-		invoice := nmiCheckoutInvoice(t, a, "attested", false, 48*time.Hour)
+		invoice := nmiCheckoutInvoice(t, a, "attested", false)
 		p.core.HideSales(1)
 		invoice = payNMICheckout(t, a, invoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), false)
 		row := nmiCheckoutOperation(t, a, invoice, false)
@@ -651,7 +686,7 @@ func testNMISaleBoundaries(t *testing.T) {
 		require.True(t, errors.Is(resolve(intents.Resolution{ProviderReference: p.core.LastSale().TransactionID, Actor: "operator", Reason: "late receipt"}), intents.ErrResolutionNotUnknown))
 		p.money(t, 1, 500)
 
-		paid := nmiCheckoutInvoice(t, a, "retained", false, 48*time.Hour)
+		paid := nmiCheckoutInvoice(t, a, "retained", false)
 		p.core.FailRequests(func(r *http.Request) bool {
 			return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/customers/")
 		}, http.StatusServiceUnavailable, 1)
@@ -675,7 +710,7 @@ func testNMISaleBoundaries(t *testing.T) {
 	t.Run("OR-J09-S76/vault-read-failure-keeps-paid-access-and-retries-storage", func(t *testing.T) {
 		for _, recurring := range []bool{false, true} {
 			a, p := newNMIWorld(t)
-			invoice := nmiCheckoutInvoice(t, a, "card-storage", recurring, 48*time.Hour)
+			invoice := nmiCheckoutInvoice(t, a, "card-storage", recurring)
 			storageDown := true
 			p.core.Intercept(func(r *http.Request) bool {
 				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/customers/")
@@ -736,7 +771,7 @@ func testNMISaleBoundaries(t *testing.T) {
 			}
 			require.Len(t, onFile, 1)
 			require.Equal(t, billing.MandateActive, onFile[0].Status)
-			next := nmiCheckoutInvoice(t, a, "after-storage", false, 48*time.Hour)
+			next := nmiCheckoutInvoice(t, a, "after-storage", false)
 			require.NotEmpty(t, next.PaymentOptions)
 			require.Contains(t, next.PaymentOptions[0].Accepts, "saved_card")
 			current, err := a.alpha.GetInvoice(t.Context(), invoice.ID)

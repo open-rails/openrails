@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 	_ "time/tzdata"
+
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // Across a midnight clock change each label starts its own date, the first
@@ -38,7 +40,7 @@ func TestBucketLabelsAcrossMidnightTransitions(t *testing.T) {
 			if label.Add(-time.Second).In(zone).Format("2006-01-02") == label.In(zone).Format("2006-01-02") {
 				t.Errorf("%s %s: %s is not the first instant of its date", c.zone, c.from, label.Format(time.RFC3339))
 			}
-			if !truncGrain(label.Add(90*time.Minute), c.grain, zone).Equal(label) {
+			if !calendarutil.BucketStart(label.Add(90*time.Minute), c.grain, zone).Equal(label) {
 				t.Errorf("%s %s: a row 90 minutes into %s is not bucketed under it", c.zone, c.from, label.Format(time.RFC3339))
 			}
 		}
@@ -78,7 +80,7 @@ func TestUTCDayMeasures(t *testing.T) {
 			t.Errorf("%s folds 15-minute usage history into the zone's days", name)
 		}
 	}
-	for _, fam := range []Family{FamNetwork, FamWebhookDaily, FamNMIHistory} {
+	for _, fam := range []Family{FamNetwork, FamWebhookDaily} {
 		found := false
 		for _, m := range Measures {
 			if m.Internal {

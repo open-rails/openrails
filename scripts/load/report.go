@@ -170,11 +170,8 @@ func summarize(r *Results) string {
 		p("- Ingest as a batch reporter (one lease): events in time order across %d customers %.0f events/s; grouped by customer %.0f events/s; sync p50 %s ms, p99 %s ms.", pr.Customers, pr.IngestRate, pr.GroupedRate, ms(pr.Syncs.Q(0.5)), ms(pr.Syncs.Q(0.99)))
 		p("- Heavy customer: %d events in its month (copied in ClickHouse in %.1f s).", pr.HeavyRows, pr.CloneSeconds)
 		p("- Posting before a top-up: light customers p50 %s ms, max %s ms; heavy customer %.0f ms.", ms(pr.TopUpLight.Q(0.5)), ms(pr.TopUpLight.Max), pr.TopUpHeavyMS)
-		if pr.Close != nil {
-			p("- Month-end close of %d customers including the heavy one: %s in %.1f s, %d postings. %s", pr.Customers+2, pr.Close.State, pr.Close.Seconds, pr.CloseCustomers, pr.Close.Error)
-		}
-		if q, ok := pr.Queries["posting_final_scan"]; ok {
-			p("- Posting scans (`usage_events FINAL`): %d, p50 %.0f ms, p99 %.0f ms, max %d ms (the heavy customer), up to %d rows and %s of memory.", q.Count, q.P50MS, q.P99MS, q.MaxMS, q.MaxRows, mb(q.MaxMemory))
+		if pr.DailyPosting != nil {
+			p("- Daily posting at the month's end of %d customers including the heavy one: %s in %.1f s, %d postings. %s", pr.Customers+2, pr.DailyPosting.State, pr.DailyPosting.Seconds, pr.DailyPostings, pr.DailyPosting.Error)
 		}
 		p("")
 		queryTable(p, pr.Queries)
@@ -203,7 +200,7 @@ func storageSection(p func(string, ...any), st *StorageResult) {
 		p("")
 		perEvent(p, w.Tables, uint64(max(w.Events, 1)))
 		if h := w.History; h != nil {
-			p("usage_history: %d rows; one a UTC day would be %d rows, %d without the invoker.", h.Rows, h.DayRows, h.DayRowsNoInvoker)
+			p("usage_history: %d rows; one a UTC day would be %d rows.", h.Rows, h.DayRows)
 			p("")
 		}
 		if len(w.Columns) > 0 {
@@ -336,8 +333,8 @@ func rowsAndDisk(p func(string, ...any), rows *RowStats, storage []TableStorage)
 		for _, k := range sortedKeys(rows.ByType) {
 			types = append(types, fmt.Sprintf("%s %d", k, rows.ByType[k]))
 		}
-		p("Rows: %d usage events; %d ledger transfers over %d customers (%.2f a customer, at most %d); by type: %s. %d usage postings, %d customers with unposted usage.",
-			rows.UsageEvents, rows.LedgerTransfers, rows.Customers, rows.TransfersPerUser, rows.PerCustomerMax, strings.Join(types, ", "), rows.UsagePostings, rows.Unposted)
+		p("Rows: %d usage events; %d ledger transfers over %d customers (%.2f a customer, at most %d); by type: %s. %d usage receipts, %d running totals, %d customers with pending usage.",
+			rows.UsageEvents, rows.LedgerTransfers, rows.Customers, rows.TransfersPerCustomer, rows.PerCustomerMax, strings.Join(types, ", "), rows.UsageReceipts, rows.UsageTotals, rows.Pending)
 		p("")
 	}
 	if len(storage) == 0 {

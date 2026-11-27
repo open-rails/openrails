@@ -407,8 +407,7 @@ func (r *Runtime) alertConfigFindings(ctx context.Context, findings []gen.Billin
 	}
 }
 
-// reloadMerchantConfig re-evaluates mid's configuration: a declaration or an
-// ended subscription resolves an undeclared account's finding.
+// reloadMerchantConfig reads mid's configuration fresh.
 func (r *Runtime) reloadMerchantConfig(ctx context.Context, mid billing.MerchantID) error {
 	if r.MerchantConfig == nil {
 		return nil

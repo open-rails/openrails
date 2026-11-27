@@ -55,6 +55,18 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
   AND (expires_at IS NULL OR expires_at > COALESCE(sqlc.narg(live_at)::timestamptz, sqlc.arg(as_of)::timestamptz))
 ORDER BY expires_at ASC NULLS LAST, created_at ASC, id ASC;
 
+-- name: ListLotLapses :many
+-- When customers' lots in a unit that hold units lapse, through an instant:
+-- intake segments usage at each, so a posting before a lapse takes only the
+-- usage before it.
+SELECT customer_id, expires_at::timestamptz AS expires_at
+FROM billing.credit_grants
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND unit = sqlc.arg(currency)::text
+  AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+  AND revoked_at IS NULL AND units_credited > units_debited
+  AND expires_at IS NOT NULL AND expires_at <= sqlc.arg(through)::timestamptz
+ORDER BY customer_id, expires_at;
+
 -- name: ListLapsedCreditLots :many
 -- Lots past their expiry with units left, to expire.
 SELECT id, expires_at::timestamptz AS expires_at, (units_credited - units_debited)::bigint AS remaining

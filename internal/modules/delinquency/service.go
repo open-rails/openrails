@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/billingfact"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -25,9 +26,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// A change to a usage invoice evaluates its payer in the same transaction:
-// paying, voiding or writing one off clears a payer at once. A policy that
-// cannot be read never fails the change: the payer is evaluated on the next
+// A change to a usage invoice evaluates its customer in the same transaction:
+// paying, voiding or writing one off clears a customer at once. A policy that
+// cannot be read never fails the change: the customer is evaluated on the next
 // pass instead.
 func init() {
 	usage.Changed = func(ctx context.Context, d *db.DB, invoice gen.BillingInvoice, now time.Time) error {
@@ -40,7 +41,7 @@ func init() {
 	}
 }
 
-// errPolicyUnavailable is a payer's policy that could not be read.
+// errPolicyUnavailable is a customer's policy that could not be read.
 var errPolicyUnavailable = errors.New("delinquency policy unavailable")
 
 // Host-lifecycle event types emitted on a delinquency transition. One per
@@ -113,7 +114,7 @@ func PolicyFromConfig(cfg models.MerchantConfiguration, code string) (Policy, er
 	return p, nil
 }
 
-// Evaluate evaluates one payer in a currency in its own transaction, on the
+// Evaluate evaluates one customer in a currency in its own transaction, on the
 // service's clock: the due pass's step.
 func (s *Service) Evaluate(ctx context.Context, customerID uuid.UUID, currency string) (Transition, bool, error) {
 	if s == nil || s.db == nil {
@@ -129,12 +130,12 @@ func (s *Service) Evaluate(ctx context.Context, customerID uuid.UUID, currency s
 	return t, changed, err
 }
 
-// EvaluateTx evaluates one payer in a currency in the caller's transaction (d
-// is bound to it): it classifies the payer's usage invoices against its
+// EvaluateTx evaluates one customer in a currency in the caller's transaction (d
+// is bound to it): it classifies the customer's usage invoices against its
 // effective policy, records the state with the next instant time alone changes
-// it, signals a transition, and tells the payer of each open invoice newly past
+// it, signals a transition, and tells the customer of each open invoice newly past
 // due. It serializes on the customer, as every change to its usage invoices
-// does. A payer that never owed and has nothing falling due gets no row.
+// does. A customer that never owed and has nothing falling due gets no row.
 func EvaluateTx(ctx context.Context, d *db.DB, customerID uuid.UUID, currency string, now time.Time) (Transition, bool, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -143,7 +144,7 @@ func EvaluateTx(ctx context.Context, d *db.DB, customerID uuid.UUID, currency st
 	now = now.UTC()
 	q := d.Gen(ctx)
 	if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: tid.UUID(), ID: customerID}); err != nil {
-		return Transition{}, false, fmt.Errorf("lock delinquency payer: %w", err)
+		return Transition{}, false, fmt.Errorf("lock delinquency customer: %w", err)
 	}
 	policy, exposure, live, err := readExposure(ctx, d, q, tid, customerID, currency, now)
 	if err != nil {
@@ -179,7 +180,7 @@ func EvaluateTx(ctx context.Context, d *db.DB, customerID uuid.UUID, currency st
 	if err != nil {
 		return Transition{}, false, err
 	}
-	if err := q.NotifyOverdueInvoices(ctx, gen.NotifyOverdueInvoicesParams{MerchantID: tid.UUID(), CustomerID: customerID, Currency: currency, Now: now}); err != nil {
+	if err := notifyOverdue(ctx, q, tid.UUID(), customerID, currency, now); err != nil {
 		return Transition{}, false, fmt.Errorf("notify overdue invoices: %w", err)
 	}
 	// "" = no row before: a first sighting already current is not a transition.
@@ -233,14 +234,14 @@ func EvaluateTx(ctx context.Context, d *db.DB, customerID uuid.UUID, currency st
 	return transition, true, nil
 }
 
-// liveExposure is when a payer's next usage invoice falls due; pending is
+// liveExposure is when a customer's next usage invoice falls due; pending is
 // false with none.
 type liveExposure struct {
 	nextDueAt time.Time
 	pending   bool
 }
 
-// readExposure reads a payer's overdue usage invoices against now and its
+// readExposure reads a customer's overdue usage invoices against now and its
 // effective policy: the merchant's with the bound billing policy's overrides.
 func readExposure(ctx context.Context, d *db.DB, q *gen.Queries, tid billing.MerchantID, customerID uuid.UUID, currency string, now time.Time) (Policy, Exposure, liveExposure, error) {
 	settings, err := merchantconfig.NewStore(d).Settings(ctx)
@@ -267,7 +268,7 @@ func readExposure(ctx context.Context, d *db.DB, q *gen.Queries, tid billing.Mer
 
 // nextEvaluation is the next instant time alone changes state's reading: the
 // next usage invoice falling due, or grace running out on a debt over the
-// floor. Nil: only a change to the payer's invoices or policy does.
+// floor. Nil: only a change to the customer's invoices or policy does.
 func nextEvaluation(p Policy, e Exposure, state State, live liveExposure) *time.Time {
 	var next *time.Time
 	if live.pending {
@@ -282,7 +283,7 @@ func nextEvaluation(p Policy, e Exposure, state State, live liveExposure) *time.
 	return next
 }
 
-// notify tells the payer on entering and leaving delinquent. Entering grace
+// notify tells the customer on entering and leaving delinquent. Entering grace
 // is silent. The customer fact, state and existing host signal share a transaction.
 func notify(ctx context.Context, database *db.DB, t Transition, exposure Exposure, now time.Time, id uuid.UUID) error {
 	var eventType models.NotificationEventType
@@ -315,16 +316,40 @@ func notify(ctx context.Context, database *db.DB, t Transition, exposure Exposur
 	return nil
 }
 
+// notifyOverdue tells the customer once about each of its open usage invoices
+// in the currency past its due date: the notice's id derives from the
+// invoice's, so a later evaluation records none.
+func notifyOverdue(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string, now time.Time) error {
+	overdue, err := q.ListOverdueUsageInvoices(ctx, gen.ListOverdueUsageInvoicesParams{MerchantID: merchantID, CustomerID: customerID, Currency: currency, Now: now})
+	if err != nil {
+		return err
+	}
+	for _, o := range overdue {
+		due, dueAt := o.AmountDue, o.DueAt.UTC()
+		data, err := json.Marshal(billing.NotificationData{InvoiceID: billing.InvoiceID(o.ID), AmountDue: &due, Currency: catalog.Currency(currency), DueAt: &dueAt})
+		if err != nil {
+			return err
+		}
+		if _, err := billingfact.Record(ctx, q, billingfact.Fact{
+			ID: uuidutil.ChildV7(o.ID, string(models.NotificationInvoiceOverdue)), MerchantID: merchantID, CustomerID: customerID,
+			EventType: string(models.NotificationInvoiceOverdue), Data: data, CreatedAt: now,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // IsDelinquent is the admission gate's question, answered conservatively: it
 // reads the stored state (one primary-key lookup) and refuses only if a live
-// recompute against the usage invoices agrees, so a payer who just settled or was
+// recompute against the usage invoices agrees, so a customer who just settled or was
 // never evaluated is never refused. Any error fails open: our malfunction must
 // not become the customer's outage.
-func (s *Service) IsDelinquent(ctx context.Context, payer identity.CustomerID, currency string) (bool, error) {
+func (s *Service) IsDelinquent(ctx context.Context, customer identity.CustomerID, currency string) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, nil
 	}
-	if payer.IsZero() || currency == "" {
+	if customer.IsZero() || currency == "" {
 		return false, nil
 	}
 	tid, err := merchant.Require(ctx)
@@ -336,7 +361,7 @@ func (s *Service) IsDelinquent(ctx context.Context, payer identity.CustomerID, c
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
 		stored, err := q.GetCustomerDelinquency(ctx, gen.GetCustomerDelinquencyParams{
-			MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: currency,
+			MerchantID: tid.UUID(), CustomerID: customer.UUID(), Currency: currency,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
@@ -349,7 +374,7 @@ func (s *Service) IsDelinquent(ctx context.Context, payer identity.CustomerID, c
 		}
 
 		now := s.now()
-		policy, exposure, _, err := readExposure(ctx, s.db, q, tid, payer.UUID(), currency, now)
+		policy, exposure, _, err := readExposure(ctx, s.db, q, tid, customer.UUID(), currency, now)
 		if err != nil {
 			return err
 		}

@@ -447,6 +447,24 @@ type nmiChargebackMatch struct {
 	CardLast4            string
 }
 
+func (s *NMIWebhookService) nmiChargebackMatchFromPayment(ctx context.Context, payment *models.Payment) (*nmiChargebackMatch, error) {
+	match := &nmiChargebackMatch{
+		PaymentID: payment.ID, PaymentTransactionID: payment.TransactionID,
+		UserID: payment.CustomerID.String(), Amount: payment.Amount, Currency: payment.Currency, PurchasedAt: payment.PurchasedAt,
+	}
+	if payment.CardLast4 != nil {
+		match.CardLast4 = *payment.CardLast4
+	}
+	if payment.SubscriptionID != nil {
+		sub, err := s.SubscriptionService.GetByID(ctx, *payment.SubscriptionID)
+		if err != nil {
+			return nil, fmt.Errorf("load payment subscription: %w", err)
+		}
+		match.SubscriptionID, match.RailSubscriptionID = sub.ID, sub.RailSubscriptionID
+	}
+	return match, nil
+}
+
 func normalizeNMIChargebackLast4(raw string) string {
 	digits := strings.Builder{}
 	for _, r := range raw {
@@ -657,19 +675,9 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 
 	var (
 		reconciledCount int
-		canceledCount   int
 		unmatchedCount  int
-		reconcileErrors int
-		alreadyCanceled int
-		ledgerErr       error
-		ledgerAlertErr  error
-		terminationErr  error
 	)
-	rememberTerminationError := func(err error) {
-		if terminationErr == nil {
-			terminationErr = err
-		}
-	}
+	var effects nmiChargebackEffects
 	processedSubs := make(map[uuid.UUID]struct{})
 
 	for i, cb := range body.Chargebacks {
@@ -678,6 +686,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			"batch_index":   i,
 			"chargeback_id": cb.ID.Trimmed(),
 			"date":          cb.Date,
+			"amount":        cb.Amount,
 			"customer_name": cb.CustomerName,
 			"cc_last4":      cb.CCNumber,
 		}
@@ -689,7 +698,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 
 		match, reconcileMeta, reconcileErr := s.reconcileNMIChargebackEntry(ctx, rail, cb)
 		if reconcileErr != nil {
-			reconcileErrors++
+			effects.reconcileErrors++
 			cbMetadata["reconciliation_status"] = "error"
 			cbMetadata["reconciliation_error"] = reconcileErr.Error()
 		} else {
@@ -705,212 +714,263 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			}
 		}
 
-		var (
-			entryLedgerErr          error
-			chargebackTransactionID string
-		)
+		// The charge the case is recorded against decides, so a heuristic
+		// that later finds another candidate never acts on that one.
+		if reconcileErr == nil && recorded != nil && recorded.PaymentID != nil && (match == nil || match.PaymentID != *recorded.PaymentID) {
+			payment, err := s.PaymentService.GetByID(ctx, *recorded.PaymentID)
+			if err != nil {
+				return fmt.Errorf("load attached NMI chargeback payment: %w", err)
+			}
+			match, err = s.nmiChargebackMatchFromPayment(ctx, payment)
+			if err != nil {
+				return err
+			}
+		}
 
 		if reconcileErr == nil && match == nil {
 			unmatchedCount++
 			cbMetadata["requires_manual_review"] = true
+			disputeID := ""
+			if recorded != nil {
+				disputeID = billing.DisputeID(recorded.BillingDispute.ID).String()
+			}
+			psp, err := db.RequirePSPID(ctx)
+			if err != nil {
+				return err
+			}
+			cbMetadata["psp_id"] = billing.PSPID(psp).String()
 			// An unmatched chargeback is durable operator work, never a log line.
 			if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
-				Provider:      rail,
-				Operation:     "chargeback_unmatched",
-				TransactionID: "chargeback:" + cb.ID.Trimmed(),
-				Err:           fmt.Errorf("NMI chargeback %s matched no single charge (%v)", cb.ID.Trimmed(), cbMetadata["reconciliation_status"]),
-				Metadata:      cbMetadata,
+				Provider:       rail,
+				Operation:      "chargeback_unmatched",
+				IdempotencyKey: unmatchedChargebackKey(cb.ID.Trimmed(), psp),
+				Action:         fmt.Sprintf("NMI chargeback %s (%s, card ending %s, dated %s) matched no single charge (%v). Nothing was revoked or canceled. Find the charge at NMI, then run `openrails disputes attach --dispute %s --payment <pay_...> --actor NAME --reason TEXT` to book it against that charge.", cb.ID.Trimmed(), cb.Amount, normalizeNMIChargebackLast4(cb.CCNumber), cb.Date, cbMetadata["reconciliation_status"], disputeID),
+				TransactionID:  "chargeback:" + cb.ID.Trimmed(),
+				Err:            fmt.Errorf("NMI chargeback %s matched no single charge (%v)", cb.ID.Trimmed(), cbMetadata["reconciliation_status"]),
+				Metadata:       cbMetadata,
 			}); err != nil {
-				reconcileErrors++
-				if ledgerAlertErr == nil {
-					ledgerAlertErr = err
+				effects.reconcileErrors++
+				if effects.ledgerAlertErr == nil {
+					effects.ledgerAlertErr = err
 				}
 			}
 		}
 
 		if reconcileErr == nil && match != nil {
 			reconciledCount++
-			cbMetadata["requires_manual_review"] = false
-			if s.PaymentService == nil {
-				reconcileErrors++
-				cbMetadata["chargeback_payment_status"] = "failed"
-				cbMetadata["chargeback_payment_error"] = "payment service unavailable"
-				entryLedgerErr = fmt.Errorf("payment service unavailable for NMI chargeback ledger reversal")
-				if ledgerErr == nil {
-					ledgerErr = entryLedgerErr
-					s.Log.ErrorContext(ctx, "Failed to record NMI chargeback reversal; continuing entitlement revocation", logx.Err(ledgerErr))
-				}
-			} else {
-				chargebackTransactionID = nmiChargebackTransactionID(cb.ID.Trimmed(), match.PaymentTransactionID)
-				if existing, lookupErr := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(rail), chargebackTransactionID); lookupErr == nil && existing != nil {
-					cbMetadata["chargeback_payment_status"] = "already_recorded"
-				} else if lookupErr != nil && !db.IsNotFound(lookupErr) {
-					reconcileErrors++
-					cbMetadata["chargeback_payment_status"] = "failed"
-					cbMetadata["chargeback_payment_error"] = lookupErr.Error()
-					entryLedgerErr = fmt.Errorf("lookup NMI chargeback reversal: %w", lookupErr)
-					if ledgerErr == nil {
-						ledgerErr = entryLedgerErr
-						s.Log.ErrorContext(ctx, "Failed to lookup NMI chargeback reversal; continuing entitlement revocation", logx.Err(ledgerErr))
-					}
-				} else {
-					// The match is exact: the chargeback is the charge's amount in its currency.
-					if reversal, refundErr := s.PaymentService.Refund(ctx, match.PaymentID, chargebackTransactionID, match.Amount, payments.ReversalChargeback); refundErr != nil {
-						reconcileErrors++
-						cbMetadata["chargeback_payment_status"] = "failed"
-						cbMetadata["chargeback_payment_error"] = refundErr.Error()
-						entryLedgerErr = fmt.Errorf("record NMI chargeback reversal: %w", refundErr)
-						if ledgerErr == nil {
-							ledgerErr = entryLedgerErr
-							s.Log.ErrorContext(ctx, "Failed to record NMI chargeback reversal; continuing entitlement revocation", logx.Err(ledgerErr))
-						}
-					} else {
-						cbMetadata["chargeback_payment_status"] = "recorded"
-						cbMetadata["chargeback_payment_transaction_id"] = chargebackTransactionID
-						if recorded != nil {
-							if err := s.disputes().Link(ctx, s.DB, *recorded, &reversal.ID, nil); err != nil {
-								return fmt.Errorf("link NMI chargeback reversal: %w", err)
-							}
-						}
-					}
-				}
-			}
-
-			if match.SubscriptionID == uuid.Nil {
-				// A charged-back one-time purchase loses what it bought, exactly
-				// as a Stripe dispute of a one-off does.
-				if err := s.revokeNMIChargedBackPurchase(ctx, match.PaymentID); err != nil {
-					reconcileErrors++
-					cbMetadata["termination_status"] = "failed"
-					cbMetadata["termination_error"] = err.Error()
-					rememberTerminationError(err)
-				} else {
-					cbMetadata["termination_status"] = "access_revoked"
-				}
-			}
-			subscriptionIDs, err := paymentSubscriptionIDs(ctx, s.DB, match.PaymentID)
-			if err != nil {
-				reconcileErrors++
-				cbMetadata["termination_status"] = "failed"
-				cbMetadata["termination_error"] = err.Error()
-				rememberTerminationError(err)
-			}
-			for _, subscriptionID := range subscriptionIDs {
-				if _, seen := processedSubs[subscriptionID]; seen {
-					cbMetadata["termination_status"] = "already_processed_in_batch"
-					continue
-				}
-				processedSubs[subscriptionID] = struct{}{}
-				if s.SubscriptionLifecycleService == nil {
-					reconcileErrors++
-					cbMetadata["termination_status"] = "failed"
-					cbMetadata["termination_error"] = "subscription lifecycle service unavailable"
-					rememberTerminationError(errors.New("subscription lifecycle service unavailable"))
-				} else if s.SubscriptionService == nil {
-					reconcileErrors++
-					cbMetadata["termination_status"] = "failed"
-					cbMetadata["termination_error"] = "subscription service unavailable"
-					rememberTerminationError(errors.New("subscription service unavailable"))
-				} else {
-
-					subscription, subErr := s.SubscriptionService.GetByID(ctx, subscriptionID)
-					if subErr != nil {
-						reconcileErrors++
-						cbMetadata["termination_status"] = "failed"
-						cbMetadata["termination_error"] = fmt.Sprintf("failed to load subscription: %v", subErr)
-						rememberTerminationError(fmt.Errorf("load subscription %s: %w", subscriptionID, subErr))
-					} else {
-						reasonCodeDisplay := reasonCode
-						if reasonCodeDisplay == "" {
-							reasonCodeDisplay = "unknown"
-						}
-						reasonDisplay := reasonText
-						if reasonDisplay == "" {
-							reasonDisplay = strings.TrimSpace(cb.Reason)
-						}
-						feedback := fmt.Sprintf(
-							"CHARGEBACK: %s (Code: %s, Dispute: %s)",
-							reasonDisplay,
-							reasonCodeDisplay,
-							strings.TrimSpace(cb.ID.Trimmed()),
-						)
-						proc := models.Rail(rail)
-						subProcID := strings.TrimSpace(subscription.RailSubscriptionID)
-						params := &subscriptions.CancelMembershipParams{
-							RevokeAccess:   true,
-							Rail:           &proc,
-							SubscriptionID: &subscriptionID,
-							CancelType:     models.CancelTypeChargeback,
-							CancelFeedback: &feedback,
-						}
-						if subProcID != "" {
-							params.RailSubscriptionID = &subProcID
-						}
-						if err := s.SubscriptionLifecycleService.CancelMembership(ctx, params); err != nil {
-							reconcileErrors++
-							cbMetadata["termination_status"] = "failed"
-							cbMetadata["termination_error"] = err.Error()
-							rememberTerminationError(fmt.Errorf("cancel subscription %s: %w", subscriptionID, err))
-						} else {
-							if subscription.Status == models.StatusCanceled {
-								alreadyCanceled++
-								cbMetadata["termination_status"] = "already_canceled"
-							} else {
-								canceledCount++
-								cbMetadata["termination_status"] = "canceled_immediate"
-							}
-						}
-					}
-				}
-			}
-
-			if entryLedgerErr != nil {
-				paymentID := match.PaymentID
-				var subID *uuid.UUID
-				if match.SubscriptionID != uuid.Nil {
-					id := match.SubscriptionID
-					subID = &id
-				}
-				alertTransactionID := chargebackTransactionID
-				if strings.TrimSpace(alertTransactionID) == "" {
-					alertTransactionID = nmiChargebackTransactionID(cb.ID.Trimmed(), match.PaymentTransactionID)
-				}
-				if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
-					Provider:          rail,
-					Operation:         "chargeback_reversal",
-					TransactionID:     alertTransactionID,
-					CustomerID:        match.UserID,
-					OriginalPaymentID: &paymentID,
-					SubscriptionID:    subID,
-					Err:               entryLedgerErr,
-					Metadata: map[string]any{
-						"batch_id":                        batchID,
-						"chargeback_id":                   cb.ID.Trimmed(),
-						"rail_subscription_id":            match.RailSubscriptionID,
-						"original_payment_transaction_id": match.PaymentTransactionID,
-					},
-				}); err != nil {
-					reconcileErrors++
-					cbMetadata["ledger_repair_alert_status"] = "failed"
-					cbMetadata["ledger_repair_alert_error"] = err.Error()
-					if ledgerAlertErr == nil {
-						ledgerAlertErr = err
-					}
-					s.Log.ErrorContext(ctx, "Failed to persist NMI chargeback ledger repair alert", logx.Err(err))
-				} else {
-					cbMetadata["ledger_repair_alert_status"] = "recorded"
-				}
+			if err := s.applyNMIChargeback(ctx, rail, cb, match, recorded, cbMetadata, processedSubs, &effects); err != nil {
+				return err
 			}
 		}
 
 	}
 
-	s.Log.WarnContext(ctx, "NMI chargeback batch processed with automated reconciliation", "eventID", s.Data.EventID, "eventType", s.Data.EventType, "chargeback_count", chargebackCount, "reconciled_count", reconciledCount, "canceled_count", canceledCount, "already_canceled", alreadyCanceled, "unmatched_count", unmatchedCount, "reconcile_failures", reconcileErrors)
-	if ledgerAlertErr != nil {
-		terminationErr = errors.Join(terminationErr, fmt.Errorf("persist NMI chargeback ledger repair alert: %w", ledgerAlertErr))
+	s.Log.WarnContext(ctx, "NMI chargeback batch processed with automated reconciliation", "eventID", s.Data.EventID, "eventType", s.Data.EventType, "chargeback_count", chargebackCount, "reconciled_count", reconciledCount, "canceled_count", effects.canceledCount, "already_canceled", effects.alreadyCanceled, "unmatched_count", unmatchedCount, "reconcile_failures", effects.reconcileErrors)
+	if effects.ledgerAlertErr != nil {
+		effects.terminationErr = errors.Join(effects.terminationErr, fmt.Errorf("persist NMI chargeback ledger repair alert: %w", effects.ledgerAlertErr))
 	}
-	if terminationErr != nil {
-		return fmt.Errorf("terminate subscriptions for NMI chargeback batch: %w", terminationErr)
+	if effects.terminationErr != nil {
+		return fmt.Errorf("terminate subscriptions for NMI chargeback batch: %w", effects.terminationErr)
+	}
+	return nil
+}
+
+// unmatchedChargebackKey names the finding of an NMI chargeback no charge
+// matched; consistency findings carry no psp_id, so the key separates accounts.
+func unmatchedChargebackKey(chargebackID string, psp uuid.UUID) string {
+	return "nmi:chargeback_unmatched:chargeback:" + chargebackID + ":" + psp.String()
+}
+
+type nmiChargebackEffects struct {
+	canceledCount, alreadyCanceled, reconcileErrors int
+	ledgerErr, ledgerAlertErr, terminationErr       error
+}
+
+func (s *NMIWebhookService) applyNMIChargeback(ctx context.Context, rail string, cb NMIChargebackEntry, match *nmiChargebackMatch, recorded *disputes.Case, cbMetadata map[string]any, processedSubs map[uuid.UUID]struct{}, effects *nmiChargebackEffects) error {
+	batchID := s.Data.EventID
+	reasonCode, reasonText := splitNMIChargebackReason(cb.Reason, cb.ReasonCode)
+	var entryLedgerErr error
+	var chargebackTransactionID string
+	rememberTerminationError := func(err error) {
+		if effects.terminationErr == nil {
+			effects.terminationErr = err
+		}
+	}
+	cbMetadata["requires_manual_review"] = false
+	if s.PaymentService == nil {
+		effects.reconcileErrors++
+		cbMetadata["chargeback_payment_status"] = "failed"
+		cbMetadata["chargeback_payment_error"] = "payment service unavailable"
+		entryLedgerErr = fmt.Errorf("payment service unavailable for NMI chargeback ledger reversal")
+		if effects.ledgerErr == nil {
+			effects.ledgerErr = entryLedgerErr
+			s.Log.ErrorContext(ctx, "Failed to record NMI chargeback reversal; continuing entitlement revocation", logx.Err(effects.ledgerErr))
+		}
+	} else {
+		chargebackTransactionID = nmiChargebackTransactionID(cb.ID.Trimmed(), match.PaymentTransactionID)
+		if existing, lookupErr := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(rail), chargebackTransactionID); lookupErr == nil && existing != nil {
+			cbMetadata["chargeback_payment_status"] = "already_recorded"
+		} else if lookupErr != nil && !db.IsNotFound(lookupErr) {
+			effects.reconcileErrors++
+			cbMetadata["chargeback_payment_status"] = "failed"
+			cbMetadata["chargeback_payment_error"] = lookupErr.Error()
+			entryLedgerErr = fmt.Errorf("lookup NMI chargeback reversal: %w", lookupErr)
+			if effects.ledgerErr == nil {
+				effects.ledgerErr = entryLedgerErr
+				s.Log.ErrorContext(ctx, "Failed to lookup NMI chargeback reversal; continuing entitlement revocation", logx.Err(effects.ledgerErr))
+			}
+		} else {
+			// The match is exact: the chargeback is the charge's amount in its currency.
+			if reversal, refundErr := s.PaymentService.Refund(ctx, match.PaymentID, chargebackTransactionID, match.Amount, payments.ReversalChargeback); refundErr != nil {
+				effects.reconcileErrors++
+				cbMetadata["chargeback_payment_status"] = "failed"
+				cbMetadata["chargeback_payment_error"] = refundErr.Error()
+				entryLedgerErr = fmt.Errorf("record NMI chargeback reversal: %w", refundErr)
+				if effects.ledgerErr == nil {
+					effects.ledgerErr = entryLedgerErr
+					s.Log.ErrorContext(ctx, "Failed to record NMI chargeback reversal; continuing entitlement revocation", logx.Err(effects.ledgerErr))
+				}
+			} else {
+				cbMetadata["chargeback_payment_status"] = "recorded"
+				cbMetadata["chargeback_payment_transaction_id"] = chargebackTransactionID
+				if recorded != nil {
+					if err := s.disputes().Link(ctx, s.DB, *recorded, &reversal.ID, nil); err != nil {
+						return fmt.Errorf("link NMI chargeback reversal: %w", err)
+					}
+				}
+			}
+		}
+	}
+
+	if match.SubscriptionID == uuid.Nil {
+		// A charged-back one-time purchase loses what it bought, exactly
+		// as a Stripe dispute of a one-off does.
+		if err := s.revokeNMIChargedBackPurchase(ctx, match.PaymentID); err != nil {
+			effects.reconcileErrors++
+			cbMetadata["termination_status"] = "failed"
+			cbMetadata["termination_error"] = err.Error()
+			rememberTerminationError(err)
+		} else {
+			cbMetadata["termination_status"] = "access_revoked"
+		}
+	}
+	subscriptionIDs, err := paymentSubscriptionIDs(ctx, s.DB, match.PaymentID)
+	if err != nil {
+		effects.reconcileErrors++
+		cbMetadata["termination_status"] = "failed"
+		cbMetadata["termination_error"] = err.Error()
+		rememberTerminationError(err)
+	}
+	for _, subscriptionID := range subscriptionIDs {
+		if _, seen := processedSubs[subscriptionID]; seen {
+			cbMetadata["termination_status"] = "already_processed_in_batch"
+			continue
+		}
+		processedSubs[subscriptionID] = struct{}{}
+		if s.SubscriptionLifecycleService == nil {
+			effects.reconcileErrors++
+			cbMetadata["termination_status"] = "failed"
+			cbMetadata["termination_error"] = "subscription lifecycle service unavailable"
+			rememberTerminationError(errors.New("subscription lifecycle service unavailable"))
+		} else if s.SubscriptionService == nil {
+			effects.reconcileErrors++
+			cbMetadata["termination_status"] = "failed"
+			cbMetadata["termination_error"] = "subscription service unavailable"
+			rememberTerminationError(errors.New("subscription service unavailable"))
+		} else {
+
+			subscription, subErr := s.SubscriptionService.GetByID(ctx, subscriptionID)
+			if subErr != nil {
+				effects.reconcileErrors++
+				cbMetadata["termination_status"] = "failed"
+				cbMetadata["termination_error"] = fmt.Sprintf("failed to load subscription: %v", subErr)
+				rememberTerminationError(fmt.Errorf("load subscription %s: %w", subscriptionID, subErr))
+			} else {
+				reasonCodeDisplay := reasonCode
+				if reasonCodeDisplay == "" {
+					reasonCodeDisplay = "unknown"
+				}
+				reasonDisplay := reasonText
+				if reasonDisplay == "" {
+					reasonDisplay = strings.TrimSpace(cb.Reason)
+				}
+				feedback := fmt.Sprintf(
+					"CHARGEBACK: %s (Code: %s, Dispute: %s)",
+					reasonDisplay,
+					reasonCodeDisplay,
+					strings.TrimSpace(cb.ID.Trimmed()),
+				)
+				proc := models.Rail(rail)
+				subProcID := strings.TrimSpace(subscription.RailSubscriptionID)
+				params := &subscriptions.CancelMembershipParams{
+					RevokeAccess:   true,
+					Rail:           &proc,
+					SubscriptionID: &subscriptionID,
+					CancelType:     models.CancelTypeChargeback,
+					CancelFeedback: &feedback,
+				}
+				if subProcID != "" {
+					params.RailSubscriptionID = &subProcID
+				}
+				if err := s.SubscriptionLifecycleService.CancelMembership(ctx, params); err != nil {
+					effects.reconcileErrors++
+					cbMetadata["termination_status"] = "failed"
+					cbMetadata["termination_error"] = err.Error()
+					rememberTerminationError(fmt.Errorf("cancel subscription %s: %w", subscriptionID, err))
+				} else {
+					if subscription.Status == models.StatusCanceled {
+						effects.alreadyCanceled++
+						cbMetadata["termination_status"] = "already_canceled"
+					} else {
+						effects.canceledCount++
+						cbMetadata["termination_status"] = "canceled_immediate"
+					}
+				}
+			}
+		}
+	}
+
+	if entryLedgerErr != nil {
+		paymentID := match.PaymentID
+		var subID *uuid.UUID
+		if match.SubscriptionID != uuid.Nil {
+			id := match.SubscriptionID
+			subID = &id
+		}
+		alertTransactionID := chargebackTransactionID
+		if strings.TrimSpace(alertTransactionID) == "" {
+			alertTransactionID = nmiChargebackTransactionID(cb.ID.Trimmed(), match.PaymentTransactionID)
+		}
+		action := ""
+		if errors.Is(entryLedgerErr, payments.ErrRefundExceedsPayment) {
+			action = fmt.Sprintf("NMI chargeback %s is on charge %s (transaction %s), whose refunds leave less than the charged amount to reverse, so OpenRails books no second reversal. Contest the chargeback with your processor and cite the refund; if a refund of it is still unresolved, resolve that first. If you lose the chargeback, the loss is outside OpenRails' books.", cb.ID.Trimmed(), billing.PaymentID(match.PaymentID).String(), match.PaymentTransactionID)
+		}
+		if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
+			Action:            action,
+			Provider:          rail,
+			Operation:         "chargeback_reversal",
+			TransactionID:     alertTransactionID,
+			CustomerID:        match.UserID,
+			OriginalPaymentID: &paymentID,
+			SubscriptionID:    subID,
+			Err:               entryLedgerErr,
+			Metadata: map[string]any{
+				"batch_id":                        batchID,
+				"chargeback_id":                   cb.ID.Trimmed(),
+				"rail_subscription_id":            match.RailSubscriptionID,
+				"original_payment_transaction_id": match.PaymentTransactionID,
+			},
+		}); err != nil {
+			effects.reconcileErrors++
+			cbMetadata["ledger_repair_alert_status"] = "failed"
+			cbMetadata["ledger_repair_alert_error"] = err.Error()
+			if effects.ledgerAlertErr == nil {
+				effects.ledgerAlertErr = err
+			}
+			s.Log.ErrorContext(ctx, "Failed to persist NMI chargeback ledger repair alert", logx.Err(err))
+		} else {
+			cbMetadata["ledger_repair_alert_status"] = "recorded"
+		}
 	}
 	return nil
 }

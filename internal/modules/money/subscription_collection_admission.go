@@ -35,23 +35,23 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 }
 
 // AdmitCustomerSubscriptionCollection uses the same locked obligation and
-// receipt custody as scheduled collection. A verified payer may bypass only
+// receipt custody as scheduled collection. A verified customer may bypass only
 // retry delay after a released attempt, never unresolved financial ownership.
-func (s *MoneyService) AdmitCustomerSubscriptionCollection(ctx context.Context, subscriptionID, payer uuid.UUID, key string, method *uuid.UUID, principal billingauth.Payer) (gen.BillingProviderIntent, bool, error) {
+func (s *MoneyService) AdmitCustomerSubscriptionCollection(ctx context.Context, subscriptionID, customer uuid.UUID, key string, method *uuid.UUID, principal billingauth.Payer) (gen.BillingProviderIntent, bool, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return gen.BillingProviderIntent{}, false, err
 	}
-	if billingauth.ValidatePayer(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid || principal.SubjectID != payer.String() {
+	if billingauth.ValidatePayer(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid || principal.SubjectID != customer.String() {
 		return gen.BillingProviderIntent{}, false, ErrCustomerSessionRequired
 	}
-	if payer == uuid.Nil || strings.TrimSpace(key) == "" || len(key) > 255 || (method != nil && *method == uuid.Nil) {
-		return gen.BillingProviderIntent{}, false, errors.New("payer and a 1-255 byte retry key required")
+	if customer == uuid.Nil || strings.TrimSpace(key) == "" || len(key) > 255 || (method != nil && *method == uuid.Nil) {
+		return gen.BillingProviderIntent{}, false, errors.New("customer and a 1-255 byte retry key required")
 	}
-	return s.admitSubscriptionCollection(ctx, subscriptionID, s.now(), payer, charge.CustomerPaymentKey(subscriptions.TypeManualRebill, payer, strings.TrimSpace(key)), method)
+	return s.admitSubscriptionCollection(ctx, subscriptionID, s.now(), customer, charge.CustomerPaymentKey(subscriptions.TypeManualRebill, customer, strings.TrimSpace(key)), method)
 }
 
-func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscriptionID uuid.UUID, admittedAt time.Time, payer uuid.UUID, customerKey string, requestedMethod *uuid.UUID) (gen.BillingProviderIntent, bool, error) {
+func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscriptionID uuid.UUID, admittedAt time.Time, customer uuid.UUID, customerKey string, requestedMethod *uuid.UUID) (gen.BillingProviderIntent, bool, error) {
 	replayed := false
 
 	var accepted gen.BillingProviderIntent
@@ -78,8 +78,8 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 		if err != nil {
 			return err
 		}
-		if payer != uuid.Nil {
-			if sub.CustomerID != payer {
+		if customer != uuid.Nil {
+			if sub.CustomerID != customer {
 				return pgx.ErrNoRows
 			}
 			prior, err := intents.NewStore(d).GetByIdempotencyKey(ctx, customerKey)
@@ -91,7 +91,7 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 				if decodeErr != nil {
 					return decodeErr
 				}
-				if p.Renewal.SubscriptionID != sub.ID || p.Renewal.CustomerID != payer || p.Initiator != charge.InitiatorCustomer || !sameEngineMethodRequest(p.RequestedPaymentMethodID, requestedMethod) {
+				if p.Renewal.SubscriptionID != sub.ID || p.Renewal.CustomerID != customer || p.Initiator != charge.InitiatorCustomer || !sameEngineMethodRequest(p.RequestedPaymentMethodID, requestedMethod) {
 					return intents.ErrRebillKeyConflict
 				}
 				accepted, replayed = prior, true
@@ -109,7 +109,7 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 			if _, err := subscriptions.DecodeSubscriptionCollectionPayload(current); err != nil {
 				return err
 			}
-			if payer != uuid.Nil {
+			if customer != uuid.Nil {
 				return intents.ErrRebillInProgress
 			}
 			if requestedMethod != nil {
@@ -133,7 +133,7 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 		}
 		// A renewal or retry OpenRails initiates waits while the merchant's
 		// rebills are held; one its customer pays now never does.
-		if payer == uuid.Nil {
+		if customer == uuid.Nil {
 			c, err := controls.Load(ctx, q, mid.UUID())
 			if err != nil {
 				return err
@@ -142,7 +142,7 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 				return fmt.Errorf("%w: %w", intents.ErrRebillNotRetryable, controls.ErrRebillsHeld)
 			}
 		}
-		if !subscriptions.EngineCollectionDue(sub, admittedAt, payer != uuid.Nil) {
+		if !subscriptions.EngineCollectionDue(sub, admittedAt, customer != uuid.Nil) {
 			return ErrEngineCollectionNotDue
 		}
 		attempt := 0
@@ -178,7 +178,7 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 		if err != nil {
 			return err
 		}
-		if payer != uuid.Nil {
+		if customer != uuid.Nil {
 			if err := intents.AdmitCustomerRetry(ctx, d, sub, method.ID); err != nil {
 				return err
 			}
@@ -201,11 +201,11 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 			failures = *sub.RetryAttempts
 		}
 		initiator, origin, actor := charge.InitiatorMerchant, intents.OriginSystem, ""
-		if payer != uuid.Nil {
+		if customer != uuid.Nil {
 			key = customerKey
 			initiator = charge.InitiatorCustomer
 			origin = intents.OriginUser
-			actor = payer.String()
+			actor = customer.String()
 		}
 		// The renewal is an invoice the customer owes; this collection is one
 		// of its attempts.
@@ -214,7 +214,7 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 			return err
 		}
 		payload := subscriptions.SubscriptionCollectionPayload{InvoiceCaptchaSubjects: intents.InvoiceCaptchaSubjects(ctx), Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Attempt: attempt, FailureCount: failures, Renewal: terms, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC(), AcceptedAt: admittedAt, PaymentMethodID: method.ID, Instrument: instrument, HyperSwitch: binding, AmountMinor: minor, OrderReference: subscriptions.ObligationOrderReference(sub.ID, sub.CurrentPeriodEndsAt.UTC()), InvoiceID: invoice.ID}
-		accepted, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, IntentType: subscriptions.TypeSubscriptionCollection, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: instrument.PSPID, CustodianID: engineCustodianID(method.CustodianID), Payload: payload, IdempotencyKey: key, NextAttemptAt: admittedAt, Origin: origin, Actor: actor, OriginReason: "accepted engine renewal", Inline: payer != uuid.Nil})
+		accepted, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, IntentType: subscriptions.TypeSubscriptionCollection, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: instrument.PSPID, CustodianID: engineCustodianID(method.CustodianID), Payload: payload, IdempotencyKey: key, NextAttemptAt: admittedAt, Origin: origin, Actor: actor, OriginReason: "accepted engine renewal", Inline: customer != uuid.Nil})
 		if err != nil {
 			return err
 		}

@@ -7,7 +7,7 @@ import {
   Tick02Icon,
   UnfoldMoreIcon,
 } from "@hugeicons/core-free-icons"
-import { Link, useLocation, useNavigate } from "#orck/admin/router"
+import { Link, useLocation } from "#orck/admin/router"
 
 import {
   DropdownMenu,
@@ -160,8 +160,8 @@ function NavSubEntry({
 
 function MerchantSwitcher() {
   const { activeMerchant, merchants, selectMerchant } = useAuth()
-  const navigate = useNavigate()
-  const newMerchant = useAdminContext().props.newMerchantHref
+  const host = useAdminContext().props
+  const newMerchant = host.newMerchantHref
   const label =
     activeMerchant?.display_name || activeMerchant?.slug || "Select merchant"
   const role = activeMerchant?.role || "Merchant console"
@@ -230,13 +230,17 @@ function MerchantSwitcher() {
                 )
               })}
             </DropdownMenuGroup>
-            {/* The console creates no merchants itself: the entry exists only
-                when a host extension serves a creation page. */}
+            {/* BillingAdmin creates no merchants itself: the entry exists
+                only when the host serves a creation page, outside basePath. */}
             {newMerchant && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={() => void navigate(newMerchant)}
+                  onClick={() =>
+                    host.navigation
+                      ? host.navigation.navigate(newMerchant)
+                      : window.location.assign(newMerchant)
+                  }
                   className="gap-2 py-2"
                 >
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-dashed border-border">

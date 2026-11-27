@@ -68,7 +68,7 @@ func TestNMIRoster(t *testing.T) {
 			require.Never(t, func() bool {
 				subs, err := a.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: customer})
 				return err != nil || len(subs.Items) != 1 || subs.Items[0].Status != unverified || !subs.Items[0].CurrentPeriodEndsAt.Equal(paid)
-			}, 3*time.Second, 100*time.Millisecond, "a cut-short roster is no evidence: nothing is adopted or cancelled")
+			}, 3*time.Second, 100*time.Millisecond, "a cut-short roster is no evidence: nothing is adopted or canceled")
 		}
 		old.TruncateRoster(0)
 		old.ClearIntercepts()

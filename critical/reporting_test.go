@@ -30,6 +30,51 @@ func TestReporting(t *testing.T) {
 	t.Run("OR-J53-S03/money-never-sums-across-currencies", moneyPerCurrency)
 	t.Run("OR-J53-S04/a-sale-at-2330-in-the-accounting-timezone-counts-on-that-local-day", accountingDays)
 	t.Run("OR-J53-S05/a-day-chart-across-a-midnight-clock-change-has-one-row-per-local-day", midnightTransition)
+	t.Run("OR-J53-S08/a-sort-term-the-query-cannot-order-by-is-refused-on-its-order-param", orderRefusals)
+	t.Run("OR-J53-S09/nmis-own-history-is-no-measure-authorizations-are-measured-on-attempts", noNMIHistory)
+}
+
+// NMI's own transaction history is no measure: the schema names no
+// nmi_history measure or nmi_kind dimension, and a query naming one is
+// refused. Authorizations are measured on attempts.
+func noNMIHistory(t *testing.T) {
+	w := newWorld(t)
+	schema, err := w.alpha.GetMetricsSchema(t.Context())
+	require.NoError(t, err)
+	var measures, dimensions []string
+	for _, m := range schema.Measures {
+		measures = append(measures, m.Name)
+	}
+	for _, d := range schema.Dimensions {
+		dimensions = append(dimensions, d.Name)
+	}
+	require.Contains(t, measures, "authorization_rate")
+	require.NotContains(t, measures, "nmi_history_authorizations")
+	require.NotContains(t, dimensions, "nmi_kind")
+	for _, c := range schema.Caveats {
+		require.NotContains(t, c, "nmi_history")
+	}
+	_, err = w.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"nmi_history_authorizations"}, Range: &billing.MetricsRange{Last: "90d"}})
+	require.Equal(t, "unknown_measure", metricRefusals(t, err)["measures[0]"]["code"])
+}
+
+// Each order term the query cannot sort by is refused on its own order[i]
+// param: one naming both a measure and a dimension, a direction other than
+// asc or desc, a measure the query does not ask for and a dimension it does
+// not group by.
+func orderRefusals(t *testing.T) {
+	w := newWorld(t)
+	_, err := w.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"rebills"}, By: []string{"outcome"},
+		Range: &billing.MetricsRange{Last: "30d"}, Order: []billing.MetricsOrder{
+			{Measure: "rebills", Dimension: "outcome"}, {Measure: "rebills", Dir: "up"}, {Measure: "purchases"}, {Dimension: "currency"},
+		}})
+	refusals := metricRefusals(t, err)
+	for _, param := range []string{"order[0]", "order[1].dir", "order[2].measure", "order[3].dimension"} {
+		require.Contains(t, refusals, param, "%v", refusals)
+		require.Equal(t, "invalid_order", refusals[param]["code"])
+	}
+	require.Len(t, refusals, 4, "%v", refusals)
+	require.Equal(t, `each order term needs exactly one of "measure" or "dimension"`, refusals["order[0]"]["message"])
 }
 
 // Santiago moved its clocks from midnight to 01:00 on 2026-09-06: that day
@@ -67,7 +112,6 @@ func midnightTransition(t *testing.T) {
 		utc[m.Name] = m.UTCDays
 	}
 	require.True(t, utc["webhook_rejects"])
-	require.True(t, utc["nmi_history_authorizations"])
 	require.False(t, utc["cash"])
 }
 

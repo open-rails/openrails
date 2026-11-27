@@ -167,13 +167,6 @@ const (
 	DormantFindingSubject = "usage_catalog"
 )
 
-// The finding a merchant's pending usage opens on a deployment without an
-// event store: its customers' balances wait for the store.
-const (
-	PendingFindingType    = "consistency.pending_usage"
-	PendingFindingSubject = "event_store"
-)
-
 // Required is the refusal of what needs the event store, on a deployment
 // without one.
 func Required(what string) error {

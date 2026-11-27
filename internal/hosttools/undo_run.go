@@ -95,6 +95,11 @@ func UndoRun(ctx context.Context, logger *slog.Logger, opts UndoRunOptions) erro
 		return nil
 	}
 
+	// The re-derivation records billing facts, each queueing its customer
+	// message in the fact's transaction.
+	if err := bindRiverProducer(ctx, opts.Config, database); err != nil {
+		return err
+	}
 	var res reconcile.UndoResult
 	if err := database.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		// A converge reversal invalidates Class D, so the re-derivation runs in

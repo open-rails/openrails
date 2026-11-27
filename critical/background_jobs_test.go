@@ -74,7 +74,7 @@ CREATE TRIGGER %s BEFORE INSERT ON %s FOR EACH ROW EXECUTE FUNCTION %s()`,
 func runRegisteredFails(t *testing.T, fleet *river.Client[pgx.Tx], kind string) {
 	t.Helper()
 	finished := finishPass(t, fleet, kind, func() []int64 {
-		job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: registeredQueue(kind)})
+		job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		return []int64{job.Job.ID}
 	})
@@ -127,7 +127,7 @@ func TestBackgroundJobs(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		host, err := fleet.Insert(t.Context(), hostChore{}, &river.InsertOpts{Queue: "host"})
 		require.NoError(t, err)
-		short, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.usage_orders"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		short, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.usage_invoices"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		long, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.cleanup_expired_data"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
@@ -181,7 +181,7 @@ func TestBackgroundJobs(t *testing.T) {
 			_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET attempt=1, "+set+" WHERE id=$1", job.Job.ID)
 			require.NoError(t, err)
 		}
-		insert("openrails.usage_orders", "state='running', attempted_at=now()-interval '11 minutes', attempted_by=ARRAY['stuck']")
+		insert("openrails.usage_invoices", "state='running', attempted_at=now()-interval '11 minutes', attempted_by=ARRAY['stuck']")
 		insert("openrails.balance_look", "state='discarded', attempted_at=now()-interval '2 minutes', finalized_at=now()-interval '1 minute', "+
 			"errors=ARRAY[jsonb_build_object('at', now(), 'attempt', 1, 'error', 'critical: the look failed', 'trace', '')]")
 		insert("openrails.billing_pass", "state='completed', attempted_at=now()-interval '2 minutes', finalized_at=now()-interval '1 minute'")
@@ -192,20 +192,18 @@ func TestBackgroundJobs(t *testing.T) {
 		for _, k := range kinds {
 			health[k.Kind] = k
 		}
-		require.EqualValues(t, 1, health["openrails.usage_orders"].Overrunning)
-		require.EqualValues(t, 600, health["openrails.usage_orders"].TimeoutSeconds)
+		require.EqualValues(t, 1, health["openrails.usage_invoices"].Overrunning)
+		require.EqualValues(t, 600, health["openrails.usage_invoices"].TimeoutSeconds)
 		require.EqualValues(t, 1, health["openrails.balance_look"].Discarded)
 		require.NotNil(t, health["openrails.balance_look"].LastError)
 		require.Equal(t, "critical: the look failed", *health["openrails.balance_look"].LastError)
 		require.NotNil(t, health["openrails.billing_pass"].LastCompletedAt)
 		require.NotNil(t, health["openrails.billing_pass"].PeriodSeconds)
 		require.EqualValues(t, 3600, *health["openrails.billing_pass"].PeriodSeconds)
-		require.Contains(t, health, "openrails.nmi_history", "NMI history is its own periodic job, off the billing pass")
-		require.NotNil(t, health["openrails.nmi_history"].PeriodSeconds)
-		require.EqualValues(t, 3600, *health["openrails.nmi_history"].PeriodSeconds)
-		require.EqualValues(t, 3600, health["openrails.nmi_history"].TimeoutSeconds)
-		for _, scan := range []string{"openrails.usage_posting", "openrails.dunning", "openrails.balance_watch", "openrails.delinquency", "openrails.order_expiry",
-			"openrails.revenue_recognition", "openrails.rebill_watch", "openrails.config_realerts", "openrails.stored_card_refresh_due"} {
+		require.NotContains(t, health, "openrails.customer_messages_dispatch", "a fact queues its message's job; no pass dispatches")
+		require.NotContains(t, health, "openrails.nmi_history", "NMI's own history is no job")
+		for _, scan := range []string{"openrails.usage_posting", "openrails.dunning", "openrails.balance_watch", "openrails.delinquency", "openrails.invoice_expiry",
+			"openrails.revenue_recognition", "openrails.stored_card_refresh_due"} {
 			require.NotContains(t, health, scan, "a scan runs in the billing pass; it is no job kind")
 		}
 		require.NotContains(t, health, "openrails.operation_wakes")
@@ -217,9 +215,9 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, fleet.Start(t.Context()))
 		require.Eventually(t, func() bool {
 			err := progress(t.Context())
-			return err != nil && strings.Contains(err.Error(), "openrails.usage_orders: 1 running past its 10m0s timeout")
+			return err != nil && strings.Contains(err.Error(), "openrails.usage_invoices: 1 running past its 10m0s timeout")
 		}, 20*time.Second, 50*time.Millisecond, "the probe names the job running past its timeout")
-		_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET state='completed', finalized_at=now() WHERE kind='openrails.usage_orders'")
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET state='completed', finalized_at=now() WHERE kind='openrails.usage_invoices'")
 		require.NoError(t, err)
 		require.NoError(t, progress(t.Context()), "a fresh leader and no overrunning job")
 	})
@@ -520,39 +518,47 @@ func TestBackgroundJobs(t *testing.T) {
 		require.Equal(t, "0112233446", findings[0].Evidence["transaction_id"])
 		require.Len(t, ccbillPayments(t, w, customer), 1)
 	})
-	t.Run("OR-J15-S30/rebill-watch-backs-off-a-failing-probe", func(t *testing.T) {
+	t.Run("OR-J15-S30/a-failed-nmi-verification-read-waits-for-the-hourly-retry", func(t *testing.T) {
 		a, p, sub := nmiMembership(t)
 		var down atomic.Bool
-		var probes atomic.Int32
+		var reads atomic.Int32
 		p.core.FailRequests(func(r *http.Request) bool {
 			if !down.Load() || !strings.HasSuffix(r.URL.Path, "/query.php") {
 				return false
 			}
-			// The pass's NMI history read names no sale or schedule; the probe does.
+			// NMI's history read names no sale or schedule; the verifier's does.
 			_ = r.ParseForm()
 			if r.Form.Get("order_id") == "" && r.Form.Get("subscription_id") == "" {
 				return false
 			}
-			probes.Add(1)
+			reads.Add(1)
 			return true
 		}, http.StatusServiceUnavailable, 1_000_000)
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()) + 25*time.Hour)
-		fleet := hostFleet(t, a.world)
-		fleet.PeriodicJobs().Clear()
-		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
-		require.NoError(t, fleet.Start(t.Context()))
+		fleet := quietFleet(t, a.world)
 		down.Store(true)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		failed := probes.Load()
+		require.Eventually(t, func() bool {
+			n, failed := verificationRead(t, a, sub.ID)
+			return n == 3 && failed != ""
+		}, 20*time.Second, 20*time.Millisecond, "the verifier tries a failing read three times, then leaves the row unverified")
+		failed := reads.Load()
 		require.NotZero(t, failed)
-		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		require.Equal(t, failed, probes.Load(), "a failed probe waits out its backoff")
+		for _, wait := range []time.Duration{0, 59 * time.Minute} {
+			a.clock.Advance(wait)
+			runRegistered(t, fleet, "openrails.billing_pass", 1)
+			require.Never(t, func() bool { return reads.Load() != failed }, time.Second, 20*time.Millisecond, "a failed read waits for the hourly retry")
+		}
 		down.Store(false)
-		a.clock.Advance(time.Hour)
+		a.clock.Advance(time.Minute)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.rebill.missed"})
-		require.NoError(t, err)
-		require.Len(t, findings.Items, 1, "the probe runs again once its backoff has passed")
+		require.Eventually(t, func() bool {
+			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.rebill.missed"})
+			return err == nil && len(findings.Items) == 1
+		}, 20*time.Second, 20*time.Millisecond, "the hourly retry reads NMI and records the missed cycle")
+		require.Equal(t, "provider_stalled", renewalMiss(t, a, sub.ID))
+		subscriptionState(t, a, sub.ID, "unverified")
+		require.True(t, entitled(t, a.alpha, sub.CustomerID, "nmi:member"), "unverified keeps access")
 	})
 	t.Run("OR-J06-S07/psp-import-commits-with-its-job", func(t *testing.T) {
 		a, _ := newNMIWorld(t)

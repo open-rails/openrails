@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/authkit/authtest"
 	"net/http"
 	"net/textproto"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -160,53 +162,91 @@ func TestFindingAlerts(t *testing.T) {
 		require.Zero(t, mail.count("life.customer.messages_rate_limited"), "a medium finding goes to alert webhooks, not email")
 	})
 
-	t.Run("OR-J06-S83/customers-own-cancellations-past-the-cap-name-the-wave-and-alert-staff-and-staff-cancels-spend-none", func(t *testing.T) {
-		a, p, first := purchasedMembershipWith(t, 24, alertEmail)
+	t.Run("OR-J06-S83/customer-cancels-spend-no-budget-and-card-removals-past-the-cap-alert-staff-once", func(t *testing.T) {
+		a, journal := newNMIWorld(t, alertEmail)
+		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "membership", DisplayName: "Membership"})
+		require.NoError(t, err)
+		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "membership-day", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
+		require.NoError(t, err)
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Len(t, psps.Items, 1)
 		tokens := []string{a.aliceToken, a.bobToken}
-		for range 4 {
+		for range 5 {
 			tokens = append(tokens, signIn(t, a.auth, authtest.NewUser(t, a.auth)).AccessToken)
 		}
-		subs := []*billing.Subscription{first}
-		for i, token := range tokens[1:] {
-			subs = append(subs, membershipAtPrice(t, a, p, first.PriceID, token, fmt.Sprintf("wave-%d", i)))
+		var subs []*billing.Subscription
+		for i, token := range tokens {
+			input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
+				Payment: &billing.InvoicePaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")}}
+			status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", token, input, map[string]string{"Idempotency-Key": fmt.Sprintf("wave-%d", i)})
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(raw, &invoice))
+			require.Equal(t, billing.InvoiceComplete, invoice.Status)
+			require.NotNil(t, invoice.Lines[0].SubscriptionID)
+			sub, err := a.alpha.GetSubscription(t.Context(), *invoice.Lines[0].SubscriptionID)
+			require.NoError(t, err)
+			require.Equal(t, "engine", sub.CollectionPolicy)
+			subs = append(subs, sub)
 		}
-		cancel := func(i int) (int, []byte) {
-			return a.request(t, http.MethodPost, "/v1/me/subscriptions/"+subs[i].ID.String()+"/cancel", tokens[i], map[string]any{"reason": "Stop renewing"})
-		}
-		// Five customers an hour may cancel on a small merchant; the sixth waits.
-		for i := range 5 {
-			status, raw := cancel(i)
+		cancel := func(i int) {
+			t.Helper()
+			status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+subs[i].ID.String()+"/cancel", tokens[i], map[string]any{"reason": "Stop renewing"})
 			require.Equal(t, http.StatusOK, status, string(raw))
+			canceled, err := a.alpha.GetSubscription(t.Context(), subs[i].ID)
+			require.NoError(t, err)
+			require.Equal(t, billing.SubscriptionCanceled, canceled.Status)
 		}
-		status, raw := cancel(5)
+		for i := range 6 {
+			cancel(i)
+		}
+		page, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.customer_action_rate.exceeded"})
+		require.NoError(t, err)
+		require.Empty(t, page.Items, "customer cancellations raise no wave finding")
+
+		methods := make([]*billing.PaymentMethod, 6)
+		for i := range methods {
+			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", tokens[i], billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID,
+				Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			require.NoError(t, json.Unmarshal(raw, &methods[i]))
+		}
+		remove := func(i int) (int, []byte) {
+			return a.request(t, http.MethodDelete, "/v1/me/payment-methods/"+methods[i].ID.String(), tokens[i], nil)
+		}
+		for i := range 5 {
+			status, raw := remove(i)
+			require.Equal(t, http.StatusNoContent, status, string(raw))
+		}
+		status, raw := remove(5)
 		require.Equal(t, http.StatusTooManyRequests, status, string(raw))
 		require.Contains(t, string(raw), `"code":"rate_limit_exceeded"`)
 		require.Contains(t, string(raw), "try again in")
-		kept, err := a.alpha.GetSubscription(t.Context(), subs[5].ID)
+		kept, err := a.alpha.ListPaymentMethods(t.Context(), methods[5].CustomerID, billing.PaymentMethodListParams{})
 		require.NoError(t, err)
-		require.Equal(t, billing.SubscriptionActive, kept.Status, "a refused cancellation changes nothing")
+		index := slices.IndexFunc(kept.Items, func(method billing.PaymentMethod) bool { return method.ID == methods[5].ID })
+		require.NotEqual(t, -1, index, "a refused removal preserves the card")
+		require.Equal(t, billing.PaymentMethodActive, kept.Items[index].Status)
 
-		page, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.customer_action_rate.exceeded"})
+		// A new customer can still cancel after card removals exhaust the budget.
+		cancel(6)
+		cancel(6)
+		page, err = a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.customer_action_rate.exceeded"})
 		require.NoError(t, err)
 		require.Len(t, page.Items, 1)
 		wave := page.Items[0]
-		require.EqualValues(t, 5, wave.Evidence["cancellations"], "the finding names the wave: %v", wave.Evidence)
-		require.EqualValues(t, 0, wave.Evidence["card_removals"])
+		require.EqualValues(t, 5, wave.Evidence["card_removals"], "the finding names the wave: %v", wave.Evidence)
 		require.NotEmpty(t, wave.Evidence["wave_started_at"])
 		var alerts int
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema + "_river", "river_job"}.Sanitize()+
 			" WHERE kind = 'openrails.operator_alert' AND args->'finding'->>'id' = $1", wave.ID.UUID().String()).Scan(&alerts))
 		require.Equal(t, 1, alerts, "staff hear of the wave once")
-		status, raw = cancel(5)
+		status, raw = remove(5)
 		require.Equal(t, http.StatusTooManyRequests, status, string(raw))
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema + "_river", "river_job"}.Sanitize()+
 			" WHERE kind = 'openrails.operator_alert' AND args->'finding'->>'id' = $1", wave.ID.UUID().String()).Scan(&alerts))
 		require.Equal(t, 1, alerts, "a second refusal of the same wave alerts no one again")
-
-		// Staff cancel under their own destructive limits, not the customers' cap.
-		canceled, err := a.alphaRemote.CancelSubscription(t.Context(), subs[5].ID, billing.CancelSubscriptionParams{Reason: "support request"})
-		require.NoError(t, err)
-		require.Equal(t, billing.SubscriptionCanceled, canceled.Status)
 	})
 
 	t.Run("OR-J06-S70/a-held-terminal-outcome-alerts-the-operator-once", func(t *testing.T) {

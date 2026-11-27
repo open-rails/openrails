@@ -69,8 +69,8 @@ type MoneyService struct {
 	usageRecoveryResolver railresolve.NMIClientResolver
 	db                    *db.DB
 	clock                 clockwork.Clock
-	// posting is set on the service a running charge's posting runs on.
-	posting *runningChargePosting
+	// posting is set on the service a usage posting's ledger write runs on.
+	posting *ledgerPosting
 }
 
 func NewMoneyService(database *db.DB, clocks ...clockwork.Clock) *MoneyService {
@@ -100,15 +100,15 @@ func (s *MoneyService) now() time.Time {
 }
 
 // ErrCustomerRequired is returned when a money operation cannot resolve a
-// payer: customer_id comes from the caller and is never synthesized.
+// customer: customer_id comes from the caller and is never synthesized.
 var ErrCustomerRequired = errors.New("customer_id required")
 
-// resolveCustomer returns the explicit payer, else the invoker parsed as a
+// resolveCustomer returns the explicit customer, else the invoker parsed as a
 // customer UUID (the self-hosted personal case), else ErrCustomerRequired. The
-// invoker is kept for attribution and is not the financial payer.
-func resolveCustomer(payer *identity.CustomerID, invokerID string) (identity.CustomerID, error) {
-	if payer != nil && !payer.IsZero() {
-		return *payer, nil
+// invoker is kept for attribution and is not the financial customer.
+func resolveCustomer(customer *identity.CustomerID, invokerID string) (identity.CustomerID, error) {
+	if customer != nil && !customer.IsZero() {
+		return *customer, nil
 	}
 	resolved := identity.CustomerIDFromString(invokerID)
 	if resolved.IsZero() {
@@ -121,18 +121,18 @@ func (s *MoneyService) GetBalance(ctx context.Context, invokerID, currency strin
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	// Reads are scoped by merchant + payer; without an explicit payer the
-	// invoker's own UUID is the payer.
-	payer, err := resolveCustomer(nil, invokerID)
+	// Reads are scoped by merchant + customer; without an explicit customer the
+	// invoker's own UUID is the customer.
+	customer, err := resolveCustomer(nil, invokerID)
 	if err != nil {
 		return nil, err
 	}
-	return s.GetBalanceForCustomer(ctx, payer, currency)
+	return s.GetBalanceForCustomer(ctx, customer, currency)
 }
 
-// GetBalanceForCustomer reads a balance scoped explicitly by payer, e.g. a team
+// GetBalanceForCustomer reads a balance scoped explicitly by customer, e.g. a team
 // customer rather than the invoker's own. No invoker is needed.
-func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyBalance, error) {
+func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, customer identity.CustomerID, currency string) (*models.MoneyBalance, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -145,9 +145,9 @@ func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity
 		return nil, err
 	}
 	tenantID := tid.UUID()
-	payerID := payer.UUID()
+	customerID := customer.UUID()
 	// A read without the lock: writers read again under it.
-	return s.deriveBalance(ctx, s.db.Gen(ctx), tenantID, payerID, cur)
+	return s.deriveBalance(ctx, s.db.Gen(ctx), tenantID, customerID, cur)
 }
 
 // AdmissionCapacity is the affordability snapshot consumed by the SQL
@@ -162,7 +162,7 @@ type AdmissionCapacity struct {
 	// resolved it: the customer's own, else its policy's cap, else the
 	// merchant's usage terms'.
 	CreditLimit int64
-	// OutstandingOwed is the payer's unpaid arrears (positive), read O(1) from
+	// OutstandingOwed is the customer's unpaid arrears (positive), read O(1) from
 	// their own arrears account in the same lookup. The credit line caps debt,
 	// so the line still available is CreditLimit - this.
 	OutstandingOwed int64
@@ -184,7 +184,7 @@ func admissionCapacityFromRow(row gen.GetAdmissionCapacityRow) AdmissionCapacity
 
 // ListBalanceTransactions lists a customer's ledger movements in one currency,
 // newest first.
-func (s *MoneyService) ListBalanceTransactions(ctx context.Context, payer identity.CustomerID, params billing.BalanceTransactionListParams) (billing.ListPage[billing.BalanceTransaction], error) {
+func (s *MoneyService) ListBalanceTransactions(ctx context.Context, customer identity.CustomerID, params billing.BalanceTransactionListParams) (billing.ListPage[billing.BalanceTransaction], error) {
 	var page billing.ListPage[billing.BalanceTransaction]
 	if s == nil || s.db == nil {
 		return page, fmt.Errorf("money service not initialized")
@@ -194,17 +194,17 @@ func (s *MoneyService) ListBalanceTransactions(ctx context.Context, payer identi
 		if err != nil {
 			return page, err
 		}
-		rows, err := s.db.Gen(ctx).ListLedgerTransfersByIDs(ctx, gen.ListLedgerTransfersByIDsParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), Ids: uuidutil.Of(params.IDs)})
+		rows, err := s.db.Gen(ctx).ListLedgerTransfersByIDs(ctx, gen.ListLedgerTransfersByIDsParams{MerchantID: tid.UUID(), CustomerID: customer.UUID(), Ids: uuidutil.Of(params.IDs)})
 		if err != nil {
 			return page, err
 		}
-		deductions, err := usageDeductions(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID(), rows)
+		receipts, err := usageReceipts(ctx, s.db.Gen(ctx), tid.UUID(), customer.UUID(), rows)
 		if err != nil {
 			return page, err
 		}
 		for _, r := range rows {
 			item := balanceTransactionFromTransfer(r)
-			item.Usage = deductions[r.ID]
+			item.Usage = receipts[r.ID]
 			page.Items = append(page.Items, item)
 		}
 		return page, nil
@@ -226,20 +226,20 @@ func (s *MoneyService) ListBalanceTransactions(ctx context.Context, payer identi
 		return page, err
 	}
 	rows, err := s.db.Gen(ctx).ListLedgerTransfersByCustomer(ctx, gen.ListLedgerTransfersByCustomerParams{
-		MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: cur,
+		MerchantID: tid.UUID(), CustomerID: customer.UUID(), Currency: cur,
 		AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit),
 	})
 	if err != nil {
 		return page, err
 	}
-	deductions, err := usageDeductions(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID(), rows)
+	receipts, err := usageReceipts(ctx, s.db.Gen(ctx), tid.UUID(), customer.UUID(), rows)
 	if err != nil {
 		return page, err
 	}
 	items := make([]billing.BalanceTransaction, 0, len(rows))
 	for _, r := range rows {
 		item := balanceTransactionFromTransfer(r)
-		item.Usage = deductions[r.ID]
+		item.Usage = receipts[r.ID]
 		items = append(items, item)
 	}
 	return pagination.Cut(items, limit, func(t billing.BalanceTransaction) any {
@@ -247,13 +247,13 @@ func (s *MoneyService) ListBalanceTransactions(ctx context.Context, payer identi
 	}), nil
 }
 
-// GetAccountSettingsForCustomer returns the payer's stored money-account
+// GetAccountSettingsForCustomer returns the customer's stored money-account
 // settings (billing mode and expiry default) in the request merchant. Never
 // nil: missing rows return the defaults.
-func (s *MoneyService) GetAccountSettingsForCustomer(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
+func (s *MoneyService) GetAccountSettingsForCustomer(ctx context.Context, customer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	var out *models.MoneyAccount
 	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		st, e := s.GetAccountSettings(ctx, payer, currency)
+		st, e := s.GetAccountSettings(ctx, customer, currency)
 		if e != nil {
 			return e
 		}
@@ -400,7 +400,7 @@ func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUI
 }
 
 // depositTx records a money-in as a credit lot and posts its deposit (DR
-// units_sold / CR customer_units). Idempotent on (merchant, payer,
+// units_sold / CR customer_units). Idempotent on (merchant, customer,
 // source_id) via the lot lookup. Runs under the customers-row lock so deposits
 // serialize per customer.
 func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositParams) (*models.MoneyTransaction, error) {
@@ -419,20 +419,20 @@ func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositPa
 		return nil, err
 	}
 	tenantID := tid.UUID()
-	payer, err := resolveCustomer(params.CustomerID, params.Invoker)
+	customer, err := resolveCustomer(params.CustomerID, params.Invoker)
 	if err != nil {
 		return nil, err
 	}
-	payerID := payer.UUID()
-	bal, err := s.lockBalance(ctx, q, payer, params.Invoker, cur)
+	customerID := customer.UUID()
+	bal, err := s.lockBalance(ctx, q, customer, params.Invoker, cur)
 	if err != nil {
 		return nil, err
 	}
-	// Idempotency: (merchant, payer, source_id) is the deposit key. A credit grant
+	// Idempotency: (merchant, customer, source_id) is the deposit key. A credit grant
 	// already carrying this source_id means the deposit happened — return it.
 	if params.SourceID != nil && strings.TrimSpace(*params.SourceID) != "" {
 		existing, gerr := q.GetCreditGrantBySourceID(ctx, gen.GetCreditGrantBySourceIDParams{
-			MerchantID: tenantID, CustomerID: payerID, SourceID: *params.SourceID,
+			MerchantID: tenantID, CustomerID: customerID, SourceID: *params.SourceID,
 		})
 		if gerr == nil {
 			if existing.Units != params.Amount {
@@ -476,10 +476,10 @@ func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositPa
 	}
 	invoker := params.Invoker
 	if invoker == "" {
-		invoker = payerID.String() // the customer funded its own balance
+		invoker = customerID.String() // the customer funded its own balance
 	}
 	issue := credits.Issue{
-		Customer: payerID, Unit: cur, Units: params.Amount, Funding: funding,
+		Customer: customerID, Unit: cur, Units: params.Amount, Funding: funding,
 		Source: params.Source, SourceID: derefStr(params.SourceID), Invoker: invoker,
 		Description: params.Description, StartsAt: now, ExpiresAt: expiresAt,
 	}
@@ -546,23 +546,23 @@ func creditGrantTxn(lot gen.BillingCreditGrant) *models.MoneyTransaction {
 // per lot at the caller's coordinate. The available/credit-line gate is the
 // caller's job; this fails only if the lots cannot cover amount. Returns the
 // derived balance after the debit.
-func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string, key IdempotencyKey, resource string, amount int64) (newBalance int64, applied bool, err error) {
+func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, customer identity.CustomerID, invokerID, currency string, key IdempotencyKey, amount int64) (newBalance int64, applied bool, err error) {
 	cur := normalizeCurrency(currency)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, false, err
 	}
 	tenantID := tid.UUID()
-	payerID := payer.UUID()
+	customerID := customer.UUID()
 	// Lock + serialize, then derive the balance under the lock.
-	bal, err := s.lockBalance(ctx, q, payer, invokerID, cur)
+	bal, err := s.lockBalance(ctx, q, customer, invokerID, cur)
 	if err != nil {
 		return 0, false, err
 	}
 	if bal.Balance < amount {
 		return 0, false, ErrInsufficientCredits
 	}
-	applied, err = s.creditLots(q, tenantID).Spend(ctx, payerID, cur, amount, invokerID, resource, key.Coord())
+	applied, err = s.creditLots(q, tenantID).Spend(ctx, customerID, cur, amount, invokerID, "", key.Coord())
 	if err != nil {
 		if errors.Is(err, credits.ErrInsufficientCredits) {
 			return 0, false, ErrInsufficientCredits
@@ -581,37 +581,37 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 // exists, FOR UPDATE-locks it, and returns the balance read under the lock.
 // Every spend, deposit and expiry path calls it first, so mutations on one
 // customer never interleave (no overdraft).
-func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string) (*models.MoneyBalance, error) {
+func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, customer identity.CustomerID, invokerID, currency string) (*models.MoneyBalance, error) {
 	cur := normalizeCurrency(currency)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	tenantID := tid.UUID()
-	payerID := payer.UUID()
-	if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
+	customerID := customer.UUID()
+	if err := ensureCustomer(ctx, q, tenantID, customerID); err != nil {
 		return nil, err
 	}
 	if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{
-		ID: payerID, MerchantID: tenantID,
+		ID: customerID, MerchantID: tenantID,
 	}); err != nil {
 		return nil, err
 	}
-	return s.deriveBalance(ctx, q, tenantID, payerID, cur)
+	return s.deriveBalance(ctx, q, tenantID, customerID, cur)
 }
 
 // deriveBalance reads a balance: the customer's ledger account, its pending
 // usage and what its running charges accrued, all in PostgreSQL. A posting
 // reads the accrual as of the instant it posts through.
-func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string) (*models.MoneyBalance, error) {
+func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenantID, customerID uuid.UUID, cur string) (*models.MoneyBalance, error) {
 	l := ledger.New(q, tenantID)
 	// A balance read never creates the account: no account = zero balance.
-	acc, found, err := l.CustomerBalanceAccountID(ctx, payerID, cur)
+	acc, found, err := l.CustomerBalanceAccountID(ctx, customerID, cur)
 	if err != nil {
 		return nil, err
 	}
 	now := instant(s.now())
-	out := &models.MoneyBalance{MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now}
+	out := &models.MoneyBalance{MerchantID: tenantID, CustomerID: customerID, Currency: cur, AsOf: now}
 	if !found {
 		return out, nil
 	}
@@ -619,7 +619,7 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 		return nil, err
 	}
 	row, err := q.GetUnpostedAmounts(ctx, gen.GetUnpostedAmountsParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now, AccruedAsOf: s.accruedAsOf(),
+		MerchantID: tenantID, CustomerID: customerID, Currency: cur, AsOf: now, AccruedAsOf: s.accruedAsOf(),
 	})
 	if err != nil {
 		return nil, err

@@ -57,7 +57,7 @@ func loadConfigIfExists(k *koanf.Koanf, path string) error {
 
 // Top-level keys of both decode targets, from their yaml tags, so a new
 // multi-word top-level key can never miss the environment mapping the way
-// PUBLIC_BILLING_BASE_URL would under first-underscore splitting. Scalar keys
+// METRICS_PORT would under first-underscore splitting. Scalar keys
 // map only on an exact name; a section also maps PREFIX_rest to prefix.rest
 // (DATABASE_URL to database.url).
 var envTopLevelScalarKeys, envTopLevelNestedKeys = topLevelKeys(reflect.TypeFor[server.Config](), reflect.TypeFor[Config]())

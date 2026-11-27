@@ -74,7 +74,7 @@ var ErrTransactionExpired = errors.New("solana: transaction expired — block he
 // decision — roughly one slot pair, so a landing is noticed within a beat.
 var watchPollInterval = 1500 * time.Millisecond
 
-// commitmentRank invoices commitment levels so "have >= want" comparisons work.
+// commitmentRank orders commitment levels so "have >= want" comparisons work.
 func commitmentRank(s rpc.ConfirmationStatusType) int {
 	switch s {
 	case rpc.ConfirmationStatusFinalized:

@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-rails/authkit/auth"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/server/internal/controlplane"
@@ -44,5 +45,9 @@ func StandaloneServer(a *app.App, cp *controlplane.ControlPlane, s Surface) (*se
 		ConsoleDisabled:         s.ConsoleDisabled,
 		CheckoutOrigin:          s.CheckoutOrigin,
 		CheckoutHandler:         s.CheckoutHandler,
+		// The console's New merchant provisions as the CLI does.
+		ProvisionMerchant: func(ctx context.Context, req billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error) {
+			return ProvisionMerchant(ctx, cp, req)
+		},
 	})
 }

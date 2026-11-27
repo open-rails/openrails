@@ -43,7 +43,7 @@ var limitsRoutes = []Route{
 			"its limits, reserving nothing), the limit set of each invoker's attributes, the pricing a gate " +
 			"costs requests with, and how many of the merchant's leases are live. The first sync under a new " +
 			"LeaseID creates the lease; a lease answers resends for 61 days after its last sync. Settled usage " +
-			"posts to the ledger at each month's end in the merchant's accounting zone and before any other " +
+			"posts to the ledger daily, once its day ends in the merchant's accounting zone, and before any other " +
 			"movement of the customer's balance.",
 		Request: billing.SyncLeasesParams{}, Responses: []Reply{{200, billing.SyncLeasesResult{}}},
 		Errors: codes("currency_unsupported", "idempotency_key_reused", "invalid_param", "resource_conflict", billing.CodeLeaseNotFound, billing.CodeServiceUnavailable, billing.CodeUsageNotPriced, billing.CodeUsageOutOfOrder), Handler: h(handlers.SyncLeases)},

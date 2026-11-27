@@ -142,7 +142,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `product_not_found` | 404 | `invalid_request_error` | The product does not exist. |
 | `product_tier_group_conflict` | 409 | `invalid_request_error` | A customer holds live subscriptions to more than one product of the tier group. |
 | `product_tier_group_in_use` | 409 | `invalid_request_error` | The tier group cannot change while a subscription has a plan change in flight. |
-| `provider_cancel_held` | 409 | `invalid_request_error` | Cancelling needs a destructive provider action that is not armed for this merchant. |
+| `provider_cancel_held` | 409 | `invalid_request_error` | Canceling needs a destructive provider action that is not armed for this merchant. |
 | `provider_outcome_unknown` | 409 | `api_error` | The provider did not confirm the outcome; read the resource before retrying. |
 | `provider_price_unreadable` | 502 | `api_error` | The provider did not answer for the provider price's terms; retry. |
 | `provider_writes_disabled` | 503 | `api_error` | Provider writes are off for the merchant, so it takes no payment; the message names why (the merchant's write posture). |
@@ -197,9 +197,11 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `subscription_not_found` | 404 | `invalid_request_error` | The subscription does not exist. |
 | `subscription_paid_through` | 409 | `invalid_request_error` | A canceled subscription to this product is still paid; buy again once its paid period ends. |
 | `subscription_resumable` | 409 | `invalid_request_error` | A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again. |
+| `too_many_buckets` | 400 | `invalid_request_error` | The window at the interval holds more buckets than a series answers (a usage series: 1,000); shorten the window or widen the interval. param is interval. |
 | `trial_unsupported_on_rail` | 400 | `invalid_request_error` | This rail cannot run a trial first phase. |
 | `unknown_field` | 400 | `invalid_request_error` | The JSON body names a field the route does not accept; param is the field. |
 | `unsupported_media_type` | 415 | `invalid_request_error` | The request body is not application/json. |
+| `usage_events_expired` | 400 | `invalid_request_error` | Usage by invoker reads raw usage events, kept 90 days; the window starts before them. History by event type and meter reaches back further. param is the window's start. |
 | `usage_meter_invalid` | 400 | `invalid_request_error` | The meter definition is invalid. |
 | `usage_meter_not_found` | 404 | `invalid_request_error` | The usage meter does not exist. |
 | `usage_not_priced` | 422 | `invalid_request_error` | A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field. |

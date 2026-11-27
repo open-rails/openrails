@@ -88,9 +88,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   own pages (`billing.BuyerPrices`). Customer-support permissions
   are `merchant:customer:read` and `merchant:customer:manage` (or their `root:` twins); catalog, config
   and metrics remain separate capabilities. There are no legacy-path aliases.
-  No route registers a merchant or manages a
-  team, API keys or the merchant directory: those are `server` Go methods and
-  the `openrails` CLI; a hosted product builds its own routes on them.
+  No engine route registers a merchant or manages a team, API keys or the merchant directory: those are `server` Go methods and the `openrails` CLI; a hosted product builds its own routes on them, as the standalone console does for a root operator's New merchant (`POST /admin/merchants`, `root:merchants:create`).
 - A merchant route acts on the merchant its credential is bound to: its group, the
   declared `Issuer`, or an OpenRails object. The request names none; anything else is
   403 `merchant_unresolved`.
@@ -207,8 +205,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Instants end in `_at`. A surrogate id defaults to `uuidv7()`; `created_at`, `updated_at`
   and a table's own creation instant to `now()`. No other column defaults to a value every
   writer supplies (one stated exception: `payments.money_movement` fails closed to `'none'`).
-- Absent text is NULL, and a CHECK refuses `''`; `''` is stored only as part of a key
-  (`payment_attempts.step`, `nmi_history_months.reason`). No `varchar`.
+- Absent text is NULL, and a CHECK refuses `''`; `''` is stored only as part of a key (`payment_attempts.step`). No `varchar`.
 - Text + CHECK, never Postgres enums. SQL lives in sqlc queries, and `sqlc vet` prepares
   every one against PostgreSQL.
 - Every table has a retention class (`internal/retention`: permanent, rows, state),
@@ -218,18 +215,9 @@ through `host-four`; these are placeholders, not customer or repository names.
   with its `invoice_lines` (`il_`), provider-run renewals included (`billing.Invoice`'s doc);
   an `invoice_attempts` row (`iat_`) is a provider attempt; a host
   charges its own metered price with a `running_charges` row.
-- Spellings matched against stored or provider records still say "order": NMI's `orderid`
-  and order references, Stripe metadata `order_id`/`order_attempt_id`, intent payload keys,
-  River kinds (`openrails.order_expiry`, `openrails.usage_orders`), the
-  `waive_order` destructive kind, idempotency and derived-id namespaces, ledger and books
-  sources (`order`, `order_line`). Never rename them.
+- Spellings matched against stored or provider records keep their old words: NMI's `orderid` and order references, Stripe metadata `order_id`/`order_attempt_id`, intent payload keys, the `waive_order` destructive kind, idempotency and derived-id namespaces, ledger and books sources (`order`, `order_line`), and the spend scope value `payer` (hashed into spend window keys). Never rename them; River kinds and Go names are free to rename.
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
-- Usage events live in ClickHouse (`Deps.ClickHouse`, `internal/eventstore`, its own embedded
-  migrations); money stays in PostgreSQL. Usage posts to the ledger at each month's end in
-  `accounting.timezone` and before any other movement of the balance, as the period's total
-  price less earlier postings (`usage_postings`); money reads use `FINAL`. Whether
-  `Deps.ClickHouse` is set decides usage: without it the event-backed routes
-  (`Route.EventStore`), catalog declarations and settings answer 409 `event_store_required`.
+- Usage events live in ClickHouse (`Deps.ClickHouse`, `internal/eventstore`, its own embedded migrations): raw events for 90 days, the 15-minute history and limit counters. Money stays in PostgreSQL: intake prices each item once into `usage_totals`, which is the balance's pending; a posting (daily at midnight in `accounting.timezone`, and before any other movement of the balance) books usage and running charges together: each period's total price less what it already posted (its posted `usage_totals` row), as ledger transfers and one immutable `usage_receipts` row per posting. A running charge's stop posts nothing; the next posting takes it. No posting reads ClickHouse. Whether `Deps.ClickHouse` is set decides usage: without it the event-backed routes (`Route.EventStore`), catalog declarations and settings answer 409 `event_store_required`.
 - User-facing records soft-delete: `deleted_at`, and reads filter `deleted_at IS NULL`.
   Hard deletes only for privacy erasure and derived or short-lived rows.
 - Abuse state (rate limits, lockouts, captcha, card-testing counts, replay ids) and

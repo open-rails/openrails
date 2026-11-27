@@ -132,7 +132,7 @@ func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, fi
 	}
 	q := d.Gen(ctx)
 	// Serialize accepted amendments. A second confirmed change for the same
-	// future cycle supersedes the first by durable acceptance invoice; source
+	// future cycle supersedes the first by durable acceptance order; source
 	// replay keeps its original version and cannot become current again.
 	locked, err := q.GetSubscriptionByIDForUpdate(ctx, gen.GetSubscriptionByIDForUpdateParams{MerchantID: mid.UUID(), ID: *bill.SubscriptionID})
 	if err != nil {

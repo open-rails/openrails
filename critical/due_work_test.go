@@ -5,6 +5,7 @@ package critical_test
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -138,49 +139,84 @@ func TestDueWork(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, access.Entitlements["stripe:member"], "an unanswered grace keeps access")
 	})
-	t.Run("OR-J15-S70/an-nmi-renewal-the-probe-cannot-settle-is-read-by-id-after-its-grace", func(t *testing.T) {
+	t.Run("OR-J15-S70/an-nmi-renewal-unpaid-a-day-past-its-period-is-unverified-access-kept", func(t *testing.T) {
 		a, p, sub := nmiMembership(t)
+		// NMI answers no read: only the due pass's deadline moves the row.
 		p.core.FailRequests(func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/query.php") }, http.StatusServiceUnavailable, 1_000_000)
 		due := *sub.CurrentPeriodEndsAt
-		a.clock.Advance(due.Add(25 * time.Hour).Sub(a.clock.Now()))
-		fleet := hostFleet(t, a.world)
-		fleet.PeriodicJobs().Clear()
-		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
-		require.NoError(t, fleet.Start(t.Context()))
+		a.clock.Advance(due.Add(24*time.Hour - time.Minute).Sub(a.clock.Now()))
+		fleet := quietFleet(t, a.world)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		subscriptionState(t, a, sub.ID, "active")
-		a.clock.Advance(24 * time.Hour)
+		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionActive, current.Status, "NMI's charge may still be indexed inside its day")
+		a.clock.Advance(2 * time.Minute)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		subscriptionState(t, a, sub.ID, "unverified")
-		access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"nmi:member"}})
-		require.NoError(t, err)
-		require.True(t, access.Entitlements["nmi:member"], "unverified keeps access")
+		require.True(t, entitled(t, a.alpha, sub.CustomerID, "nmi:member"), "unverified keeps access")
 	})
-	t.Run("OR-J16-S71/an-overdue-renewal-is-asked-before-the-rebill-watch-reads-nmi", func(t *testing.T) {
+	t.Run("OR-J16-S71/an-overdue-nmi-renewal-is-unverified-before-nmi-is-read", func(t *testing.T) {
 		a, p, sub := nmiMembership(t)
-		// NMI's Query API stops answering a probe of this subscription's sales.
+		// NMI's Query API holds the first read naming this schedule or its order.
+		schedule := *sub.RailSubscriptionID
 		hold := p.core.Hold(func(r *http.Request) bool {
 			if !strings.HasSuffix(r.URL.Path, "/query.php") {
 				return false
 			}
 			_ = r.ParseForm()
-			return r.Form.Get("order_id") == sub.ID.UUID().String()
+			return r.Form.Get("order_id") == sub.ID.UUID().String() || slices.Contains(strings.Split(r.Form.Get("subscription_id"), ","), schedule)
 		}, nmimock.HoldRequest)
 		defer hold.Release()
-		a.clock.Advance(sub.CurrentPeriodEndsAt.Add(49 * time.Hour).Sub(a.clock.Now()))
+		a.clock.Advance(sub.CurrentPeriodEndsAt.Add(25 * time.Hour).Sub(a.clock.Now()))
 		fleet := quietFleet(t, a.world)
 		_, err := fleet.Insert(t.Context(), billingPass{}, nil)
 		require.NoError(t, err)
 		select {
 		case <-hold.Arrived():
 		case <-time.After(20 * time.Second):
-			t.Fatal("the rebill watch never probed NMI")
+			t.Fatal("NMI was never read about the overdue renewal")
 		}
 		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.SubscriptionStatus("unverified"), current.Status, "the due pass asked about the overdue renewal before NMI was read")
+		require.Equal(t, billing.SubscriptionUnverified, current.Status, "the due pass unverified the overdue renewal before NMI was read")
 		hold.Release()
 		require.True(t, entitled(t, a.alpha, sub.CustomerID, "nmi:member"), "unverified keeps access")
+	})
+	t.Run("OR-J16-S72", func(t *testing.T) {
+		// A provider that retries on its own keeps its renewal active two days.
+		t.Run("stripe", func(t *testing.T) {
+			a, accounts, sub := stripeMembership(t)
+			end, remote := *sub.CurrentPeriodEndsAt, "/v1/subscriptions/"+*sub.RailSubscriptionID
+			a.clock.Advance(end.Add(47 * time.Hour).Sub(a.clock.Now()))
+			fleet := quietFleet(t, a.world)
+			asked := accounts.count("sk_test_old", remote)
+			runRegistered(t, fleet, "openrails.billing_pass", 1)
+			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+			require.NoError(t, err)
+			require.Equal(t, billing.SubscriptionActive, current.Status)
+			require.Equal(t, asked, accounts.count("sk_test_old", remote), "nothing asks Stripe before its deadline")
+			a.clock.Advance(2 * time.Hour)
+			runRegistered(t, fleet, "openrails.billing_pass", 1)
+			subscriptionState(t, a, sub.ID, "unverified")
+			require.Eventually(t, func() bool { return accounts.count("sk_test_old", remote) > asked }, 20*time.Second, 20*time.Millisecond, "the verifier reads it by id")
+			require.True(t, entitled(t, a.alpha, sub.CustomerID, "stripe:member"), "unverified keeps access")
+		})
+		t.Run("ccbill", func(t *testing.T) {
+			w := newWorld(t, func(w *world) {
+				declareCCBill(w, "")
+				w.posture = "full"
+			})
+			paid := w.clock.Now().Truncate(time.Second).Add(24 * time.Hour)
+			customer, _, _ := importCCBillMember(t, w, "0223344556600000779", paid)
+			w.clock.Advance(paid.Add(47 * time.Hour).Sub(w.clock.Now()))
+			fleet := quietFleet(t, w)
+			runRegistered(t, fleet, "openrails.billing_pass", 1)
+			require.Equal(t, billing.SubscriptionActive, onlySubscription(t, w.alpha, customer).Status)
+			w.clock.Advance(2 * time.Hour)
+			runRegistered(t, fleet, "openrails.billing_pass", 1)
+			require.Equal(t, billing.SubscriptionUnverified, onlySubscription(t, w.alpha, customer).Status)
+			require.True(t, entitledTo(t, w.alpha, customer, "ccbill:member"), "unverified keeps access")
+		})
 	})
 	t.Run("OR-J15-S72/a-complete-provider-refresh-queues-no-due-work", func(t *testing.T) {
 		a, _ := newNMIWorld(t)
@@ -188,7 +224,7 @@ func TestDueWork(t *testing.T) {
 		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
 		var queued int
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema + "_river", "river_job"}.Sanitize()+
-			" WHERE kind IN ('openrails.dunning', 'openrails.usage_orders', 'openrails.billing_pass')").Scan(&queued))
+			" WHERE kind IN ('openrails.dunning', 'openrails.usage_invoices', 'openrails.billing_pass')").Scan(&queued))
 		require.Zero(t, queued, "what falls due waits for the hourly billing pass; a refresh queues none of it")
 	})
 	t.Run("OR-J29-S70/a-grant-commits-with-its-customers-convergence", func(t *testing.T) {

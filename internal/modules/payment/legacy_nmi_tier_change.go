@@ -153,7 +153,13 @@ func (s *PurchaseService) previewProviderNMITierChange(ctx context.Context, resp
 		resp.Message = fmt.Sprintf("No charge now. The plan changes to %s on %s, then renews at %s.", product.DisplayName, end.UTC().Format("January 2, 2006"), formatMinorAmount(target.Amount, target.Currency))
 		return resp, nil
 	}
-	quote, err := QuoteKeepBoundaryUpgrade(providerUpgradeOf(sub, current, target), now)
+	paid, err := periodKept(ctx, s.SubscriptionService.Database(), sub, current.Currency)
+	if err != nil {
+		return nil, err
+	}
+	upgrade := providerUpgradeOf(sub, current, target)
+	upgrade.Paid = paid
+	quote, err := QuoteKeepBoundaryUpgrade(upgrade, now)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +170,7 @@ func (s *PurchaseService) previewProviderNMITierChange(ctx context.Context, resp
 
 // processProviderNMITierChange freezes the change and runs it as one durable
 // operation (nmi_upgrade_intent.go). The same Idempotency-Key replays it.
-func (s *PurchaseService) processProviderNMITierChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity, newPrice *models.Price, newProduct *models.Product, sub *models.Subscription, action string) (*TierChangeResponse, error) {
+func (s *PurchaseService) processProviderNMITierChange(ctx context.Context, req *SubscriptionChangeRequest, user *CustomerIdentity, newPrice *models.Price, newProduct *models.Product, sub *models.Subscription, action string) (*TierChangeResponse, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -220,7 +226,13 @@ func (s *PurchaseService) processProviderNMITierChange(ctx context.Context, req 
 	}
 	amount := int64(0)
 	if !downgrade {
-		quote, err := QuoteKeepBoundaryUpgrade(providerUpgradeOf(sub, current, newPrice), now)
+		paid, err := periodKept(ctx, s.SubscriptionService.Database(), sub, current.Currency)
+		if err != nil {
+			return nil, err
+		}
+		upgrade := providerUpgradeOf(sub, current, newPrice)
+		upgrade.Paid = paid
+		quote, err := QuoteKeepBoundaryUpgrade(upgrade, now)
 		if err != nil {
 			return nil, err
 		}

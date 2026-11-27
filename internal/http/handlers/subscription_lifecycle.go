@@ -377,7 +377,7 @@ func writeMySubscription(r *httprequest.Request, userID string, id uuid.UUID, ne
 }
 
 func mySubscription(r *httprequest.Request, userID string, id uuid.UUID) (billing.Subscription, bool) {
-	subscription, err := r.State.UserSubscriptionService.GetUserSubscriptionByID(r.Request.Context(), userID, id)
+	subscription, err := r.State.CustomerSubscriptionService.GetCustomerSubscriptionByID(r.Request.Context(), userID, id)
 	if err != nil {
 		if errors.Is(err, subscriptions.ErrSubscriptionNotFound) {
 			writeRefusal(r, err, "subscription not found")
@@ -392,7 +392,7 @@ func mySubscription(r *httprequest.Request, userID string, id uuid.UUID) (billin
 		return billing.Subscription{}, false
 	}
 	out = one[0]
-	payer, ok := selfAccountPayer(r)
+	customer, ok := selfAccountCustomer(r)
 	if !ok {
 		return billing.Subscription{}, false
 	}
@@ -401,7 +401,7 @@ func mySubscription(r *httprequest.Request, userID string, id uuid.UUID) (billin
 		r.InternalError("billing service unavailable", err)
 		return billing.Subscription{}, false
 	}
-	if out.Recovery, err = svc.SubscriptionRecovery(r.Request.Context(), payer, id); err != nil {
+	if out.Recovery, err = svc.SubscriptionRecovery(r.Request.Context(), customer, id); err != nil {
 		r.InternalError("subscription recovery unavailable", err)
 		return billing.Subscription{}, false
 	}

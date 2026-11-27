@@ -47,7 +47,7 @@ type MyEntitlementListQuery struct {
 
 // SelfListEntitlements is one page of the customer's own keys.
 func SelfListEntitlements(r *httprequest.Request) {
-	payer, ok := selfAccountPayer(r)
+	customer, ok := selfAccountCustomer(r)
 	if !ok {
 		return
 	}
@@ -55,7 +55,7 @@ func SelfListEntitlements(r *httprequest.Request) {
 	if !bindList(r, &query, &query.PageRequest) {
 		return
 	}
-	listEntitlements(r, billing.EntitlementListParams{PageRequest: query.PageRequest, CustomerIDs: []billing.CustomerID{billing.CustomerID(payer)}, Prefix: query.Prefix, At: query.At})
+	listEntitlements(r, billing.EntitlementListParams{PageRequest: query.PageRequest, CustomerIDs: []billing.CustomerID{billing.CustomerID(customer)}, Prefix: query.Prefix, At: query.At})
 }
 
 // entitlementCursor is the last row of a page of held keys.

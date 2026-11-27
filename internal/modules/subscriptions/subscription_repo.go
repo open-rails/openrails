@@ -226,6 +226,12 @@ func (r *SubscriptionRepo) updateAt(ctx context.Context, s *models.Subscription,
 		if rows < 1 {
 			return fmt.Errorf("%w: subscription %s changed since it was read (%s, caller %s)", ErrSubscriptionMoved, s.ID, s.LifecycleDecision(), callerName(2))
 		}
+		if (s.LoadedStatus() == models.StatusPastDue || s.LoadedStatus() == models.StatusAwaitingMethod || s.LoadedStatus() == models.StatusUnverified) &&
+			(s.Status == models.StatusActive || s.Status == models.StatusCanceled) {
+			if _, err := r.db.Gen(ctx).ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: scopeMerchantID.UUID(), FindingType: FindingTerminalHeld, SubjectKey: s.ID.String()}); err != nil {
+				return fmt.Errorf("resolve held terminal outcome for %s: %w", s.ID, err)
+			}
+		}
 		s.LifecycleRev++
 		s.RowVersion++
 		s.RememberLifecycle()
@@ -876,26 +882,7 @@ func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rail
 	return out, nil
 }
 
-// ListOverdueRebills returns a page, after the (period end, id) cursor, of
-// NMI schedules whose period ended before cutoff with neither an attempt nor a
-// recorded miss for that cycle, and no failed look waiting out its backoff at
-// now.
-func (r *SubscriptionRepo) ListOverdueRebills(ctx context.Context, cutoff, now time.Time, after DueDunningCursor) ([]*models.Subscription, error) {
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	rows, err := r.db.Gen(ctx).ListOverdueRebills(ctx, gen.ListOverdueRebillsParams{
-		MerchantID: scopeMerchantID.UUID(), Cutoff: cutoff, Now: now,
-		AfterDueAt: after.DueAt, AfterID: after.ID, RowLimit: DueDunningBatch,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return r.manyWithDetails(ctx, rows)
-}
-
-// GetLatestResumableCanceled returns the payer's most recent canceled
+// GetLatestResumableCanceled returns the customer's most recent canceled
 // subscription whose paid period has not elapsed (resume candidate), or
 // pgx.ErrNoRows.
 func (r *SubscriptionRepo) GetLatestResumableCanceled(ctx context.Context, tenantSubjectID uuid.UUID, now time.Time) (*models.Subscription, error) {

@@ -37,18 +37,10 @@ const (
 	QueueBilling = "billing"
 	KindDunning  = "openrails.dunning"
 
-	// dueRecheckMin is the shortest wait of a row the pass left unchanged.
-	dueRecheckMin = time.Minute
-
 	// dunningMerchantBatch is one page of the merchants with due work. The
 	// work queue is indexed on the due-dunning predicate, so a pass costs its
 	// ACTIVITY, never the size of the merchant directory.
 	dunningMerchantBatch = 500
-
-	// dueRecheckMax bounds how long a row the pass left unchanged waits before
-	// it is looked at again: an operator's switch or a fixed configuration
-	// takes effect within it.
-	dueRecheckMax = time.Hour
 )
 
 // dunningOutcome classifies what a dunning pass did with one subscription.
@@ -68,7 +60,7 @@ const (
 	// resolved the obligation between this pass's scan and its admission.
 	dunningOutcomeSettled
 	// dunningOutcomeRefused: the row was left as it was (held, refused,
-	// unarmed); it waits for its recheck.
+	// unarmed); it is due again at the next pass.
 	dunningOutcomeRefused
 )
 
@@ -206,14 +198,12 @@ func (w *DunningWorker) due(ctx context.Context) error {
 				for _, sub := range dueSubscriptions {
 					outcome, processErr := w.processSubscription(mctx, &sub, lifecycle, priceSvc, materialize)
 					// One subscription's refusal never fails the pass: it becomes a
-					// standing operator finding, and the row waits for its recheck.
+					// standing operator finding, and the row is due again at the
+					// next pass; one left a day is the pass's overdue report.
 					if err := w.recordSubscriptionOutcome(mctx, &sub, processErr); err != nil {
 						merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, err))
 					}
 					if outcome == dunningOutcomeRefused || processErr != nil {
-						if err := w.deferDue(mctx, &sub, now); err != nil {
-							merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, err))
-						}
 						failCount++
 						continue
 					}
@@ -270,20 +260,22 @@ func (w *DunningWorker) DueBy(ctx context.Context, at time.Time) (bool, error) {
 	return len(ids) > 0, err
 }
 
-// overdueRenewals moves each provider-billed renewal still unconfirmed
-// reconcile.PeriodGrace after its period to unverified: a clock reading is
-// not evidence, so it only asks the provider. The row leaves the due set.
+// overdueRenewals moves each provider-billed renewal still unpaid past its
+// rail's deadline to unverified, access kept: reconcile.NMIRebillDeadline for
+// an NMI schedule, reconcile.PeriodGrace for Stripe and CCBill. A clock
+// reading is not evidence, so it only asks the provider: the verifier reads
+// the row at once. The row leaves the due set.
 func (w *DunningWorker) overdueRenewals(ctx context.Context, now time.Time) error {
 	if w.Lifecycle == nil {
 		return errors.New("overdue renewals: lifecycle not wired")
 	}
-	before := now.Add(-reconcile.PeriodGrace)
+	cutoffs := overdueCutoffs{nmi: now.Add(-reconcile.NMIRebillDeadline), other: now.Add(-reconcile.PeriodGrace)}
 	postures := controls.View{DB: w.DB}
 	var workErr error
 	after := uuid.Nil
 	for {
 		merchantIDs, err := w.DB.GenDirectory().ListOverdueRenewalMerchants(ctx, gen.ListOverdueRenewalMerchantsParams{
-			OverdueBefore: before, AfterMerchantID: after, MerchantLimit: dunningMerchantBatch,
+			NmiOverdueBefore: cutoffs.nmi, OverdueBefore: cutoffs.other, AfterMerchantID: after, MerchantLimit: dunningMerchantBatch,
 		})
 		if err != nil {
 			return errors.Join(workErr, fmt.Errorf("overdue renewals: list merchants: %w", err))
@@ -293,7 +285,7 @@ func (w *DunningWorker) overdueRenewals(ctx context.Context, now time.Time) erro
 				if p := postures.Posture(ctx, mid); p.ReadOnly() {
 					return nil
 				}
-				return w.overdueMerchantRenewals(ctx, mid, before)
+				return w.overdueMerchantRenewals(ctx, mid, cutoffs)
 			}); err != nil {
 				workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", mid, err))
 			}
@@ -305,13 +297,17 @@ func (w *DunningWorker) overdueRenewals(ctx context.Context, now time.Time) erro
 	}
 }
 
-func (w *DunningWorker) overdueMerchantRenewals(ctx context.Context, mid uuid.UUID, before time.Time) error {
+// overdueCutoffs are the period ends a provider-billed renewal unpaid since
+// is overdue before: NMI's, and Stripe's and CCBill's.
+type overdueCutoffs struct{ nmi, other time.Time }
+
+func (w *DunningWorker) overdueMerchantRenewals(ctx context.Context, mid uuid.UUID, cutoffs overdueCutoffs) error {
 	var merchantErr error
 	var afterAt time.Time
 	afterID := uuid.Nil
 	for {
 		rows, err := w.DB.Gen(ctx).ListOverdueRenewals(ctx, gen.ListOverdueRenewalsParams{
-			MerchantID: mid, OverdueBefore: before, AfterDueAt: afterAt, AfterID: afterID, RowLimit: subscriptions.DueDunningBatch,
+			MerchantID: mid, NmiOverdueBefore: cutoffs.nmi, OverdueBefore: cutoffs.other, AfterDueAt: afterAt, AfterID: afterID, RowLimit: subscriptions.DueDunningBatch,
 		})
 		if err != nil {
 			return errors.Join(merchantErr, err)
@@ -350,18 +346,6 @@ func (w *DunningWorker) recordSubscriptionOutcome(ctx context.Context, sub *mode
 	return err
 }
 
-// deferDue takes a row the pass left unchanged out of the due set until its
-// recheck: half the time it has been due, at least one pass interval and at
-// most dueRecheckMax.
-func (w *DunningWorker) deferDue(ctx context.Context, sub *models.Subscription, now time.Time) error {
-	due := subscriptions.DueDunningCursorOf(sub).DueAt
-	if due.IsZero() {
-		due = now
-	}
-	wait := min(max(now.Sub(due)/2, dueRecheckMin), dueRecheckMax)
-	return w.DB.Gen(ctx).DeferDueSubscription(ctx, gen.DeferDueSubscriptionParams{MerchantID: sub.MerchantID, ID: sub.ID, RecheckAt: now.Add(wait)})
-}
-
 // processSubscription takes one due subscription's next step.
 func (w *DunningWorker) processSubscription(
 	ctx context.Context,
@@ -397,6 +381,21 @@ func (w *DunningWorker) processSubscription(
 			blocked = gate.Reason
 		}
 		if _, err := lifecycle.ExpireAwaitingMethod(ctx, w.DB, sub, blocked); err != nil {
+			return dunningOutcomeFailed, err
+		}
+		if blocked != "" {
+			return dunningOutcomeRefused, nil
+		}
+		return dunningOutcomeWindowExpired, nil
+	}
+	if sub.TerminalHeld() {
+		blocked := ""
+		if materialize {
+			blocked = "a limited write posture holds local terminal cancellations"
+		} else if gate := destructive.New(w.DB).Check(ctx, sub.MerchantID); !gate.Allowed {
+			blocked = gate.Reason
+		}
+		if _, err := lifecycle.EndHeldOutcome(ctx, w.DB, sub, blocked); err != nil {
 			return dunningOutcomeFailed, err
 		}
 		if blocked != "" {

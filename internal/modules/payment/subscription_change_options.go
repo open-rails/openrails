@@ -21,12 +21,12 @@ import (
 // re-derives the tier rules; a subscription that cannot change at all answers
 // why. Staff pass the subscription's customer as user, and every preview is
 // then a staff change: one that waits for the next renewal.
-func (s *PurchaseService) SubscriptionChangeOptions(ctx context.Context, subscriptionID uuid.UUID, user *UserIdentity, staff bool) ([]billing.SubscriptionChangeOption, error) {
+func (s *PurchaseService) SubscriptionChangeOptions(ctx context.Context, subscriptionID uuid.UUID, user *CustomerIdentity, staff bool) ([]billing.SubscriptionChangeOption, error) {
 	if s.SubscriptionService == nil || s.ProductService == nil || s.PriceService == nil {
 		return nil, errors.New("subscription change services unavailable")
 	}
 	sub, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
-	if payer := identity.CustomerIDFromString(user.ID); err != nil || payer.IsZero() || sub.CustomerID != payer.UUID() {
+	if customer := identity.CustomerIDFromString(user.ID); err != nil || customer.IsZero() || sub.CustomerID != customer.UUID() {
 		return nil, &TierChangeError{Code: billing.CodeSubscriptionNotFound, Message: "subscription not found"}
 	}
 	if err := validateTierChangeSubscriptionStatus(sub); err != nil {

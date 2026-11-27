@@ -17,23 +17,23 @@ type BillingPolicy struct {
 	SpendWindows []BudgetWindowPolicy `json:"spend_windows,omitempty"`
 
 	// BadSpendWindows are wasted/failed-spend grace windows for the direct
-	// payer: at most Limit of wasted spend is forgiven per window, and overage
+	// customer: at most Limit of wasted spend is forgiven per window, and overage
 	// is charged at report time.
 	BadSpendWindows []BudgetWindowPolicy `json:"bad_spend_windows,omitempty"`
 
-	// CollectionThresholdAmount (micros) is when this payer's accrued arrears is
-	// invoiced. Overrides its currency's usage_billing collection_threshold for payers
+	// CollectionThresholdAmount (micros) is when this customer's accrued arrears is
+	// invoiced. Overrides its currency's usage_billing collection_threshold for customers
 	// bound to this policy; unset defers to it.
 	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty"`
 
-	// CollectionCycleBoundary is declarable and refused: a payer's statement
+	// CollectionCycleBoundary is declarable and refused: a customer's statement
 	// periods must tile its lifetime, and rebinding a policy mid-cycle would
 	// bill a stretch twice or never. It stays merchant-wide
 	// (invoice.billing_period_boundary).
 	CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
 
 	// DelinquencyGraceDays / DelinquencyAmountFloor override the merchant's
-	// arrears_grace_days / its currency's delinquency_floor for bound payers;
+	// arrears_grace_days / its currency's delinquency_floor for bound customers;
 	// unset defers to them. DelinquencyAmountFloor is in PolicyCurrency and
 	// applies to debt in it.
 	DelinquencyGraceDays   *int   `json:"delinquency_grace_days,omitempty"`

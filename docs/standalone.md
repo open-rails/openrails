@@ -125,7 +125,7 @@ openrails catalog apply catalog.yaml --config config.yaml --merchant onlydemo
 https://billing.example.com/admin/setup#token=…
 ```
 
-Open it, create the owner account (email, username and password) and enroll the second factor its first sign-in asks for. The link is valid 24 hours and only its hash is stored; a restart while it lives logs only its expiry, a start after it expires logs a new one, and once anyone holds a root role it creates nobody. The process that runs the workers logs it (`run-server`, or `run-worker` beside `run-server --no-workers`). From the server's shell, `openrails setup-link` issues a fresh one that replaces a live link and creates an owner even while operators exist: the break-glass. Both need the console, whose `/admin/setup` page opens them.
+Open it, create the owner account (email, username and password) and enroll the second factor its first sign-in asks for. Signed in, the console asks for the first merchant's name (and, where Vault holds configuration, its display name; you can skip it) and creates it owned by you, then its overview asks you to connect a payment provider: no customer can pay until a PSP is armed. Where Vault holds configuration the step leads to its PSPs page; from a file, declare the PSP in the manifest ([below](#the-merchant-manifest)) and restart. A server whose manifest already declares merchants skips the merchant step. The link is valid 24 hours and only its hash is stored; a restart while it lives logs only its expiry, a start after it expires logs a new one, and once anyone holds a root role it creates nobody. The process that runs the workers logs it (`run-server`, or `run-worker` beside `run-server --no-workers`). From the server's shell, `openrails setup-link` issues a fresh one that replaces a live link and creates an owner even while operators exist: the break-glass. Both need the console, whose `/admin/setup` page opens them.
 
 An init job can seed operators instead, then no link is logged: a bootstrap manifest user holding a root role, with a password they reset through the console (which needs `email_smtp`), as a deployment with `admin_console.disabled` must:
 
@@ -300,7 +300,7 @@ A merchant renames at most every 72 hours, and a former name forwards and stays 
 | `rate_limits.subscribe.requests_per_minute` | `20` | a customer's subscription changes |
 | `rate_limits.webhook.requests_per_minute` | `1200` | provider callbacks |
 | `captcha.provider`, `captcha.site_key`, `captcha.secret_key` | `turnstile` | both keys set turn captcha on; `turnstile`, `recaptcha-v3` or `hcaptcha` |
-A bucket set to 0 is unlimited: a deployment whose gateway limits sets every bucket to 0. Captcha is on only with its keys. The customers' own cancellations and card removals, and staff destructive actions, have fixed limits ([abuse limits](#abuse-limits), [destructive holds](#destructive-holds)). The example file sets the shipped limits explicitly:
+A bucket set to 0 is unlimited: a deployment whose gateway limits sets every bucket to 0. Captcha is on only with its keys. Customers' own card removals and staff destructive actions have fixed limits ([abuse limits](#abuse-limits), [destructive holds](#destructive-holds)). The example file sets the shipped limits explicitly:
 
 ```yaml
 rate_limits:
@@ -555,9 +555,9 @@ prefix `openrails_st_<key_id>` identifies it. Grant a backend only what it needs
 | read or act on customers | `merchant:customer:read`, `merchant:customer:manage` |
 
 Root operators hold the `root:` names, plus `billing.RootMerchantsRead`,
-`billing.RootMerchantsDelete`, `billing.RootMerchantsRestore` and
-`billing.RootWorkerHealthRead` for the server's merchant directory and worker
-health. A person's token is
+`billing.RootMerchantsCreate`, `billing.RootMerchantsDelete`,
+`billing.RootMerchantsRestore` and `billing.RootWorkerHealthRead` for the
+server's merchant directory and worker health. A person's token is
 refused on `/v1/app` (`403 application_required`).
 
 ### The console
@@ -566,7 +566,9 @@ refused on `/v1/app` (`403 application_required`).
 
 The console exchanges the session's token for one bound to the chosen merchant (RFC 8693 through the server's `openrails-console` client), refused where the person holds no role there and no root role. The session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in; a revoked session answers `401 credential_revoked` at once.
 
-Operators invite operators on **Team** (`/admin/team`): root's people, an invitation by email with a root role. Where `email_smtp` is unset the invitation is not sent and Team shows its link to share. The invitee opens it at `/admin/invite`, registers and proves the address with an emailed code (so someone new needs `email_smtp`), or accepts it into the account they hold. The console shows `/admin/setup`, `/admin/invite` and Team only where the server's AuthKit serves its people and groups (`GET /auth/v1/capabilities` `route_groups` names `groups`).
+A root operator holding `billing.RootMerchantsCreate` (the owner and the `merchant-directory-admin` role) creates a merchant with **New merchant** (`/admin/merchants/new`) and owns its team. A merchant's overview asks to connect a payment provider while none of its PSPs is armed (`armed` in `GET /v1/merchant/psps`).
+
+Operators invite operators on **Team** (`/admin/team`): root's people, an invitation by email with a root role. The invitee opens its link at `/admin/invite` and registers, or accepts it into the account they hold. With `email_smtp` the link is emailed, and registering the invited address with it proves the address. Without it nothing is sent and Team shows the link: it is the credential, so hand it over privately (whoever uses it first gets the role); the invitee registers at once and the address stays unverified. The console shows `/admin/setup`, `/admin/invite` and Team only where the server's AuthKit serves its people and groups (`GET /auth/v1/capabilities` `route_groups` names `groups`).
 
 The flow is in [authentication](authentication.md#standalone-the-servers-own-accounts). `admin_console.disabled` omits the console.
 
@@ -645,11 +647,11 @@ Besides the hosts you configure (database, Redis, Vault, SMTP, trusted issuers' 
 
 ## Event store
 
-Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage item is a raw event there (kept 90 days: what was reported, its identity and its priced meter cells), with the rollups limits, balances and history read (limit windows, pricing periods, minutes, and history by UTC hour, kept with no TTL and grouped into the merchant's `accounting.timezone` days as it is read). PostgreSQL keeps what the ledger took (`usage_postings`), what usage it has not taken yet costs at its provisional prices (`usage_pending`, `usage_pending_amounts`: the balance deducts it at once) and the rate cards usage was priced under (`usage_card_prints`). Usage posts once a day, after the day ends in the merchant's `accounting.timezone` (UTC by default), in the billing pass (`openrails.usage_posting`), before a usage invoice and before a credit lot's expiry, revocation or refund. The exact price of a period is read from ClickHouse when it posts: back it up nightly ([backup and restore](#backup-and-restore)).
+Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage item is a raw event there (kept 90 days: what was reported, its identity and its priced meter cells), with the rollups limits and history read (limit windows, and history by UTC quarter hour, kept with no TTL and grouped into the merchant's `accounting.timezone` days as it is read). PostgreSQL keeps what usage settled, per pricing period and meter (`usage_totals`: its provisional price, which the balance deducts at once, until a posting takes it), each posting's receipt (`usage_receipts`) and the rate cards usage was priced under (`usage_card_prints`). Usage and running charges post once a day, after the day ends in the merchant's `accounting.timezone` (UTC by default), in the billing pass (`openrails.usage_posting`), before a usage invoice and before a credit lot's expiry, revocation or refund. A posting prices each period's total from PostgreSQL alone; ClickHouse holds the usage history and limit counts: back it up nightly ([backup and restore](#backup-and-restore)).
 
-Without an event store (`clickhouse.url` empty, or the default one unreachable at boot) the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage invoices, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken starts without ClickHouse: only the store can post that usage, so each merchant with some gets a `consistency.pending_usage` finding, and the customers it belongs to read their balances, pending usage included, but their usage cannot post (`event_store_required`), so their lots cannot expire, be revoked or refunded, until the store is attached; every other customer bills as before. Replicas starting together take turns migrating ClickHouse under a PostgreSQL advisory lock.
+Without an event store (`clickhouse.url` empty, or the default one unreachable at boot) the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage invoices, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken starts without ClickHouse: that usage is PostgreSQL's, so it reads, posts and bills as before. Replicas starting together take turns migrating ClickHouse under a PostgreSQL advisory lock.
 
-The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead. Where none exists, `openrails usage attach --actor NAME --reason TEXT` records the configured ClickHouse as the store; with usage pending it also needs `--discard-pending`, which deletes it and records each merchant's discard as a `usage_discard` maintenance run. While ClickHouse is out of reach, syncs answer 503 `service_unavailable` (gates spend their offline share), and pending usage cannot post; balances read and move as before.
+The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead. Where none exists, `openrails usage attach` records the configured ClickHouse as the store: usage not yet posted stays and posts, and the new store starts without the old one's history and limit counts. While ClickHouse is out of reach, syncs answer 503 `service_unavailable` (gates spend their offline share); balances read and move and pending usage posts as before.
 
 ## Scaling and Redis
 
@@ -672,7 +674,7 @@ count, primary or sticky session.
 - **Background work:** every instance with workers takes River jobs, each job on
   one instance. River's leader alone schedules periodic work; a crashed leader
   is replaced within about 20 seconds. Each instance works up to 20 billing
-  jobs at once, plus the `psp_import`, `provider_refresh` and `nmi_history` queues. Outside
+  jobs at once, plus the `psp_import` and `provider_refresh` queues. Outside
   River every instance runs the Solana Pay poller (leased claims) and checks its
   PSP credentials at start, on change and before a write once its verdict is an
   hour old.
@@ -792,7 +794,7 @@ openrails merchant destructive arm --merchant shop --by you --reason "reviewed f
 openrails merchant destructive disarm --all-merchants --by you --reason "incident: mass cancellation observed"
 ```
 
-A held cancel logs `convergence cancel held; the subscription keeps its access`. Every destructive act reads the control first, so a change reaches every instance at its next check. Until the merchant is armed a staff cancel of an NMI- or CCBill-owned membership is `409 provider_cancel_held`: OpenRails will not cancel locally while the provider would keep charging. A customer's own cancel is never held: the provider stops billing and the subscription ends at period end, refused only by the [customer budget](#abuse-limits).
+A held cancel logs `convergence cancel held; the subscription keeps its access`. Every destructive act reads the control first, so a change reaches every instance at its next check. Until the merchant is armed a staff cancel of an NMI- or CCBill-owned membership is `409 provider_cancel_held`: OpenRails will not cancel locally while the provider would keep charging. A customer's own cancel is never held or refused by the [customer budget](#abuse-limits): the provider stops billing and the subscription ends at period end.
 
 **Cancellation caps.** A provider read, or a billing import's cancels of subscriptions it did not create, may cancel at most `min(25, max(3, 5% of the PSP's live linked book))` subscriptions per PSP, or the whole book when it has at most 5. Over that it cancels none, halts the merchant's pass and raises `pull.cancellation.capped`; a held import cancel keeps the subscription `unverified` with access. The usual causes are a misdeclared `account_id`, a credential rotated onto a sibling sub-account, or a provider returning a short page.
 
@@ -842,7 +844,7 @@ Counting is per minute, per bucket and per client IP; a request over the limit i
 
 - **Captcha.** With captcha on, a subject reaching three times a purchase, payment or subscribe limit in a window is challenged for 15 minutes: `403 captcha_required` with `X-Captcha-Required: true` until it sends a valid `X-Captcha-Token`. Staff, console and server-to-server routes never see a captcha.
 - **Card testing.** A decline counts against the customer and the client address (IPv6: the /64). Before any provider call, a card save or payment is refused (`429 card_attempts_blocked`) when its customer or its address has 6 declines in 15 minutes (blocked for the window) or 10 in 24 hours (for the day): a customer with no declines of its own is refused from a blocked address. 100 declines in 24 hours from at least 25 customers and 25 addresses is attack mode for the merchant: with captcha on, every request to its card routes must solve one, and a single decline in the last 15 minutes, by the customer or from its address, refuses the attempt, so a customer without a recent decline is still refused from an address that has one.
-- **Customers' own cancellations and card removals** share one merchant-wide budget, enforced even with every `rate_limits` bucket at 0: per rolling day the larger of 10 customers or 1 % of customers who paid in the last 30 days, per rolling hour the larger of 5 or one per 400 paying customers. Staff and host cancellations count under the [destructive holds](#destructive-holds) instead. A refusal is 429 with the wait, changes nothing, and records a finding that alerts staff, naming the wave's cancellations, card removals and start.
+- **Customers' own card removals** have a merchant-wide budget, enforced even with every `rate_limits` bucket at 0: per rolling day the larger of 10 customers or 1 % of customers who paid in the last 30 days, per rolling hour the larger of 5 or one per 400 paying customers. Customers' own cancellations never spend this budget and are never refused by it. Staff and host cancellations count under the [destructive holds](#destructive-holds) instead. A refused card removal is 429 with the wait, changes nothing, and records a finding that alerts staff, naming the wave's card removals and start.
 - **Admin lockouts.** A person making more than 100 staff grants in a minute, counted by item (credits, access, limit adjustments, customer updates), or more than 10 off-channel changes (recorded payments, subscription changes) is locked out of them for an hour; `openrails admin-lockouts unlock <user-id>` ends one (with Redis; without it a lockout lives in the serving process).
 
 ## Provider intents
@@ -869,9 +871,23 @@ order search also allows release with an actor and reason attesting release
 without proof of nonexecution. Such sales release automatically after 24 hours
 from submission when the order search is empty. Both raise a high finding for
 later reconciliation; the terminal intent cannot accept a later receipt. It never
-resends. Webhooks are at-least-once and handlers idempotent;
+resends. NMI engine renewals (`subscription_collection`) accept an exact receipt
+or `--not-executed` when the order shows one definitive decline or is empty
+with operator attestation. A decline enters dunning; an empty-order release
+reopens the renewal invoice for the next attempt under the same obligation order,
+whose pre-submission read catches a late charge. Renewals never release
+automatically. Stripe engine renewals do not accept operator resolution.
+Webhooks are at-least-once and handlers idempotent;
 there is no local inbound queue, so a long outage is backfilled with a provider
 refresh.
+
+An unresolved NMI refund raises `life.refund.unresolved`. It accepts
+`--not-executed` when NMI's transaction report shows no refund of the original
+sale since the refund was requested that OpenRails has not recorded, with
+`--actor` and `--reason` attesting release. A refund NMI refused outright is
+released automatically.
+
+NMI chargebacks match a single charge by amount and card last four digits within ±7 days; when no single charge matches, find it at NMI and run `openrails disputes attach --merchant NAME --dispute dsp_... --payment pay_... --actor NAME --reason TEXT` to book it and end what it bought.
 
 ## Provider refresh
 
@@ -953,7 +969,7 @@ Periods are constants, the same for every merchant. Each table's comment states 
 
 | Table | Deleted |
 |---|---|
-| `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
+| `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles` | 25 months |
 | `provider_intents` | instruction-only intents 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
 | `invoice_attempts`; `invoices`, `invoice_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed invoices with no attempt, 397 days |
@@ -963,15 +979,15 @@ Periods are constants, the same for every merchant. Each table's comment states 
 | `webhook_events` | 90 days after completion |
 | `customer_messages` | two years (731 days) after created |
 | `idempotency_keys`, `solana_pay_references` | at expiry, after the 7-day watch |
-| `user_destructive_reservations` | 24 hours |
-| `limit_windows` | 61 days after `window_ends_at`; a lifetime or rate limit's row stays |
+| `customer_destructive_reservations` | 24 hours |
+| `limit_windows` | a day after `window_ends_at`, 61 days once it reached capacity; a lifetime or rate limit's row stays |
 | `leases` (with their in-flight reports), `limit_adjustments` | 61 days after the last sync, or after the adjustment |
 | `webhook_health_daily` | 13 months |
 | `periodic_leases` | a kind unscheduled for 30 days |
 
-The event store's tables expire by their own TTLs: raw usage events 90 days after they occurred, a pricing period's quantities 100 days after it starts, minutes after 2 days, and a limit window's usage 61 days after it ends (a lifetime limit's stays). Usage history, by UTC hour, has no TTL; a merchant purge deletes its rows.
+The event store's tables expire by their own TTLs: raw usage events 90 days after they occurred and a limit window's usage a day after it ends (a lifetime limit's stays). Usage history, by UTC quarter hour, event type and meter, has no TTL; a merchant purge deletes its rows.
 
-The hourly cleanup deletes 1,000 rows per statement and at most 50,000 per merchant per pass. `subscription_status_transitions` and `subscription_billing_changes` refuse other deletes (`billing.guard_retention_delete`). What integrators see: usage may be dated up to 35 days back; a lease answers resends for 61 days after its last sync; usage reports reach back about 26 months.
+The hourly cleanup deletes 1,000 rows per statement and at most 50,000 per merchant per pass. `subscription_status_transitions` and `subscription_billing_changes` refuse other deletes (`billing.guard_retention_delete`). What integrators see: usage may be dated up to 35 days back; a lease answers resends for 61 days after its last sync, and usage settled after its limit window ended counts toward none; usage reports and series read all of history, and by invoker the raw events' 90 days.
 
 ## Backup and restore
 
@@ -1043,8 +1059,9 @@ the merchant the token is bound to.
 | `openrails merchant controls`, `merchant writes`, `merchant rebills`, `merchant destructive` | a merchant's controls ([merchant controls](#merchant-controls)) |
 | `openrails merchant purge` | record a purge inventory, or with it typed back delete the merchant permanently |
 | `openrails book status`, `openrails book arm --by NAME` | the book identity |
-| `openrails usage attach --actor NAME --reason TEXT [--discard-pending]` | record the configured ClickHouse as the event store in place of a lost one; `--discard-pending` discards usage not yet posted, recorded per merchant |
+| `openrails usage attach` | record the configured ClickHouse as the event store in place of a lost one; usage not yet posted stays |
 | `openrails provider-refresh --merchant NAME` | queue a provider refresh and print its job |
+| `openrails disputes attach` | book an unmatched NMI chargeback against the charge it disputes |
 | `openrails intents`, `openrails intents resolve`, `openrails intents-log` | the provider intent ledger |
 | `openrails proposals list`, `proposals show`, `proposals approve`, `proposals dismiss`, `proposals foreign`, `proposals runs` | review what provider reads propose |
 | `openrails prune`, `openrails prune list`, `openrails undo-run` | retire what a PSP no longer lists; reverse a run |

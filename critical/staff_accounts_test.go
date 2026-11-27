@@ -19,6 +19,7 @@ import (
 
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/helpers/smtp/smtptest"
+	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -112,13 +113,15 @@ func TestStaffAccounts(t *testing.T) {
 		require.NotContains(t, string(out), "#token=")
 	})
 
-	t.Run("OR-J01-S36/without-email-an-operators-invitation-answers-its-link-to-share", func(t *testing.T) {
-		// Behind the deployment's proxy: an address may invite once a minute.
+	t.Run("OR-J01-S36/without-email-an-operators-invitation-link-registers-its-invitee-once", func(t *testing.T) {
+		// Behind the deployment's proxy, so a second visitor has an address of
+		// its own: one address registers once a minute.
 		s := startStaffServer(t, newWorld(t), map[string]any{"trusted_proxies": []string{"127.0.0.1/32"}})
 		owner, session := s.owner(t)
 		// The Team page's invitation by email: none is sent, so its link is
-		// the inviter's to share.
-		status, raw := owner.call(t, http.MethodPost, "/auth/v1/groups/root/invitations", session, map[string]string{"email": "teammate@critical.invalid", "role": operatorRole})
+		// the inviter's to hand over.
+		const email = "teammate@critical.invalid"
+		status, raw := owner.call(t, http.MethodPost, "/auth/v1/groups/root/invitations", session, map[string]string{"email": email, "role": operatorRole})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var created struct {
 			Code, URL  string
@@ -128,48 +131,63 @@ func TestStaffAccounts(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &created))
 		require.False(t, created.Emailed, string(raw))
 		require.Equal(t, operatorRole, created.Invitation.Role)
-		require.Equal(t, "teammate@critical.invalid", created.Invitation.Email)
-		require.Equal(t, created.Code, linkFragment(t, created.URL, "/admin/invite", "invite_code"))
+		require.Equal(t, email, created.Invitation.Email)
+		code := linkFragment(t, created.URL, "/admin/invite", "invite_code")
+		require.Equal(t, created.Code, code)
+
+		// The link is the credential: its holder registers at once, the
+		// address unproven, and enrolls a second factor, an operator holding
+		// the invited role alone.
+		invitee := s.browser(t)
+		status, raw = invitee.register(t, email, "teammate", code)
+		require.Equal(t, http.StatusOK, status, "no code can be sent: the sign-up is answered at once: %s", raw)
+		mate, mateID := invitee.enroll(t, raw)
+		require.False(t, invitee.emailVerified(t, mate), "nothing proved the address")
+		require.True(t, invitee.consoleRoot(t, mate), "the invitee is an operator")
+		members := owner.rootMembers(t, session)
+		require.Len(t, members, 2, "root holds the owner and the invitee: %v", members)
+		require.Equal(t, operatorRole, members[mateID])
+
+		// Spent, the link registers nobody else.
+		stranger := s.browser(t)
+		stranger.forwardedFor = "203.0.113.7"
+		status, raw = stranger.register(t, "stranger@critical.invalid", "stranger", code)
+		require.Equal(t, http.StatusNotFound, status, string(raw))
+		require.Contains(t, string(raw), "invitation_not_found")
+		require.Len(t, owner.rootMembers(t, session), 2)
+
 		// An invite link, for an account that holds one, carries its code
 		// as link_code.
-		elsewhere := *owner
-		elsewhere.forwardedFor = "203.0.113.7"
-		status, raw = elsewhere.call(t, http.MethodPost, "/auth/v1/groups/root/invitations", session, map[string]string{"role": operatorRole})
+		status, raw = owner.call(t, http.MethodPost, "/auth/v1/groups/root/invitations", session, map[string]string{"role": operatorRole})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		require.NoError(t, json.Unmarshal(raw, &created))
 		require.Equal(t, created.Code, linkFragment(t, created.URL, "/admin/invite", "link_code"))
-		status, raw = owner.call(t, http.MethodGet, "/auth/v1/groups/root/invitations", session, nil)
-		require.Equal(t, http.StatusOK, status, string(raw))
-		require.Equal(t, 2, strings.Count(string(raw), `"role":"`+operatorRole+`"`), string(raw))
 	})
 
-	t.Run("OR-J01-S37/an-accepted-invitation-makes-the-invitee-an-operator", func(t *testing.T) {
+	t.Run("OR-J01-S37/an-emailed-invitation-proves-the-address-and-makes-the-invitee-an-operator", func(t *testing.T) {
 		mail := smtptest.Start(t, smtptest.Options{})
 		s := startStaffServer(t, newWorld(t), map[string]any{"email_smtp": map[string]any{"host": mail.Host, "port": mail.Port, "from": "ops@critical.invalid"}})
 		owner, session := s.owner(t)
 		const email = "teammate@critical.invalid"
 		status, raw := owner.call(t, http.MethodPost, "/auth/v1/groups/root/invitations", session, map[string]string{"email": email, "role": operatorRole})
 		require.Equal(t, http.StatusAccepted, status, "an emailed invitation answers nothing to share: %s", raw)
+		// Its code went to the address alone: the invitee reads it there.
 		link := regexp.MustCompile(`https://\S+/admin/invite#\S+`).FindString(mailTo(t, mail, email, "invited").Text)
 		code := linkFragment(t, link, "/admin/invite", "invite_code")
 
-		// The invitee signs up with it, proves the address and enrolls a
-		// second factor: an operator from the first request on.
+		// Registering the invited address with it proves the address, so no
+		// second code is sent; the invitee enrolls a second factor, an
+		// operator from the first request on.
 		invitee := s.browser(t)
-		status, raw = invitee.call(t, http.MethodPost, "/auth/v1/register", "", map[string]string{"identifier": email, "username": "teammate", "password": authtest.Password, "invite_code": code})
-		require.Equal(t, http.StatusAccepted, status, string(raw))
-		var pending struct{ Challenge string }
-		require.NoError(t, json.Unmarshal(raw, &pending))
-		verify := regexp.MustCompile(`Code: (\S+)`).FindStringSubmatch(mailTo(t, mail, email, "Verify").Text)
-		require.Len(t, verify, 2)
-		status, raw = invitee.call(t, http.MethodPost, "/auth/v1/verify/confirm", "", map[string]string{"challenge": pending.Challenge, "code": verify[1]})
+		status, raw = invitee.register(t, email, "teammate", code)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		mate, mateID := invitee.enroll(t, raw)
+		require.True(t, invitee.emailVerified(t, mate), "the emailed code proved the address")
+		for _, m := range mail.Messages() {
+			require.False(t, slices.Contains(m.To, email) && strings.Contains(m.Subject, "Verify"), "a second code was sent: %s", m.Subject)
+		}
 		require.True(t, invitee.consoleRoot(t, mate), "the invitee is an operator")
-		status, raw = owner.call(t, http.MethodGet, "/auth/v1/groups/root/members", session, nil)
-		require.Equal(t, http.StatusOK, status, string(raw))
-		require.Contains(t, string(raw), mateID)
-		require.Contains(t, string(raw), operatorRole)
+		require.Equal(t, operatorRole, owner.rootMembers(t, session)[mateID])
 	})
 
 	t.Run("OR-J01-S38/a-server-whose-staff-sign-in-elsewhere-advertises-no-groups-or-setup", func(t *testing.T) {
@@ -191,6 +209,76 @@ func TestStaffAccounts(t *testing.T) {
 		groups = fixtureRouteGroups(t, headless)
 		require.Contains(t, groups, "groups")
 		require.NotContains(t, groups, "setup")
+	})
+
+	t.Run("OR-J01-S39/a-root-operator-creates-a-merchant-from-the-console-and-owns-it", func(t *testing.T) {
+		s := startStaffServer(t, newWorld(t), vaultOverlay(t))
+		owner, session := s.owner(t)
+		ownerID := owner.userID(t, session)
+		before := owner.consoleMerchants(t, session)
+
+		// The console's New merchant, as its page sends it.
+		status, raw := owner.call(t, http.MethodPost, "/admin/merchants", session, map[string]string{"name": "acme-shop", "display_name": "Acme Shop"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var created consoleMerchant
+		require.NoError(t, json.Unmarshal(raw, &created))
+		require.Equal(t, "acme-shop", created.Slug)
+		require.Equal(t, "Acme Shop", created.DisplayName, "Vault holds configuration: the display name is written")
+		require.Equal(t, "owner", created.Role)
+		require.Equal(t, "merchant:owner", owner.groupMembers(t, session, created.ID)[ownerID], "the operator who created it owns its team")
+		after := owner.consoleMerchants(t, session)
+		require.Len(t, after, len(before)+1)
+		require.Contains(t, after, created.ID)
+		require.Equal(t, "Acme Shop", after[created.ID].DisplayName)
+
+		// A name held, a malformed one and an unknown field create nothing.
+		for _, refused := range []struct {
+			body   map[string]string
+			status int
+			code   string
+		}{
+			{map[string]string{"name": "acme-shop"}, http.StatusConflict, "resource_conflict"},
+			{map[string]string{"name": "Not A Name"}, http.StatusBadRequest, "invalid_param"},
+			{map[string]string{"name": "other-shop", "owner": ownerID}, http.StatusBadRequest, "unknown_field"},
+		} {
+			status, raw = owner.call(t, http.MethodPost, "/admin/merchants", session, refused.body)
+			require.Equal(t, refused.status, status, string(raw))
+			require.Contains(t, string(raw), refused.code)
+		}
+		require.Len(t, owner.consoleMerchants(t, session), len(after))
+	})
+
+	t.Run("OR-J01-S40/only-a-root-operator-holding-the-create-permission-creates-a-merchant", func(t *testing.T) {
+		// Behind the deployment's proxy, so the second invitee registers
+		// from an address of its own.
+		s := startStaffServer(t, newWorld(t), map[string]any{"trusted_proxies": []string{"127.0.0.1/32"}})
+		owner, session := s.owner(t)
+		status, raw := owner.call(t, http.MethodPost, "/admin/merchants", session, map[string]string{"name": "team-shop"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var shop consoleMerchant
+		require.NoError(t, json.Unmarshal(raw, &shop))
+		count := len(owner.consoleMerchants(t, session))
+
+		// The merchant's staff, who are no root operators.
+		staff := s.invitee(t, owner, session, shop.ID, "merchant:support", "shopsupport@critical.invalid", "shopsupport", "")
+		// An operator of the directory who reads it alone.
+		viewer := s.invitee(t, owner, session, "root", "root:merchant-directory-viewer", "dirviewer@critical.invalid", "dirviewer", "203.0.113.7")
+		for name, caller := range map[string]staffSession{"the merchant's staff": staff, "an operator without root:merchants:create": viewer} {
+			status, raw = caller.b.call(t, http.MethodPost, "/admin/merchants", caller.session, map[string]string{"name": "refused-shop"})
+			require.Equal(t, http.StatusForbidden, status, "%s: %s", name, raw)
+			require.Contains(t, string(raw), "permission_required")
+		}
+		require.True(t, viewer.b.consoleRoot(t, viewer.session), "the viewer is a root operator")
+		require.Contains(t, staff.b.consoleMerchants(t, staff.session), shop.ID, "the staff member reaches the merchant")
+
+		// No credential is refused; a file holds configuration, so a display
+		// name is refused before anything is created.
+		status, raw = s.browser(t).call(t, http.MethodPost, "/admin/merchants", "", map[string]string{"name": "refused-shop"})
+		require.Equal(t, http.StatusUnauthorized, status, string(raw))
+		status, raw = owner.call(t, http.MethodPost, "/admin/merchants", session, map[string]string{"name": "refused-shop", "display_name": "Refused"})
+		require.Equal(t, http.StatusConflict, status, string(raw))
+		require.Contains(t, string(raw), "merchant_config_read_only")
+		require.Len(t, owner.consoleMerchants(t, session), count, "nothing refused was created")
 	})
 }
 
@@ -346,6 +434,44 @@ func (b *staffBrowser) setup(t *testing.T, token, email, username string) (int, 
 	return b.call(t, http.MethodPost, "/auth/v1/setup", "", map[string]string{"token": token, "email": email, "username": username, "password": authtest.Password})
 }
 
+// register signs up with an invitation's code, as the console's
+// /admin/invite page does.
+func (b *staffBrowser) register(t *testing.T, email, username, code string) (int, []byte) {
+	t.Helper()
+	return b.call(t, http.MethodPost, "/auth/v1/register", "", map[string]string{"identifier": email, "username": username, "password": authtest.Password, "invite_code": code})
+}
+
+// emailVerified reports whether the session's account has proved its email.
+func (b *staffBrowser) emailVerified(t *testing.T, session string) bool {
+	t.Helper()
+	status, raw := b.call(t, http.MethodGet, "/auth/v1/me", session, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var me struct {
+		EmailVerified bool `json:"email_verified"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &me))
+	return me.EmailVerified
+}
+
+// rootMembers are root's people, each account id with its role.
+func (b *staffBrowser) rootMembers(t *testing.T, session string) map[string]string {
+	t.Helper()
+	status, raw := b.call(t, http.MethodGet, "/auth/v1/groups/root/members", session, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var page struct {
+		Data []struct {
+			Subject struct{ ID string }
+			Role    string
+		}
+	}
+	require.NoError(t, json.Unmarshal(raw, &page))
+	out := make(map[string]string, len(page.Data))
+	for _, m := range page.Data {
+		out[m.Subject.ID] = m.Role
+	}
+	return out
+}
+
 // enroll finishes a first sign-in, which the server's accounts start by
 // enrolling a second factor: an authenticator app. It returns the session's
 // access token and the account's id.
@@ -422,4 +548,93 @@ func mailTo(t *testing.T, mail *smtptest.Server, address, about string) smtptest
 		return false
 	}, 30*time.Second, 100*time.Millisecond, "a message to %s about %q", address, about)
 	return found
+}
+
+// vaultOverlay is configuration in a fresh KV mount of the critical Vault.
+func vaultOverlay(t *testing.T) map[string]any {
+	t.Helper()
+	addr, token := os.Getenv("OPENRAILS_CRITICAL_VAULT_ADDR"), os.Getenv("OPENRAILS_CRITICAL_VAULT_TOKEN")
+	require.NotEmpty(t, addr, "critical configuration cases require real Vault")
+	require.NotEmpty(t, token)
+	t.Setenv(vaulttest.AddrEnv, addr)
+	t.Setenv(vaulttest.TokenEnv, token)
+	vault := vaulttest.New(t)
+	return map[string]any{"vault": map[string]any{"address": addr, "token": token, "kv_mount": vault.Config().KVMount}}
+}
+
+// consoleMerchant is a merchant as the console's directory and New merchant
+// answer it.
+type consoleMerchant struct {
+	ID          string `json:"id"`
+	Slug        string `json:"slug"`
+	DisplayName string `json:"display_name"`
+	Role        string `json:"role"`
+}
+
+// consoleMerchants are the merchants the console's directory lists for the
+// session, by id.
+func (b *staffBrowser) consoleMerchants(t *testing.T, session string) map[string]consoleMerchant {
+	t.Helper()
+	status, raw := b.call(t, http.MethodGet, "/admin/merchants", session, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var page struct{ Data []consoleMerchant }
+	require.NoError(t, json.Unmarshal(raw, &page))
+	out := make(map[string]consoleMerchant, len(page.Data))
+	for _, m := range page.Data {
+		out[m.ID] = m
+	}
+	return out
+}
+
+// userID is the session's account id.
+func (b *staffBrowser) userID(t *testing.T, session string) string {
+	t.Helper()
+	status, raw := b.call(t, http.MethodGet, "/auth/v1/me", session, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var me struct{ ID string }
+	require.NoError(t, json.Unmarshal(raw, &me))
+	require.NotEmpty(t, me.ID, string(raw))
+	return me.ID
+}
+
+// groupMembers are a group's people, each account id with its role.
+func (b *staffBrowser) groupMembers(t *testing.T, session, group string) map[string]string {
+	t.Helper()
+	status, raw := b.call(t, http.MethodGet, "/auth/v1/groups/"+group+"/members", session, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var page struct {
+		Data []struct {
+			Subject struct{ ID string }
+			Role    string
+		}
+	}
+	require.NoError(t, json.Unmarshal(raw, &page))
+	out := make(map[string]string, len(page.Data))
+	for _, m := range page.Data {
+		out[m.Subject.ID] = m.Role
+	}
+	return out
+}
+
+// staffSession is a signed-in person: their browser and session.
+type staffSession struct {
+	b       *staffBrowser
+	session string
+}
+
+// invitee is a person the owner invites into group with role, registered
+// through the invitation's link from forwardedFor ("" for none) and signed
+// in.
+func (s *staffServer) invitee(t *testing.T, owner *staffBrowser, session, group, role, email, username, forwardedFor string) staffSession {
+	t.Helper()
+	status, raw := owner.call(t, http.MethodPost, "/auth/v1/groups/"+group+"/invitations", session, map[string]string{"email": email, "role": role})
+	require.Equal(t, http.StatusCreated, status, string(raw))
+	var created struct{ Code string }
+	require.NoError(t, json.Unmarshal(raw, &created))
+	b := s.browser(t)
+	b.forwardedFor = forwardedFor
+	status, raw = b.register(t, email, username, created.Code)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	signedIn, _ := b.enroll(t, raw)
+	return staffSession{b, signedIn}
 }

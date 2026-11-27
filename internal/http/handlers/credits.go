@@ -80,8 +80,6 @@ func moneyRefusal(err error) *api.APIError {
 		return api.Coded(billing.CodeCreditGrantHeld, err.Error())
 	case errors.Is(err, billingservice.ErrCreditGrantUnavailable):
 		return api.Coded(billing.CodeCreditGrantUnavailable, err.Error())
-	case errors.Is(err, billingservice.ErrUsageOutsideIngestWindow):
-		return api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("occurred_at")
 	}
 	return refusalOf(err)
 }

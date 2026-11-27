@@ -102,7 +102,7 @@ type CreateInvoiceParams struct {
 	IdempotencyKey       *string
 	RequestDigest        []byte
 	LinesDigest          []byte
-	ExpiresAt            time.Time
+	ExpiresAt            *time.Time
 	Now                  time.Time
 	CustomerType         *string
 	PurchaseNumber       *int32
@@ -1012,7 +1012,8 @@ type ListExpiredInvoicesRow struct {
 	ExpiresAt time.Time
 }
 
-// A merchant's live invoices past their expiry, in expiry order after a cursor.
+// A merchant's live purchases past their expiry (no other invoice has one), in
+// expiry order after a cursor.
 func (q *Queries) ListExpiredInvoices(ctx context.Context, arg ListExpiredInvoicesParams) ([]ListExpiredInvoicesRow, error) {
 	rows, err := q.db.Query(ctx, listExpiredInvoices,
 		arg.MerchantID,
@@ -1238,41 +1239,46 @@ WHERE o.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR o.customer_id = $2::uuid)
   AND ($3::text IS NULL OR $3::text = CASE
         WHEN o.status = 'open' AND o.collection_owner = 'engine' AND o.expires_at <= $4::timestamptz THEN 'expired' ELSE o.status END)
-  AND ($5::text IS NULL OR o.origin = $5::text)
-  AND ($6::uuid IS NULL OR o.subscription_id = $6::uuid)
-  AND ($7::timestamptz IS NULL OR (o.status = 'open' AND o.due_at < $7::timestamptz))
-  AND ($8::uuid IS NULL OR EXISTS (
+  AND NOT ($5::boolean AND o.origin = 'customer' AND (o.status = 'expired'
+        OR o.status = 'open' AND o.collection_owner = 'engine' AND o.expires_at <= $4::timestamptz))
+  AND ($6::text IS NULL OR o.origin = $6::text)
+  AND ($7::uuid IS NULL OR o.subscription_id = $7::uuid)
+  AND ($8::timestamptz IS NULL OR (o.status = 'open' AND o.due_at < $8::timestamptz))
+  AND ($9::uuid IS NULL OR EXISTS (
         SELECT 1 FROM billing.invoice_lines l
-        WHERE l.merchant_id = o.merchant_id AND l.invoice_id = o.id AND l.price_id = $8::uuid))
-  AND ($9::timestamptz IS NULL
-       OR (o.created_at, o.id) < ($9::timestamptz, $10::uuid))
+        WHERE l.merchant_id = o.merchant_id AND l.invoice_id = o.id AND l.price_id = $9::uuid))
+  AND ($10::timestamptz IS NULL
+       OR (o.created_at, o.id) < ($10::timestamptz, $11::uuid))
 ORDER BY o.created_at DESC, o.id DESC
-LIMIT $11::int
+LIMIT $12::int
 `
 
 type ListInvoicesPageParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     *uuid.UUID
-	Status         *string
-	Now            time.Time
-	Origin         *string
-	SubscriptionID *uuid.UUID
-	OverdueAt      *time.Time
-	PriceID        *uuid.UUID
-	AfterCreatedAt *time.Time
-	AfterID        *uuid.UUID
-	RowLimit       int32
+	MerchantID           uuid.UUID
+	CustomerID           *uuid.UUID
+	Status               *string
+	Now                  time.Time
+	OmitExpiredPurchases bool
+	Origin               *string
+	SubscriptionID       *uuid.UUID
+	OverdueAt            *time.Time
+	PriceID              *uuid.UUID
+	AfterCreatedAt       *time.Time
+	AfterID              *uuid.UUID
+	RowLimit             int32
 }
 
 // One page of invoices, newest first; every filter is optional. status reads an
 // open invoice past its expiry as expired; price_id names invoices with a line on
-// that price; overdue_at the open ones due before it.
+// that price; overdue_at the open ones due before it; omit_expired_purchases
+// leaves out a customer's purchases that expired unpaid, never bills.
 func (q *Queries) ListInvoicesPage(ctx context.Context, arg ListInvoicesPageParams) ([]BillingInvoice, error) {
 	rows, err := q.db.Query(ctx, listInvoicesPage,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Status,
 		arg.Now,
+		arg.OmitExpiredPurchases,
 		arg.Origin,
 		arg.SubscriptionID,
 		arg.OverdueAt,

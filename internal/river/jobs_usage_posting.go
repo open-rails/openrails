@@ -23,9 +23,8 @@ const (
 )
 
 // UsagePostingWorker is the daily posting: each customer whose pending usage
-// is due (the accounting-zone day of its oldest usage ended, or a period
-// whose price fell may be credited) posts it, on the money service's clock;
-// a month's last day's posting is its close. An idle pass reads no row. A
+// is due (the accounting-zone day of its oldest usage ended) posts it, on the
+// money service's clock. An idle pass reads no row. A
 // customer whose posting failed stays due and fails the pass once the others
 // are done.
 type UsagePostingWorker struct {

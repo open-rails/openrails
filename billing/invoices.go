@@ -200,15 +200,13 @@ type PreviewInvoiceParams struct {
 	Lines      []InvoiceLineParams `json:"lines"`
 }
 
-// CreateInvoiceParams creates a merchant invoice: an unpaid invoice for one
-// customer, which they pay on the merchant's own site
-// (POST /v1/me/invoices/{id}/pay), or, with PayURL, at its pay URL. It never
-// charges. ExpiresAt defaults to 30 days, or to the pay URL's expiry with
-// PayURL, and is at most 120 days away.
+// CreateInvoiceParams creates a merchant invoice: a bill for one customer,
+// which they pay on the merchant's own site (POST /v1/me/invoices/{id}/pay),
+// or, with PayURL, at its pay URL. It never charges and never expires: it
+// stays open until paid or canceled. A pay URL expires on its own.
 type CreateInvoiceParams struct {
 	CustomerID CustomerID          `json:"customer_id"`
 	Lines      []InvoiceLineParams `json:"lines"`
-	ExpiresAt  *time.Time          `json:"expires_at,omitempty"`
 	// PayURL asks for the invoice's pay URL (Invoice.PayURL), where the
 	// customer pays. The deployment must serve a checkout origin.
 	PayURL *InvoicePayURLParams `json:"pay_url,omitempty"`
@@ -303,7 +301,8 @@ type Invoice struct {
 	// Usage is a usage invoice's period, collection and document fields; null
 	// on any other.
 	Usage *InvoiceUsage `json:"usage"`
-	// ExpiresAt is when an unpaid purchase expires; a renewal has none.
+	// ExpiresAt is when a customer's unpaid purchase (origin customer)
+	// expires, a day after it was created; any other invoice has none.
 	ExpiresAt   *time.Time `json:"expires_at"`
 	CompletedAt *time.Time `json:"completed_at"`
 	CanceledAt  *time.Time `json:"canceled_at"`

@@ -44,7 +44,7 @@ func (q *Queries) CompleteCustodianMethodDelete(ctx context.Context, arg Complet
 
 const countCustodianMethodAliases = `-- name: CountCustodianMethodAliases :one
 SELECT count(*) AS total,
-       count(*) FILTER (WHERE customer_id <> $1::uuid) AS foreign_payers
+       count(*) FILTER (WHERE customer_id <> $1::uuid) AS foreign_customers
 FROM billing.payment_methods
 WHERE merchant_id = $2::uuid
   AND custodian_id = $3::uuid
@@ -60,8 +60,8 @@ type CountCustodianMethodAliasesParams struct {
 }
 
 type CountCustodianMethodAliasesRow struct {
-	Total         int64
-	ForeignPayers int64
+	Total            int64
+	ForeignCustomers int64
 }
 
 func (q *Queries) CountCustodianMethodAliases(ctx context.Context, arg CountCustodianMethodAliasesParams) (CountCustodianMethodAliasesRow, error) {
@@ -72,7 +72,7 @@ func (q *Queries) CountCustodianMethodAliases(ctx context.Context, arg CountCust
 		arg.MethodRef,
 	)
 	var i CountCustodianMethodAliasesRow
-	err := row.Scan(&i.Total, &i.ForeignPayers)
+	err := row.Scan(&i.Total, &i.ForeignCustomers)
 	return i, err
 }
 

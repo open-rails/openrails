@@ -40,8 +40,8 @@ var (
 	ErrCancelUnsupportedOnRail = apperr.New(http.StatusBadRequest, billing.CodeCancelUnsupportedOnRail, "cancel operation not supported for this rail")
 )
 
-// UserSubscriptionService handles user-facing subscription operations
-type UserSubscriptionService struct {
+// CustomerSubscriptionService handles a customer's own subscription operations.
+type CustomerSubscriptionService struct {
 	SubscriptionService *SubscriptionService
 	ProductService      *catalog.ProductService
 	PriceService        *catalog.PriceService
@@ -74,30 +74,30 @@ type ProviderCancelScheduler interface {
 }
 
 // SetProviderCancelScheduler injects the provider-cancel scheduler.
-func (s *UserSubscriptionService) SetProviderCancelScheduler(c ProviderCancelScheduler) {
+func (s *CustomerSubscriptionService) SetProviderCancelScheduler(c ProviderCancelScheduler) {
 	s.providerCancel = c
 }
 
 // SetClock sets the clock for this service. Used for testing.
-func (s *UserSubscriptionService) SetClock(c clockwork.Clock) {
+func (s *CustomerSubscriptionService) SetClock(c clockwork.Clock) {
 	s.clock = timeutil.FirstClock(c)
 }
 
-func (s *UserSubscriptionService) Clock() clockwork.Clock {
+func (s *CustomerSubscriptionService) Clock() clockwork.Clock {
 	return s.clock
 }
 
 // now returns the service clock's time, or time.Now() without one.
-func (s *UserSubscriptionService) now() time.Time {
+func (s *CustomerSubscriptionService) now() time.Time {
 	if s.clock != nil {
 		return s.clock.Now()
 	}
 	return time.Now()
 }
 
-// UserSubscriptionResponse is a customer's subscription with the catalog rows
+// CustomerSubscriptionResponse is a customer's subscription with the catalog rows
 // its wire projection needs. The HTTP layer serves it as billing.Subscription.
-type UserSubscriptionResponse struct {
+type CustomerSubscriptionResponse struct {
 	*models.Subscription
 	// EvaluatedAt binds derived eligibility flags to the service's business clock.
 	EvaluatedAt      time.Time
@@ -110,20 +110,20 @@ type UserSubscriptionResponse struct {
 
 // EvaluationTime defaults only for responses constructed without a service.
 // Service reads stamp EvaluatedAt before either HTTP or library serialization.
-func (r *UserSubscriptionResponse) EvaluationTime() time.Time {
+func (r *CustomerSubscriptionResponse) EvaluationTime() time.Time {
 	if !r.EvaluatedAt.IsZero() {
 		return r.EvaluatedAt.UTC()
 	}
 	return time.Now().UTC()
 }
 
-// GetUserSubscription retrieves the current subscription for a user with enriched data
-func (s *UserSubscriptionService) GetUserSubscription(ctx context.Context, userID string) (*UserSubscriptionResponse, error) {
+// GetCustomerSubscription retrieves a customer's current subscription with enriched data.
+func (s *CustomerSubscriptionService) GetCustomerSubscription(ctx context.Context, userID string) (*CustomerSubscriptionResponse, error) {
 	subscription, err := s.SubscriptionService.GetActiveSubscription(ctx, userID)
 	switch {
 	case err == nil:
-		resp := &UserSubscriptionResponse{Subscription: subscription}
-		if err := s.enrichSubscriptionResponses(ctx, []*UserSubscriptionResponse{resp}); err != nil {
+		resp := &CustomerSubscriptionResponse{Subscription: subscription}
+		if err := s.enrichSubscriptionResponses(ctx, []*CustomerSubscriptionResponse{resp}); err != nil {
 			return nil, err
 		}
 		return resp, nil
@@ -133,7 +133,7 @@ func (s *UserSubscriptionService) GetUserSubscription(ctx context.Context, userI
 			return nil, accessErr
 		}
 		if access != nil {
-			return &UserSubscriptionResponse{Access: access}, nil
+			return &CustomerSubscriptionResponse{Access: access}, nil
 		}
 		return nil, sql.ErrNoRows
 	default:
@@ -141,8 +141,8 @@ func (s *UserSubscriptionService) GetUserSubscription(ctx context.Context, userI
 	}
 }
 
-// GetUserSubscriptionByID retrieves a subscription by ID with ownership verification and enriched data
-func (s *UserSubscriptionService) GetUserSubscriptionByID(ctx context.Context, userID string, subscriptionID uuid.UUID) (*UserSubscriptionResponse, error) {
+// GetCustomerSubscriptionByID retrieves a subscription by ID with ownership verification and enriched data
+func (s *CustomerSubscriptionService) GetCustomerSubscriptionByID(ctx context.Context, userID string, subscriptionID uuid.UUID) (*CustomerSubscriptionResponse, error) {
 	subscription, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
 	if err != nil {
 		if db.IsNotFound(err) {
@@ -156,41 +156,41 @@ func (s *UserSubscriptionService) GetUserSubscriptionByID(ctx context.Context, u
 		return nil, ErrSubscriptionNotFound // Return not found to avoid leaking existence
 	}
 
-	resp := &UserSubscriptionResponse{
+	resp := &CustomerSubscriptionResponse{
 		Subscription: subscription,
 	}
 
-	if err := s.enrichSubscriptionResponses(ctx, []*UserSubscriptionResponse{resp}); err != nil {
+	if err := s.enrichSubscriptionResponses(ctx, []*CustomerSubscriptionResponse{resp}); err != nil {
 		return nil, err
 	}
 
 	return resp, nil
 }
 
-// ListUserSubscriptions is one page of the customer's own subscriptions
+// ListCustomerSubscriptions is one page of the customer's own subscriptions
 // matching f, newest first.
-func (s *UserSubscriptionService) ListUserSubscriptions(ctx context.Context, userID string, f GetSubscriptionsFilters, page billing.PageRequest) (billing.ListPage[*UserSubscriptionResponse], error) {
+func (s *CustomerSubscriptionService) ListCustomerSubscriptions(ctx context.Context, userID string, f GetSubscriptionsFilters, page billing.PageRequest) (billing.ListPage[*CustomerSubscriptionResponse], error) {
 	customer, err := billing.ParseCustomerID(userID)
 	if err != nil || customer.IsZero() {
-		return billing.ListPage[*UserSubscriptionResponse]{}, ErrSubscriptionNotFound
+		return billing.ListPage[*CustomerSubscriptionResponse]{}, ErrSubscriptionNotFound
 	}
 	f.CustomerID = customer
 	subs, err := s.SubscriptionService.ListSubscribers(ctx, f, page)
 	if err != nil {
-		return billing.ListPage[*UserSubscriptionResponse]{}, fmt.Errorf("failed to list subscriptions: %w", err)
+		return billing.ListPage[*CustomerSubscriptionResponse]{}, fmt.Errorf("failed to list subscriptions: %w", err)
 	}
-	out := pagination.Map(subs, func(sub *models.Subscription) *UserSubscriptionResponse {
-		return &UserSubscriptionResponse{Subscription: sub}
+	out := pagination.Map(subs, func(sub *models.Subscription) *CustomerSubscriptionResponse {
+		return &CustomerSubscriptionResponse{Subscription: sub}
 	})
 	if err := s.enrichSubscriptionResponses(ctx, out.Items); err != nil {
-		return billing.ListPage[*UserSubscriptionResponse]{}, err
+		return billing.ListPage[*CustomerSubscriptionResponse]{}, err
 	}
 	return out, nil
 }
 
 // enrichSubscriptionResponses loads every current and scheduled price, with its
 // product, in one batch; access uses one batch of current entitlement windows.
-func (s *UserSubscriptionService) enrichSubscriptionResponses(ctx context.Context, responses []*UserSubscriptionResponse) error {
+func (s *CustomerSubscriptionService) enrichSubscriptionResponses(ctx context.Context, responses []*CustomerSubscriptionResponse) error {
 	at := s.now().UTC()
 	if s.EntitlementService != nil && len(responses) > 0 {
 		ids := make([]uuid.UUID, 0, len(responses))
@@ -249,7 +249,7 @@ func (s *UserSubscriptionService) enrichSubscriptionResponses(ctx context.Contex
 	return nil
 }
 
-func subscriptionsOf(responses []*UserSubscriptionResponse) []*models.Subscription {
+func subscriptionsOf(responses []*CustomerSubscriptionResponse) []*models.Subscription {
 	out := make([]*models.Subscription, 0, len(responses))
 	for _, r := range responses {
 		out = append(out, r.Subscription)
@@ -257,10 +257,10 @@ func subscriptionsOf(responses []*UserSubscriptionResponse) []*models.Subscripti
 	return out
 }
 
-// CancelUserSubscription cancels the member's named subscription at period
+// CancelCustomerSubscription cancels the member's named subscription at period
 // end: access stays to the paid period end and a provider schedule is deleted
 // through its durable intent before the next billing.
-func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, userID string, subscriptionID uuid.UUID, feedback string) error {
+func (s *CustomerSubscriptionService) CancelCustomerSubscription(ctx context.Context, userID string, subscriptionID uuid.UUID, feedback string) error {
 	subscription, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
 	if err != nil {
 		if db.IsNotFound(err) {
@@ -268,7 +268,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		}
 		return fmt.Errorf("load subscription: %w", err)
 	}
-	if payer := identity.CustomerIDFromString(userID); payer.IsZero() || subscription.CustomerID != payer.UUID() {
+	if customer := identity.CustomerIDFromString(userID); customer.IsZero() || subscription.CustomerID != customer.UUID() {
 		return ErrSubscriptionNotFound
 	}
 	if !providerCancellable(subscription.Status) {
@@ -291,9 +291,9 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	case rails.IsNMI(subscription.Rail):
 		// The NMI delete always rides the durable nmi_delete_subscription
 		// intent, committed with the cancellation, and is verified before it
-		// executes; the customer budget admitted it, so destructive arming
-		// does not hold it. With an undo window it is due at period_end -
-		// margin, keeping the schedule for a resume; otherwise now.
+		// executes; destructive arming and the card-removal budget never
+		// hold a customer's own cancel. With an undo window it is due at
+		// period_end - margin, keeping the schedule for a resume; otherwise now.
 		if subscription.RailSubscriptionID != "" {
 			if s.providerCancel == nil {
 				return fmt.Errorf("nmi remote-delete scheduler unavailable")
@@ -390,7 +390,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 // applySubscriptionAccess projects live access windows, never billing status
 // or a price snapshot. A canceled membership may retain bought access; a live
 // membership may have no access between its independently scheduled grants.
-func applySubscriptionAccess(responses []*UserSubscriptionResponse, active []*models.ProductAccess) {
+func applySubscriptionAccess(responses []*CustomerSubscriptionResponse, active []*models.ProductAccess) {
 	bySource := make(map[[2]string]*billing.SubscriptionAccess)
 	for _, window := range active {
 		grant := windowAccess(window)
@@ -423,7 +423,7 @@ func windowAccess(window *models.ProductAccess) *billing.SubscriptionAccess {
 
 // activeProductAccess is the customer's newest live window, when they hold a
 // product without a live subscription.
-func (s *UserSubscriptionService) activeProductAccess(ctx context.Context, userID string) (*billing.SubscriptionAccess, error) {
+func (s *CustomerSubscriptionService) activeProductAccess(ctx context.Context, userID string) (*billing.SubscriptionAccess, error) {
 	if s.EntitlementService == nil {
 		return nil, nil
 	}
@@ -438,8 +438,8 @@ func (s *UserSubscriptionService) activeProductAccess(ctx context.Context, userI
 	return windowAccess(window), nil
 }
 
-// NewUserSubscriptionService creates a new UserSubscriptionService
-func NewUserSubscriptionService(logger *slog.Logger,
+// NewCustomerSubscriptionService creates a new CustomerSubscriptionService
+func NewCustomerSubscriptionService(logger *slog.Logger,
 	subscriptionService *SubscriptionService,
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
@@ -449,8 +449,8 @@ func NewUserSubscriptionService(logger *slog.Logger,
 	nmiResolver railresolve.NMIClientResolver,
 	postures controls.View,
 	clocks ...clockwork.Clock,
-) *UserSubscriptionService {
-	return &UserSubscriptionService{
+) *CustomerSubscriptionService {
+	return &CustomerSubscriptionService{
 		NMIResolver:         nmiResolver,
 		SubscriptionService: subscriptionService,
 		ProductService:      productService,

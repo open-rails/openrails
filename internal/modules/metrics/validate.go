@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
@@ -205,7 +206,7 @@ func ValidateIn(q *Query, now time.Time, zone *time.Location) (*Plan, *Validatio
 	}
 	var buckets []time.Time
 	if hasTime && validGrain && grain != "auto" && !from.IsZero() && from.Before(to) {
-		buckets = bucketLabels(from, to, grain, zone)
+		buckets, _ = calendarutil.Buckets(from, to, grain, zone, MaxBuckets)
 		if len(buckets) > MaxBuckets {
 			add(FieldError{Code: "range_too_many_buckets", Param: "range",
 				Message: fmt.Sprintf("range at grain %q yields %d buckets; max %d — shrink the range or coarsen the grain", grain, len(buckets), MaxBuckets)})
@@ -287,21 +288,21 @@ func ValidateIn(q *Query, now time.Time, zone *time.Location) (*Plan, *Validatio
 
 	for i, o := range q.Order {
 		if (o.Measure == "") == (o.Dimension == "") {
-			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("invoice[%d]", i),
-				Message: `each invoice term needs exactly one of "measure" or "dimension"`})
+			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("order[%d]", i),
+				Message: `each order term needs exactly one of "measure" or "dimension"`})
 			continue
 		}
 		if o.Dir != "" && o.Dir != "asc" && o.Dir != "desc" {
-			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("invoice[%d].dir", i),
+			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("order[%d].dir", i),
 				Message: fmt.Sprintf("invalid dir %q", o.Dir), Valid: []string{"asc", "desc"}})
 		}
 		if o.Measure != "" && !seenMeasure[o.Measure] {
-			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("invoice[%d].measure", i),
-				Message: fmt.Sprintf("invoice measure %q is not in measures", o.Measure), Valid: q.Measures})
+			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("order[%d].measure", i),
+				Message: fmt.Sprintf("order measure %q is not in measures", o.Measure), Valid: q.Measures})
 		}
 		if o.Dimension != "" && o.Dimension != "time" && !seenDim[o.Dimension] {
-			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("invoice[%d].dimension", i),
-				Message: fmt.Sprintf("invoice dimension %q is not in by", o.Dimension), Valid: q.By})
+			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("order[%d].dimension", i),
+				Message: fmt.Sprintf("order dimension %q is not in by", o.Dimension), Valid: q.By})
 		}
 	}
 
@@ -345,15 +346,31 @@ func ValidateIn(q *Query, now time.Time, zone *time.Location) (*Plan, *Validatio
 		}
 	}
 
-	if len(errs) > 0 {
-		return nil, &ValidationError{Errors: errs}
-	}
-	return &Plan{
+	plan := &Plan{
 		Measures: measures, Dims: dims, HasTime: hasTime, Grain: grain,
 		From: from, To: to, Zone: zone, Buckets: buckets, Filters: filters,
 		Order: q.Order, Limit: limit, Compare: q.Compare,
 		ImplicitCurrency: implicitCurrency,
-	}, nil
+	}
+	// History names no invoker: by invoker, usage is read from raw events.
+	if plan.ReadsUsage() && plan.byInvoker() && !from.IsZero() {
+		earliest := from
+		switch q.Compare {
+		case "previous_year":
+			earliest = yearBefore(from, zone)
+		case "previous_period":
+			earliest = from.Add(-to.Sub(from))
+		}
+		if kept := now.Add(-eventstore.EventsKept); earliest.Before(kept) {
+			add(FieldError{Code: "range_before_usage_events", Param: "range",
+				Message: fmt.Sprintf("usage by invoker reads raw usage events, kept %d days: the range (and its comparison) must start at %s or later; drop invoker to read history",
+					int(eventstore.EventsKept.Hours()/24), kept.UTC().Format(time.RFC3339))})
+		}
+	}
+	if len(errs) > 0 {
+		return nil, &ValidationError{Errors: errs}
+	}
+	return plan, nil
 }
 
 var lastRangeRe = regexp.MustCompile(`^([0-9]+)([dwmy])$`)
@@ -473,64 +490,6 @@ func contains(list []string, v string) bool {
 		}
 	}
 	return false
-}
-
-// bucketLabels enumerates the calendar bucket starts in zone covering
-// [from, to), as UTC instants: each its date's first instant, which is what
-// PostgreSQL's date_trunc(grain, t, zone) gives (weeks start Monday). Each
-// is computed from its date, never by moving a wall clock, so a day that
-// starts at a transition neither drifts nor repeats.
-func bucketLabels(from, to time.Time, grain string, zone *time.Location) []time.Time {
-	y, m, d := bucketDate(from.In(zone), grain)
-	var out []time.Time
-	for cur := calendarutil.DayStart(y, m, d, zone); cur.Before(to); cur = calendarutil.DayStart(y, m, d, zone) {
-		out = append(out, cur.UTC())
-		y, m, d = nextBucketDate(y, m, d, grain)
-		if len(out) > MaxBuckets {
-			break // clamp check reports the error; avoid unbounded loops
-		}
-	}
-	return out
-}
-
-// truncGrain is the start of t's bucket on zone's calendar.
-func truncGrain(t time.Time, grain string, zone *time.Location) time.Time {
-	y, m, d := bucketDate(t.In(zone), grain)
-	return calendarutil.DayStart(y, m, d, zone).UTC()
-}
-
-// bucketDate is the date t's bucket starts on, in t's location.
-func bucketDate(t time.Time, grain string) (int, time.Month, int) {
-	y, m, d := t.Date()
-	switch grain {
-	case "week":
-		d -= (int(t.Weekday()) + 6) % 7 // Monday start, like date_trunc
-	case "month":
-		d = 1
-	case "quarter":
-		m, d = ((m-1)/3)*3+1, 1
-	case "year":
-		m, d = 1, 1
-	}
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Date()
-}
-
-// nextBucketDate is the date the bucket after the one starting on y-m-d
-// starts on.
-func nextBucketDate(y int, m time.Month, d int, grain string) (int, time.Month, int) {
-	switch grain {
-	case "day":
-		d++
-	case "week":
-		d += 7
-	case "month":
-		m++
-	case "quarter":
-		m += 3
-	case "year":
-		y++
-	}
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Date()
 }
 
 // ReadsUsage reports a plan whose measures, or their components, read usage

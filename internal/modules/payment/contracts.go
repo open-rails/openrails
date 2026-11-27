@@ -8,7 +8,7 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 )
 
-type UserIdentity struct {
+type CustomerIdentity struct {
 	ID       string
 	Email    *string
 	Username string
@@ -24,7 +24,7 @@ type UserIdentity struct {
 func customerIDFromUser(userID string) (uuid.UUID, error) {
 	id := identity.CustomerIDFromString(userID)
 	if id.IsZero() {
-		return uuid.Nil, fmt.Errorf("payer subject %q is not a UUID: payable identities are UUID-only", userID)
+		return uuid.Nil, fmt.Errorf("customer subject %q is not a UUID: payable identities are UUID-only", userID)
 	}
 	return id.UUID(), nil
 }

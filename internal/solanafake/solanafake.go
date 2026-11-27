@@ -50,9 +50,9 @@ func (e *programError) Error() string { return e.msg }
 
 // Custom codes the fake answers with; any other refusal is Custom 1.
 const (
-	codeTokenOwnerMismatch    = 4
-	codeSubscriptionCancelled = 508
-	codePeriodAlreadyPaid     = 400
+	codeTokenOwnerMismatch   = 4
+	codeSubscriptionCanceled = 508
+	codePeriodAlreadyPaid    = 400
 )
 
 type Node struct {
@@ -650,7 +650,7 @@ func (n *Node) pullSubscription(address solanago.PublicKey, amount uint64, block
 	now := uint64(blockTime.Unix()) // #nosec G115 -- the fake's clock is after 1970
 	expires := binary.LittleEndian.Uint64(stored.data[subExpiresAtOffset:])
 	if expires != 0 && now >= expires {
-		return &programError{codeSubscriptionCancelled, "transfer_subscription refused: subscription canceled"}
+		return &programError{codeSubscriptionCanceled, "transfer_subscription refused: subscription canceled"}
 	}
 	start := binary.LittleEndian.Uint64(stored.data[subPeriodStartOffset:])
 	period := 3600 * binary.LittleEndian.Uint64(stored.data[subPeriodHoursOffset:])

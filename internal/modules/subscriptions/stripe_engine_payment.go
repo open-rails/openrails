@@ -607,9 +607,9 @@ func (s *StripeService) FinalizeEngineDecline(ctx context.Context, p StripeEngin
 }
 
 // CancelAbandonedEnginePayment closes the SAME payment after its issuer
-// authentication window lapsed, so a challenge the payer never finished can
+// authentication window lapsed, so a challenge the customer never finished can
 // no longer charge them and the accepted operation can resolve. It reads
-// first and cancels only a payment still awaiting authentication; a payer
+// first and cancels only a payment still awaiting authentication; a customer
 // who completed meanwhile reads back succeeded.
 func (s *StripeService) CancelAbandonedEnginePayment(ctx context.Context, p StripeEnginePaymentParams, reference string) (StripeEnginePaymentResult, error) {
 	scoped, err := s.engineScoped(p)

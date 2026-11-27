@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/ccbillmock"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/db"
 	embedded "github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -750,7 +749,7 @@ func (c completeRoster) Fetch(ctx context.Context, params reconcile.FetchParams)
 // policy a caller may hold that the provider refresh never does.
 func ccbillPull(t *testing.T, w *world, feed *httptest.Server, since time.Time, mode reconcile.Mode, mutations *reconcile.LocalMutationPolicy) *reconcile.RunResult {
 	t.Helper()
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	dl := ccbill.NewDataLinkClient(slog.Default(), &config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0001", Sandbox: true,
 		DataLinkUsername: "critical-datalink", DataLinkPassword: "critical-datalink-password"})

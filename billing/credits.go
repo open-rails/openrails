@@ -213,10 +213,11 @@ type BalanceTransaction struct {
 	Resource      *string                `json:"resource"`
 	Source        string                 `json:"source"`
 	SourceID      string                 `json:"source_id"`
-	// Usage is what a usage deduction was for: the day's usage per meter.
-	// Every leg of one posting carries it; null on other movements.
-	Usage     *UsageDeduction `json:"usage"`
-	CreatedAt time.Time       `json:"created_at"`
+	// Usage is the usage receipt a posting's movement took: its usage per
+	// period and meter, and its running charges. Every leg of one posting
+	// carries it; null on other movements.
+	Usage     *UsageReceipt `json:"usage"`
+	CreatedAt time.Time     `json:"created_at"`
 }
 
 // BalanceTransactionListParams selects a customer's ledger in one currency,
@@ -338,13 +339,11 @@ type MerchantCheckoutSettings struct {
 }
 
 // BalanceNoticeSettings are a merchant's default low-balance lines: a
-// customer's own line (LowBalanceLine) overrides each part. RunwayHours is
-// hours of spend at the customer's burn rate, 24 when nil; LowAmounts are
-// amount lines per currency, none for a currency not listed. 0 turns a line
-// off. balance.depleted cannot be turned off.
+// customer's own line (LowBalanceLine) overrides one. A balance is low once
+// what the customer may spend is at or under its currency's amount; a
+// currency not listed has no line, and 0 turns it off. balance.depleted
+// cannot be turned off.
 type BalanceNoticeSettings struct {
-	// RunwayHours is the line in hours of spend at the customer's burn rate: 24 when unset, 0 off.
-	RunwayHours *int `json:"runway_hours,omitempty"`
 	// LowAmounts are amount lines per currency; none for a currency not listed.
 	LowAmounts []BalanceNoticeAmount `json:"low_amounts,omitempty"`
 }
@@ -450,12 +449,11 @@ type MerchantSettings struct {
 // AccountingSettings date a merchant's books.
 type AccountingSettings struct {
 	// Timezone is the IANA zone (Europe/Berlin) whose days and months the
-	// metrics, MRR reports and usage history group in, and at whose month
-	// ends usage posts; empty is UTC. Rollups are kept in UTC quarter hours,
-	// and usage history in UTC hours, so a change regroups every day and
-	// month, past ones too; a zone whose offset is not whole hours has its
-	// usage days cut at the hour. Posted books keep their effective instants
-	// and never change.
+	// metrics, MRR reports and usage history group in, and where usage posts
+	// at the end of each day; empty is UTC. Rollups and usage history are
+	// kept in UTC quarter hours, so a change regroups every day and month,
+	// past ones too. Posted books keep their effective instants and never
+	// change.
 	Timezone string `json:"timezone,omitempty"`
 }
 
@@ -473,19 +471,19 @@ type BillingPolicy struct {
 	// budget_exceeded.
 	SpendWindows []BudgetWindow `json:"spend_windows,omitempty"`
 	// CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor
-	// override the merchant-wide invoice policy for payers bound here; nil defers
+	// override the merchant-wide invoice policy for customers bound here; nil defers
 	// to it. DelinquencyAmountFloor is in
 	// PolicyCurrency, which it requires, and applies to debt in it.
 	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty,string"`
 	DelinquencyGraceDays      *int   `json:"delinquency_grace_days,omitempty"`
 	DelinquencyAmountFloor    *int64 `json:"delinquency_amount_floor,omitempty,string"`
 	// CollectionCycleBoundary is declarable and REFUSED: statement periods must
-	// tile a payer's lifetime, and rebinding is a live lever, so the boundary
+	// tile a customer's lifetime, and rebinding is a live lever, so the boundary
 	// stays merchant-wide. Declaring it here fails with that reason.
 	CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
-	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
+	// BadSpendWindows are the #497 per-CUSTOMER direct-credential wasted-spend grace
 	// windows: at most Limit of host-reported wasted spend is forgiven per window;
-	// direct-payer overage is charged.
+	// direct-customer overage is charged.
 	BadSpendWindows []BudgetWindow `json:"bad_spend_windows,omitempty"`
 	// PolicyCurrency is the currency of the policy's amounts and of a spend or
 	// bad-spend window that names none; absent, the request's. The outstanding
@@ -584,7 +582,9 @@ type DunningPolicy struct {
 	// AccessWhileRenewalHeld is DunningAccessKeep (default: a renewal with no
 	// outcome because collection is stopped keeps access until it is
 	// attempted) or DunningAccessSuspend (access ends at the renewal
-	// allowance, min(24h, max(2h, period/10)) past the paid period).
+	// allowance, min(24h, max(2h, period/10)) past the paid period, while
+	// nothing is sent). An NMI charge sent but unresolved keeps access
+	// under either policy; proven nonexecution restores this held-renewal rule.
 	AccessWhileRenewalHeld DunningAccess `json:"access_while_renewal_held,omitempty"`
 }
 

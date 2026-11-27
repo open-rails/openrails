@@ -151,7 +151,6 @@ var merchantCols = map[Family]string{
 	FamAttempts:       "a.merchant_id",
 	FamPurchases:      "ck.merchant_id",
 	FamRebillCycles:   "cy.merchant_id",
-	FamNMIHistory:     "h.merchant_id",
 	FamFindings:       "f.merchant_id",
 	FamCheckouts:      "o.merchant_id",
 	FamSales:          "o.merchant_id",
@@ -296,7 +295,7 @@ func compileSnapshot(plan *Plan, merchantID uuid.UUID, fam Family, spec familySp
 }
 
 // bucketExpr is the start of a row's bucket at grain, on the calendar of
-// zone, as an instant: what bucketLabels gives. A calendar family's day is
+// zone, as an instant: what calendarutil.Buckets gives. A calendar family's day is
 // its date wherever the zone is.
 func bucketExpr(spec familySpec, grain, zone string) string {
 	if spec.Calendar {

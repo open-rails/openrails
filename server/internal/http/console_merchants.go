@@ -9,7 +9,10 @@ import (
 
 	"github.com/open-rails/authkit/auth"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/history"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/server/internal/adminconsole"
 )
@@ -171,4 +174,109 @@ func consoleRefuse(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		billingauth.WriteJSONError(w, refusal.Status, billing.CodeAuthenticationUnavailable, message)
 	}
+}
+
+// consoleNewMerchant is a merchant the console's New merchant creates: its
+// name and, where Vault holds configuration, the name buyers see.
+type consoleNewMerchant struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+}
+
+// consoleCreateMerchant is the console's New merchant: a root operator's
+// own session holding root:merchants:create creates a merchant through the
+// operator's provisioning and owns its team. It is the standalone product's
+// route, mounted with the console; the engine's route catalog registers no
+// merchant.
+func (s *Server) consoleCreateMerchant(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+		consoleRefuse(w, r, auth.ErrUnauthenticated)
+		return
+	}
+	verified, err := s.auth.Authenticate(r)
+	if err != nil || verified == nil {
+		consoleRefuse(w, r, err)
+		return
+	}
+	who := verified.Identity()
+	checker, ok := verified.(auth.PermissionChecker)
+	rootAuthority, hasRoot := s.auth.(auth.Root)
+	// A person's own session at this server: the owner is an account here,
+	// and a credential bound to a merchant reaches no other.
+	if bound, isBound := verified.(auth.Bound); !ok || !hasRoot || isBound && bound.BoundScope() != (auth.Scope{}) ||
+		who.Issuer != s.controlPlane.Issuer() || !billingauth.Interactive(who) {
+		consoleRefuse(w, r, auth.ErrForbidden)
+		return
+	}
+	root, err := rootAuthority.RootScope(r.Context())
+	if err != nil {
+		consoleRefuse(w, r, err)
+		return
+	}
+	allowed, err := checker.Can(r.Context(), root, string(billing.RootMerchantsCreate))
+	if err != nil || !allowed {
+		if err == nil {
+			err = auth.ErrForbidden
+		}
+		consoleRefuse(w, r, err)
+		return
+	}
+	var req consoleNewMerchant
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		if field, unknown := strings.CutPrefix(err.Error(), "json: unknown field "); unknown {
+			consoleError(w, api.Coded(billing.CodeUnknownField, "").WithParam(strings.Trim(field, `"`)))
+			return
+		}
+		consoleError(w, api.Coded(billing.CodeInvalidRequestBody, "the body is one JSON object: name and display_name"))
+		return
+	}
+	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	// A display name is configuration: refused before anything is created
+	// where a file holds it.
+	if req.DisplayName != "" && !s.runtime.MerchantConfigManageable() {
+		consoleError(w, api.Coded(billing.CodeMerchantConfigReadOnly, "merchant configuration is read from a file: declare the display name there").WithParam("display_name"))
+		return
+	}
+	// The display name's history entry is the console's; the log line names who.
+	ctx := history.WithSource(r.Context(), billing.LogSourceConsole)
+	res, err := s.provision(ctx, billing.ProvisionMerchantParams{Slug: req.Name, DisplayName: req.DisplayName, OwnerUserID: who.Subject})
+	switch {
+	case errors.Is(err, billing.ErrInvalidMerchantSlug):
+		consoleError(w, api.Coded(billing.CodeInvalidParam, "a merchant's name is lowercase letters, digits and hyphens").WithParam("name"))
+		return
+	case errors.Is(err, billing.ErrMerchantSlugReserved):
+		consoleError(w, api.Coded(billing.CodeInvalidParam, "that name is reserved").WithParam("name"))
+		return
+	case errors.Is(err, billing.ErrMerchantNameTaken):
+		consoleError(w, api.Coded(billing.CodeResourceConflict, "another merchant holds that name").WithParam("name"))
+		return
+	case errors.Is(err, billing.ErrMerchantCreationRefused), errors.Is(err, billing.ErrMerchantCreationEmailUnverified),
+		errors.Is(err, billing.ErrMerchantCreationPaymentMethodRequired):
+		consoleError(w, api.Coded(billing.CodePermissionRequired, "the deployment's merchant creation policy refuses it: "+err.Error()))
+		return
+	case err != nil:
+		s.Log.ErrorContext(r.Context(), "console: merchant not created", logx.Err(err), "subject", who.Subject)
+		consoleError(w, api.Coded(billing.CodeInternalError, "the merchant could not be created"))
+		return
+	case !res.Created:
+		consoleError(w, api.Coded(billing.CodeResourceConflict, "another merchant holds that name").WithParam("name"))
+		return
+	}
+	s.Log.InfoContext(r.Context(), "console: merchant created", "merchant_id", res.MerchantID.String(), "subject", who.Subject)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(adminconsole.Merchant{ID: res.MerchantID.String(), Slug: billing.NormalizeMerchantSlug(req.Name),
+		DisplayName: s.merchants.DisplayName(r.Context(), res.MerchantID), Role: "owner"})
+}
+
+func consoleError(w http.ResponseWriter, refusal *api.APIError) {
+	if id := strings.TrimSpace(w.Header().Get("X-Request-ID")); id != "" {
+		refusal.WithRequestID(id)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(refusal.HTTPStatus)
+	_ = json.NewEncoder(w).Encode(refusal.ToResponse())
 }

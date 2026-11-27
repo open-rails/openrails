@@ -30,8 +30,10 @@
 //
 // Exactly once: every attempt to pay one period shares one order id, read
 // before any send. An engine renewal with no receipt is never re-sent: it
-// stays pending until a read settles it (only Stripe replays a lost
-// submission); the executor re-reads its claim just before each charge. Keep
+// stays pending until a read or operator resolution settles it (only Stripe
+// replays a lost submission). An operator may supply an exact receipt or attest
+// release once the order is declined or empty. Renewals never release on time
+// alone. The executor re-reads its claim just before each charge. Keep
 // NMI's duplicate check on: it is the only fence against a stalled replica.
 // An empty search never proves non-execution.
 //
@@ -48,9 +50,9 @@
 // convergence, which re-reads NMI. An unknown live schedule is adopted
 // through the billing import or parked (price_unmapped, customer_unlinked,
 // product_held, import_owned). Unverified schedules are read in batches of 50;
-// an operator refresh reads in bulk above 200. nmi_history_months holds a
-// daily read of 25 months of transaction reports, the source of `openrails nmi
-// decline-report`.
+// an operator refresh reads in bulk above 200. `openrails nmi decline-report`
+// reads an account's transaction reports for the window an operator names
+// (DeclineHistory).
 //
 // The Query API's start_date and end_date select a transaction by its last
 // change, which a settlement, refund or void moves, not by when it was made.

@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
+	"github.com/open-rails/openrails/internal/billingfact"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -205,7 +206,7 @@ func (h *InvoiceCollectionHandler) chargeRequest(intent gen.BillingProviderInten
 	invoiceID := p.InvoiceID
 	return ChargeRequest{
 		MerchantID:          intent.MerchantID,
-		Payer:               identity.CustomerID(p.CustomerID),
+		Customer:            identity.CustomerID(p.CustomerID),
 		Invoker:             p.CustomerID.String(),
 		InvoiceID:           &invoiceID,
 		PaymentMethodID:     p.PaymentMethodID,
@@ -479,7 +480,7 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		if err != nil || chargedAmount < p.Amount {
 			return fmt.Errorf("collection charge does not cover the frozen invoice amount")
 		}
-		// Take the payer's money lock before invoice/ledger writes. Rounding
+		// Take the customer's money lock before invoice/ledger writes. Rounding
 		// credits use the same spendable-lot path and lock order as deposits.
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: intent.MerchantID, ID: p.CustomerID}); err != nil {
 			return err
@@ -538,12 +539,12 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		}
 		var change *models.MoneyTransaction
 		if excess := chargedAmount - p.Amount; excess > 0 {
-			payer := identity.CustomerIDFromString(p.CustomerID.String())
+			customer := identity.CustomerIDFromString(p.CustomerID.String())
 			key := "invoice-rounding:" + intent.ID.String()
 			reason := "Rounding credit from invoice " + billing.InvoiceID(p.InvoiceID).String()
 			// Change the card paid beyond the invoice is credit bought at face.
 			change, err = NewMoneyService(h.DB, h.Clock).depositTx(ctx, h.DB.NewWithPgxTx(tx), DepositParams{
-				CustomerID: &payer, Invoker: payer.String(), Currency: currency, Amount: excess,
+				CustomerID: &customer, Invoker: customer.String(), Currency: currency, Amount: excess,
 				Source: "invoice_rounding_purchase", SourceID: &key, Description: &reason, Funding: credits.Purchase,
 			})
 			if err != nil {
@@ -852,8 +853,9 @@ func queueUsageReceipt(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 	if err != nil {
 		return err
 	}
-	return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
+	_, err = billingfact.Record(ctx, q, billingfact.Fact{
 		ID:         uuidutil.DerivedV7(uuidutil.TimeOf(payment), uuidutil.DeterministicNamespace, uuidutil.Name(string(models.NotificationUsageCharged), merchantID.String(), payment.String())),
 		MerchantID: merchantID, CustomerID: invoice.CustomerID, EventType: string(models.NotificationUsageCharged), Data: raw, CreatedAt: now,
 	})
+	return err
 }

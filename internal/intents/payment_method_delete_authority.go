@@ -12,17 +12,17 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 )
 
-func paymentMethodDeleteAuthority(ctx context.Context, payer uuid.UUID) (Origin, string) {
+func paymentMethodDeleteAuthority(ctx context.Context, customer uuid.UUID) (Origin, string) {
 	if c, ok := billingauth.IdentityFromContext(ctx); ok {
 		actor, err := uuid.Parse(strings.TrimSpace(c.Subject))
-		if err == nil && actor == payer && payer != uuid.Nil {
+		if err == nil && actor == customer && customer != uuid.Nil {
 			return OriginUser, actor.String()
 		}
 	}
 	return OriginAdmin, ResolveActor(ctx, "")
 }
 
-// User origin is an authenticated payer decision, never a caller-selected
+// User origin is an authenticated customer decision, never a caller-selected
 // label. Canonical admission checks this before stamping the durable actor.
 func validatePaymentMethodDeleteAuthority(ctx context.Context, p EnqueueParams) error {
 	if p.Origin != OriginUser {
@@ -39,16 +39,16 @@ func validatePaymentMethodDeleteAuthority(ctx context.Context, p EnqueueParams) 
 	if err = json.Unmarshal(raw, &coordinates); err != nil {
 		return err
 	}
-	payer := coordinates.CustomerID
+	customer := coordinates.CustomerID
 	if p.IntentType == TypeNMIPaymentMethodDelete {
-		payer, err = uuid.Parse(coordinates.UserID)
+		customer, err = uuid.Parse(coordinates.UserID)
 		if err != nil {
 			return err
 		}
 	}
-	origin, actor := paymentMethodDeleteAuthority(ctx, payer)
+	origin, actor := paymentMethodDeleteAuthority(ctx, customer)
 	if origin != OriginUser || p.Actor != "" && p.Actor != actor {
-		return errors.New("user payment-method deletion requires its authenticated payer")
+		return errors.New("user payment-method deletion requires its authenticated customer")
 	}
 	return nil
 }
@@ -76,8 +76,8 @@ func isSelfServicePaymentMethodDelete(in gen.BillingProviderIntent) bool {
 		if err != nil || in.Rail != "nmi" || in.PspID == nil || *in.PspID == uuid.Nil || in.CustodianID != nil || !nativeMethodDeleteKeyMatches(in.IdempotencyKey, p.PaymentMethodID) {
 			return false
 		}
-		payer, err := uuid.Parse(p.UserID)
-		return err == nil && payer == actor
+		customer, err := uuid.Parse(p.UserID)
+		return err == nil && customer == actor
 	}
 	return false
 }

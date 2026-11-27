@@ -51,7 +51,8 @@ function OwnAccountsOnly({
 }
 
 // The first owner's page: the setup link the server logs while no account
-// holds a root role, or `openrails setup-link` prints.
+// holds a root role, or `openrails setup-link` prints. Signed in, the owner
+// goes on to the first merchant (setup/merchant).
 export function SetupPage() {
   const token = useFragment(readSetupToken)
   const navigate = useNavigate()
@@ -60,6 +61,7 @@ export function SetupPage() {
       <main className="console-sign-in">
         <OwnerSetup
           token={token}
+          fallbackPath="/setup/merchant"
           navigate={(to) => void navigate(to, { replace: true })}
         />
       </main>
@@ -67,8 +69,9 @@ export function SetupPage() {
   )
 }
 
-// An invitation's landing page: sign up with an emailed invitation, or
-// accept one into the signed-in account.
+// An invitation's landing page: sign up with it, or accept it into the
+// signed-in account. Where the server sends no email the sign-up is
+// immediate and the address stays unverified.
 export function InvitePage() {
   const invitation = useFragment(readInvitation)
   const [accepted, setAccepted] = useState(false)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,14 +26,14 @@ import (
 // balance and accrued to owed (either may be 0).
 //
 // preAuthorized selects the gating contract:
-//   - false: the remainder is gated by the credit line; a payer
+//   - false: the remainder is gated by the credit line; a customer
 //     without one, or a spend past it, gets ErrInsufficientCredits and nothing
 //     is debited.
 //   - true (capture of an admitted request): never re-gates; the remainder is
 //     recorded as owed/overdraft even without a credit line. Admission was the
 //     gate; capture records reality.
 func (s *MoneyService) spendBalanceThenOwedTx(
-	ctx context.Context, q *gen.Queries, payer identity.CustomerID,
+	ctx context.Context, q *gen.Queries, customer identity.CustomerID,
 	userID, currency string, key IdempotencyKey, amount int64, preAuthorized bool,
 ) (balanceSpent, owedAccrued int64, applied bool, err error) {
 	if amount <= 0 {
@@ -51,9 +52,9 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		return 0, 0, false, err
 	}
 	tenantID := tid.UUID()
-	payerID := payer.UUID()
+	customerID := customer.UUID()
 
-	bal, err := s.lockBalance(ctx, q, payer, userID, cur)
+	bal, err := s.lockBalance(ctx, q, customer, userID, cur)
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -61,7 +62,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	// The ledger balance holds a lapsed lot until its expiry posts, and a
 	// spend never draws it: cap the balance leg at the live lots.
 	lots, lerr := q.ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now, LiveAt: s.lotsLiveAt(),
+		MerchantID: tenantID, CustomerID: customerID, Currency: cur, AsOf: now, LiveAt: s.lotsLiveAt(),
 	})
 	if lerr != nil {
 		return 0, 0, false, lerr
@@ -93,14 +94,14 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			// owed/overdraft regardless of the credit line. An involuntary
 			// overdraft leaves a prepaid customer prepaid: the owed blocks new
 			// holds until funding repays it.
-			if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModePrepaid, now); err != nil {
+			if err := s.ensureSettingsRowTx(ctx, q, tenantID, customerID, cur, BillingModePrepaid, now); err != nil {
 				return 0, 0, false, err
 			}
 		} else {
 			// Immediate spend: the remainder can only go to owed when the account
 			// has a credit line, and only up to that line.
 			settingsRow, serr := q.LockMoneyAccountSettings(ctx, gen.LockMoneyAccountSettingsParams{
-				MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+				MerchantID: tenantID, CustomerID: customerID, Currency: cur,
 			})
 			if errors.Is(serr, pgx.ErrNoRows) {
 				// No settings row => prepaid default => no credit line.
@@ -109,14 +110,14 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			if serr != nil {
 				return 0, 0, false, serr
 			}
-			capacity, err := s.usageAdmissionCapacity(ctx, q, payer, cur, AdmissionCapacity{BillingMode: settingsRow.BillingMode, CreditLimit: settingsRow.CreditLimitAmount})
+			capacity, err := s.usageAdmissionCapacity(ctx, q, customer, cur, AdmissionCapacity{BillingMode: settingsRow.BillingMode, CreditLimit: settingsRow.CreditLimitAmount})
 			if err != nil {
 				return 0, 0, false, err
 			}
 			if capacity.BillingMode != BillingModeArrears || capacity.CreditLimit <= 0 {
 				return 0, 0, false, ErrInsufficientCredits
 			}
-			exposure, err := s.moneyLedger(q, tenantID).OutstandingOwed(ctx, payerID, cur)
+			exposure, err := s.moneyLedger(q, tenantID).OutstandingOwed(ctx, customerID, cur)
 			if err != nil {
 				return 0, 0, false, err
 			}
@@ -128,7 +129,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	}
 
 	if fromBalance > 0 {
-		_, balanceApplied, werr := s.withdrawBalanceAndBlocks(ctx, q, payer, userID, cur, key, s.postingResource(), fromBalance)
+		_, balanceApplied, werr := s.withdrawBalanceAndBlocks(ctx, q, customer, userID, cur, key, fromBalance)
 		if werr != nil {
 			return 0, 0, false, werr
 		}
@@ -138,26 +139,32 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 
 	if fromOwed > 0 {
 		ml := s.moneyLedger(q, tenantID)
-		_, owedApplied, aerr := ml.AccrueOwedIdempotent(ctx, payerID, cur, fromOwed, key.Coord(), nil)
+		_, owedApplied, aerr := ml.AccrueOwedIdempotent(ctx, customerID, cur, fromOwed, key.Coord(), nil)
 		if aerr != nil {
 			return 0, 0, false, aerr
 		}
 		applied = applied || owedApplied
+		parts := s.owedParts(key, fromOwed, now)
 		// What it leaves owed is usage revenue receivable, dated as its owed
-		// item is.
+		// items are: one accrual per date, the first at the owed accrual's
+		// coordinate.
 		if owedApplied {
-			at := now
-			if s.posting != nil && !s.posting.owedAt.IsZero() {
-				at = s.posting.owedAt
+			for i, a := range accrualsByDate(parts) {
+				coord := key.Coord()
+				if i > 0 {
+					coord.SourceID += "@" + a.at.UTC().Format(instantLayout)
+				}
+				if err := books.New(q, tenantID).AccrueUsage(ctx, customerID, cur, a.amount, coord, a.at, nil); err != nil {
+					return 0, 0, false, err
+				}
 			}
-			if err := books.New(q, tenantID).AccrueUsage(ctx, payerID, cur, fromOwed, key.Coord(), at, nil); err != nil {
+		}
+		for _, p := range parts {
+			if err := insertPendingOwedItemTx(ctx, q, tenantID, customerID, cur, txOwedAccrual, p.sourceID, p.amount, p.at, p.metadata); err != nil {
 				return 0, 0, false, err
 			}
 		}
-		if err := s.insertOwedItemsTx(ctx, q, tenantID, payerID, cur, key, fromOwed, now); err != nil {
-			return 0, 0, false, err
-		}
-		if err := s.queueUsageBilling(ctx, q, payerID, cur); err != nil {
+		if err := s.queueUsageBilling(ctx, q, customerID, cur); err != nil {
 			return 0, 0, false, err
 		}
 		owedAccrued = fromOwed
@@ -166,35 +173,53 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	return balanceSpent, owedAccrued, applied, nil
 }
 
-// insertOwedItemsTx queues what a spend left owed for its usage invoice: one
-// item, or one per meter an accrual's posting is for, so the invoice bills each
-// meter on its own line.
-func (s *MoneyService) insertOwedItemsTx(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string, key IdempotencyKey, owed int64, now time.Time) error {
-	if s.posting != nil && !s.posting.owedAt.IsZero() {
-		now = s.posting.owedAt
-	}
-	// An item names when its charges began, where its invoice's period starts.
-	metadata := func(source string) map[string]any {
-		m := map[string]any{"operation": string(key.Operation()), "source": source}
-		if s.posting != nil && !s.posting.from.IsZero() {
-			m[owedPeriodStartKey] = s.posting.from.UTC().Format(time.RFC3339Nano)
-		}
-		return m
-	}
+// owedPart is one owed item a spend leaves for its usage invoice.
+type owedPart struct {
+	sourceID string
+	amount   int64
+	at       time.Time
+	metadata map[string]any
+}
+
+// owedParts split what a spend left owed into its owed items: one dated now,
+// or one per share of a posting (a period's meter, its running charges),
+// each dated and starting as its share says, so the invoice bills each on
+// its own line.
+func (s *MoneyService) owedParts(key IdempotencyKey, owed int64, now time.Time) []owedPart {
 	if s.posting == nil || len(s.posting.owed) == 0 {
-		return insertPendingOwedItemTx(ctx, q, merchantID, customerID, currency, txOwedAccrual, key.owedItemSourceID(), owed, now, metadata(key.Source()))
+		return []owedPart{{sourceID: key.owedItemSourceID(), amount: owed, at: now,
+			metadata: map[string]any{"operation": string(key.Operation()), "source": key.Source()}}}
 	}
 	weights := make([]int64, len(s.posting.owed))
 	for i, o := range s.posting.owed {
 		weights[i] = o.weight
 	}
+	var out []owedPart
 	for i, amount := range share(owed, weights) {
-		meter := s.posting.owed[i].meter
-		if err := insertPendingOwedItemTx(ctx, q, merchantID, customerID, currency, txOwedAccrual, key.owedItemSourceID()+"/"+meter, amount, now, metadata("metered:"+meter)); err != nil {
-			return err
-		}
+		o := s.posting.owed[i]
+		from := o.from.UTC().Format(time.RFC3339Nano)
+		out = append(out, owedPart{sourceID: key.owedItemSourceID() + "/" + o.source + "@" + from, amount: amount, at: o.at,
+			metadata: map[string]any{"operation": string(key.Operation()), "source": o.source, owedPeriodStartKey: from}})
 	}
-	return nil
+	return out
+}
+
+// accrualsByDate sums owed parts by date, earliest first.
+func accrualsByDate(parts []owedPart) []owedPart {
+	var out []owedPart
+	for _, p := range parts {
+		if p.amount <= 0 {
+			continue
+		}
+		i := slices.IndexFunc(out, func(a owedPart) bool { return a.at.Equal(p.at) })
+		if i < 0 {
+			out = append(out, owedPart{at: p.at})
+			i = len(out) - 1
+		}
+		out[i].amount = addSat(out[i].amount, p.amount)
+	}
+	slices.SortFunc(out, func(a, b owedPart) int { return a.at.Compare(b.at) })
+	return out
 }
 
 // spendableUnits is what a customer's lots in a merchant's unit can take now,

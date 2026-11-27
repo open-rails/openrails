@@ -137,8 +137,8 @@ type Runtime struct {
 	// composition root alongside the other write-through producers.
 	PaymentSourceUpdateIntents *intents.PaymentSourceUpdateThrough
 
-	UserSubscriptionService  *subscriptions.UserSubscriptionService
-	AdminSubscriptionService *subscriptions.AdminSubscriptionService
+	CustomerSubscriptionService *subscriptions.CustomerSubscriptionService
+	AdminSubscriptionService    *subscriptions.AdminSubscriptionService
 	// EmailSender delivers all of OpenRails' email; nil sends none.
 	EmailSender config.EmailSender
 	// Messages sends customers their billing messages.
@@ -276,7 +276,7 @@ type Runtime struct {
 	// job runs. The dunning worker threads it into its per-run lifecycle so terminal
 	// cancellations schedule the rail-side delete through the ONE
 	// mechanism (no inline deletes). User-asked cancellations use a separate
-	// user-origin instance wired into UserSubscriptionService.
+	// user-origin instance wired into CustomerSubscriptionService.
 	DeferredDeletes subscriptions.ProviderCancelScheduler
 	// Verifier reads unverified subscriptions from their provider as soon as
 	// they become unverified; started with the billing workers.
@@ -541,14 +541,10 @@ func (r *Runtime) StartWorkers(ctx context.Context, fleet *river.Client[pgx.Tx])
 		return nil, err
 	}
 	loopCtx, stopLoops := context.WithCancel(ctx)
-	var pollerDone, dispatchDone chan struct{}
+	var pollerDone chan struct{}
 	if r.SolanaPayPoller != nil {
 		pollerDone = make(chan struct{})
 		go func() { defer close(pollerDone); r.SolanaPayPoller.Start(loopCtx) }()
-	}
-	if r.Messages != nil {
-		dispatchDone = make(chan struct{})
-		go func() { defer close(dispatchDone); r.Messages.Run(loopCtx) }()
 	}
 	var wakeDone chan struct{}
 	if r.Disputes != nil {
@@ -562,7 +558,7 @@ func (r *Runtime) StartWorkers(ctx context.Context, fleet *river.Client[pgx.Tx])
 	}
 	joinLoops := func() {
 		stopLoops()
-		for _, done := range []chan struct{}{pollerDone, dispatchDone, wakeDone, riskDone} {
+		for _, done := range []chan struct{}{pollerDone, wakeDone, riskDone} {
 			if done != nil {
 				<-done
 			}

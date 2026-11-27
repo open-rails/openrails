@@ -320,6 +320,9 @@ func ImportDeclaredSubscriptions(
 			}
 		}
 
+		// A canceled row whose provider schedule may still be live owes a
+		// remote delete on a rail that deletes remotely.
+		owesStop := f.CancelKind != DeclaredCancelNone && f.CancelScheduleLive && deferDelete != nil && rails.RemoteDeleteOnTerminalCancel(models.Rail(f.Rail))
 		existing, err := q.GetSubscriptionByPSPSubID(ctx, gen.GetSubscriptionByPSPSubIDParams{MerchantID: merchantID, PspID: f.PspID,
 			Rail:               f.Rail,
 			RailSubscriptionID: f.RailSubscriptionID,
@@ -370,7 +373,13 @@ func ImportDeclaredSubscriptions(
 				var err error
 				txq := db.NewWithPgxTx(logger, tx).Gen(ctx)
 				if f.CancelKind != DeclaredCancelNone {
-					subID, err = insertDeclaredCanceled(ctx, txq, merchantID, f, price, periodStart, periodEnd, authority)
+					if subID, err = insertDeclaredCanceled(ctx, txq, merchantID, f, price, periodStart, periodEnd, authority); err != nil || !owesStop {
+						return err
+					}
+					// A row owed a provider stop holds the customer's product
+					// until the stop lands: taken with the insert, a product
+					// the customer already holds blocks the row, not the book.
+					return txq.MarkProviderStopPending(ctx, gen.MarkProviderStopPendingParams{ID: subID, MerchantID: merchantID, At: asOf})
 				} else {
 					subID, err = materializeDeclaredUnknown(ctx, txq, merchantID, f, periodStart, periodEnd, authority)
 				}
@@ -442,17 +451,12 @@ func ImportDeclaredSubscriptions(
 			}
 			// Declared canceled but the provider-side schedule was not confirmed
 			// dead at AsOf: record the owed remote delete exactly like the runtime
-			// producers — DeletionScheduledAt marker + nmi_delete intent in ONE
-			// transaction (no crash window, no out-of-band healing needed).
-			if f.CancelScheduleLive && deferDelete != nil &&
-				rails.RemoteDeleteOnTerminalCancel(models.Rail(f.Rail)) {
+			// producers. Its DeletionScheduledAt marker was taken with the insert;
+			// marker and nmi_delete intent commit in the book's one transaction
+			// (no crash window, no out-of-band healing needed).
+			if owesStop {
 				if err := book.stopProvider(ctx, database, sub, func(ctx context.Context) error {
 					return database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-						if err := gen.New(tx).MarkProviderStopPending(ctx, gen.MarkProviderStopPendingParams{
-							ID: subID, MerchantID: merchantID, At: asOf,
-						}); err != nil {
-							return err
-						}
 						return deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, f.Customer.String(), subID, asOf)
 					})
 				}); err != nil {

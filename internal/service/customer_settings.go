@@ -117,8 +117,8 @@ func (s *Service) UpdateCustomer(ctx context.Context, customer identity.Customer
 }
 
 // SetLowBalanceLine sets the customer's own low-balance line in a currency
-// (null parts inherit the merchant's) and answers the effective line. The low
-// notice is re-armed.
+// (a null amount inherits the merchant's) and answers the effective line. The
+// low notice is re-armed.
 func (s *Service) SetLowBalanceLine(ctx context.Context, customer identity.CustomerID, currency string, params billing.SetLowBalanceLineParams) (*billing.EffectiveLowBalanceLine, error) {
 	if customer.IsZero() {
 		return nil, apperr.Invalidf("customer_id is required").WithParam("customer_id")
@@ -127,7 +127,7 @@ func (s *Service) SetLowBalanceLine(ctx context.Context, customer identity.Custo
 	if err != nil {
 		return nil, err
 	}
-	line := billing.LowBalanceLine{Currency: catalog.Currency(currency), Amount: params.Amount, RunwayHours: params.RunwayHours}
+	line := billing.LowBalanceLine{Currency: catalog.Currency(currency), Amount: params.Amount}
 	if err := money.ValidateLowBalanceLine(line, ""); err != nil {
 		return nil, err
 	}
@@ -441,12 +441,8 @@ func customerSettings(ctx context.Context, q *gen.Queries, mid uuid.UUID, custom
 	}
 	for _, l := range lines {
 		doc := out[l.CustomerID]
-		line := billing.LowBalanceLine{Currency: catalog.Currency(l.Currency), Amount: l.Amount}
-		if l.RunwayHours != nil {
-			hours := int(*l.RunwayHours)
-			line.RunwayHours = &hours
-		}
-		doc.LowBalanceLines = append(doc.LowBalanceLines, line)
+		amount := l.Amount
+		doc.LowBalanceLines = append(doc.LowBalanceLines, billing.LowBalanceLine{Currency: catalog.Currency(l.Currency), Amount: &amount})
 		out[l.CustomerID] = doc
 	}
 	policies, err := q.ListCustomerBillingPolicyAssignments(ctx, gen.ListCustomerBillingPolicyAssignmentsParams{MerchantID: mid, CustomerIds: customers, RowLimit: int32(len(customers))}) // #nosec G115 -- customers is at most 100 ids or one page (MaxPageLimit)

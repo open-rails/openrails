@@ -99,12 +99,12 @@ type GetOverdueInvoiceAggregateRow struct {
 	AmountFloor      int64
 }
 
-// One payer's usage invoices in a currency against now: how much is overdue and
+// One customer's usage invoices in a currency against now: how much is overdue and
 // since when, and when the next one falls due. Every evaluation and the
 // admission gate's live recompute read it, so the stored state and the gate
 // agree. grace_days and amount_floor are the bound billing policy's overrides,
 // -1 for none; its floor is in its policy_currency, and overrides only there. policies is the merchant's settings, {policies: {name: body},
-// tiers: {tier: name}, default: name, trust}; the payer's policy is its own
+// tiers: {tier: name}, default: name, trust}; the customer's policy is its own
 // assignment while the settings still declare it, else its trust tier's
 // (billing.trust_tier), else the default.
 //
@@ -211,7 +211,7 @@ type ListDueDelinquencyRow struct {
 
 // Arrears delinquency: the state projection, its due work, and the durable
 // host-lifecycle signal feed.
-// CROSS-MERCHANT: the payers whose delinquency time alone changes now (a usage
+// CROSS-MERCHANT: the customers whose delinquency time alone changes now (a usage
 // invoice fell due, a grace window ran out), in due order. Strictly before now:
 // an invoice is overdue only once its due_at has passed. An idle pass reads no
 // row.
@@ -247,6 +247,57 @@ func (q *Queries) ListDueDelinquency(ctx context.Context, arg ListDueDelinquency
 	return items, nil
 }
 
+const listOverdueUsageInvoices = `-- name: ListOverdueUsageInvoices :many
+SELECT o.id, o.total - o.amount_paid AS amount_due, o.due_at
+FROM billing.invoices o
+WHERE o.merchant_id = $1::uuid AND o.customer_id = $2::uuid
+  AND o.currency = $3::text
+  AND o.origin = 'usage' AND o.status = 'open' AND o.amount_paid < o.total
+  AND o.due_at < $4::timestamptz
+ORDER BY o.id
+`
+
+type ListOverdueUsageInvoicesParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Now        time.Time
+}
+
+type ListOverdueUsageInvoicesRow struct {
+	ID        uuid.UUID
+	AmountDue int64
+	DueAt     *time.Time
+}
+
+// The customer's open usage invoices in the currency past their due date, each
+// told once (invoice_overdue). One with a collection in flight waits for its
+// outcome.
+func (q *Queries) ListOverdueUsageInvoices(ctx context.Context, arg ListOverdueUsageInvoicesParams) ([]ListOverdueUsageInvoicesRow, error) {
+	rows, err := q.db.Query(ctx, listOverdueUsageInvoices,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.Now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOverdueUsageInvoicesRow
+	for rows.Next() {
+		var i ListOverdueUsageInvoicesRow
+		if err := rows.Scan(&i.ID, &i.AmountDue, &i.DueAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markDelinquencyDue = `-- name: MarkDelinquencyDue :exec
 UPDATE billing.customer_delinquency
 SET next_evaluation_at = $1::timestamptz
@@ -259,48 +310,10 @@ type MarkDelinquencyDueParams struct {
 	MerchantID uuid.UUID
 }
 
-// The merchant's delinquency policy may have changed: every payer it holds
+// The merchant's delinquency policy may have changed: every customer it holds
 // in grace or delinquent is evaluated again on the next pass.
 func (q *Queries) MarkDelinquencyDue(ctx context.Context, arg MarkDelinquencyDueParams) error {
 	_, err := q.db.Exec(ctx, markDelinquencyDue, arg.Now, arg.MerchantID)
-	return err
-}
-
-const notifyOverdueInvoices = `-- name: NotifyOverdueInvoices :exec
-INSERT INTO billing.notification_events (id, merchant_id, customer_id, event_type, data, created_at)
-SELECT encode(set_byte(set_byte(n.b, 6, (get_byte(n.b, 6) & 15) | 112), 8, (get_byte(n.b, 8) & 63) | 128), 'hex')::uuid,
-       o.merchant_id, o.customer_id, 'invoice_overdue',
-       jsonb_build_object('invoice_id', 'in_' || o.id::text, 'amount_due', (o.total - o.amount_paid)::text, 'currency', o.currency, 'due_at', o.due_at),
-       $1::timestamptz
-FROM billing.invoices o
-CROSS JOIN LATERAL (SELECT CASE WHEN get_byte(uuid_send(o.id), 6) >> 4 = 7 THEN substring(uuid_send(o.id) FROM 1 FOR 6) ELSE decode('000000000000', 'hex') END
-    || substring(sha256(uuid_send(o.id) || convert_to('invoice_overdue', 'UTF8')) FROM 1 FOR 10) AS b) n
-WHERE o.merchant_id = $2::uuid AND o.customer_id = $3::uuid
-  AND o.currency = $4::text
-  AND o.origin = 'usage' AND o.status = 'open' AND o.amount_paid < o.total
-  AND o.due_at < $1::timestamptz
-ON CONFLICT (merchant_id, id) DO NOTHING
-`
-
-type NotifyOverdueInvoicesParams struct {
-	Now        time.Time
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-}
-
-// Tells the payer once about each of its open usage invoices in the currency
-// past its due date; the notice id derives from the invoice's (uuidutil.ChildV7
-// of "invoice_overdue": its timestamp, then SHA-256 of the invoice id and name),
-// so a later evaluation adds none. One with a collection in flight waits for
-// its outcome.
-func (q *Queries) NotifyOverdueInvoices(ctx context.Context, arg NotifyOverdueInvoicesParams) error {
-	_, err := q.db.Exec(ctx, notifyOverdueInvoices,
-		arg.Now,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Currency,
-	)
 	return err
 }
 
@@ -320,7 +333,7 @@ type RebuildDelinquencyDueParams struct {
 	MerchantID uuid.UUID
 }
 
-// A restored merchant's payers with an open usage invoice are evaluated again
+// A restored merchant's customers with an open usage invoice are evaluated again
 // at once; MarkDelinquencyDue covers the ones in grace or delinquent.
 func (q *Queries) RebuildDelinquencyDue(ctx context.Context, arg RebuildDelinquencyDueParams) error {
 	_, err := q.db.Exec(ctx, rebuildDelinquencyDue, arg.Now, arg.MerchantID)
@@ -343,7 +356,7 @@ type ScheduleDelinquencyParams struct {
 	Now        time.Time
 }
 
-// The payer is evaluated on the next pass: its policy could not be read when
+// The customer is evaluated on the next pass: its policy could not be read when
 // one of its usage invoices changed.
 func (q *Queries) ScheduleDelinquency(ctx context.Context, arg ScheduleDelinquencyParams) error {
 	_, err := q.db.Exec(ctx, scheduleDelinquency,

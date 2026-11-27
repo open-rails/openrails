@@ -44,13 +44,18 @@ Per rail ([provider uncertainty](../standalone.md#provider-intents) has the full
 
 - **NMI** has no idempotency key. Local refusals and dial failures before a
   connection is obtained return `nmi.ErrNotDispatched`. Lost answers and
-  non-200 responses stay ambiguous. Checkout recognizes `response=3` refusal
-  codes 300, 410, 411, 440, 441, 460 and 461 through `nmi.ErrSaleRefused`;
-  other callers keep verifying them. A charge settles only from the exact
+  non-200 responses stay ambiguous. Checkout and engine renewals recognize
+  `response=3` refusal codes 300, 410, 411, 440, 441, 460 and 461 through
+  `nmi.ErrSaleRefused`; engine renewals take the normal decline/dunning path.
+  A charge settles only from the exact
   receipt under its invoice id, which every attempt for one period shares; an
   empty search proves nothing. Checkout sales release after 24 hours with an empty
   order search, or earlier on operator attestation, raising a high finding for
-  reconciliation if money later appears. NMI is never resent
+  reconciliation if money later appears. Engine renewals accept operator resolution
+  from an exact receipt, a definitive decline, or an attested empty order; they
+  never release automatically. An empty-order release admits the next attempt
+  under the same obligation order, read before submission to catch late money.
+  An unresolved NMI submission is never resent
   (`Store.ArmLostSubmissionResend` refuses any rail but Stripe).
 - **Stripe** requests carry an `Idempotency-Key` rooted in the operation id
   (`stripeapi.SetIdempotencyKey`). A lost renewal may replay it after
@@ -149,17 +154,9 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   5 s; a wake landing on a running job chains a follow-up, since that job may
   have read before the cause.
 - **Convergence**: `reconcile.Decide` is the one pure decision table. Webhook
-  fetches, probes, the rebill watch, pulls and imports each give it an
+  fetches, probes, verifier reads, pulls and imports each give it an
   `EvidenceBundle`; only `ApplyDecision` changes a subscription.
-- **Missed callbacks**: `openrails.rebill_watch` reads each NMI schedule past
-  `NMIRebillDeadline` (24 h) with no attempt; a found charge is recorded, a
-  proven skip collected, a reversed one never recharged (`life.rebill.missed`).
-  A period lapsing without evidence makes a subscription `unverified`, access
-  kept; `trg_subscriptions_track_unverified` queues it in
-  `subscription_verifications`, and the `Verifier` reads queued ids, 50 per
-  request. `openrails.charge_attributions`, `openrails.nmi_history` and
-  `openrails provider-refresh` (from `psp_refresh_watermarks`) read the rest;
-  `life.webhooks.silent` fires when webhooks stop but pulls find charges.
+- **Missed callbacks**: the due pass moves a provider-billed renewal unpaid past its rail's deadline to `unverified`, access kept: `reconcile.NMIRebillDeadline` (24 h) for an NMI schedule, `reconcile.PeriodGrace` (48 h) for Stripe and CCBill. `trg_subscriptions_track_unverified` queues it in `subscription_verifications`; the `Verifier` reads queued ids at once, 50 per request, and `openrails.subscription_verification_retry` again any not read for an hour. An NMI cycle the read leaves with no attempt is decided from NMI's transactions for it (`life.rebill.missed`): a found charge is recorded, a reversed or unrecorded one never recharged, a gone schedule ended, a proven skip collected (`CollectSkippedRenewal`). `openrails.charge_attributions` and `openrails provider-refresh` (from `psp_refresh_watermarks`) read the rest; `life.webhooks.silent` fires when webhooks stop but pulls find charges.
 - **Proposals**: only `proposals.Executor` applies a `pull.*` finding's `change`,
   one approval run per approve call, reversed by `openrails undo-run`.
 - **Parking**: an unmapped price, an unlinked customer or a customer already
@@ -184,7 +181,7 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   at NMI and Stripe carry the book id (`internal/booktag`).
 
 Other tables: `provider_bills`, `provider_charge_attributions`, `provider_listed_rebills`, `webhook_health`,
-`webhook_health_daily`, `nmi_history_months`, `nmi_bulk_checkpoints`,
+`webhook_health_daily`, `nmi_bulk_checkpoints`,
 `solana_subscriptions`, `solana_pay_references`, `solana_pay_receipts`.
 
 ## Interfaces
@@ -222,8 +219,8 @@ Checks:
 Stripe and NMI subscription and charge events only wake a fetch, so a late,
 repeated or reordered one cannot write stale state; refund, void, dispute and
 chargeback notices are applied from the verified payload, once per event id.
-Missing callbacks are caught by reads driven by evidence (the rebill watch,
-verification, attributions, refreshes). A subscription ends only on the
+Missing callbacks are caught by reads driven by evidence (verification,
+attributions, refreshes). A subscription ends only on the
 provider's own terminal answer (Stripe `resource_missing`, NMI `E_NOT_FOUND`);
 no evidence keeps it `unverified` with access, and what converge cannot land
 parks for a person.
@@ -231,7 +228,7 @@ parks for a person.
 Checks:
 - `markSubscriptionDirty` (`internal/modules/webhooks/converge.go`) only enqueues; state changes go through `ApplyDecision`.
 - OR-J28-S04 (duplicate, out-of-order) and OR-J28-S05 (callback during a fetch).
-- OR-J15-S01, S03, S04: a missing callback repaired from the Query API, a skipped cycle collected only after proven absence, a reversed charge never recollected.
+- OR-J15-S01 to S04, S76: a missing callback repaired from the Query API, a lagging or failed read never charging again, a skipped cycle collected only after proven absence, a reversed or unrecorded charge never recollected, a gone schedule ended; OR-J15-S70 and OR-J16-S72: NMI's renewal deadline is a day, Stripe's and CCBill's two.
 - OR-J15-S18, S19: any other 404 fails the converge, which retries with access intact.
 
 ### 3. Exact money
@@ -290,7 +287,7 @@ Checks:
 
 ### 7. Work scales with activity
 
-An operation's wake is queued by the write that leaves it live, at its due time; `openrails.operation_wakes` only requeues operations an hour overdue, 500 at a time. Wake jobs coalesce per object. The `Verifier` reads queued ids; the rebill watch reads only overdue NMI schedules without an attempt (`ListOverdueRebills`). Provider posture is proven per credential set at load and at the first write after an hour (a Stripe key's once), never by sweep.
+An operation's wake is queued by the write that leaves it live, at its due time; `openrails.operation_wakes` only requeues operations an hour overdue, 500 at a time. Wake jobs coalesce per object. The `Verifier` reads queued ids; the due pass selects only provider-billed renewals past their deadline with no payment (`ListOverdueRenewals`). Provider posture is proven per credential set at load and at the first write after an hour (a Stripe key's once), never by sweep.
 
 Checks:
 - `OperationWakes.Pass` uses `ListOverdueProviderOperations` past `OperationWakeGrace`; OR-J04-S60 requeues a lost wake.
@@ -330,7 +327,7 @@ Critical scenarios:
 - J06: OR-J06-S01 to S05, S09, S30, S31, S60 to S64 (`TestPSPControls`, `TestStripeWebhookDueWork`), S07 (`TestBackgroundJobs`), S08 (`TestPSPPostureExpiry`), S65 (`TestDueWork`).
 - J10: OR-J10-S01, S03, S04 (`TestPaymentReplay`), S02 (`TestCheckoutBoundaries`), S05 (`TestInvoicePaymentReceipts`).
 - J11: OR-J11-S01, S02 (`TestProviderRecovery`), S04 (`TestUnresolvedRouting`).
-- J15: OR-J15-S01 to S04 (`TestNMIRecovery`), S06, S07 (`TestVerificationBinding`), S08 to S21 (`TestProviderTrailing`), S30 (`TestBackgroundJobs`), S70, S72 (`TestDueWork`), S71 (`TestNMIRoster`).
+- J15: OR-J15-S01 to S04, S76 (`TestNMIRecovery`), S06, S07 (`TestVerificationBinding`), S08 to S21 (`TestProviderTrailing`), S30 (`TestBackgroundJobs`), S70, S72 (`TestDueWork`), S71 (`TestNMIRoster`).
 - J28: OR-J28-S01 to S05, S08 (`TestCallbackContracts`), S06, S07 (`TestWebhookAccountClasses`), S17 to S23 (`TestCCBillWebhookToken`).
 - J29: OR-J29-S01, S04 (`TestProcessRecovery`), S02, S05, S06 (`TestUnresolvedMoneyContracts`), S07, S08, S40, S41 (`TestBackgroundJobs`), S37, S70 to S73 (`TestDueWork`).
 - J38: OR-J38-S86 to S94 (`TestCCBillCallbackEvidence`): unconfirmed CCBill callback rebills and doubtful lapses.

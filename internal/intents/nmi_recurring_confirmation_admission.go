@@ -42,7 +42,7 @@ type recurringConfirmation struct {
 
 // EnqueueCustomer admits only an explicit confirmation of the effective current
 // card. A nil result leaves ordinary method selection with its existing owner.
-func (h *NMIRecurringConfirmationHandler) EnqueueCustomer(ctx context.Context, subID, payer uuid.UUID, requested *uuid.UUID) (*gen.BillingProviderIntent, error) {
+func (h *NMIRecurringConfirmationHandler) EnqueueCustomer(ctx context.Context, subID, customer uuid.UUID, requested *uuid.UUID) (*gen.BillingProviderIntent, error) {
 	var accepted *gen.BillingProviderIntent
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := h.DB.NewWithPgxTx(tx)
@@ -50,7 +50,7 @@ func (h *NMIRecurringConfirmationHandler) EnqueueCustomer(ctx context.Context, s
 		if err != nil {
 			return err
 		}
-		if payer == uuid.Nil || sub.CustomerID != payer {
+		if customer == uuid.Nil || sub.CustomerID != customer {
 			return pgx.ErrNoRows
 		}
 		p, eligible, err := confirmationSnapshot(ctx, d, sub)
@@ -84,7 +84,7 @@ func (h *NMIRecurringConfirmationHandler) EnqueueCustomer(ctx context.Context, s
 			MerchantID: sub.MerchantID, Provider: string(sub.Rail), IntentType: TypeNMIRecurringConfirmation,
 			SubscriptionID: &sub.ID, PspID: sub.PspID,
 			Payload: recurringConfirmation{p, "pmr-" + episode, now}, IdempotencyKey: key,
-			NextAttemptAt: now, Origin: OriginUser, OriginReason: "customer confirmed current card for recurring recovery", Actor: payer.String(), Inline: true,
+			NextAttemptAt: now, Origin: OriginUser, OriginReason: "customer confirmed current card for recurring recovery", Actor: customer.String(), Inline: true,
 		})
 		if err == nil {
 			accepted = &row

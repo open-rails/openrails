@@ -661,40 +661,6 @@ func TestDeclineCauses(t *testing.T) {
 			require.NotEmpty(t, answers[id], id)
 		}
 	})
-	t.Run("OR-J45-S08/nmi-history-months-carry-each-answers-outcome-and-cause", func(t *testing.T) {
-		a, p := newNMIWorld(t)
-		vault := p.core.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
-		at := a.clock.Now().Add(-48 * time.Hour)
-		for _, sale := range []nmimock.Sale{
-			{},
-			{},
-			{Declined: "200", IssuerCode: "51"},
-			{Declined: "200", IssuerCode: "05"},
-			{Declined: "200", IssuerCode: "59"},
-			{Declined: "461"},
-		} {
-			sale.Vault, sale.Amount, sale.At = vault, "10.00", at
-			p.core.AddSale(sale)
-			at = at.Add(time.Minute)
-		}
-		require.NoError(t, p.persist(t.Context()))
-		awaitHistoryQueued(t, a)
-		fleet := quietFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.nmi_history", 1)
-		rows := metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"nmi_history_authorizations"},
-			By: []string{"outcome", "decline_cause", "reason"}, Range: &billing.MetricsRange{Last: "90d"}})
-		got := map[string]int64{}
-		for _, row := range rows {
-			got[fmt.Sprintf("%v/%v/%v", row["outcome"], row["decline_cause"], row["reason"])] += whole(t, row["nmi_history_authorizations"])
-		}
-		require.Equal(t, map[string]int64{
-			"approved//":                           2,
-			"declined/customer/insufficient_funds": 1,
-			"declined/issuer/do_not_honor":         1,
-			"declined/fraud/suspected_fraud":       1,
-			"refused/merchant/brand_not_accepted":  1,
-		}, got, "NMI's catch-all 200 is the issuer's code; its 461 is the merchant account's")
-	})
 }
 
 // awaitDeferredToRenewal checks a case the issuer's advice deferred past the
@@ -724,12 +690,19 @@ func awaitDeferredToRenewal(t *testing.T, a *authorityWorld, fleet *river.Client
 
 // nmiEngineMembership buys a weekly OpenRails membership on NMI with a new
 // card the gateway vaults: OpenRails collects its renewals.
-func nmiEngineMembership(t *testing.T) (*authorityWorld, *nmiJournal, *billing.Subscription) {
+func nmiEngineMembership(t *testing.T, configure ...func(*world)) (*authorityWorld, *nmiJournal, *billing.Subscription) {
 	t.Helper()
-	a, p := newNMIWorld(t)
+	return nmiEngineMembershipFor(t, 7*24, configure...)
+}
+
+// nmiEngineMembershipFor is nmiEngineMembership with its paid access lasting
+// accessHours of each weekly period.
+func nmiEngineMembershipFor(t *testing.T, accessHours int, configure ...func(*world)) (*authorityWorld, *nmiJournal, *billing.Subscription) {
+	t.Helper()
+	a, p := newNMIWorld(t, configure...)
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-engine-membership", DisplayName: "NMI engine membership", Entitlements: []string{"nmi:engine"}})
 	require.NoError(t, err)
-	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "nmi-engine-weekly", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(7 * 24)})
+	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "nmi-engine-weekly", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(7 * 24), AccessDurationHours: ptr(accessHours)})
 	require.NoError(t, err)
 	token := p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"})
 	input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: token, BillingDetails: billedTo("US", "10001")}}

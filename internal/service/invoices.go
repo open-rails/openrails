@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -112,7 +111,7 @@ func (s *Service) PreviewInvoice(ctx context.Context, actor InvoiceActor, params
 
 // previewInvoice prices lines for customer; replacing prices them as
 // FindOrCreate buys them.
-func (s *Service) previewInvoice(ctx context.Context, customer billing.CustomerID, payer *InvoiceActor, params billing.PreviewMyInvoiceParams, replacing bool) (*billing.InvoicePreview, error) {
+func (s *Service) previewInvoice(ctx context.Context, customer billing.CustomerID, actor *InvoiceActor, params billing.PreviewMyInvoiceParams, replacing bool) (*billing.InvoicePreview, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -137,7 +136,7 @@ func (s *Service) previewInvoice(ctx context.Context, customer billing.CustomerI
 	// The balance pays an invoice in a merchant's unit: no PSP takes it.
 	var options []billing.InvoicePaymentOption
 	if !invoices.InMerchantUnit(quote.Currency) {
-		if options, err = s.invoiceOptions(ctx, customer.UUID(), payer, quote.Prices(), quote.Products()); err != nil {
+		if options, err = s.invoiceOptions(ctx, customer.UUID(), actor, quote.Prices(), quote.Products()); err != nil {
 			return nil, err
 		}
 	}
@@ -490,8 +489,8 @@ func (s *Service) payInvoice(ctx context.Context, rt *invoiceRuntime, actor Invo
 	if err := s.reconsentPaying(ctx, actor.Customer.UUID(), pay.method, key); err != nil {
 		return payment.InvoiceCharge{}, err
 	}
-	user := &payment.UserIdentity{ID: actor.Customer.String(), ClientIP: actor.ClientIP}
-	identify := func(ctx context.Context, user *payment.UserIdentity) error { return s.identify(ctx, actor, user) }
+	user := &payment.CustomerIdentity{ID: actor.Customer.String(), ClientIP: actor.ClientIP}
+	identify := func(ctx context.Context, user *payment.CustomerIdentity) error { return s.identify(ctx, actor, user) }
 	return rt.Attempts.PayInvoice(ctx, payment.InvoicePayInput{Invoice: invoice, PaymentMethodID: pay.method, Card: pay.card, Solana: pay.solana, Hosted: pay.hosted, Key: key, User: user,
 		Identify: identify, Prices: quote.prices, Products: quote.products})
 }
@@ -499,7 +498,7 @@ func (s *Service) payInvoice(ctx context.Context, rt *invoiceRuntime, actor Invo
 // identify names the customer to a provider's own page (a CCBill FlexForm):
 // the verified email and username their credential carries, else the
 // merchant's directory's.
-func (s *Service) identify(ctx context.Context, actor InvoiceActor, user *payment.UserIdentity) error {
+func (s *Service) identify(ctx context.Context, actor InvoiceActor, user *payment.CustomerIdentity) error {
 	if p := actor.Principal; p.EmailVerified && strings.TrimSpace(p.Email) != "" {
 		email := strings.TrimSpace(p.Email)
 		user.Email = &email
@@ -596,6 +595,8 @@ func (s *Service) GetInvoice(ctx context.Context, actor InvoiceActor, id billing
 
 // ListInvoices pages the customer's own invoices, newest first. A list carries
 // no next_action or payment options; read the invoice for them.
+// A page leaves out purchases that expired unpaid: they were never bills.
+// Invoices named by id are answered as they are.
 func (s *Service) ListInvoices(ctx context.Context, actor InvoiceActor, params billing.InvoiceListParams) (billing.ListPage[billing.Invoice], error) {
 	if actor.Customer.IsZero() {
 		return billing.ListPage[billing.Invoice]{}, invoices.ErrNotFound
@@ -662,7 +663,8 @@ func (s *Service) listInvoices(ctx context.Context, params billing.InvoiceListPa
 		}
 		return out, s.markDelinquentPage(ctx, out.Items)
 	}
-	var filter invoices.ListFilter
+	// A customer's page leaves out its purchases that expired unpaid.
+	filter := invoices.ListFilter{OmitExpiredPurchases: !merchant}
 	if !params.CustomerID.IsZero() {
 		filter.CustomerID = new(params.CustomerID.UUID())
 	}
@@ -732,7 +734,7 @@ func (s *Service) viewOf(ctx context.Context, rt *invoiceRuntime, actor InvoiceA
 
 // openInvoiceOptions are what can pay an open invoice, each with the invoice's
 // failed attempts through it; none for any other invoice.
-func (s *Service) openInvoiceOptions(ctx context.Context, invoice *invoices.Invoice, payer *InvoiceActor) ([]billing.InvoicePaymentOption, error) {
+func (s *Service) openInvoiceOptions(ctx context.Context, invoice *invoices.Invoice, actor *InvoiceActor) ([]billing.InvoicePaymentOption, error) {
 	var options []billing.InvoicePaymentOption
 	var err error
 	switch {
@@ -747,7 +749,7 @@ func (s *Service) openInvoiceOptions(ctx context.Context, invoice *invoices.Invo
 	default:
 		var quote frozenLines
 		if quote, err = s.frozenQuote(ctx, invoice); err == nil {
-			options, err = s.invoiceOptions(ctx, invoice.CustomerID, payer, quote.prices, quote.products)
+			options, err = s.invoiceOptions(ctx, invoice.CustomerID, actor, quote.prices, quote.products)
 		}
 	}
 	if err != nil || len(options) == 0 {
@@ -788,9 +790,9 @@ func (s *Service) frozenQuote(ctx context.Context, invoice *invoices.Invoice) (f
 	return out, nil
 }
 
-// invoiceOptions are the PSPs that sell the lines. For payer, the customer
+// invoiceOptions are the PSPs that sell the lines. For customer, the customer
 // reading them, a CCBill option names what its page still needs (identify).
-func (s *Service) invoiceOptions(ctx context.Context, customer uuid.UUID, payer *InvoiceActor, prices []*models.Price, products []*models.Product) ([]billing.InvoicePaymentOption, error) {
+func (s *Service) invoiceOptions(ctx context.Context, customer uuid.UUID, actor *InvoiceActor, prices []*models.Price, products []*models.Product) ([]billing.InvoicePaymentOption, error) {
 	if page, ok := paymentpage.FromContext(ctx); ok && !page.SavedPaymentMethods {
 		customer = uuid.Nil
 	}
@@ -805,12 +807,12 @@ func (s *Service) invoiceOptions(ctx context.Context, customer uuid.UUID, payer 
 			saved = append(saved, billing.PaymentMethodID(id))
 		}
 		option := billing.InvoicePaymentOption{PSPID: billing.PSPID(o.PSPID), Rail: billing.Rail(o.Rail), Accepts: o.Accepts(), SavedPaymentMethodIDs: saved}
-		if payer != nil && o.Rail == string(models.RailCCBill) {
+		if actor != nil && o.Rail == string(models.RailCCBill) {
 			// A hint only: paying checks again, so a directory outage
 			// leaves the option without it rather than failing the read.
-			user := &payment.UserIdentity{ID: payer.Customer.String()}
-			if err := s.identify(ctx, *payer, user); err != nil {
-				s.Log.WarnContext(ctx, "ccbill option: cannot read the customer's identity", logx.Err(err), "customer_id", payer.Customer.String())
+			user := &payment.CustomerIdentity{ID: actor.Customer.String()}
+			if err := s.identify(ctx, *actor, user); err != nil {
+				s.Log.WarnContext(ctx, "ccbill option: cannot read the customer's identity", logx.Err(err), "customer_id", actor.Customer.String())
 			} else {
 				option.Requires = payment.CCBillIdentityMissing(user)
 			}
@@ -955,8 +957,6 @@ func (s *Service) RecordPayment(ctx context.Context, params billing.RecordExtern
 // creates an unpaid invoice they pay on the merchant's own site. Merchants
 // never pay: no merchant route takes a payment.
 
-var errMerchantInvoiceExpiry = apperr.Invalidf("expires_at is between an hour and 120 days away").WithParam("expires_at")
-
 // PreviewMerchantInvoice prices lines for one customer without writing.
 func (s *Service) PreviewMerchantInvoice(ctx context.Context, params billing.PreviewInvoiceParams) (*billing.InvoicePreview, error) {
 	if params.CustomerID.IsZero() {
@@ -1025,15 +1025,8 @@ func (s *Service) CreateMerchantInvoice(ctx context.Context, params billing.Crea
 		return view, true, nil
 	}
 	now := s.now()
-	ttl := invoices.MerchantTTL
-	if params.ExpiresAt != nil {
-		ttl = params.ExpiresAt.Sub(now)
-		if ttl < time.Hour || ttl > invoices.MaxMerchantTTL {
-			return nil, false, errMerchantInvoiceExpiry
-		}
-	}
-	// A pay URL is checked before the invoice exists; without an expiry of
-	// its own, the invoice expires with it (Stripe).
+	// A pay URL is checked before the invoice exists; it expires on its own,
+	// and the invoice stays open after it.
 	var attach func(context.Context, *gen.Queries, uuid.UUID) error
 	var payURL string
 	if params.PayURL != nil {
@@ -1049,7 +1042,7 @@ func (s *Service) CreateMerchantInvoice(ctx context.Context, params billing.Crea
 		if err != nil {
 			return nil, false, err
 		}
-		plan, err := paymentpage.Plan(*params.PayURL, billing.InvoiceID{}, now, params.ExpiresAt, allowed)
+		plan, err := paymentpage.Plan(*params.PayURL, billing.InvoiceID{}, now, allowed)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1061,15 +1054,12 @@ func (s *Service) CreateMerchantInvoice(ctx context.Context, params billing.Crea
 				return nil, false, err
 			}
 		}
-		if params.ExpiresAt == nil {
-			ttl = plan.ExpiresAt.Sub(now)
-		}
 		attach = func(ctx context.Context, q *gen.Queries, id uuid.UUID) error {
 			mid, err := merchant.Require(ctx)
 			if err != nil {
 				return err
 			}
-			c, err := paymentpage.Plan(*params.PayURL, billing.InvoiceID(id), now, params.ExpiresAt, allowed)
+			c, err := paymentpage.Plan(*params.PayURL, billing.InvoiceID(id), now, allowed)
 			if err != nil {
 				return err
 			}
@@ -1078,7 +1068,7 @@ func (s *Service) CreateMerchantInvoice(ctx context.Context, params billing.Crea
 		}
 	}
 	invoice, err := rt.Invoices.Create(ctx, invoices.CreateInput{CustomerID: params.CustomerID.UUID(), Origin: billing.InvoiceOriginMerchant, Lines: params.Lines,
-		IdempotencyKey: scoped, RequestDigest: digest, TTL: ttl, Attach: attach, Checkout: invoices.CheckoutFacts{Attribution: s.attribution(ctx, params.Attribution)}})
+		IdempotencyKey: scoped, RequestDigest: digest, Attach: attach, Checkout: invoices.CheckoutFacts{Attribution: s.attribution(ctx, params.Attribution)}})
 	if err != nil {
 		if db.IsUniqueViolation(err) {
 			return nil, false, ErrIdempotencyKeyInUse

@@ -16,7 +16,7 @@ on:
         description: Hot merchant rates to step through, events/s (comma separated; empty for the default)
         default: ""
       heavy_rows:
-        description: Usage events of the heavy customer in the month-end close
+        description: Usage events of the heavy customer in the daily posting at the month's end
         default: "26000000"
       worlds:
         description: Worlds to run (http, embedded, posting, storage)
@@ -62,16 +62,16 @@ jobs:
           timeout 90 bash -c 'until docker exec load-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_load; do sleep 1; done'
           timeout 60 bash -c 'until docker exec load-redis redis-cli ping; do sleep 1; done'
           timeout 90 bash -c 'until docker exec load-clickhouse clickhouse-client --query "SELECT 1"; do sleep 1; done'
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: scripts/load/go.mod
           cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          family: critical
       - uses: ./.github/actions/go-remote-cache
         with:
           credentials: ${{ github.event_name == 'push' && secrets.GO_REMOTE_CACHE_RW || secrets.GO_REMOTE_CACHE_RO }}
+      - uses: ./.github/actions/go-cache
+        with:
+          family: critical
       - name: Build the driver
         working-directory: scripts/load
         run: GOWORK=off go build -o "$RUNNER_TEMP/load" .

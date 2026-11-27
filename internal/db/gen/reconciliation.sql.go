@@ -728,6 +728,85 @@ func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAban
 	return items, nil
 }
 
+const listAccessWindowsWiderThanGrant = `-- name: ListAccessWindowsWiderThanGrant :many
+SELECT pa.id AS access_id, pa.customer_id, pa.product_id, pa.grant_id,
+       pa.starts_at, pa.ends_at, g.starts_at AS grant_starts_at, g.ends_at AS grant_ends_at,
+       ((g.ends_at IS NULL OR pa.starts_at < g.ends_at) AND (pa.ends_at IS NULL OR g.starts_at < pa.ends_at))::boolean AS overlaps
+FROM billing.product_access pa
+JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
+WHERE pa.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR pa.customer_id = $2::uuid)
+  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+  AND (pa.ends_at IS NULL OR pa.ends_at > $3::timestamptz)
+  AND (pa.starts_at < g.starts_at OR g.ends_at IS NOT NULL AND (pa.ends_at IS NULL OR pa.ends_at > g.ends_at))
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.grants t
+      WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+        AND t.event IN ('revoke', 'expire', 'supersede'))
+ORDER BY pa.created_at, pa.id
+LIMIT $4::int
+`
+
+type ListAccessWindowsWiderThanGrantParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Now        time.Time
+	RowLimit   int32
+}
+
+type ListAccessWindowsWiderThanGrantRow struct {
+	AccessID      uuid.UUID
+	CustomerID    uuid.UUID
+	ProductID     uuid.UUID
+	GrantID       uuid.UUID
+	StartsAt      time.Time
+	EndsAt        *time.Time
+	GrantStartsAt time.Time
+	GrantEndsAt   *time.Time
+	Overlaps      bool
+}
+
+// derive.grant_effect.mismatch (window direction): a live window that starts
+// before its grant or ends after it. Every writer copies the grant's dates or
+// narrows them, so the wider part has no grant behind it. A window outside
+// its grant altogether has no trustworthy dates and goes to an operator.
+// Terminated grants are derive.grant_effect.excess's. NULL customer_id =
+// merchant-wide.
+func (q *Queries) ListAccessWindowsWiderThanGrant(ctx context.Context, arg ListAccessWindowsWiderThanGrantParams) ([]ListAccessWindowsWiderThanGrantRow, error) {
+	rows, err := q.db.Query(ctx, listAccessWindowsWiderThanGrant,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAccessWindowsWiderThanGrantRow
+	for rows.Next() {
+		var i ListAccessWindowsWiderThanGrantRow
+		if err := rows.Scan(
+			&i.AccessID,
+			&i.CustomerID,
+			&i.ProductID,
+			&i.GrantID,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.GrantStartsAt,
+			&i.GrantEndsAt,
+			&i.Overlaps,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActionablePullFindingsForPSP = `-- name: ListActionablePullFindingsForPSP :many
 SELECT id, merchant_id, finding_type, rail, psp_id, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, change, source, evidence_digest, approval_run_id, pull_id, dismissed_at FROM billing.reconciliation_findings
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
@@ -1101,10 +1180,11 @@ const listOverdueRenewalMerchants = `-- name: ListOverdueRenewalMerchants :many
 SELECT DISTINCT s.merchant_id
 FROM billing.subscriptions s
 WHERE s.status = 'active'
-  AND s.current_period_ends_at < $1::timestamptz
+  AND ((s.rail = 'nmi' AND s.current_period_ends_at < $1::timestamptz)
+       OR (s.rail <> 'nmi' AND s.current_period_ends_at < $2::timestamptz))
   AND s.collection_policy <> 'engine'
   AND s.deleted_at IS NULL
-  AND s.merchant_id > $2::uuid
+  AND s.merchant_id > $3::uuid
   AND NOT EXISTS (
       SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
@@ -1112,20 +1192,26 @@ WHERE s.status = 'active'
         AND p.purchased_at >= s.current_period_ends_at
   )
 ORDER BY s.merchant_id
-LIMIT $3::int
+LIMIT $4::int
 `
 
 type ListOverdueRenewalMerchantsParams struct {
-	OverdueBefore   time.Time
-	AfterMerchantID uuid.UUID
-	MerchantLimit   int32
+	NmiOverdueBefore time.Time
+	OverdueBefore    time.Time
+	AfterMerchantID  uuid.UUID
+	MerchantLimit    int32
 }
 
 // CROSS-MERCHANT: merchants holding an active provider-billed subscription
-// whose paid period ended before overdue_before with no renewal payment (see
-// ListOverdueRenewals), ids in order after a cursor.
+// past its rail's deadline with no renewal payment (see ListOverdueRenewals),
+// ids in order after a cursor.
 func (q *Queries) ListOverdueRenewalMerchants(ctx context.Context, arg ListOverdueRenewalMerchantsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listOverdueRenewalMerchants, arg.OverdueBefore, arg.AfterMerchantID, arg.MerchantLimit)
+	rows, err := q.db.Query(ctx, listOverdueRenewalMerchants,
+		arg.NmiOverdueBefore,
+		arg.OverdueBefore,
+		arg.AfterMerchantID,
+		arg.MerchantLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1151,8 +1237,9 @@ WHERE s.merchant_id = $1::uuid
   AND s.deleted_at IS NULL
   AND s.status = 'active'
   AND s.collection_policy <> 'engine'
-  AND s.current_period_ends_at < $2::timestamptz
-  AND (s.current_period_ends_at, s.id) > ($3::timestamptz, $4::uuid)
+  AND ((s.rail = 'nmi' AND s.current_period_ends_at < $2::timestamptz)
+       OR (s.rail <> 'nmi' AND s.current_period_ends_at < $3::timestamptz))
+  AND (s.current_period_ends_at, s.id) > ($4::timestamptz, $5::uuid)
   AND NOT EXISTS (
       SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
@@ -1160,15 +1247,16 @@ WHERE s.merchant_id = $1::uuid
         AND p.purchased_at >= s.current_period_ends_at
   )
 ORDER BY s.current_period_ends_at, s.id
-LIMIT $5::int
+LIMIT $6::int
 `
 
 type ListOverdueRenewalsParams struct {
-	MerchantID    uuid.UUID
-	OverdueBefore time.Time
-	AfterDueAt    time.Time
-	AfterID       uuid.UUID
-	RowLimit      int32
+	MerchantID       uuid.UUID
+	NmiOverdueBefore time.Time
+	OverdueBefore    time.Time
+	AfterDueAt       time.Time
+	AfterID          uuid.UUID
+	RowLimit         int32
 }
 
 type ListOverdueRenewalsRow struct {
@@ -1177,13 +1265,15 @@ type ListOverdueRenewalsRow struct {
 	CurrentPeriodEndsAt *time.Time
 }
 
-// An active provider-billed subscription whose paid period ended before
-// overdue_before with no renewal payment. A clock reading only: the due pass
+// An active provider-billed subscription with no renewal payment whose paid
+// period ended before its rail's cutoff: nmi_overdue_before for an NMI
+// schedule, overdue_before for the rest. A clock reading only: the due pass
 // asks the provider (RenewalOverdue -> unverified). Oldest lapse first, a page
 // after the (period end, id) cursor.
 func (q *Queries) ListOverdueRenewals(ctx context.Context, arg ListOverdueRenewalsParams) ([]ListOverdueRenewalsRow, error) {
 	rows, err := q.db.Query(ctx, listOverdueRenewals,
 		arg.MerchantID,
+		arg.NmiOverdueBefore,
 		arg.OverdueBefore,
 		arg.AfterDueAt,
 		arg.AfterID,

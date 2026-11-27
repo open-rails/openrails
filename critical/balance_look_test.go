@@ -17,11 +17,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// lowAt600 is a merchant amount line of 6.00 USD-units and no runway line:
-// a balance is low at or under 599.
+// lowAt600 is a merchant amount line of 600 USD-units: a balance is low at or
+// under 600.
 func lowAt600(w *world) {
 	m := cfgMerchant(w.cfg, "alpha")
-	m.MerchantSettings.BalanceNotices = &billing.BalanceNoticeSettings{RunwayHours: ptr(0), LowAmounts: []billing.BalanceNoticeAmount{{Currency: "USD", Amount: 600}}}
+	m.MerchantSettings.BalanceNotices = &billing.BalanceNoticeSettings{LowAmounts: []billing.BalanceNoticeAmount{{Currency: "USD", Amount: 600}}}
 	setCfgMerchant(&w.cfg, "alpha", m)
 }
 
@@ -154,9 +154,9 @@ func TestBalanceLooks(t *testing.T) {
 		w, fleet := setup(t)
 		customer, _ := watchedCustomer(t, w, fleet, 1000, nil)
 		require.Eventually(t, func() bool { return lowEvents(t, w, customer) == 0 && looks(t, fleet, customer) == 1 }, 5*time.Second, 20*time.Millisecond)
-		spend(t, w.alpha, customer, "above-the-line", 400)
-		require.Equal(t, 1, looks(t, fleet, customer), "usage leaving 600 crosses nothing")
-		balance(t, w.alpha, customer, 600, 400, 1000)
+		spend(t, w.alpha, customer, "above-the-line", 399)
+		require.Equal(t, 1, looks(t, fleet, customer), "usage leaving 601 crosses nothing")
+		balance(t, w.alpha, customer, 601, 399, 1000)
 		require.Zero(t, lowEvents(t, w, customer))
 	})
 	t.Run("OR-J25-S42/a-look-that-fails-is-taken-by-the-next-billing-pass", func(t *testing.T) {

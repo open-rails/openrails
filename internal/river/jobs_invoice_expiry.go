@@ -16,12 +16,12 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payment"
 )
 
-// KindInvoiceExpiry keeps the kind jobs queued before invoices were named.
-const KindInvoiceExpiry = "openrails.order_expiry"
+// KindInvoiceExpiry is the billing pass's invoice expiry scan.
+const KindInvoiceExpiry = "openrails.invoice_expiry"
 
-// InvoiceExpiryWorker expires invoices past their expiry, releasing their claims,
-// and the invoice attempts still waiting on their customer past theirs: it is
-// their one expiry writer. It never touches an invoice whose payment is
+// InvoiceExpiryWorker expires customer purchases past their expiry, the only
+// invoices that have one, releasing their claims, and the invoice attempts
+// still waiting on their customer past theirs: it is their one expiry writer. It never touches an invoice whose payment is
 // processing: only the provider's answer ends that. It also removes card
 // saves left waiting for the bank's authentication.
 type InvoiceExpiryWorker struct {

@@ -8,9 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db/gen"
+	embedded "github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
@@ -31,7 +36,7 @@ func runRegistered(t *testing.T, fleet *river.Client[pgx.Tx], kind string, copie
 	finished := finishPass(t, fleet, kind, func() []int64 {
 		ids := make([]int64, 0, copies)
 		for range copies {
-			job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: registeredQueue(kind)})
+			job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: openrails.QueueBilling})
 			require.NoError(t, err)
 			ids = append(ids, job.Job.ID)
 		}
@@ -53,14 +58,6 @@ func runRegistered(t *testing.T, fleet *river.Client[pgx.Tx], kind string, copie
 			}
 		}
 	}
-}
-
-// registeredQueue is the queue OpenRails serves kind on.
-func registeredQueue(kind string) string {
-	if kind == "openrails.nmi_history" {
-		return "nmi_history"
-	}
-	return openrails.QueueBilling
 }
 
 func renewalSettled(t *testing.T, a *authorityWorld, p *providerLedger, sub *billing.Subscription, due time.Time) {
@@ -101,6 +98,87 @@ func renewalSettled(t *testing.T, a *authorityWorld, p *providerLedger, sub *bil
 }
 
 func TestRenewal(t *testing.T) {
+	t.Run("OR-J14-S14/stuck-renewal-verification-slows-with-age-and-stops-at-the-cap", func(t *testing.T) {
+		a, p, sub := nmiEngineMembership(t)
+		p.core.DropSaleResponses(1)
+		p.core.HideSales(1)
+		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+		fleet := startFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		operations := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+		var id uuid.UUID
+		require.Eventually(t, func() bool {
+			return a.pool.QueryRow(t.Context(), "SELECT id FROM "+operations+" WHERE subscription_id=$1 AND intent_type='subscription_collection' AND status='unknown_needs_verify' AND lease_expires_at IS NULL", sub.ID.UUID()).Scan(&id) == nil
+		}, 20*time.Second, 20*time.Millisecond)
+		require.NoError(t, fleet.StopAndCancel(t.Context()))
+		rt := embedded.Graph(a.engine).Runtime
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		var evidence []byte
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT result_evidence FROM "+operations+" WHERE id=$1", id).Scan(&evidence))
+		submitted, err := time.Parse(time.RFC3339Nano, intents.EvidenceString(gen.BillingProviderIntent{ResultEvidence: evidence}, "submitted_at"))
+		require.NoError(t, err)
+		for _, tc := range []struct{ age, delay time.Duration }{
+			{time.Minute, 2 * time.Minute},
+			{20 * time.Minute, 10 * time.Minute},
+			{time.Hour, 30 * time.Minute},
+			{4 * time.Hour, 2 * time.Hour},
+			{24 * time.Hour, 2 * time.Hour},
+		} {
+			a.clock.Advance(submitted.Add(tc.age).Sub(a.clock.Now()))
+			var row gen.BillingProviderIntent
+			require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+				var err error
+				row, err = rt.IntentRunner().VerifyByID(ctx, id)
+				return err
+			}))
+			require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+			require.EqualValues(t, 1, row.Attempts, "verification does not consume execution attempts")
+			require.WithinDuration(t, a.clock.Now().Add(tc.delay), row.NextAttemptAt, time.Microsecond, "submission age %s", tc.age)
+			if tc.age >= 20*time.Minute {
+				findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.submission.unresolved"})
+				require.NoError(t, err)
+				require.Len(t, findings.Items, 1)
+			}
+		}
+		p.money(t, 2, 2000)
+	})
+	t.Run("OR-J14-S15/late-renewal-submission-starts-with-handler-verification-backoff", func(t *testing.T) {
+		a, p, sub := nmiEngineMembership(t, suspendHeld)
+		advanceTo(a.world, *sub.CurrentPeriodEndsAt)
+		rt := embedded.Graph(a.engine).Runtime
+		var row gen.BillingProviderIntent
+		require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+			var err error
+			row, err = rt.MoneyService.AdmitDueSubscriptionCollection(ctx, sub.ID.UUID(), a.clock.Now())
+			return err
+		}))
+		// Admission uses database time; align it before delaying the first send.
+		_, err := a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+" SET created_at=$1 WHERE id=$2", a.clock.Now(), row.ID)
+		require.NoError(t, err)
+		a.clock.Advance(16*time.Hour + 40*time.Minute)
+		p.core.DropSaleResponses(1)
+		p.core.HideSales(1)
+		require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+			var err error
+			row, err = rt.IntentRunner().ExecuteNowByID(ctx, row.ID)
+			return err
+		}))
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		submitted, err := time.Parse(time.RFC3339Nano, intents.EvidenceString(row, "submitted_at"))
+		require.NoError(t, err)
+		require.Equal(t, a.clock.Now(), submitted)
+		require.Greater(t, submitted.Sub(row.CreatedAt), 16*time.Hour)
+		a.clock.Advance(time.Minute)
+		require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+			var err error
+			row, err = rt.IntentRunner().VerifyByID(ctx, row.ID)
+			return err
+		}))
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		require.EqualValues(t, 1, row.Attempts)
+		require.WithinDuration(t, a.clock.Now().Add(2*time.Minute), row.NextAttemptAt, time.Microsecond)
+		p.money(t, 2, 2000)
+	})
 	t.Run("OR-J14-S01/before-boundary-workers-cannot-admit-renewal", func(t *testing.T) {
 		a, p, sub := purchasedMembership(t)
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()) - time.Microsecond)

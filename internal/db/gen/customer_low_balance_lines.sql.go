@@ -31,7 +31,7 @@ func (q *Queries) DeleteCustomerLowBalanceLine(ctx context.Context, arg DeleteCu
 
 const getCustomerLowBalanceLine = `-- name: GetCustomerLowBalanceLine :one
 
-SELECT merchant_id, customer_id, currency, amount, runway_hours, created_at, updated_at FROM billing.customer_low_balance_lines
+SELECT merchant_id, customer_id, currency, amount, created_at, updated_at FROM billing.customer_low_balance_lines
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND currency = $3::text
 `
@@ -42,8 +42,8 @@ type GetCustomerLowBalanceLineParams struct {
 	Currency   string
 }
 
-// billing.customer_low_balance_lines: a customer's own low-balance line per
-// currency. A null part inherits the merchant's.
+// billing.customer_low_balance_lines: a customer's own low-balance amount per
+// currency; with none it inherits the merchant's.
 func (q *Queries) GetCustomerLowBalanceLine(ctx context.Context, arg GetCustomerLowBalanceLineParams) (BillingCustomerLowBalanceLine, error) {
 	row := q.db.QueryRow(ctx, getCustomerLowBalanceLine, arg.MerchantID, arg.CustomerID, arg.Currency)
 	var i BillingCustomerLowBalanceLine
@@ -52,7 +52,6 @@ func (q *Queries) GetCustomerLowBalanceLine(ctx context.Context, arg GetCustomer
 		&i.CustomerID,
 		&i.Currency,
 		&i.Amount,
-		&i.RunwayHours,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -60,7 +59,7 @@ func (q *Queries) GetCustomerLowBalanceLine(ctx context.Context, arg GetCustomer
 }
 
 const listCustomerLowBalanceLines = `-- name: ListCustomerLowBalanceLines :many
-SELECT merchant_id, customer_id, currency, amount, runway_hours, created_at, updated_at FROM billing.customer_low_balance_lines
+SELECT merchant_id, customer_id, currency, amount, created_at, updated_at FROM billing.customer_low_balance_lines
 WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
 ORDER BY customer_id, currency
 LIMIT $3::int
@@ -88,7 +87,6 @@ func (q *Queries) ListCustomerLowBalanceLines(ctx context.Context, arg ListCusto
 			&i.CustomerID,
 			&i.Currency,
 			&i.Amount,
-			&i.RunwayHours,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -103,20 +101,19 @@ func (q *Queries) ListCustomerLowBalanceLines(ctx context.Context, arg ListCusto
 }
 
 const upsertCustomerLowBalanceLine = `-- name: UpsertCustomerLowBalanceLine :exec
-INSERT INTO billing.customer_low_balance_lines (merchant_id, customer_id, currency, amount, runway_hours, created_at, updated_at)
+INSERT INTO billing.customer_low_balance_lines (merchant_id, customer_id, currency, amount, created_at, updated_at)
 VALUES ($1::uuid, $2::uuid, $3::text,
-        $4::bigint, $5::int, $6::timestamptz, $6::timestamptz)
+        $4::bigint, $5::timestamptz, $5::timestamptz)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
-    amount = EXCLUDED.amount, runway_hours = EXCLUDED.runway_hours, updated_at = EXCLUDED.updated_at
+    amount = EXCLUDED.amount, updated_at = EXCLUDED.updated_at
 `
 
 type UpsertCustomerLowBalanceLineParams struct {
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	Currency    string
-	Amount      *int64
-	RunwayHours *int32
-	Now         time.Time
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Amount     int64
+	Now        time.Time
 }
 
 func (q *Queries) UpsertCustomerLowBalanceLine(ctx context.Context, arg UpsertCustomerLowBalanceLineParams) error {
@@ -125,7 +122,6 @@ func (q *Queries) UpsertCustomerLowBalanceLine(ctx context.Context, arg UpsertCu
 		arg.CustomerID,
 		arg.Currency,
 		arg.Amount,
-		arg.RunwayHours,
 		arg.Now,
 	)
 	return err

@@ -43,18 +43,15 @@ the operation keyed by `SubscriptionCollectionKey`. The
 `openrails.provider_operation` job charges; payment, invoice and `RenewMembership`
 commit with its terminal outcome (`CommitsTerminalOutcome`). An unchargeable
 card leaves the invoice to the customer (`awaiting_method`). A renewal past grace
-with no outcome is held, access kept by default (`access_while_renewal_held`),
-and reported as `life.renewal.held`.
+with nothing sent is held, access kept by default (`access_while_renewal_held`),
+and reported as `life.renewal.held`. With `suspend`, access ends at the allowance
+while nothing is sent. An NMI charge sent but still unresolved keeps access
+under either policy. Payment supersedes that grace; a decline follows
+`access_during_dunning`; proven nonexecution restores the held-renewal allowance.
 
-**Provider-owned renewal.** Webhooks wake `openrails.subscription_converge`,
-which applies the provider's state. `openrails.rebill_watch` reads NMI schedules
-past `NMIRebillDeadline` and collects a proven skip (`CollectSkippedRenewal`).
-The due pass moves a provider-billed renewal still unpaid 48 hours
-(`reconcile.PeriodGrace`) past its period to `unverified` and reads it by id
-(`AskProviderOverdueRenewal`). Solana renewals are the cranker's pulls
-([payment providers](payment-providers.md)).
+**Provider-owned renewal.** Webhooks wake `openrails.subscription_converge`, which applies the provider's state. The due pass moves a provider-billed renewal still unpaid past its rail's deadline to `unverified`, access kept (`AskProviderOverdueRenewal`): 24 hours for an NMI schedule (`reconcile.NMIRebillDeadline`), 48 for Stripe and CCBill (`reconcile.PeriodGrace`). The `Verifier` reads it by id; an NMI cycle that read leaves with no attempt is decided from NMI's records of it, and a proven skip is collected (`CollectSkippedRenewal`). Solana renewals are the cranker's pulls ([payment providers](payment-providers.md)).
 
-**Cancel and resume.** Customers cancel at period end with a 4–500 character reason (`Service.CancelSubscriptionForCustomer`); staff use `AdminSubscriptionService.CancelSubscription` (`revoke_access`, `account_deletion`). Access runs to the boundary unless immediate or a chargeback; any provider stop is an operation. An NMI delete waits until 48 hours before the rebill (`NMIDeferredDeleteAt`), a system cancel 24 hours, never later than 48 hours before the rebill (`SystemDeleteCoolingOff`); one during an unresolved renewal is refused (`payment_in_progress`). `Resumable` allows undoing a non-merchant cancel (engine, Solana: the customer's own; never a provider's or an abandoned start) on a reversible rail in the paid period; a Stripe resume is a `stripe_resume_subscription` operation committed with it, refused before anything commits when Stripe cannot be told now (provider writes off, Stripe not configured, or a key that cannot write). A Stripe cancel or resume supersedes the opposite one not yet sent, and waits, unattempted, while an earlier one of its subscription is in flight or unresolved; each is ordered by when it was inserted under the subscription's row lock, so Stripe ends as the last one committed. A pending resume keeps a pull from reading Stripe's standing `cancel_at_period_end` as a new portal cancel, and a pending cancel keeps one from reading its absence as a portal resume.
+**Cancel and resume.** Customers cancel at period end with a 4–500 character reason (`Service.CancelSubscriptionForCustomer`); staff use `AdminSubscriptionService.CancelSubscription` (`revoke_access`, `account_deletion`). Access runs to the boundary unless immediate or a chargeback; any provider stop is an operation. An NMI delete waits until 48 hours before the rebill (`NMIDeferredDeleteAt`), a system cancel 24 hours, never later than 48 hours before the rebill (`SystemDeleteCoolingOff`); a card renewal in flight does not block cancellation. A later successful charge grants its paid period while the subscription stays canceled; an immediate access revoke refunds the charge instead. A submitted Solana renewal still refuses cancellation (`payment_in_progress`). `Resumable` allows undoing a non-merchant cancel (engine, Solana: the customer's own; never a provider's or an abandoned start) on a reversible rail in the paid period; a Stripe resume is a `stripe_resume_subscription` operation committed with it, refused before anything commits when Stripe cannot be told now (provider writes off, Stripe not configured, or a key that cannot write). A Stripe cancel or resume supersedes the opposite one not yet sent, and waits, unattempted, while an earlier one of its subscription is in flight or unresolved; each is ordered by when it was inserted under the subscription's row lock, so Stripe ends as the last one committed. A pending resume keeps a pull from reading Stripe's standing `cancel_at_period_end` as a new portal cancel, and a pending cancel keeps one from reading its absence as a portal resume.
 
 **Plan and seat changes.** `PurchaseService.ChangeSubscription` routes by owner:
 
@@ -69,6 +66,10 @@ The due pass moves a provider-billed renewal still unpaid 48 hours
   changes. One unresolved change owns a subscription: its `Idempotency-Key`
   replays it; an unresolved provider outcome answers 202 `processing`, and one
   awaiting the customer `requires_action` (`next_action`), which `/confirm` finishes.
+- The unused credit counts only what the customer kept: refunds and
+  chargebacks of the period's charges (payments whose `period_start` names the
+  current period) shrink it by their share. Engine, NMI schedule and Solana
+  upgrades apply it; Stripe and CCBill work out their own proration.
 
 ## Interfaces
 
@@ -144,7 +145,7 @@ Checks:
 
 ### 7. Work scales with activity
 
-The due pass reads partial indexes on due instants ([dunning](dunning.md)), pages 500 merchants and defers an unchanged row (`due_recheck_at`). Operations wake at `next_attempt_at`; webhooks coalesce.
+The due pass reads partial indexes on due instants ([dunning](dunning.md)) and pages 500 merchants; a row it leaves unchanged is due again at the next hourly pass. Operations wake at `next_attempt_at`; webhooks coalesce.
 
 Checks:
 - `ListDueDunningMerchants` and `ListDueDunningSubscriptions` read due instants.
@@ -154,7 +155,7 @@ Checks:
 
 `/v1/me/subscriptions` writes share the `subscribe` bucket (20 per minute, 64
 KiB, captcha when configured; [limits](../standalone.md#abuse-limits)). Customer cancels spend
-the merchant-wide budget (`destructive.NewUserActionLimiter`). `retry-now` passes
+the merchant-wide budget (`destructive.NewCustomerActionLimiter`). `retry-now` passes
 the card-testing ledger; `AdminOperationOffChannel` caps staff changes.
 
 Checks:
@@ -163,14 +164,14 @@ Checks:
 
 ### 9. Destructive-action safeguards
 
-Staff cancels run in `destructive.RunLocal` (`CancellationCommand`, keyed by `lifecycle_rev`). A staff cancel needing a provider stop while destructive actions are disarmed is refused `provider_cancel_held`; an account deletion cancels locally and waits. A customer's own cancel is never held: its NMI delete or CCBill cancel runs disarmed, and only the customer budget refuses it. `ExpireAwaitingMethod` holds under `mode=limited` or a closed gate.
+Staff cancels run in `destructive.RunLocal` (`CancellationCommand`, keyed by `lifecycle_rev`). A staff cancel needing a provider stop while destructive actions are disarmed is refused `provider_cancel_held`; an account deletion cancels locally and waits. A customer's own cancel is never held: its NMI delete or CCBill cancel runs disarmed, and the customer card-removal budget never refuses it. `ExpireAwaitingMethod` holds under `mode=limited` or a closed gate.
 
 Checks:
 - `RequireProviderCancelArmed` (staff only) refuses a disarmed provider stop with `provider_cancel_held`, except an account deletion.
 - The runner's kill switch passes `isAcceptedCustomerCancel` intents, as the volume breaker does.
 - OR-J17-S03: a held provider delete survives process death; OR-J34-S06: a held
   webhook cancel keeps access.
-- OR-J17-S13: a customer's own NMI and CCBill cancels stop the provider while disarmed; OR-J17-S14: a staff cancel is still held; OR-J17-S15: over the customer budget the cancel is refused 429 and reaches no provider.
+- OR-J17-S13: a customer's own NMI and CCBill cancels stop the provider while disarmed; OR-J17-S14: a staff cancel is still held; OR-J17-S15: six customers' cancels within an hour all stop the provider without card-removal reservations or a wave finding.
 
 ## Tests
 
@@ -178,7 +179,7 @@ Journeys:
 - OR-J13-S01–S04: enrollment, concurrent signup, imported terms, trials.
 - OR-J14-S01–S07, OR-J14-S70: boundary, concurrency, restart, frozen terms,
   process death, one agreement, calendar anchor, missed renewal.
-- OR-J17-S01–S15: cancel and resume (a Stripe resume a `stripe_resume_subscription` operation, refused with provider writes off, sent after the cancel before it, ordered by commit, and superseded by a later cancel; a cancel Stripe has not heard survives a converge), renewal custody, held delete, callbacks, a customer's own cancel unheld while disarmed but refused over its budget, and a staff one held.
+- OR-J17-S01–S15: cancel and resume (a Stripe resume a `stripe_resume_subscription` operation, refused with provider writes off, sent after the cancel before it, ordered by commit, and superseded by a later cancel; a cancel Stripe has not heard survives a converge), renewal custody, held delete, callbacks, customers' own cancels unheld while disarmed and outside the card-removal budget, and a staff one held.
 - OR-J18-S01–S06: preview, stale preview, customer action, fences, seats.
 - Related: OR-J04-S42, OR-J04-S70, OR-J34-S05/S06, OR-J27-S08, OR-J37-S64–S68.
 

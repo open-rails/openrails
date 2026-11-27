@@ -956,6 +956,56 @@ func (q *Queries) ListLapsedCreditLots(ctx context.Context, arg ListLapsedCredit
 	return items, nil
 }
 
+const listLotLapses = `-- name: ListLotLapses :many
+SELECT customer_id, expires_at::timestamptz AS expires_at
+FROM billing.credit_grants
+WHERE merchant_id = $1::uuid AND unit = $2::text
+  AND customer_id = ANY($3::uuid[])
+  AND revoked_at IS NULL AND units_credited > units_debited
+  AND expires_at IS NOT NULL AND expires_at <= $4::timestamptz
+ORDER BY customer_id, expires_at
+`
+
+type ListLotLapsesParams struct {
+	MerchantID  uuid.UUID
+	Currency    string
+	CustomerIds []uuid.UUID
+	Through     time.Time
+}
+
+type ListLotLapsesRow struct {
+	CustomerID uuid.UUID
+	ExpiresAt  time.Time
+}
+
+// When customers' lots in a unit that hold units lapse, through an instant:
+// intake segments usage at each, so a posting before a lapse takes only the
+// usage before it.
+func (q *Queries) ListLotLapses(ctx context.Context, arg ListLotLapsesParams) ([]ListLotLapsesRow, error) {
+	rows, err := q.db.Query(ctx, listLotLapses,
+		arg.MerchantID,
+		arg.Currency,
+		arg.CustomerIds,
+		arg.Through,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLotLapsesRow
+	for rows.Next() {
+		var i ListLotLapsesRow
+		if err := rows.Scan(&i.CustomerID, &i.ExpiresAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRevokedCreditLotsWithUnits = `-- name: ListRevokedCreditLotsWithUnits :many
 SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, invoice_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_refunding, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
 WHERE merchant_id = $1::uuid

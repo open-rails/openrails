@@ -96,7 +96,7 @@ const (
 	StatusMessagePending = "pending"
 )
 
-func (s *SubscriptionService) GetUserSubscription(ctx context.Context, userID string) (*models.Subscription, error) {
+func (s *SubscriptionService) GetCustomerSubscription(ctx context.Context, userID string) (*models.Subscription, error) {
 	return s.GetByUserID(ctx, userID)
 }
 
@@ -274,8 +274,8 @@ func (s *SubscriptionService) ListSubscribers(ctx context.Context, f GetSubscrip
 // ErrInvalidSubscriptionSort is a sort the subscription list does not offer.
 var ErrInvalidSubscriptionSort = apperr.New(http.StatusBadRequest, billing.CodeInvalidQuery, "sort is invalid").WithParam("sort")
 
-// subscriptionSortKey is the time a non-default invoice sorts by; nil for
-// created_at or an unknown invoice. Its rows always carry it.
+// subscriptionSortKey is the time a non-default order sorts by; nil for
+// created_at or an unknown order. Its rows always carry it.
 func subscriptionSortKey(sort billing.SubscriptionSort) func(*models.Subscription) *time.Time {
 	switch sort {
 	case billing.SubscriptionSortCurrentPeriodEndsAt:

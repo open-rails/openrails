@@ -11,7 +11,7 @@ INSERT INTO billing.invoices (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(origin)::text,
     'open', 'requires_payment_method', sqlc.arg(currency)::text, sqlc.arg(total)::bigint,
     sqlc.narg(idempotency_key)::text, sqlc.narg(request_digest)::bytea, sqlc.narg(lines_digest)::bytea,
-    sqlc.arg(expires_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz,
+    sqlc.narg(expires_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz,
     sqlc.narg(customer_type)::text, sqlc.narg(purchase_number)::int,
     sqlc.narg(ip_country)::text, sqlc.narg(language)::text,
     sqlc.narg(attribution_source)::text, sqlc.narg(attribution_medium)::text, sqlc.narg(attribution_campaign)::text,
@@ -173,12 +173,15 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND idempotency_key = sqlc.arg(i
 -- name: ListInvoicesPage :many
 -- One page of invoices, newest first; every filter is optional. status reads an
 -- open invoice past its expiry as expired; price_id names invoices with a line on
--- that price; overdue_at the open ones due before it.
+-- that price; overdue_at the open ones due before it; omit_expired_purchases
+-- leaves out a customer's purchases that expired unpaid, never bills.
 SELECT o.* FROM billing.invoices o
 WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR o.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sqlc.narg(status)::text = CASE
         WHEN o.status = 'open' AND o.collection_owner = 'engine' AND o.expires_at <= sqlc.arg(now)::timestamptz THEN 'expired' ELSE o.status END)
+  AND NOT (sqlc.arg(omit_expired_purchases)::boolean AND o.origin = 'customer' AND (o.status = 'expired'
+        OR o.status = 'open' AND o.collection_owner = 'engine' AND o.expires_at <= sqlc.arg(now)::timestamptz))
   AND (sqlc.narg(origin)::text IS NULL OR o.origin = sqlc.narg(origin)::text)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR o.subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (sqlc.narg(overdue_at)::timestamptz IS NULL OR (o.status = 'open' AND o.due_at < sqlc.narg(overdue_at)::timestamptz))
@@ -300,7 +303,8 @@ ORDER BY merchant_id
 LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: ListExpiredInvoices :many
--- A merchant's live invoices past their expiry, in expiry order after a cursor.
+-- A merchant's live purchases past their expiry (no other invoice has one), in
+-- expiry order after a cursor.
 SELECT id, expires_at::timestamptz AS expires_at FROM billing.invoices
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND collection_owner = 'engine' AND status = 'open'
   AND expires_at <= sqlc.arg(now)::timestamptz

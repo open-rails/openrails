@@ -53,6 +53,7 @@ func TestUsageContracts(t *testing.T) {
 		// The month's usage posts once, after the month ends, with what it was
 		// for.
 		fleet := startFleet(t, w)
+		used := w.clock.Now()
 		nextMonth(w)
 		postDays(t, fleet)
 		balance(t, w.alpha, customer, 800, 0, 800)
@@ -62,7 +63,7 @@ func TestUsageContracts(t *testing.T) {
 		deductions := usageDeductions(t, w.alpha, customer)
 		require.Len(t, deductions, 1)
 		require.EqualValues(t, -200, deductions[0].Amount)
-		require.Equal(t, []billing.UsageDeductionLine{{MeterKey: "compute", Requests: 1, Quantity: 2, Amount: 200}}, deductions[0].Usage.Lines)
+		require.Equal(t, []billing.UsageReceiptLine{{MeterKey: "compute", Requests: 1, Quantity: 2, Amount: 200}}, periodless(t, used, deductions[0].Usage.Lines))
 		postDays(t, fleet)
 		require.Len(t, usageDeductions(t, w.alpha, customer), 1, "a posted month posts nothing again")
 	})
@@ -102,6 +103,8 @@ func TestUsageContracts(t *testing.T) {
 			refused := refusedItem(t, out, n)
 			require.Equal(t, http.StatusBadRequest, refused.Status)
 			require.Equal(t, billing.CodeInvalidParam, refused.Error.Code)
+			require.Equal(t, fmt.Sprintf("usage[%d].occurred_at", n-3), *refused.Error.Param)
+			require.Equal(t, "occurred_at must be within the last 35 days and not in the future", refused.Error.Message)
 		}
 		balance(t, w.alpha, customer, 200, 800, 1000)
 	})
@@ -110,6 +113,16 @@ func TestUsageContracts(t *testing.T) {
 		a := newAuthorityWorld(t)
 		usageMeter(t, a.alphaRemote, 100)
 		alice, bob := billing.CustomerID(uuid.MustParse(a.alice.ID)), billing.CustomerID(uuid.MustParse(a.bob.ID))
+		_, err := a.alphaRemote.GetBalance(t.Context(), alice, billing.GetBalanceParams{})
+		require.Equal(t, "currency", *requireCode(t, err, billing.CodeInvalidParam).Param)
+		status, raw := a.request(t, http.MethodGet, "/v1/me/usage", a.aliceToken, nil)
+		require.Equal(t, http.StatusBadRequest, status, string(raw))
+		var missing struct {
+			Error billing.ErrorDetails `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &missing))
+		require.Equal(t, billing.CodeInvalidParam, missing.Error.Code)
+		require.Equal(t, "currency", *missing.Error.Param)
 		lease := newLease()
 		items := numbered(1, usageInput(alice, "alice-good", 2), usageInput(billing.CustomerID{}, "invalid-customer", 5), usageInput(bob, "bob-good", 3))
 		out := syncLease(t, a.alphaRemote, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
@@ -124,7 +137,7 @@ func TestUsageContracts(t *testing.T) {
 		foreign := syncLease(t, a.betaRemote, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(1, usageInput(billing.CustomerID(uuid.New()), "beta-own", 1))})
 		require.EqualValues(t, 1, foreign.Usage.ThroughN)
 		require.Empty(t, foreign.Usage.Refused)
-		status, raw := a.request(t, http.MethodPost, "/v1/app/leases/sync", a.aliceToken, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
+		status, raw = a.request(t, http.MethodPost, "/v1/app/leases/sync", a.aliceToken, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
 		require.Equal(t, http.StatusForbidden, status, string(raw))
 
 		report := func(token string) billing.Usage {

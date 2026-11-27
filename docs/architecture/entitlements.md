@@ -69,22 +69,7 @@ grant a requested key.
 
 **SDK cache.** A remote handle with a static `APIKey` caches `CheckEntitlements` by default (`entitlementCheckCache`): a bounded 8 MiB in-process LRU, or Redis when `EntitlementCheckCacheOptions.Redis` is set. Only current exact-key checks use it. It stores each allowed key's answer, never a denial, and answers from the cache only when every requested key is allowed there; otherwise it asks OpenRails for the whole set, with `include_validity`. An entry lives `min(MaxAge, valid_until − evaluated_at)`, timed from before the request was sent; a response naming no merchant (`OpenRails-Bound-Merchant`) is refused, never stored. A check through an `Uncached` handle always asks; its answer replaces allowed entries, drops denied ones and, when it denies a key, advances the scope's generation, so a fill begun before it cannot restore a dropped entry.
 
-**Lease sync.** A gate settles usage and asks for views on a lease sync
-(`POST /v1/app/leases/sync`, `leases.Syncer.Sync`): one transaction, bounded by
-`limits.SyncTimeout` (5 s) and a 2 s lock budget, that takes no customer's lock.
-One that cannot take a lock in time, or is chosen to break a deadlock, commits
-nothing and answers 503.
-It locks the lease (creating it on the first sync), settles new usage in chunks while
-within its usage budget ([usage billing](usage-billing.md)), replaces its in-flight report (changed rows of its own), and stores
-`settled_through_n` and receipts. Once it committed, it watches the balances its
-usage moved (`MoneyService.WatchUsage`) and answers views, limit sets and pricing
-(`views.go`) in one read-only snapshot, reading every customer's money, recent
-spend and limit usage in one batch each; money is PostgreSQL's alone (a balance
-and its pending usage). Every writer inserts usage into the event
-store before it commits the end of the in-flight line that held it, and limit
-reads take PostgreSQL before the event store, so an item counts
-twice at worst, never not at all; the view covers every item the receipts name.
-Views read usage only through `leases.UsageReader`.
+**Lease sync.** A gate settles usage and asks for views on a lease sync (`POST /v1/app/leases/sync`, `leases.Syncer.Sync`): one transaction, bounded by `limits.SyncTimeout` (5 s) and a 2 s lock budget, that takes no customer's lock. One that cannot take a lock in time, or is chosen to break a deadlock, commits nothing and answers 503. It locks the lease (creating it on the first sync), settles new usage in chunks while within its usage budget ([usage billing](usage-billing.md)), replaces its in-flight report (changed rows of its own), and stores `settled_through_n` and receipts. Once it committed, it inserts the usage into the event store, watches the balances its usage moved (`MoneyService.WatchUsage`) and answers views, limit sets and pricing (`views.go`) in one read-only snapshot, reading every customer's money, recent spend and limit usage in one batch each; money is PostgreSQL's alone (a balance and its pending usage). Limit reads take PostgreSQL before the event store, so another gate's view counts an item twice at worst (its in-flight line and its events), and misses it only between its sync's commit and its insert, or for good when the store never takes it. The view covers every item the receipts name that the store took. Views read usage only through `leases.UsageReader`.
 
 **Limits.** Every opener of a window locks the customer (`LockCustomerForSpend`, `FOR NO KEY UPDATE`, so a row naming the customer is written without waiting for it); intake, which only appends usage, takes it only to open a window or charge a failure. A request is checked against `balance`, its spend windows (`spendgate.SpendClaims`), then its declared limits, each by its overrun; a declared limit's or spend window's held is what live leases report in flight, the balance's its pending usage and accrual. `admission.Admitter` resolves the set a view carries and adds delinquency and the delegated-invoker cutoff. Intake (`MoneyService.PrepareUsageTx`) counts units in their windows in full, never clamped, in the event store's `limit_usage`: the windows current when the usage was admitted (`admitted_at`), and the spend windows of the invoker attributes it reports (none when its policy cannot be resolved, such as during an FX outage); reads take a window's units there, a rolling limit's buckets and a rate limit's level from its buckets (`limits.RateLevelOf`). A lease's report counts while it is live (`limits.LeaseLiveSince`). A view request a sync cannot answer is refused alone (`refused_views`).
 
@@ -123,14 +108,17 @@ follows what OpenRails recorded of a provider, never a guess. A refund that
 revokes access does so in the transaction that records the refund; canceling a
 subscription's recurrence never shortens a paid period; an uncertain or
 `unverified` subscription keeps its access. Repair rechecks recorded evidence and
-never reopens access a recorded revocation ended.
+never reopens access a recorded revocation ended. A live window never covers more
+than its grant: convergence cuts a wider one back to the grant's dates, once the
+merchant's destructive switch is armed. A window wholly outside its grant goes to
+an operator unchanged.
 Checks:
 - `internal/intents/refund.go` calls `RevokeRefundedPaymentAccess` with the
   refund's transaction (`txDB`).
 - `lifecycle.EndAccess` revokes only renewal grace unless the effect sets
   `Revoke` (`internal/modules/subscriptions/effects.go`).
 - OR-J27-S05, OR-J27-S07, OR-J27-S08 and OR-J27-S09 cover repair, a late
-  chargeback and uncertain state.
+  chargeback and uncertain state; OR-J27-S17 a window wider than its grant.
 
 ### 3. Exact money
 Access windows and keys carry no amounts; credit lots (`credit_grants`) belong to [Credits](credits.md). In-flight reports and limit windows are `int64` native units of one currency each. The one FX use converts a spend window's cap declared in another currency to the request's (`SpendgatePolicyLoader.convert`): a cap, never a ledger amount.
@@ -174,7 +162,7 @@ Checks:
 - `LocalClient` has no admission method in `api/go.txt`.
 
 ### 6. Data lifecycle
-`product_entitlements` and `grants` are permanent; `product_access` is state and keeps revoked and removed windows. `limit_windows`, `leases` and `limit_adjustments` are rows (61 days); the limit catalog and override tables are state. An archive refuses live leases.
+`product_entitlements` and `grants` are permanent; `product_access` is state and keeps revoked and removed windows. `limit_windows` are rows kept a day past their end (61 days once one reached its capacity, for `limits_reached`; usage settled after a window ended counts toward none, OR-J24-S83), `leases` and `limit_adjustments` rows kept 61 days; the limit catalog and override tables are state. An archive refuses live leases.
 Checks:
 - The table comments and `internal/retention/tables.go` agree on each class.
 - Outside the gated merchant purge (`PurgeMerchantRowsProductAccess`), no query
@@ -223,7 +211,7 @@ Checks:
 ## Tests
 
 Critical journeys, over real PostgreSQL, Redis and Vault:
-- **J27**, entitlements: OR-J27-S01 to S04 (window union, revocation, boundaries, archive and refund), S05 to S09 (subscription closure and repair), S10 to S12 (imported grants), S13 and S14 (the SDK cache: scoped allowed keys, cutoff, Redis sharing, live denial, a purchase seen at once), S16 (read plans at 10,000 held products).
+- **J27**, entitlements: OR-J27-S01 to S04 (window union, revocation, boundaries, archive and refund), S05 to S09 (subscription closure and repair), S10 to S12 (imported grants), S13 and S14 (the SDK cache: scoped allowed keys, cutoff, Redis sharing, live denial, a purchase seen at once), S16 (read plans at 10,000 held products), S17 (a window wider than its grant).
 - **J23**, limits and the gate: OR-J23-S04, S05 (a host transaction), S07 to S18 (declarations, capacity, windows, overruns, spend caps), S19 to S22, S24, S27, S37, S38, S40, S41 (the gate: lost replies, outbox, closing, in-flight reports, the bound, offline shares and resends, idle stop, window resets), S33 (a window in the policy's `policy_currency`), S35 (a limit counting two meters by weight), S36 (a field a limit does not take refused), S42 (one policy's cap on what is owed and its spend window, and a customer's own credit limit over the cap).
 - **J24**, leases and views: OR-J24-S03, S14, S16, S18 to S20, S23 to S27, S29, S31 to S34, S37, S38, S42, S43, S45 (lease lifetime, views, limit sets, admission windows, bounded syncs, view refusals, lock order).
 - Also OR-J22-S06 and OR-J22-S50 (lapsed credit), OR-J29-S08, OR-J31-S14.

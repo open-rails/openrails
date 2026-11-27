@@ -55,7 +55,7 @@ var (
 // engineUpgradeQuote prices an engine upgrade to target at quantity seats at
 // now and freezes the successor membership terms. The preview and the charge
 // share it.
-func engineUpgradeQuote(sub *models.Subscription, charged *uuid.UUID, current, target *models.Price, product *models.Product, quantity *int, now time.Time) (subscriptions.InitialMembershipTerms, error) {
+func engineUpgradeQuote(sub *models.Subscription, charged *uuid.UUID, current, target *models.Price, product *models.Product, quantity *int, paid PeriodPaid, now time.Time) (subscriptions.InitialMembershipTerms, error) {
 	var terms subscriptions.InitialMembershipTerms
 	if current.BillingIntervalMonths != nil || target.BillingIntervalMonths != nil {
 		return terms, &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: "calendar subscription plan changes are not supported"}
@@ -70,6 +70,7 @@ func engineUpgradeQuote(sub *models.Subscription, charged *uuid.UUID, current, t
 	if err != nil {
 		return terms, err
 	}
+	upgrade.Paid = paid
 	quote, err := QuoteModelBUpgrade(upgrade, now)
 	if err != nil {
 		return terms, err
@@ -135,8 +136,12 @@ func seatIncreaseQuote(sub *models.Subscription, charged *uuid.UUID, current *mo
 	return terms, terms.Validate()
 }
 
-func (s *PurchaseService) processEngineUpgrade(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity, c *changeTarget) (*TierChangeResponse, error) {
-	terms, err := engineUpgradeQuote(c.sub, c.charged, c.currentPrice, c.price, c.product, c.quantity, s.now().UTC().Truncate(time.Microsecond))
+func (s *PurchaseService) processEngineUpgrade(ctx context.Context, req *SubscriptionChangeRequest, user *CustomerIdentity, c *changeTarget) (*TierChangeResponse, error) {
+	paid, err := periodKept(ctx, s.SubscriptionService.Database(), c.sub, c.currentPrice.Currency)
+	if err != nil {
+		return nil, err
+	}
+	terms, err := engineUpgradeQuote(c.sub, c.charged, c.currentPrice, c.price, c.product, c.quantity, paid, s.now().UTC().Truncate(time.Microsecond))
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +150,7 @@ func (s *PurchaseService) processEngineUpgrade(ctx context.Context, req *Subscri
 
 // addEngineSeats charges more seats now. Seats that cost nothing (the period
 // is ending) are added without a charge.
-func (s *PurchaseService) addEngineSeats(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity, c *changeTarget) (*TierChangeResponse, error) {
+func (s *PurchaseService) addEngineSeats(ctx context.Context, req *SubscriptionChangeRequest, user *CustomerIdentity, c *changeTarget) (*TierChangeResponse, error) {
 	terms, err := seatIncreaseQuote(c.sub, c.charged, c.currentPrice, c.product, c.quantity, s.now().UTC().Truncate(time.Microsecond))
 	if err != nil {
 		return nil, err
@@ -179,7 +184,7 @@ func (s *PurchaseService) addEngineSeats(ctx context.Context, req *SubscriptionC
 // enqueueEngineChange runs an accepted engine charge as the durable operation
 // the request's Idempotency-Key names. Only the customer, present, charges a
 // change now, so a hold on the merchant's rebills never holds it.
-func (s *PurchaseService) enqueueEngineChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity, sub *models.Subscription, terms subscriptions.InitialMembershipTerms) (*TierChangeResponse, error) {
+func (s *PurchaseService) enqueueEngineChange(ctx context.Context, req *SubscriptionChangeRequest, user *CustomerIdentity, sub *models.Subscription, terms subscriptions.InitialMembershipTerms) (*TierChangeResponse, error) {
 	if req.Staff {
 		return nil, errStaffImmediateCharge
 	}
@@ -436,8 +441,12 @@ func previewEngineCancel(resp *TierChangePreviewResponse, c *changeTarget) (*Tie
 }
 
 // previewEngineUpgrade quotes exactly what processEngineUpgrade charges.
-func (s *PurchaseService) previewEngineUpgrade(resp *TierChangePreviewResponse, c *changeTarget) (*TierChangePreviewResponse, error) {
-	terms, err := engineUpgradeQuote(c.sub, c.charged, c.currentPrice, c.price, c.product, c.quantity, s.now().UTC().Truncate(time.Microsecond))
+func (s *PurchaseService) previewEngineUpgrade(ctx context.Context, resp *TierChangePreviewResponse, c *changeTarget) (*TierChangePreviewResponse, error) {
+	paid, err := periodKept(ctx, s.SubscriptionService.Database(), c.sub, c.currentPrice.Currency)
+	if err != nil {
+		return nil, err
+	}
+	terms, err := engineUpgradeQuote(c.sub, c.charged, c.currentPrice, c.price, c.product, c.quantity, paid, s.now().UTC().Truncate(time.Microsecond))
 	if err != nil {
 		return nil, err
 	}

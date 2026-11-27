@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"regexp"
 	"slices"
 	"strings"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/billingfact"
 	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -378,7 +378,7 @@ func TestBooks(t *testing.T) {
 
 		// The general ledger is opened outside business transactions, never
 		// inside one.
-		database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+		database, err := producerDB(w.pool, w.schema)
 		require.NoError(t, err)
 		require.ErrorIs(t, booksRawTx(t, w, func(ctx context.Context, _ pgx.Tx, _ *gen.Queries) error {
 			return books.Open(ctx, database.DataPool(), mid, "EUR")
@@ -724,6 +724,19 @@ products:
 		require.NoError(t, firsts[0])
 		require.NoError(t, firsts[1])
 
+		// A meter's rate card opens its currency's books too.
+		accounts := "SELECT count(*) FROM " + booksTable(w, "ledger_accounts") + " WHERE merchant_id=$1 AND book='general' AND currency='JPY' AND account_type IN ('usage_revenue', 'promotional_credit')"
+		var opened int
+		require.NoError(t, w.pool.QueryRow(t.Context(), accounts, mid).Scan(&opened))
+		require.Zero(t, opened)
+		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "books-usage", DisplayName: "Books usage"})
+		require.NoError(t, err)
+		_, err = w.alpha.SetMeter(t.Context(), "books-usage", billing.SetMeterParams{EventType: "books-usage", ValueProperty: "units", Aggregation: catalog.AggregationSum,
+			RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: product.ID, Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "JPY", PerUnit: &catalog.PerUnitPrice{UnitAmount: 100, DivideBy: 1}}})})
+		require.NoError(t, err)
+		require.NoError(t, w.pool.QueryRow(t.Context(), accounts, mid).Scan(&opened))
+		require.Equal(t, 2, opened)
+
 		// A posting that meets an account nothing opened still posts: it
 		// creates the account in its own transaction and raises
 		// books.account.opened_late, once per account.
@@ -820,7 +833,8 @@ products:
 		fundBooks(t, w, second, "USD", 1000)
 		a, b := first.UUID(), second.UUID()
 		notify := func(ctx context.Context, q *gen.Queries, customer uuid.UUID) error {
-			return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{ID: uuid.New(), MerchantID: mid, CustomerID: customer, EventType: "invoice_due"})
+			_, err := billingfact.Record(ctx, q, billingfact.Fact{ID: uuid.New(), MerchantID: mid, CustomerID: customer, EventType: "invoice_due"})
+			return err
 		}
 		// Every row both commits lock exists, the merchant's stream included.
 		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
@@ -940,7 +954,7 @@ func booksTx(t *testing.T, w *world, fn func(ctx context.Context, q *gen.Queries
 // booksRawTx is booksTx with the transaction, for a statement no query names.
 // It reports rather than fails, so a goroutine may run it.
 func booksRawTx(t *testing.T, w *world, fn func(ctx context.Context, tx pgx.Tx, q *gen.Queries) error) error {
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	if err != nil {
 		return err
 	}
@@ -965,7 +979,7 @@ func booksAwait(step <-chan struct{}, what string) error {
 // a currency becomes sellable do.
 func booksOpen(t *testing.T, w *world, merchant uuid.UUID, currency string) {
 	t.Helper()
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	require.NoError(t, books.Open(t.Context(), database.DataPool(), merchant, currency))
 }

@@ -174,12 +174,17 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("nmi webhook %s is dated %s, before its replay record would be kept: refused as a replay", payload.EventID, at.Format(time.RFC3339)))
 	}
 
-	service := NMIWebhookService{
+	service := d.nmiWebhookService()
+	service.Data, service.Rail, service.Log = payload, event.Rail, h.Log
+	return service.HandleNMIWebhook(ctx)
+}
+
+func (d *WebhookDispatcher) nmiWebhookService() *NMIWebhookService {
+	return &NMIWebhookService{
 		DB:                   d.DB,
 		PriceService:         d.PriceService,
 		ProductService:       d.ProductService,
-		Data:                 payload,
-		Rail:                 event.Rail,
+		Rail:                 string(models.RailNMI),
 		SubscriptionService:  d.SubscriptionService,
 		PaymentService:       d.PaymentService,
 		MoneyService:         d.MoneyService,
@@ -190,9 +195,8 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 		NMIResolver:                  d.NMIResolver,
 		Clock:                        d.Clock,
 		Disputes:                     d.Disputes,
-		Log:                          h.Log,
+		Log:                          d.Log,
 	}
-	return service.HandleNMIWebhook(ctx)
 }
 
 // Apply builds the Stripe webhook service from the dispatcher and runs it.

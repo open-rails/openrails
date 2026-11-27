@@ -11,7 +11,7 @@ package budgets
 // BudgetWindow is one fixed money-budget window in a trust-level/budget policy:
 // at most Limit (the currency's minor units) of spend per WindowSeconds. The
 // loader maps this onto a spendgate.Window (reset boundaries staggered per
-// payer, #337).
+// customer, #337).
 type BudgetWindow struct {
 	// Key is a stable identifier for the window (e.g. "5h", "7d").
 	Key string

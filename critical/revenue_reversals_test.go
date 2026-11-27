@@ -12,7 +12,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 
@@ -180,7 +182,7 @@ func TestRevenueReversals(t *testing.T) {
 		require.Equal(t, "payment:"+skipped.String(), found.Items[0].SubjectKey)
 
 		// Posted at last, it passes, and its finding closes.
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -685,7 +687,7 @@ func TestRevenueReversals(t *testing.T) {
 		m := newMixedSale(t)
 		a := m.a
 		payment := m.buy(t, "unnamed-recovery")
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		service := payments.NewPaymentService(database, a.clock)
@@ -754,7 +756,7 @@ func TestRevenueReversals(t *testing.T) {
 				Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: now},
 			Settled: true, SettlementSource: "cash"}, now)
 		require.True(t, paid.Completed)
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -885,7 +887,7 @@ func lotShare(t *testing.T, w *world, reversal uuid.UUID) [2]int64 {
 // the next reversal of its payment does.
 func applyLotReversal(t *testing.T, w *world, payment, reversal uuid.UUID) bool {
 	t.Helper()
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	posted, err := purchasedcredits.New(database, w.clock).ApplyReversal(merchant.WithID(t.Context(), w.alpha.MerchantID()), payment, reversal, nil)
 	require.NoError(t, err)
@@ -907,10 +909,26 @@ func forfeited(t *testing.T, w *world, schedule uuid.UUID) int64 {
 // refund's access policy is read there.
 func configuredDB(t *testing.T, w *world) *db.DB {
 	t.Helper()
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	database.SetMerchantConfig(declaredConfig{w: w})
 	return database
+}
+
+// producerDB is a handle on the world's schema as an engine's is: its River
+// producer bound in the world's River schema, so a billing fact queues its
+// customer message's job with it.
+func producerDB(pool *pgxpool.Pool, schema string) (*db.DB, error) {
+	database, err := db.NewWithPGXPool(slog.Default(), pool, schema)
+	if err != nil {
+		return nil, err
+	}
+	producer, err := river.NewClient(riverpgxv5.New(pool), &river.Config{Schema: schema + "_river"})
+	if err != nil {
+		return nil, err
+	}
+	database.SetRiverJobInserter(producer)
+	return database, nil
 }
 
 // declaredConfig serves the world's merchant declarations.

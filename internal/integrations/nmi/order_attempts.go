@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 // OrderAttempts describes the visible transactions for one accepted attempt.
 // Any approved or unresolved transaction under the shared obligation order
 // prevents another submission. Renewal declines bind the exact attempt, not
-// timestamps which can overlap when a payer retries immediately.
+// timestamps which can overlap when a customer retries immediately.
 type OrderAttempts struct {
 	Transactions int
 	// Declined is set when the attempt's only transaction is one refused sale
@@ -110,6 +111,15 @@ func (c *NMIClient) readOrderAttempts(ctx context.Context, orderReference string
 	for _, txn := range report.Transactions {
 		if txn.OrderID != orderReference {
 			return OrderAttempts{}, receiptMismatch("order search returned another order's transaction")
+		}
+		// A duplicate refusal was rejected unprocessed; any charge it
+		// duplicated is its own transaction.
+		if len(txn.Actions) == 1 {
+			action := txn.Actions[0]
+			code, err := strconv.Atoi(strings.TrimSpace(action.ResponseCode))
+			if err == nil && action.Is("sale") && strings.TrimSpace(action.Success) == "0" && duplicateRefusal(code, action.ResponseText) {
+				continue
+			}
 		}
 		if accepted != nil && txn.OrderDescription != accepted.OrderDescription {
 			// Other attempts' conclusive refusals did not move money. Anything

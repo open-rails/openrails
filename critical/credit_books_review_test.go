@@ -5,7 +5,7 @@ package critical_test
 import (
 	"bytes"
 	"context"
-	"log/slog"
+	"net/http"
 	"testing"
 	"time"
 
@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -36,6 +35,60 @@ func TestCreditBooksEdges(t *testing.T) {
 	t.Run("OR-J40-S19/a-revocation-retried-under-its-idempotency-key-replays-and-a-lapsed-lot-is-not-reinstated", revocationKeysAndLapsedReinstatement)
 	t.Run("OR-J40-S25/a-lot-applied-beyond-its-payments-cash-fails-ledger-audit", overappliedLotFailsAudit)
 	t.Run("OR-J40-S26/a-lot-whose-payment-brought-no-cash-defers-nothing-and-raises-a-finding", unfundedLotRaisesAFinding)
+	t.Run("OR-J40-S42/staff-refunds-of-revoked-or-spent-credit-are-conflicts-and-move-nothing", func(t *testing.T) {
+		for _, state := range []string{"revoked", "spent"} {
+			t.Run(state, func(t *testing.T) {
+				s := newCreditShop(t)
+				a, w := s.a, s.a.world
+				payment, lot := s.buy(t, s.pack(t, "pack-55", 55_000_000, 50_000_000, 365), 50_000_000, "pack-55")
+				if state == "revoked" {
+					_, err := a.alpha.RevokeCreditGrant(t.Context(), "revoke", lot, billing.RevokeCreditGrantParams{Reason: "abuse"})
+					require.NoError(t, err)
+				} else {
+					s.spend(t, 55_000_000, "all-of-it")
+				}
+				database, err := producerDB(w.pool, w.schema)
+				require.NoError(t, err)
+				ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+				effects := s.p.effects(t)
+				var before int
+				require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(w, "ledger_transfers")+" WHERE merchant_id=$1", a.alpha.MerchantID().UUID()).Scan(&before))
+				for _, full := range []bool{false, true} {
+					name := "partial"
+					params := billing.RefundPaymentParams{Amount: 25_000_000, Reason: "Refund pack"}
+					amount := int64(25_000_000)
+					if full {
+						name = "full"
+						params.Amount, params.Full = 0, true
+						amount = 50_000_000
+					}
+					t.Run(name, func(t *testing.T) {
+						err := purchasedcredits.New(database, w.clock).ValidateRefund(ctx, payment.UUID(), amount)
+						require.ErrorIs(t, err, billing.ErrConflict)
+						_, err = a.alphaRemote.RefundPayment(t.Context(), name, payment, params)
+						var refusal *billing.StatusError
+						require.ErrorAs(t, err, &refusal)
+						require.Equal(t, http.StatusConflict, refusal.Status)
+						require.Equal(t, billing.CodeResourceConflict, refusal.Code)
+						message := "refund requires unused purchased credit"
+						if state == "revoked" {
+							message = "credit grant is no longer refundable"
+						}
+						require.Equal(t, message, refusal.Message)
+						require.ErrorIs(t, err, billing.ErrConflict)
+					})
+				}
+				read, err := a.alpha.GetPayment(t.Context(), payment)
+				require.NoError(t, err)
+				require.Empty(t, read.Refunds)
+				require.Equal(t, effects, s.p.effects(t))
+				var after int
+				require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(w, "ledger_transfers")+" WHERE merchant_id=$1", a.alpha.MerchantID().UUID()).Scan(&after))
+				require.Equal(t, before, after)
+				balance(t, a.alpha, s.customer, 0, 0, 0)
+			})
+		}
+	})
 }
 
 // A credit lot's issue applies its payment's cash: ledger-audit holds it to
@@ -87,7 +140,7 @@ func (s *creditShop) chargeback(t *testing.T, payment billing.PaymentID, id stri
 func (s *creditShop) recover(t *testing.T, payment billing.PaymentID, chargeback uuid.UUID, amount int64, key string) {
 	t.Helper()
 	w := s.a.world
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 	service := payments.NewPaymentService(database, w.clock)
@@ -376,7 +429,7 @@ func (s *creditShop) cardPayment(t *testing.T, amount int64, movement models.Mon
 	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "invoice_lines")+" (merchant_id, id, invoice_id, customer_id, position, description, quantity, unit_amount, amount, credit_grant, source)"+
 		" VALUES ($1, $2, $3, $4, 0, 'Credit pack', 1, $5, $5, '{\"from_payment\": true}', 'provider_line')", mid, uuid.New(), invoice, s.customer.UUID(), amount)
 	require.NoError(t, err)
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 	id := uuid.New()
@@ -409,7 +462,7 @@ func (s *creditShop) issue(t *testing.T, unit string, units, paid int64, payment
 func (s *creditShop) reverse(t *testing.T, payment uuid.UUID, amount int64, kind, key string) {
 	t.Helper()
 	w := s.a.world
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 	service := payments.NewPaymentService(database, w.clock)

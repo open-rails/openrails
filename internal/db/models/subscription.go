@@ -192,6 +192,11 @@ func (s *Subscription) AdviceDeferred() bool {
 	return s.Status == StatusPastDue && s.NextRetryAt == nil && s.RetryAdvisedAt != nil && s.GraceEndsAt != nil
 }
 
+// TerminalHeld reports an engine case whose grace ended when its terminal outcome was held.
+func (s *Subscription) TerminalHeld() bool {
+	return s.CollectionPolicy == CollectionPolicyEngine && s.Status == StatusPastDue && s.NextRetryAt == nil && s.RetryAdvisedAt == nil && s.GraceEndsAt != nil
+}
+
 // Validate checks activation preconditions. amountCents is integer minor
 // units; money is never a float.
 func (s *Subscription) Validate(amountCents int64, now time.Time) error {
@@ -247,6 +252,9 @@ func (s *Subscription) lifecycle() lifecycleFields {
 func (s *Subscription) RememberLifecycle() {
 	s.loaded, s.decision, s.historyDecision = s.lifecycle(), "", ""
 }
+
+// LoadedStatus is the status as persisted when the lifecycle was remembered.
+func (s *Subscription) LoadedStatus() SubscriptionStatus { return s.loaded.status }
 
 // LifecycleChanged reports whether status, paid period or cancellation
 // differ from what was read.

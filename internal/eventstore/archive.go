@@ -20,11 +20,9 @@ import (
 
 // Archive tables, in archive order.
 const (
-	ArchiveEvents     = "usage_events"
-	ArchiveHistory    = "usage_history"
-	ArchiveLimits     = "limit_usage"
-	ArchiveQuantities = "usage_quantities"
-	ArchiveMinutes    = "usage_minutes"
+	ArchiveEvents  = "usage_events"
+	ArchiveHistory = "usage_history"
+	ArchiveLimits  = "limit_usage"
 )
 
 // archiveTime is PostgreSQL's text form of a UTC instant, as the archive
@@ -41,7 +39,6 @@ const (
 	kindNullTime
 	kindText
 	kindInt
-	kindUint
 )
 
 // rollup is an archived rollup table: its columns after merchant_id and the
@@ -54,30 +51,20 @@ type rollup struct {
 }
 
 var rollups = []rollup{
-	{ArchiveHistory, []string{"customer_id", "bucket_at", "currency", "event_type", "meter", "cell", "print", "period_starts_at", "invoker", "outcome",
-		"requests", "quantity", "stated", "charged", "forgiven"},
-		[]kind{kindUUID, kindTime, kindText, kindText, kindText, kindText, kindText, kindTime, kindText, kindText, kindInt, kindInt, kindInt, kindInt, kindInt},
-		`SELECT customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, toString(outcome),
-       sum(requests) AS r, sum(quantity) AS q, sum(stated) AS st, sum(charged) AS c, sum(forgiven) AS f
+	{ArchiveHistory, []string{"customer_id", "bucket_at", "currency", "event_type", "meter", "cell",
+		"requests", "quantity", "stated", "amount", "discount", "failed_requests", "failed_amount", "forgiven"},
+		[]kind{kindUUID, kindTime, kindText, kindText, kindText, kindText, kindInt, kindInt, kindInt, kindInt, kindInt, kindInt, kindInt, kindInt},
+		`SELECT customer_id, bucket_at, currency, event_type, meter, cell, sum(requests) AS r, sum(quantity) AS q, sum(stated) AS st,
+       sum(amount) AS a, sum(discount) AS d, sum(failed_requests) AS fr, sum(failed_amount) AS fa, sum(forgiven) AS f
 FROM {database}.usage_history WHERE merchant_id = %s
-GROUP BY customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome
-HAVING r != 0 OR q != 0 OR st != 0 OR c != 0 OR f != 0
-ORDER BY customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome`},
+GROUP BY customer_id, bucket_at, currency, event_type, meter, cell
+HAVING r != 0 OR q != 0 OR st != 0 OR a != 0 OR d != 0 OR fr != 0 OR fa != 0 OR f != 0
+ORDER BY customer_id, bucket_at, currency, event_type, meter, cell`},
 	{ArchiveLimits, []string{"customer_id", "limit_key", "window_starts_at", "window_ends_at", "units"},
 		[]kind{kindUUID, kindText, kindTime, kindNullTime, kindInt},
 		`SELECT customer_id, limit_key, window_starts_at, any(window_ends_at), sum(units) AS u
 FROM {database}.limit_usage WHERE merchant_id = %s
 GROUP BY customer_id, limit_key, window_starts_at HAVING u != 0 ORDER BY customer_id, limit_key, window_starts_at`},
-	{ArchiveQuantities, []string{"customer_id", "currency", "period_starts_at", "meter", "cell", "print", "quantity", "stated", "requests"},
-		[]kind{kindUUID, kindText, kindTime, kindText, kindText, kindText, kindInt, kindInt, kindUint},
-		`SELECT customer_id, currency, period_starts_at, meter, cell, print, sum(quantity) AS q, sum(stated) AS st, sum(requests) AS r
-FROM {database}.usage_quantities WHERE merchant_id = %s
-GROUP BY customer_id, currency, period_starts_at, meter, cell, print HAVING q != 0 OR st != 0 OR r != 0
-ORDER BY customer_id, currency, period_starts_at, meter, cell, print`},
-	{ArchiveMinutes, []string{"customer_id", "currency", "minute", "amount"},
-		[]kind{kindUUID, kindText, kindTime, kindInt},
-		`SELECT customer_id, currency, minute, sum(amount) AS a FROM {database}.usage_minutes WHERE merchant_id = %s
-GROUP BY customer_id, currency, minute HAVING a != 0 ORDER BY customer_id, currency, minute`},
 }
 
 // archivedEvent is a usage_events row as the archive carries it.
@@ -106,7 +93,8 @@ type archivedEvent struct {
 }
 
 const eventColumns = "event_id, customer_id, currency, event_type, invoker, invoker_type, outcome, source, source_id, lease_id, n, occurred_at, admitted_at, " +
-	"ingested_at, period_starts_at, dimensions, metadata, stated, charged, forgiven, `charges.meter`, `charges.cell`, `charges.print`, `charges.quantity`, `charges.stated`"
+	"ingested_at, period_starts_at, dimensions, metadata, stated, charged, forgiven, `charges.meter`, `charges.cell`, `charges.print`, `charges.quantity`, `charges.stated`, " +
+	"`charges.amount`, `charges.discount`"
 
 // ExportUsage streams the context's merchant's usage to emit, table by
 // table in archive order.
@@ -117,7 +105,7 @@ func (s *Store) ExportUsage(ctx context.Context, emit func(table string, values 
 	}
 	rows, err := s.conn.Query(ctx, s.resolve(`SELECT event_id, customer_id, currency, event_type, invoker, invoker_type, toString(outcome), source, source_id,
        lease_id, n, occurred_at, admitted_at, ingested_at, period_starts_at, dimensions, metadata, stated, charged, forgiven,
-       charges.meter, charges.cell, charges.print, charges.quantity, charges.stated
+       charges.meter, charges.cell, charges.print, charges.quantity, charges.stated, charges.amount, charges.discount
 FROM {database}.usage_events FINAL WHERE merchant_id = `+mid+` ORDER BY customer_id, occurred_at, event_id`))
 	if err != nil {
 		return fail("export usage", err)
@@ -125,15 +113,16 @@ FROM {database}.usage_events FINAL WHERE merchant_id = `+mid+` ORDER BY customer
 	for rows.Next() {
 		var e archivedEvent
 		var meter, cell, print []string
-		var quantity, stated []int64
+		var quantity, stated, amount, discount []int64
 		if err := rows.Scan(&e.EventID, &e.CustomerID, &e.Currency, &e.EventType, &e.Invoker, &e.InvokerType, &e.Outcome, &e.Source, &e.SourceID,
 			&e.LeaseID, &e.N, &e.OccurredAt, &e.AdmittedAt, &e.IngestedAt, &e.PeriodStartsAt, &e.Dimensions, &e.Metadata, &e.Stated,
-			&e.Charged, &e.Forgiven, &meter, &cell, &print, &quantity, &stated); err != nil {
+			&e.Charged, &e.Forgiven, &meter, &cell, &print, &quantity, &stated, &amount, &discount); err != nil {
 			rows.Close()
 			return fail("export usage", err)
 		}
 		for i := range meter {
-			e.Charges = append(e.Charges, UsageCharge{Meter: meter[i], Cell: cell[i], Print: print[i], Quantity: quantity[i], Stated: stated[i]})
+			e.Charges = append(e.Charges, UsageCharge{Meter: meter[i], Cell: cell[i], Print: print[i], Quantity: quantity[i], Stated: stated[i],
+				Amount: amount[i], Discount: discount[i]})
 		}
 		raw, err := json.Marshal(e)
 		if err != nil {
@@ -178,8 +167,6 @@ func (s *Store) exportRollup(ctx context.Context, mid string, r rollup, emit fun
 				dest[i] = new(string)
 			case kindInt:
 				dest[i] = new(int64)
-			case kindUint:
-				dest[i] = new(uint64)
 			}
 		}
 		if err := rows.Scan(dest...); err != nil {
@@ -202,8 +189,6 @@ func (s *Store) exportRollup(ctx context.Context, mid string, r rollup, emit fun
 				v = *d
 			case *int64:
 				v = strconv.FormatInt(*d, 10)
-			case *uint64:
-				v = strconv.FormatUint(*d, 10)
 			}
 			values[i] = &v
 		}
@@ -242,7 +227,7 @@ func (s *Store) ImportUsage(ctx context.Context, table string, rows [][]*string)
 			}
 			if err := batch.Append(merchant, e.EventID, e.CustomerID, e.Currency, e.EventType, e.Invoker, e.InvokerType, e.Outcome, e.Source, e.SourceID,
 				e.LeaseID, e.N, e.OccurredAt.UTC(), e.AdmittedAt.UTC(), e.IngestedAt.UTC(), e.PeriodStartsAt.UTC(), dimensions, e.Metadata, e.Stated,
-				e.Charged, e.Forgiven, c.meter, c.cell, c.print, c.quantity, c.stated); err != nil {
+				e.Charged, e.Forgiven, c.meter, c.cell, c.print, c.quantity, c.stated, c.amount, c.discount); err != nil {
 				return fail("restore usage", err)
 			}
 		}
@@ -307,8 +292,6 @@ func archived(t rollup, r []*string) ([]any, error) {
 			out[i] = v
 		case kindInt:
 			out[i], err = strconv.ParseInt(v, 10, 64)
-		case kindUint:
-			out[i], err = strconv.ParseUint(v, 10, 64)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("eventstore: archived %s.%s: %w", t.table, t.columns[i], err)

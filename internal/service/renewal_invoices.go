@@ -54,7 +54,7 @@ func (s *Service) payRenewal(ctx context.Context, actor InvoiceActor, invoice *i
 	if err != nil {
 		return payment.InvoiceCharge{}, false, err
 	}
-	user := &payment.UserIdentity{ID: actor.Customer.String(), ClientIP: actor.ClientIP}
+	user := &payment.CustomerIdentity{ID: actor.Customer.String(), ClientIP: actor.ClientIP}
 	if err := rt.InvoiceAttemptService.GuardCardAttempt(ctx, user); err != nil {
 		return payment.InvoiceCharge{}, false, err
 	}

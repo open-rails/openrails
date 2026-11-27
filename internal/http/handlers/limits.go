@@ -78,7 +78,7 @@ func ListCustomerLimits(r *httprequest.Request) {
 
 // ListMyLimits is where the signed-in customer stands on every limit.
 func ListMyLimits(r *httprequest.Request) {
-	customer, ok := selfAccountPayer(r)
+	customer, ok := selfAccountCustomer(r)
 	if !ok {
 		return
 	}

@@ -98,7 +98,7 @@ func (s *SubscriptionLifecycleService) AddSeatsTx(ctx context.Context, txDB *db.
 			Amount: terms.Amount, ListAmount: terms.RecurringAmount, Currency: terms.Currency,
 			Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail,
 			AttemptKind: &kind, TokenType: &token, Quantity: &added,
-			Metadata:    withPaidPeriod(staff.Metadata(map[string]any{"added_seats": added}), terms.PeriodStart),
+			Metadata:    WithPaidPeriod(staff.Metadata(map[string]any{"added_seats": added}), terms.PeriodStart),
 			PurchasedAt: terms.AcceptedAt, CreatedAt: s.now(),
 		}
 		if err := payments.SetMethodCard(ctx, txDB.Gen(ctx), sub.MerchantID, terms.PaymentMethodID, payment); err != nil {

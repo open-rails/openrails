@@ -361,7 +361,7 @@ func (v *Verifier) verifyPSP(ctx context.Context, mid billing.MerchantID, lc *su
 		}
 		snaps[sub.ID] = snap
 	}
-	return errors.Join(readErr, applyVerified(ctx, v.DB, lc, provider, psp, subs, snaps, now))
+	return errors.Join(readErr, applyVerified(ctx, v.DB, lc, provider, psp, subs, snaps, now, nil))
 }
 
 // byPSP groups rows by the PSP that owns them, in first-seen order.

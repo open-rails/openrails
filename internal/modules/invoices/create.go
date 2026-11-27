@@ -77,7 +77,8 @@ type CreateInput struct {
 	ExpectedTotal  *int64
 	IdempotencyKey string
 	RequestDigest  []byte
-	TTL            time.Duration
+	// TTL is a customer purchase's lifetime; no other invoice expires.
+	TTL time.Duration
 	// FromCart buys the customer's cart instead of Lines, emptying it in the
 	// invoice's transaction.
 	FromCart bool
@@ -228,8 +229,8 @@ func (s *Service) create(ctx context.Context, in CreateInput) (*Invoice, bool, e
 	if err != nil {
 		return nil, false, err
 	}
-	if in.CustomerID == uuid.Nil || in.TTL <= 0 || (in.IdempotencyKey == "") != (len(in.RequestDigest) == 0) {
-		return nil, false, errors.New("invoice needs a customer, a lifetime and a keyed digest")
+	if in.CustomerID == uuid.Nil || (in.Origin == billing.InvoiceOriginCustomer) != (in.TTL > 0) || (in.IdempotencyKey == "") != (len(in.RequestDigest) == 0) {
+		return nil, false, errors.New("invoice needs a customer, a keyed digest, and a lifetime exactly when a customer buys")
 	}
 	id := uuidutil.NewV7()
 	found := false
@@ -313,7 +314,11 @@ func (s *Service) create(ctx context.Context, in CreateInput) (*Invoice, bool, e
 		}
 		params := gen.CreateInvoiceParams{MerchantID: mid.UUID(), ID: id, CustomerID: in.CustomerID, Origin: string(in.Origin),
 			Currency: quote.Currency, Total: quote.Total, IdempotencyKey: key, RequestDigest: digest, LinesDigest: in.LinesDigest,
-			ExpiresAt: now.Add(in.TTL), Now: now}
+			Now: now}
+		if in.TTL > 0 {
+			expires := now.Add(in.TTL)
+			params.ExpiresAt = &expires
+		}
 		// Spending a merchant's units is not a checkout: no facts.
 		if !unit {
 			if err := checkoutFacts(ctx, q, &params, in.Checkout); err != nil {
@@ -456,6 +461,9 @@ type ListFilter struct {
 	Origin         *string
 	// OverdueAt lists the open invoices due before it.
 	OverdueAt *time.Time
+	// OmitExpiredPurchases leaves out a customer's purchases that expired
+	// unpaid: checkouts, never bills.
+	OmitExpiredPurchases bool
 }
 
 // List pages the merchant's invoices, newest first.
@@ -474,7 +482,8 @@ func (s *Service) List(ctx context.Context, filter ListFilter, page billing.Page
 	}
 	q := s.DB.Gen(ctx)
 	rows, err := q.ListInvoicesPage(ctx, gen.ListInvoicesPageParams{MerchantID: mid.UUID(), CustomerID: filter.CustomerID, PriceID: filter.PriceID, Status: filter.Status, Now: s.now(),
-		Origin: filter.Origin, SubscriptionID: filter.SubscriptionID, OverdueAt: filter.OverdueAt, AfterCreatedAt: at, AfterID: after, RowLimit: pagination.Fetch(limit)})
+		Origin: filter.Origin, SubscriptionID: filter.SubscriptionID, OverdueAt: filter.OverdueAt, OmitExpiredPurchases: filter.OmitExpiredPurchases,
+		AfterCreatedAt: at, AfterID: after, RowLimit: pagination.Fetch(limit)})
 	if err != nil {
 		return billing.ListPage[*Invoice]{}, err
 	}
@@ -704,8 +713,9 @@ func invoiceEvent(ctx context.Context, q *gen.Queries, invoice *gen.BillingInvoi
 	return invoiceevent.Enqueue(ctx, q, invoice, kind, at, extra)
 }
 
-// ExpireDue expires every live invoice of the merchant past its expiry, a page
-// of batch at a time, until none is left or ctx ends.
+// ExpireDue expires every live customer purchase of the merchant past its
+// expiry (no other invoice has one), a page of batch at a time, until none is
+// left or ctx ends.
 func (s *Service) ExpireDue(ctx context.Context, batch int32) (int, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {

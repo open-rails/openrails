@@ -398,7 +398,7 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 			if t.Success {
 				bill.Payment = &models.Payment{CustomerID: sub.CustomerID, SubscriptionID: &sub.ID, PspID: &sub.PspID, Rail: sub.Rail,
 					TransactionID: t.TransactionID, Amount: amount, ListAmount: amount, Currency: currency, Status: payments.PaymentStatusSucceededValue,
-					MoneyMovement: models.MoneyMovementRail, PurchasedAt: t.OccurredAt, CreatedAt: now, Metadata: t.PaymentMetadata}
+					MoneyMovement: models.MoneyMovementRail, PurchasedAt: t.OccurredAt, CreatedAt: now, Metadata: subscriptions.WithPaidPeriod(t.PaymentMetadata, bill.PeriodStart)}
 				// The sale names its vault: the customer's one card in it is
 				// the card charged.
 				if t.CustomerRef != "" {
@@ -524,7 +524,7 @@ func verificationSource() *string {
 func evidenceStaleAction(reason string) string {
 	return "the evidence for this terminal cancel (" + reason + ") predates this deployment's first pull of the merchant, or carries no date at all, " +
 		"so nothing we observed corroborates it — it arrived with the imported book. The subscription is parked as `unknown` with its access intact. " +
-		"Verify it against the provider (a per-subscription probe re-decides it on evidence THIS deployment observed) before cancelling anything"
+		"Verify it against the provider (a per-subscription probe re-decides it on evidence THIS deployment observed) before canceling anything"
 }
 
 // recordEvidenceStaleFinding persists the operator-facing record of a cancel

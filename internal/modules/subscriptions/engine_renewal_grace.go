@@ -14,12 +14,15 @@ import (
 
 // Engine renewal grace keeps an engine member's access across the paid-period
 // boundary until the engine's own renewal decides. A qualified renewal
-// supersedes it; a decline, cancellation or terminal outcome revokes it.
+// supersedes it; a decline follows dunning access rules, and cancellation or
+// a terminal outcome revokes it.
 //
-// A renewal with no outcome past its allowance is held (collection stopped:
+// A renewal with nothing sent past its allowance is held (collection stopped:
 // fleet halted, rebills held, breaker, readonly). By default the member keeps
-// access until the renewal is attempted, and life.renewal.held reports the
-// backlog; access_while_renewal_held=suspend ends access at the allowance.
+// access, and life.renewal.held reports the backlog. With
+// access_while_renewal_held=suspend, access ends at the allowance while nothing
+// is sent. An active subscription's sent renewal keeps access while unresolved
+// past its settle delay; proven nonexecution restores the held-renewal policy.
 //
 // The allowance is a bounded share of the period, never a fixed day (24h would
 // give an hourly member 24 free periods):
@@ -44,7 +47,7 @@ func EngineRenewalGrace(period time.Duration) (time.Duration, error) {
 }
 
 // EngineAuthenticationWindow bounds how long a first payment may wait on an
-// issuer authentication challenge the payer started. After it the engine
+// issuer authentication challenge the customer started. After it the engine
 // closes the payment and the enrollment fails, releasing the product for a
 // new attempt. A renewal's challenge waits at most EngineRenewalGrace of the
 // renewal's period, the same bound as its access.
@@ -93,4 +96,32 @@ func (s *SubscriptionLifecycleService) EnsureRenewalGrace(ctx context.Context, d
 		return s.dunningAccess(ctx, d, s.newLifecycleEntitlementService(d), sub, s.now())
 	}
 	return pushRenewalGrace(ctx, d, s.newLifecycleEntitlementService(d), sub, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt)
+}
+
+// SetSubmittedRenewalGrace keeps access for an unanswered submission, or
+// restores the held-renewal policy after proven nonexecution. The caller owns
+// the transaction and subscription lock.
+func (s *SubscriptionLifecycleService) SetSubmittedRenewalGrace(ctx context.Context, d *db.DB, sub *models.Subscription, unresolved bool) error {
+	if unresolved && sub.Status != models.StatusActive {
+		return nil
+	}
+	if sub.CanceledAt != nil || !lifecycle.Status(sub.Status).Live() || sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil || !accessMatchesBillingPeriod(sub, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt) {
+		return nil
+	}
+	policy, err := CasePolicy(ctx, d, sub)
+	if err != nil || !policy.SuspendWhenHeld {
+		return err
+	}
+	ent := s.newLifecycleEntitlementService(d)
+	if !unresolved {
+		if err := ent.RevokeSourcesForSubscription(ctx, sub.CustomerID.String(), sub.ID, models.AccessRevokeSuperseded, models.AccessSourceGrace); err != nil {
+			return fmt.Errorf("end submitted renewal grace %s: %w", sub.ID, err)
+		}
+		return s.EnsureRenewalGrace(ctx, d, sub)
+	}
+	start := *subscriptionAccessEnd(sub, *sub.CurrentPeriodStartsAt)
+	if _, err := ent.PushAccess(ctx, entitlements.PushAccessParams{UserID: sub.CustomerID.String(), ProductID: sub.ProductID, NotBefore: &start, Indefinite: true, SourceType: models.AccessSourceGrace, SourceID: sub.ID.String(), Quantity: sub.Quantity}); err != nil {
+		return fmt.Errorf("keep access for submitted renewal %s: %w", sub.ID, err)
+	}
+	return nil
 }

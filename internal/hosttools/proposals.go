@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
-	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/proposals"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -99,15 +98,6 @@ func bindRiverProducer(ctx context.Context, cfg *billing.Config, database *db.DB
 	}
 	database.SetRiverJobInserter(producer)
 	return nil
-}
-
-// bindParkWakes binds a River producer so a fix this tool makes (a mapping,
-// a customer link) wakes the subscriptions parked on it; without one, they
-// wake on their next provider event.
-func bindParkWakes(ctx context.Context, cfg *billing.Config, database *db.DB) {
-	if err := bindRiverProducer(ctx, cfg, database); err != nil {
-		database.Log.WarnContext(ctx, "no River producer: parked subscriptions wake on their next provider event", logx.Err(err))
-	}
 }
 
 // ProposalsList prints the open proposals a set's filter selects (ids are

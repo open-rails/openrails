@@ -1,7 +1,7 @@
 -- Arrears delinquency: the state projection, its due work, and the durable
 -- host-lifecycle signal feed.
 
--- CROSS-MERCHANT: the payers whose delinquency time alone changes now (a usage
+-- CROSS-MERCHANT: the customers whose delinquency time alone changes now (a usage
 -- invoice fell due, a grace window ran out), in due order. Strictly before now:
 -- an invoice is overdue only once its due_at has passed. An idle pass reads no
 -- row.
@@ -16,12 +16,12 @@ ORDER BY next_evaluation_at, merchant_id, customer_id, currency
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: GetOverdueInvoiceAggregate :one
--- One payer's usage invoices in a currency against now: how much is overdue and
+-- One customer's usage invoices in a currency against now: how much is overdue and
 -- since when, and when the next one falls due. Every evaluation and the
 -- admission gate's live recompute read it, so the stored state and the gate
 -- agree. grace_days and amount_floor are the bound billing policy's overrides,
 -- -1 for none; its floor is in its policy_currency, and overrides only there. policies is the merchant's settings, {policies: {name: body},
--- tiers: {tier: name}, default: name, trust}; the payer's policy is its own
+-- tiers: {tier: name}, default: name, trust}; the customer's policy is its own
 -- assignment while the settings still declare it, else its trust tier's
 -- (billing.trust_tier), else the default.
 --
@@ -60,28 +60,20 @@ WHERE o.merchant_id = sqlc.arg(merchant_id)
   AND o.status IN ('open', 'processing')
   AND o.amount_paid < o.total;
 
--- name: NotifyOverdueInvoices :exec
--- Tells the payer once about each of its open usage invoices in the currency
--- past its due date; the notice id derives from the invoice's (uuidutil.ChildV7
--- of "invoice_overdue": its timestamp, then SHA-256 of the invoice id and name),
--- so a later evaluation adds none. One with a collection in flight waits for
--- its outcome.
-INSERT INTO billing.notification_events (id, merchant_id, customer_id, event_type, data, created_at)
-SELECT encode(set_byte(set_byte(n.b, 6, (get_byte(n.b, 6) & 15) | 112), 8, (get_byte(n.b, 8) & 63) | 128), 'hex')::uuid,
-       o.merchant_id, o.customer_id, 'invoice_overdue',
-       jsonb_build_object('invoice_id', 'in_' || o.id::text, 'amount_due', (o.total - o.amount_paid)::text, 'currency', o.currency, 'due_at', o.due_at),
-       sqlc.arg(now)::timestamptz
+-- name: ListOverdueUsageInvoices :many
+-- The customer's open usage invoices in the currency past their due date, each
+-- told once (invoice_overdue). One with a collection in flight waits for its
+-- outcome.
+SELECT o.id, o.total - o.amount_paid AS amount_due, o.due_at
 FROM billing.invoices o
-CROSS JOIN LATERAL (SELECT CASE WHEN get_byte(uuid_send(o.id), 6) >> 4 = 7 THEN substring(uuid_send(o.id) FROM 1 FOR 6) ELSE decode('000000000000', 'hex') END
-    || substring(sha256(uuid_send(o.id) || convert_to('invoice_overdue', 'UTF8')) FROM 1 FOR 10) AS b) n
 WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.customer_id = sqlc.arg(customer_id)::uuid
   AND o.currency = sqlc.arg(currency)::text
   AND o.origin = 'usage' AND o.status = 'open' AND o.amount_paid < o.total
   AND o.due_at < sqlc.arg(now)::timestamptz
-ON CONFLICT (merchant_id, id) DO NOTHING;
+ORDER BY o.id;
 
 -- name: ScheduleDelinquency :exec
--- The payer is evaluated on the next pass: its policy could not be read when
+-- The customer is evaluated on the next pass: its policy could not be read when
 -- one of its usage invoices changed.
 INSERT INTO billing.customer_delinquency (merchant_id, customer_id, currency, state, overdue_amount, overdue_invoices,
     entered_at, transition_seq, evaluated_at, next_evaluation_at)
@@ -91,7 +83,7 @@ ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE
 SET next_evaluation_at = LEAST(billing.customer_delinquency.next_evaluation_at, EXCLUDED.next_evaluation_at);
 
 -- name: MarkDelinquencyDue :exec
--- The merchant's delinquency policy may have changed: every payer it holds
+-- The merchant's delinquency policy may have changed: every customer it holds
 -- in grace or delinquent is evaluated again on the next pass.
 UPDATE billing.customer_delinquency
 SET next_evaluation_at = sqlc.arg(now)::timestamptz
@@ -99,7 +91,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND state <> 'current'
   AND next_evaluation_at IS DISTINCT FROM sqlc.arg(now)::timestamptz;
 
 -- name: RebuildDelinquencyDue :exec
--- A restored merchant's payers with an open usage invoice are evaluated again
+-- A restored merchant's customers with an open usage invoice are evaluated again
 -- at once; MarkDelinquencyDue covers the ones in grace or delinquent.
 INSERT INTO billing.customer_delinquency (merchant_id, customer_id, currency, state, overdue_amount, overdue_invoices,
     entered_at, transition_seq, evaluated_at, next_evaluation_at)
@@ -170,7 +162,7 @@ SELECT upserted.state,
 FROM upserted;
 
 -- A row is NEVER deleted once it exists, and one is created `current` only to
--- hold a payer's next evaluation (transition_seq 0). Deleting a cleared row would
+-- hold a customer's next evaluation (transition_seq 0). Deleting a cleared row would
 -- restart transition_seq, and a restarted sequence collides with the dedupe key
--- of the payer's earlier transition — which would silently swallow the second
+-- of the customer's earlier transition — which would silently swallow the second
 -- shutoff signal for anyone who has been delinquent before.

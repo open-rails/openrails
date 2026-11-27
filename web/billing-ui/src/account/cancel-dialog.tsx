@@ -34,7 +34,7 @@ export interface CancelSubscriptionDialogProps {
   name: string
   /** Offers an optional on-chain cancellation when a wallet is available. */
   onChain?: boolean
-  /** In-flight stage, when cancelling. */
+  /** In-flight stage, when canceling. */
   pending?: SubscriptionAction
   /** Resolves null on success; the dialog then closes. */
   onConfirm: (reason: string, revokeOnChain: boolean) => Promise<BillingError | null>

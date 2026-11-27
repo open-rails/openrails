@@ -122,7 +122,7 @@ an optional section is on once set.
 
 How much OpenRails writes to a merchant's providers, whether the charges it initiates wait and whether its destructive actions run are the merchant's controls, kept in the database: `openrails merchant writes`, `merchant rebills` and `merchant destructive`, run with the engine's database and schema, change them ([merchant controls](standalone.md#merchant-controls)).
 
-A return URL (a pay URL's `success_url` and `cancel_url`, a hosted payment's `return_url`, the Stripe billing portal's return) may name only the origin of `PublicURL`, of the merchant's `Issuer`, or one of its `checkout.embed_origins`. The event log keeps 90 days, and a rotated-out PSP webhook signing secret verifies for 24 hours. Customers' own cancellations and card removals, and staff destructive actions, have fixed limits ([destructive holds](client.md#destructive-holds)).
+A return URL (a pay URL's `success_url` and `cancel_url`, a hosted payment's `return_url`, the Stripe billing portal's return) may name only the origin of `PublicURL`, of the merchant's `Issuer`, or one of its `checkout.embed_origins`. The event log keeps 90 days, and a rotated-out PSP webhook signing secret verifies for 24 hours. Customers' own card removals and staff destructive actions have fixed limits ([destructive holds](client.md#destructive-holds)). Customers' own cancellations never spend the card-removal budget and are never refused by it.
 
 Several instances must agree on the schemas, `Merchants`, `RateLimits`, `Captcha`, `TrustedProxies` and the mounted `Routes` (a route some instances lack answers 404 there).
 
@@ -223,7 +223,7 @@ if err := bill.Start(ctx, openrails.WithRiverClient(fleet)); err != nil {
 }
 ```
 
-`RiverJobs` adds the `billing` (20 workers), `psp_import` (2), `provider_refresh` (4) and `nmi_history` (1) queues when missing and sets `RescueStuckJobsAfter` to 10 minutes, or the fleet's `JobTimeout` if longer, when unset; each worker declares its own timeout. The fleet must be in `DatabaseConfig.RiverSchema`, run on every replica, and is yours to start and stop. `Start` without `WithRiverClient` after `RiverJobs` went to a fleet is refused. AuthKit joins the same fleet when its River schema matches. Every kind, queue and schedule: [River jobs](river-jobs.md).
+`RiverJobs` adds the `billing` (20 workers), `psp_import` (2) and `provider_refresh` (4) queues when missing and sets `RescueStuckJobsAfter` to 10 minutes, or the fleet's `JobTimeout` if longer, when unset; each worker declares its own timeout. The fleet must be in `DatabaseConfig.RiverSchema`, run on every replica, and is yours to start and stop. `Start` without `WithRiverClient` after `RiverJobs` went to a fleet is refused. AuthKit joins the same fleet when its River schema matches. Every kind, queue and schedule: [River jobs](river-jobs.md).
 
 ## Several instances
 

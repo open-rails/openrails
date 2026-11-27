@@ -59,160 +59,6 @@ func (q *Queries) DeleteRebillCyclesBefore(ctx context.Context, arg DeleteRebill
 	return result.RowsAffected(), nil
 }
 
-const listOverdueRebillMerchants = `-- name: ListOverdueRebillMerchants :many
-SELECT DISTINCT s.merchant_id
-FROM billing.subscriptions s
-WHERE s.status IN ('active', 'unverified', 'awaiting_method') AND s.deleted_at IS NULL
-  AND s.merchant_id > $1::uuid
-  AND s.collection_policy = 'nmi_schedule' AND s.current_period_ends_at <= $2::timestamptz
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.rebill_cycles c
-       WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at
-         AND (c.missed_at IS NOT NULL OR c.next_probe_at > $3::timestamptz))
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.rebill_cycles c
-        JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
-       WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at)
-ORDER BY s.merchant_id
-LIMIT $4::int
-`
-
-type ListOverdueRebillMerchantsParams struct {
-	AfterMerchantID uuid.UUID
-	Cutoff          time.Time
-	Now             time.Time
-	MerchantLimit   int32
-}
-
-// CROSS-MERCHANT: merchants holding an NMI schedule whose period ended before
-// the cutoff with neither an attempt nor a recorded miss for that cycle, and
-// no failed probe waiting out its backoff. Ids in order after a cursor, so a
-// pass reaches every merchant.
-func (q *Queries) ListOverdueRebillMerchants(ctx context.Context, arg ListOverdueRebillMerchantsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listOverdueRebillMerchants,
-		arg.AfterMerchantID,
-		arg.Cutoff,
-		arg.Now,
-		arg.MerchantLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var merchant_id uuid.UUID
-		if err := rows.Scan(&merchant_id); err != nil {
-			return nil, err
-		}
-		items = append(items, merchant_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listOverdueRebills = `-- name: ListOverdueRebills :many
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_invoice_id FROM billing.subscriptions sub
-WHERE sub.merchant_id = $1::uuid
-  AND sub.status IN ('active', 'unverified', 'awaiting_method') AND sub.deleted_at IS NULL
-  AND sub.collection_policy = 'nmi_schedule' AND sub.current_period_ends_at <= $2::timestamptz
-  AND (sub.current_period_ends_at, sub.id) > ($3::timestamptz, $4::uuid)
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.rebill_cycles c
-       WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at
-         AND (c.missed_at IS NOT NULL OR c.next_probe_at > $5::timestamptz))
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.rebill_cycles c
-        JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
-       WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at)
-ORDER BY sub.current_period_ends_at, sub.id
-LIMIT $6::int
-`
-
-type ListOverdueRebillsParams struct {
-	MerchantID uuid.UUID
-	Cutoff     time.Time
-	AfterDueAt time.Time
-	AfterID    uuid.UUID
-	Now        time.Time
-	RowLimit   int32
-}
-
-// NMI schedules whose period ended before the cutoff with neither an attempt
-// nor a recorded miss for that cycle, and no failed probe waiting out its
-// backoff: a page after the (period end, id) cursor.
-func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebillsParams) ([]BillingSubscription, error) {
-	rows, err := q.db.Query(ctx, listOverdueRebills,
-		arg.MerchantID,
-		arg.Cutoff,
-		arg.AfterDueAt,
-		arg.AfterID,
-		arg.Now,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingSubscription
-	for rows.Next() {
-		var i BillingSubscription
-		if err := rows.Scan(
-			&i.ID,
-			&i.PriceID,
-			&i.ProductID,
-			&i.Status,
-			&i.Rail,
-			&i.CollectionPolicy,
-			&i.RailSubscriptionID,
-			&i.PaymentMethodID,
-			&i.CurrentPeriodStartsAt,
-			&i.CurrentPeriodEndsAt,
-			&i.StartedAt,
-			&i.EndedAt,
-			&i.GraceEndsAt,
-			&i.LastRetryAt,
-			&i.RetryAttempts,
-			&i.NextRetryAt,
-			&i.CanceledAt,
-			&i.CancelType,
-			&i.CancelFeedback,
-			&i.GatewayResponse,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.TierGroup,
-			&i.DeletionScheduledAt,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.PspID,
-			&i.DeletedAt,
-			&i.DestructiveRunID,
-			&i.DestructiveRunClass,
-			&i.TransientRetries,
-			&i.LifecycleRev,
-			&i.RowVersion,
-			&i.DunningPolicy,
-			&i.AccessDurationHoursSnapshot,
-			&i.Quantity,
-			&i.ProviderAccessDefaultSnapshot,
-			&i.FactsAuthority,
-			&i.DueRecheckAt,
-			&i.RailSubscriptionKey,
-			&i.RetryAdvisedAt,
-			&i.CheckoutInvoiceID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listRebillCycles = `-- name: ListRebillCycles :many
 WITH cy AS (
     SELECT c.id, c.subscription_id, c.customer_id, c.psp_id, c.rail, c.owner, c.due_at, c.amount, c.currency, c.missed_at, c.miss_reason
@@ -510,7 +356,7 @@ SELECT c.subscription_id, d.declines, d.reason
 FROM unnest($1::uuid[], $2::timestamptz[]) AS k(subscription_id, due_at)
 JOIN billing.rebill_cycles c ON c.merchant_id = $3::uuid AND c.subscription_id = k.subscription_id AND c.due_at = k.due_at
 CROSS JOIN LATERAL (
-    SELECT count(*)::int AS declines,
+    SELECT count(*) FILTER (WHERE NOT (pa.owner = 'engine' AND pa.kind = 'customer_retry' AND pa.action = 'retry'))::int AS declines,
            (array_agg(pa.reason ORDER BY pa.attempted_at DESC, pa.id DESC))[1]::text AS reason
     FROM billing.payment_attempts pa
     WHERE pa.merchant_id = c.merchant_id AND pa.cycle_id = c.id AND pa.outcome <> 'approved'
@@ -560,8 +406,7 @@ func (q *Queries) ListRenewalDeclines(ctx context.Context, arg ListRenewalDeclin
 }
 
 const markRebillCycleMissed = `-- name: MarkRebillCycleMissed :execrows
-UPDATE billing.rebill_cycles SET missed_at = $1::timestamptz, miss_reason = $2::text,
-    probe_failed_at = NULL, next_probe_at = NULL
+UPDATE billing.rebill_cycles SET missed_at = $1::timestamptz, miss_reason = $2::text
 WHERE merchant_id = $3::uuid AND id = $4::uuid AND missed_at IS NULL
 `
 
@@ -585,54 +430,27 @@ func (q *Queries) MarkRebillCycleMissed(ctx context.Context, arg MarkRebillCycle
 	return result.RowsAffected(), nil
 }
 
-const recordRebillProbeFailure = `-- name: RecordRebillProbeFailure :one
-INSERT INTO billing.rebill_cycles (id, merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency, quantity, probe_failed_at, next_probe_at)
-VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
-    $5::uuid, $6::text, $7::text, $8::timestamptz,
-    $9::bigint, $10::text, $11::int,
-    $12::timestamptz, $12::timestamptz + interval '15 minutes')
-ON CONFLICT (merchant_id, subscription_id, due_at) DO UPDATE SET
-    probe_failed_at = COALESCE(billing.rebill_cycles.probe_failed_at, EXCLUDED.probe_failed_at),
-    next_probe_at = EXCLUDED.probe_failed_at + LEAST(interval '24 hours', GREATEST(interval '15 minutes',
-        EXCLUDED.probe_failed_at - COALESCE(billing.rebill_cycles.probe_failed_at, EXCLUDED.probe_failed_at)))
-RETURNING next_probe_at
+const rebillCycleSettled = `-- name: RebillCycleSettled :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.rebill_cycles c
+     WHERE c.merchant_id = $1::uuid AND c.subscription_id = $2::uuid AND c.due_at = $3::timestamptz
+       AND (c.missed_at IS NOT NULL
+            OR EXISTS (SELECT 1 FROM billing.payment_attempts a WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id))
+)::boolean AS settled
 `
 
-type RecordRebillProbeFailureParams struct {
-	ID             uuid.UUID
+type RebillCycleSettledParams struct {
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
-	CustomerID     uuid.UUID
-	PspID          uuid.UUID
-	Rail           string
-	Owner          string
 	DueAt          time.Time
-	Amount         int64
-	Currency       string
-	Quantity       *int32
-	FailedAt       time.Time
 }
 
-// A failed look at an overdue cycle: it is looked at again after a backoff
-// that doubles from 15 minutes, at most a day.
-func (q *Queries) RecordRebillProbeFailure(ctx context.Context, arg RecordRebillProbeFailureParams) (*time.Time, error) {
-	row := q.db.QueryRow(ctx, recordRebillProbeFailure,
-		arg.ID,
-		arg.MerchantID,
-		arg.SubscriptionID,
-		arg.CustomerID,
-		arg.PspID,
-		arg.Rail,
-		arg.Owner,
-		arg.DueAt,
-		arg.Amount,
-		arg.Currency,
-		arg.Quantity,
-		arg.FailedAt,
-	)
-	var next_probe_at *time.Time
-	err := row.Scan(&next_probe_at)
-	return next_probe_at, err
+// Whether the cycle due at due_at is decided: an attempt or a recorded miss.
+func (q *Queries) RebillCycleSettled(ctx context.Context, arg RebillCycleSettledParams) (bool, error) {
+	row := q.db.QueryRow(ctx, rebillCycleSettled, arg.MerchantID, arg.SubscriptionID, arg.DueAt)
+	var settled bool
+	err := row.Scan(&settled)
+	return settled, err
 }
 
 const upsertRebillCycle = `-- name: UpsertRebillCycle :one

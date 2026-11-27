@@ -49,14 +49,16 @@ func EventStoreOf(q *gen.Queries) *eventstore.Store {
 	return tx.river.events
 }
 
-// UsageLedger posts the usage the event store holds. The runtime binds the
-// money service, so code holding only a transaction (credit lots, a merchant
-// purge) reaches it.
+// UsageLedger posts the usage intake settled and what running charges
+// accrued. The runtime binds the money service, so code holding only a
+// transaction (credit lots, a merchant purge) reaches it.
 type UsageLedger interface {
-	// PostUsage posts, at now, what a customer's usage in a currency costs
-	// and the ledger has not taken: everything with a zero cut, else what
-	// occurred before cut. reason is usage_postings.reason.
-	PostUsage(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string, cut, now time.Time, reason string) (bool, error)
+	// PostUsage posts, at now, what a customer's usage and running charges
+	// in a currency cost and the ledger has not taken: the usage that
+	// occurred before cut (all of it with a zero cut) and the running
+	// charges through through (none with a zero through), in one receipt.
+	// reason is usage_receipts.reason.
+	PostUsage(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string, cut, through, now time.Time, reason string) (bool, error)
 }
 
 // SetUsageLedger binds the usage ledger every handle derived from d reaches.

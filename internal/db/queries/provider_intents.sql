@@ -388,7 +388,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(s
 
 -- name: LockProviderIntentForCollectionCompletion :one
 -- Call after acquiring the domain's customer/invoice locks, matching admission's
--- invoice-before-operation invoice.
+-- invoice-before-operation order.
 SELECT * FROM billing.provider_intents
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND intent_type IN ('order_collection', 'manual_rebill', 'subscription_collection')
