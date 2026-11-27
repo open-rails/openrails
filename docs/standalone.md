@@ -36,11 +36,11 @@ to it.
 
 `openrails version` prints the version, commit and build date.
 
-The server listens on loopback (`127.0.0.1`) unless `host` names another address; a container sets `0.0.0.0`, and the image, the chart and Compose do. From a checkout, `task dev` runs it with every dependency ([local development](#local-development)).
+The server listens on loopback (`127.0.0.1`) unless `host` names another address; a container sets `0.0.0.0`, and the image, the chart and Compose do. From a checkout, `task dev` runs it beside its dependencies ([local development](#local-development)).
 
 ## Local development
 
-`task dev` starts the Compose dependencies (PostgreSQL, Redis as Valkey, ClickHouse and Vault, each on a loopback port), then the server under Air on `127.0.0.1:3053` and the console under Vite at `http://localhost:3054/admin/`. Once the server is ready it seeds a local operator and a merchant named `sandbox`, and prints the sign-in; `task dev:login` prints it again.
+`task dev:services` starts the Compose dependencies (PostgreSQL, Redis as Valkey, ClickHouse and Vault, each on a loopback port) and mounts Vault's engines; `task dev:services:stop` stops them. `task dev` runs the server under Air on `127.0.0.1:3053` and the console under Vite at `http://localhost:3054/admin/`; it first checks the dependencies are up and Vault has its `kv` mount, and otherwise names `task dev:services` and exits. Air rebuilds the server on every change to a `.go` or `.sql` file, migrations included, and the server's output is also written to `tmp/dev.log`, replaced each start. Once the server is ready it seeds a local operator and a merchant named `sandbox`, and prints the sign-in; `task dev:login` prints it again. Ctrl+C stops the server and the console, not the dependencies.
 
 | Sign-in | |
 |---|---|
@@ -48,7 +48,7 @@ The server listens on loopback (`127.0.0.1`) unless `host` names another address
 | password | `openrails` |
 | role | `root:owner`; the first sign-in enrolls an authenticator app |
 
-Vault is a development server in memory, root token `openrails-dev-root`, with KV v2 at `kv` (the server's `vault.kv_mount`) and Transit at `transit`. It forgets everything when its container restarts; the next `task dev` mounts both again and re-creates nothing else. `docker compose down -v` discards every local service's data.
+Vault is a development server in memory, root token `openrails-dev-root`, with KV v2 at `kv` (the server's `vault.kv_mount`) and Transit at `transit`. It forgets everything when its container restarts; `task dev:services` mounts both again and re-creates nothing else. `docker compose down -v` discards every local service's data.
 
 Root holds that operator, so the server logs no setup link ([the first operator](#first-run)). That operator's password is published, so the server refuses to start listening beyond loopback while the account exists, wherever the database came from. The Compose `openrails` service (`docker compose --profile openrails up -d`, followed by `docker compose logs -f openrails`) listens on `0.0.0.0` in its container and so refuses a database `task dev` seeded: start it on a fresh one (`docker compose --profile openrails down -v` removes everything, volumes included).
 

@@ -3,6 +3,8 @@
 package critical_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +19,7 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -312,5 +315,50 @@ func TestMerchantHost(t *testing.T) {
 		require.NoError(t, purge(&purged, "--inventory", inventory.ID.String(), "--confirm", inventory.ConfirmPhrase, "--expect-rows", strconv.Itoa(inventory.TotalRows)))
 		require.Zero(t, rows("customer_contacts"), "the merchant's copy of its directory goes with it")
 		require.Zero(t, rows("provisioning_tokens"), "and the tokens its directory pushed with")
+	})
+	t.Run("OR-J32-S08/cli-create-sets-the-display-name-vault-holds", func(t *testing.T) {
+		w := newWorld(t)
+		t.Cleanup(func() {
+			_, _ = w.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{w.schema + "_auth"}.Sanitize()+" CASCADE")
+		})
+		addr, token := os.Getenv("OPENRAILS_CRITICAL_VAULT_ADDR"), os.Getenv("OPENRAILS_CRITICAL_VAULT_TOKEN")
+		require.NotEmpty(t, addr, "critical configuration cases require real Vault")
+		t.Setenv(vaulttest.AddrEnv, addr)
+		t.Setenv(vaulttest.TokenEnv, token)
+		vault := vaulttest.New(t)
+		keys := staffKeys(t)
+		overlay := map[string]any{"vault": map[string]any{"address": vault.Addr, "token": vault.Token, "kv_mount": vault.Mount}}
+		// run is the operator CLI with merchant configuration in Vault; it
+		// answers stderr and decodes stdout into out.
+		run := func(out any, args ...string) string {
+			t.Helper()
+			cmd := staffCLI(t, w, keys, overlay, args...)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			require.NoError(t, cmd.Run(), "%v: %s", args, stderr.String())
+			require.NoError(t, json.Unmarshal(stdout.Bytes(), out), stdout.String())
+			return stderr.String()
+		}
+
+		// task dev's seed.
+		var created billing.Merchant
+		run(&created, "merchants", "create", "sandbox", "--display-name", "Sandbox")
+		require.Equal(t, "sandbox", created.Slug)
+		require.NotNil(t, created.DisplayName)
+		require.Equal(t, "Sandbox", *created.DisplayName)
+		var doc struct {
+			DisplayName string `json:"display_name"`
+		}
+		require.NotZero(t, vault.Get(t, "openrails/merchants/"+created.ID.String()+"/merchant", &doc), "the merchant document is Vault's")
+		require.Equal(t, "Sandbox", doc.DisplayName)
+
+		// The seed again, as every task dev start runs it.
+		var again billing.Merchant
+		require.Contains(t, run(&again, "merchants", "create", "sandbox", "--display-name", "Sandbox"), "sandbox exists; unchanged")
+		require.Equal(t, created.ID, again.ID)
+		var read billing.Merchant
+		run(&read, "merchants", "get", "sandbox")
+		require.NotNil(t, read.DisplayName)
+		require.Equal(t, "Sandbox", *read.DisplayName)
 	})
 }

@@ -801,6 +801,9 @@
     "OR-J32-S07": [
       "TestMerchantHost/OR-J32-S07/a-purge-the-event-store-refused-to-delete-from-is-retried-by-its-job"
     ],
+    "OR-J32-S08": [
+      "TestMerchantHost/OR-J32-S08/cli-create-sets-the-display-name-vault-holds"
+    ],
     "OR-J34-S01": [
       "TestDestructiveControls/OR-J34-S01/ceiling-persists-original-actor-target-and-denied-effect"
     ],

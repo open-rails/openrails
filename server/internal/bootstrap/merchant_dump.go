@@ -3,30 +3,27 @@ package bootstrap
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"maps"
 	"strings"
 
 	"github.com/goccy/go-yaml"
-	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchantdocs"
-	"github.com/open-rails/openrails/server/internal/controlplane"
+	"github.com/open-rails/openrails/internal/merchants"
 )
 
-// DumpMerchantConfig reads a merchant's configuration from Vault and returns
-// it in the push-merchant-config YAML shape (#646/#653). Credentials (PSP and
-// custodian secrets, the SCIM token, alert webhook URLs) are never exported,
-// so alert webhooks are omitted; a redacted dump re-applies without a
-// placeholder standing in for a real value. With a manifest as the
-// configuration, the manifest is the dump.
-func DumpMerchantConfig(ctx context.Context, logger *slog.Logger, cfg *billing.Config, vault *vaultapi.Client, cp *controlplane.ControlPlane, slug string) (*BillingConfig, error) {
-	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
-		return nil, fmt.Errorf("dump-merchant-config requires an enabled control plane")
+// DumpMerchantConfig reads a merchant's configuration from Vault, through
+// directory, and returns it in the push-merchant-config YAML shape.
+// Credentials (PSP and custodian secrets, the SCIM token, alert webhook URLs)
+// are never exported, so alert webhooks are omitted; a redacted dump
+// re-applies without a placeholder standing in for a real value. With a
+// manifest as the configuration, the manifest is the dump.
+func DumpMerchantConfig(ctx context.Context, cfg *billing.Config, directory *merchants.Service, slug string) (*BillingConfig, error) {
+	if directory == nil {
+		return nil, fmt.Errorf("dump-merchant-config requires the merchant configuration")
 	}
 	slug = strings.ToLower(strings.TrimSpace(slug))
 	if slug == "" {
@@ -35,21 +32,11 @@ func DumpMerchantConfig(ctx context.Context, logger *slog.Logger, cfg *billing.C
 	if config.MerchantConfigKVMount(cfg) == "" {
 		return nil, fmt.Errorf("merchant configuration is read from the manifest; the manifest is the dump")
 	}
-	database, err := db.NewWithPGXPool(logger, cp.Pool().Raw(), cp.Pool().Schema())
-	if err != nil {
-		return nil, fmt.Errorf("wrap control-plane db: %w", err)
-	}
-	opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database, vault)
-	if err != nil {
-		return nil, err
-	}
-	defer opened.Close()
-	svc := opened.Service
-	selected, err := svc.GetBySlug(ctx, slug)
+	selected, err := directory.GetBySlug(ctx, slug)
 	if err != nil {
 		return nil, fmt.Errorf("lookup merchant %q: %w", slug, err)
 	}
-	set, err := svc.Config().Get(ctx, selected.ID)
+	set, err := directory.Config().Get(ctx, selected.ID)
 	if err != nil {
 		return nil, err
 	}

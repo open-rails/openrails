@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -94,19 +95,42 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 }
 
 func (c *commandControlPlane) loadMerchants(ctx context.Context) error {
+	rt, closeMerchants, err := openCLIMerchants(ctx, c.db, billing.MerchantID{})
+	if err != nil {
+		return err
+	}
+	c.cleanups = append(c.cleanups, closeMerchants)
+	c.directory = rt.Merchants
+	c.cp.BindMerchants(c.directory)
+	return nil
+}
+
+// openCLIMerchants is every command's merchant configuration: Vault's, else a
+// file source, which a merchant's manifest entry fills when one is named. Its
+// writes are armed as a server's are: the admission owner, the River producer
+// its incident alerts need and Vault's fingerprint key.
+func openCLIMerchants(ctx context.Context, database *db.DB, merchant billing.MerchantID) (*app.Runtime, func(), error) {
 	cfg := hostconfig.Engine(ctx)
 	vault, err := cliVault(ctx)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, c.db, vault)
+	var opened *merchantbootstrap.Merchants
+	if merchant.IsZero() {
+		opened, err = merchantbootstrap.OpenMerchants(ctx, cfg, database, vault)
+	} else {
+		opened, err = merchantbootstrap.OneOffMerchants(ctx, cfg, database, vault, merchant, nil, "")
+	}
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	c.cleanups = append(c.cleanups, opened.Close)
-	c.directory = opened.Service
-	c.cp.BindMerchants(c.directory)
-	return nil
+	rt := &app.Runtime{DB: database, Config: cfg, Merchants: opened.Service, MerchantConfig: opened.Service.Config(), Log: slog.Default()}
+	closeAll := func() { _ = rt.Close(context.WithoutCancel(ctx)); opened.Close() }
+	if err := rt.WireOneOffDestructiveAdmissions(ctx); err != nil {
+		closeAll()
+		return nil, nil, err
+	}
+	return rt, closeAll, nil
 }
 
 func (c *commandControlPlane) ProvisionMerchant(ctx context.Context, req billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error) {
@@ -136,16 +160,11 @@ func (c *commandControlPlane) RestoreMerchant(ctx context.Context, id billing.Me
 // Directory reads retain config-backed display names, but need no AuthKit.
 func withCLIDirectory(cmd *cobra.Command, run func(context.Context, *db.DB, *merchants.Service) error) error {
 	return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
-		cfg := hostconfig.Engine(ctx)
-		vault, err := cliVault(ctx)
+		rt, closeMerchants, err := openCLIMerchants(ctx, database, billing.MerchantID{})
 		if err != nil {
 			return err
 		}
-		opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database, vault)
-		if err != nil {
-			return err
-		}
-		defer opened.Close()
-		return run(ctx, database, opened.Service)
+		defer closeMerchants()
+		return run(ctx, database, rt.Merchants)
 	})
 }
