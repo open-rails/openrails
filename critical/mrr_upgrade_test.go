@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -409,13 +410,14 @@ func upgradeKeepsEveryMRRMeasure(t *testing.T) {
 		require.NoError(t, err)
 		return out
 	}
-	require.Equal(t, "USD churn -10000000 -1 07-16", moves("c5")[len(moves("c5"))-1])
+	c5 := moves("c5")
+	assert.Equal(t, "USD churn -10000000 -1 07-16", c5[len(c5)-1])
 
 	// An end that has come stays with its subscription: touched after it, then
 	// met by a change dated before it, c7's churn is written again, a
 	// contraction beside the plan bought then.
-	set(9, at(8, 12), "canceled", "pro-EUR", at(7, 10), at(8, 10), "user", at(8, 10))
+	exec("UPDATE "+table("subscriptions")+" SET ended_at = $3, lifecycle_rev = lifecycle_rev + 1, updated_at = $4 WHERE merchant_id = $1 AND id = $2", m, id(9), at(8, 10), at(8, 12))
 	subscribe("c7", 19, "basic-EUR", at(7, 20), at(8, 20))
-	require.Equal(t, []string{"EUR new 22000000 1 04-10", "EUR expansion 9000000 0 07-20", "EUR contraction -22000000 0 08-10"}, moves("c7"))
-	require.Equal(t, []string{"EUR contraction -22000000 0 08-10"}, scheduled())
+	assert.Equal(t, []string{"EUR new 22000000 1 04-10", "EUR expansion 9000000 0 07-20", "EUR contraction -22000000 0 08-10"}, moves("c7"))
+	assert.Equal(t, []string{"EUR contraction -22000000 0 08-10"}, scheduled())
 }

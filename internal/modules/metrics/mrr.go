@@ -330,7 +330,7 @@ FROM (
 func compileCohort(plan *Plan, merchantID uuid.UUID, leaves []*Measure) (stmt, error) {
 	b := &binder{}
 	zone := b.arg(plan.zone().String())
-	merchant, from, to := b.arg(merchantID), b.arg(plan.From), b.arg(plan.To)
+	merchant, from, to, asOf := b.arg(merchantID), b.arg(plan.From), b.arg(plan.To), b.arg(plan.AsOf)
 	basis := `'subscribers'`
 	bases := `(VALUES ('subscribers'))`
 	if slices.Contains(plan.Dims, "basis") || plan.Filters["basis"] != nil {
@@ -372,12 +372,12 @@ func compileCohort(plan *Plan, merchantID uuid.UUID, leaves []*Measure) (stmt, e
 	SELECT m.currency, date_trunc('month', m.cohort_at, ` + zone + `) AS cohort, date_trunc('month', m.occurred_at, ` + zone + `) AS month,
 	       SUM(m.logo_delta)::bigint AS logos, SUM(m.delta)::bigint AS amount
 	FROM billing.mrr_movements m
-	WHERE m.merchant_id = ` + merchant + ` AND m.cohort_at >= ` + from + ` AND m.cohort_at < ` + to + ` AND m.occurred_at < ` + to + ` AND m.occurred_at <= ` + b.arg(plan.AsOf) + `
+	WHERE m.merchant_id = ` + merchant + ` AND m.cohort_at >= ` + from + ` AND m.cohort_at < ` + to + ` AND m.occurred_at < ` + to + ` AND m.occurred_at <= ` + asOf + `
 	GROUP BY 1, 2, 3
 ), a AS (
 	SELECT m.currency, date_trunc('month', m.cohort_at, ` + zone + `) AS cohort, count(DISTINCT m.customer_id)::bigint AS members
 	FROM billing.mrr_movements m
-	WHERE m.merchant_id = ` + merchant + ` AND m.cohort_at >= ` + from + ` AND m.cohort_at < ` + to + `
+	WHERE m.merchant_id = ` + merchant + ` AND m.cohort_at >= ` + from + ` AND m.cohort_at < ` + to + ` AND m.occurred_at <= ` + asOf + `
 	GROUP BY 1, 2
 ), g AS (
 	SELECT k.currency, k.cohort, to_char(k.cohort AT TIME ZONE ` + zone + `, 'YYYY-MM') AS cohort_label, mm.n,
