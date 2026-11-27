@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 872,
+  "scenario_count": 874,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -901,7 +901,7 @@
     {
       "id": "OR-J24-S47",
       "journey": "J24",
-      "name": "A sync that inserted its events and failed in PostgreSQL, then its resend: each item is charged once and FINAL raw usage holds it once, while history counts the failed attempt's copy too"
+      "name": "A sync that commits and stops before its insert is charged once and counted nowhere in the store; its resend answers the receipts and inserts nothing, and the next item counts once in raw usage, history and its spend window"
     },
     {
       "id": "OR-J24-S48",
@@ -3991,12 +3991,12 @@
     {
       "id": "OR-J24-S73",
       "journey": "J24",
-      "name": "A sync that failed after inserting its first chunk leaves that usage unsettled; the resend adds each item to pending once, priced from the period's start"
+      "name": "A sync that failed before its commit inserted nothing; the resend adds each item to pending once, priced from the period's start, and the store counts each once"
     },
     {
       "id": "OR-J24-S74",
       "journey": "J24",
-      "name": "A posting before the resend leaves usage a failed sync inserted to the resend, which adds it to pending once; the next posting takes it once"
+      "name": "A posting before the resend leaves usage a failed sync did not settle to the resend, which adds it to pending once; the next posting takes it once"
     },
     {
       "id": "OR-J24-S75",
@@ -4282,6 +4282,16 @@
       "id": "OR-J24-S85",
       "journey": "J24",
       "name": "Usage reported after a credit lot lapsed, from either side of the lapse, is split at it in the running totals: the posting before the lapse draws the lot for the usage before it only, and the rest is owed"
+    },
+    {
+      "id": "OR-J24-S86",
+      "journey": "J24",
+      "name": "A store that refuses a sync's insert after its commit is tried again: once it takes the usage each item counts once; one that refuses every try still answers the receipts and charges each item once, counting none of them, and a resend inserts nothing"
+    },
+    {
+      "id": "OR-J24-S87",
+      "journey": "J24",
+      "name": "A failed item's grace counts each failure once: the resend of a sync that failed reads no copy of its own failure, and a later chunk of one sync counts the failures of the chunks before it"
     },
     {
       "id": "OR-J25-S44",

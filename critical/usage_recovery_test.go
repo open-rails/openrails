@@ -285,7 +285,7 @@ func TestUsageRecovery(t *testing.T) {
 		balance(t, w.alpha, customer, 600, 400, 1000)
 	})
 
-	t.Run("OR-J24-S73/a-sync-that-failed-after-its-insert-leaves-its-usage-unsettled-and-the-resend-adds-it-once", func(t *testing.T) {
+	t.Run("OR-J24-S73/a-sync-that-failed-before-its-commit-inserted-nothing-and-the-resend-adds-it-once", func(t *testing.T) {
 		w := newWorld(t, earlyInMonth)
 		// The first 100 units at 2, the rest at 1.
 		pricedMeter(t, w.alpha, tiers(catalog.TierModeGraduated, 2, 1, 100))
@@ -295,14 +295,16 @@ func TestUsageRecovery(t *testing.T) {
 		failAfterFirstChunk(t, lease)
 		_, err := w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: items})
 		require.Error(t, err)
-		require.EqualValues(t, leases.UsageChunkItems, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"), "its first chunk reached the store")
+		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"), "the store takes nothing a sync did not commit")
 		balance(t, w.alpha, customer, 1000, 0, 1000)
 
 		// The resend settles all of it: each item's price is pending once,
-		// priced from the period's start, as if the failed sync never ran.
+		// priced from the period's start, as if the failed sync never ran, and
+		// the store counts each once.
 		out := settleUsage(t, w.alpha, lease, items...)
 		require.EqualValues(t, leases.UsageChunkItems+1, out.Usage.ThroughN)
-		require.EqualValues(t, leases.UsageChunkItems+1, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"))
+		require.EqualValues(t, leases.UsageChunkItems+1, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"))
+		require.EqualValues(t, leases.UsageChunkItems+1, storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"))
 		balance(t, w.alpha, customer, 649, 351, 1000)
 		fleet := startFleet(t, w)
 		nextDay(w)
@@ -321,9 +323,10 @@ func TestUsageRecovery(t *testing.T) {
 		_, err := w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: items})
 		require.Error(t, err)
 		balance(t, w.alpha, customer, 990, 10, 1000)
+		require.EqualValues(t, 1, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"), "the failed sync inserted nothing")
 
 		// The day's posting takes what settled and leaves what the failed
-		// sync inserted.
+		// sync did not settle.
 		fleet := startFleet(t, w)
 		nextDay(w)
 		postDays(t, fleet)
@@ -335,6 +338,38 @@ func TestUsageRecovery(t *testing.T) {
 		nextDay(w)
 		postDays(t, fleet)
 		balance(t, w.alpha, customer, 739, 0, 739)
+	})
+
+	t.Run("OR-J24-S87/a-failed-items-grace-counts-each-failure-once", func(t *testing.T) {
+		w := newWorld(t, meteredPolicy)
+		usageMeter(t, w.alpha, 1)
+		customer, _ := fundedCustomer(t, w)
+		failed := func(id string, amount int64) billing.LeaseUsage {
+			v := usageInput(customer, id, 0)
+			v.Outcome, v.Amount = billing.UsageFailed, ptr(amount)
+			return v
+		}
+		// After the customer, these fill a chunk and start the next.
+		others := make([]billing.LeaseUsage, leases.UsageChunkCustomers)
+		for i := range others {
+			others[i] = usageInput(billing.CustomerID(uuid.New()), fmt.Sprintf("other-%d", i), 1)
+		}
+
+		// A sync fails after the chunk that took a failure of 80; its resend
+		// reads no copy of it: all of it is within the 100 of grace.
+		lease := newLease()
+		items := numbered(1, append([]billing.LeaseUsage{failed("first", 80)}, others...)...)
+		failAfterFirstChunk(t, lease)
+		_, err := w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: items})
+		require.Error(t, err)
+		settleUsage(t, w.alpha, lease, items...)
+		balance(t, w.alpha, customer, 1000, 0, 1000)
+
+		// One sync's failures in two chunks: the second chunk's grace counts
+		// the first's. 80 and 15 leave 5, so the last 15 is charged 10.
+		items = numbered(1, append(append([]billing.LeaseUsage{failed("second", 15)}, others...), failed("third", 15))...)
+		settleUsage(t, w.alpha, newLease(), items...)
+		balance(t, w.alpha, customer, 990, 0, 990)
 	})
 
 	t.Run("OR-J24-S75/a-resend-older-than-the-kept-receipts-settles-nothing-again", func(t *testing.T) {
@@ -375,9 +410,21 @@ func unitItems(customer billing.CustomerID, first int64, count int) []billing.Le
 	return numbered(first, items...)
 }
 
-// failAfterFirstChunk fails the lease's next sync once its first chunk is in
-// the store and its transaction holds the chunk's settlement: the sync rolls
-// back, and the store keeps the events.
+// failAfterCommit stops the lease's next sync once it committed, before its
+// insert, as a crash there would.
+func failAfterCommit(t *testing.T, lease billing.LeaseID) {
+	t.Helper()
+	var failed atomic.Bool
+	t.Cleanup(failpoint.Set(func(_ context.Context, site failpoint.Site) error {
+		if site.Point == failpoint.Committed && site.Kind == leases.FailpointKind && site.Operation == lease.UUID() && failed.CompareAndSwap(false, true) {
+			return errors.New("the sync stops between its commit and its insert")
+		}
+		return nil
+	}))
+}
+
+// failAfterFirstChunk fails the lease's next sync once its transaction holds
+// its first chunk's settlement: the sync rolls back.
 func failAfterFirstChunk(t *testing.T, lease billing.LeaseID) {
 	t.Helper()
 	var failed atomic.Bool

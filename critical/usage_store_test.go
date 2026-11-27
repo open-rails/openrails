@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/modules/leases"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -102,6 +101,51 @@ func (c *downConn) PrepareBatch(ctx context.Context, query string, opts ...drive
 	return c.Conn.PrepareBatch(ctx, query, opts...)
 }
 
+func (c *downConn) Ping(ctx context.Context) error {
+	if c.down.Load() {
+		return errStoreDown
+	}
+	return c.Conn.Ping(ctx)
+}
+
+// refusingInserts is the world's ClickHouse refusing its next refuse usage
+// inserts, while it answers everything else.
+type refusingInserts struct {
+	driver.Conn
+	refuse atomic.Int64
+}
+
+func (c *refusingInserts) PrepareBatch(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
+	if strings.Contains(query, ".usage_intake") {
+		for n := c.refuse.Load(); n > 0; n = c.refuse.Load() {
+			if c.refuse.CompareAndSwap(n, n-1) {
+				return nil, errStoreDown
+			}
+		}
+	}
+	return c.Conn.PrepareBatch(ctx, query, opts...)
+}
+
+// meteredPolicy binds every customer of alpha to a policy with an hourly
+// spend window and an hourly grace of 100 for failed usage.
+func meteredPolicy(w *world) {
+	m := cfgMerchant(w.cfg, "alpha")
+	m.BillingPolicies = []billing.BillingPolicy{{Name: "metered",
+		SpendWindows:    []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 1_000_000, Currency: "USD"}},
+		BadSpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 100, Currency: "USD"}}}}
+	m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "metered"}}
+	setCfgMerchant(&w.cfg, "alpha", m)
+}
+
+// storeCounts are what the store counts of alpha's usage: raw events,
+// history's requests and the spend windows' units.
+func storeCounts(t *testing.T, w *world) [3]uint64 {
+	t.Helper()
+	return [3]uint64{storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"),
+		storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"),
+		storeCount(t, w, "SELECT toUInt64(sum(units)) FROM {db}.limit_usage WHERE merchant_id = {m} AND startsWith(limit_key, 'spend:')")}
+}
+
 type downRow struct{}
 
 func (downRow) Err() error           { return errStoreDown }
@@ -115,34 +159,67 @@ func requireUnavailable(t *testing.T, err error) {
 }
 
 func TestUsageStore(t *testing.T) {
-	t.Run("OR-J24-S47/a-resend-after-a-failed-sync-charges-once-and-history-counts-both-copies", func(t *testing.T) {
-		w := newWorld(t)
+	t.Run("OR-J24-S47/a-sync-that-fails-between-its-commit-and-its-insert-is-charged-once-and-its-resend-inserts-nothing", func(t *testing.T) {
+		w := newWorld(t, meteredPolicy)
 		customer, _ := fundedCustomer(t, w)
 		usageMeter(t, w.alpha, 1)
 		lease := newLease()
-		chunk := int64(leases.UsageChunkItems)
-		items := unitItems(customer, 1, leases.UsageChunkItems+1)
-		// The sync inserts its first chunk's events and fails in PostgreSQL:
-		// nothing settled.
-		failAfterFirstChunk(t, lease)
+		items := unitItems(customer, 1, 3)
+		// The sync commits and stops before its insert, as a crash would: its
+		// usage is charged, and the store took none of it.
+		failAfterCommit(t, lease)
 		_, err := w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: items})
 		require.Error(t, err)
-		balance(t, w.alpha, customer, 1000, 0, 1000)
+		balance(t, w.alpha, customer, 997, 3, 1000)
+		require.Equal(t, [3]uint64{0, 0, 0}, storeCounts(t, w))
 
-		// The resend inserts them again and settles each once: the money is
-		// PostgreSQL's. Raw usage collapses the copies; the rollups count both.
-		settleUsage(t, w.alpha, lease, items...)
-		balance(t, w.alpha, customer, 1000-chunk-1, chunk+1, 1000)
-		require.EqualValues(t, chunk+1, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"), "raw usage holds each item once")
-		require.EqualValues(t, 2*chunk+1, storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"),
-			"history counts the failed attempt's copy too")
+		// The resend answers its receipts: nothing settles or is inserted again.
+		out := settleUsage(t, w.alpha, lease, items...)
+		require.EqualValues(t, 3, out.Usage.ThroughN)
+		balance(t, w.alpha, customer, 997, 3, 1000)
+		require.Equal(t, [3]uint64{0, 0, 0}, storeCounts(t, w), "a settled item is never inserted again")
+
+		// The next item counts once in raw usage, history and its spend window.
+		settleUsage(t, w.alpha, lease, numbered(4, usageInput(customer, "next", 1))...)
+		require.Equal(t, [3]uint64{1, 1, 1}, storeCounts(t, w))
 		fleet := startFleet(t, w)
 		nextDay(w)
 		postDays(t, fleet)
-		balance(t, w.alpha, customer, 1000-chunk-1, 0, 1000-chunk-1)
+		balance(t, w.alpha, customer, 996, 0, 996)
 		deductions := usageDeductions(t, w.alpha, customer)
 		require.Len(t, deductions, 1)
-		require.EqualValues(t, -(chunk + 1), deductions[0].Amount, "charged once")
+		require.EqualValues(t, -4, deductions[0].Amount, "charged once")
+	})
+
+	t.Run("OR-J24-S86/a-store-that-refuses-the-insert-after-the-commit-is-tried-again-and-one-that-refuses-for-good-loses-only-the-counts", func(t *testing.T) {
+		var conn *refusingInserts
+		w := newWorld(t, meteredPolicy, func(w *world) {
+			conn = &refusingInserts{Conn: w.deps.ClickHouse}
+			w.deps.ClickHouse = conn
+		})
+		customer, _ := fundedCustomer(t, w)
+		usageMeter(t, w.alpha, 1)
+		lease := newLease()
+		// The store refuses the first insert after the commit: the sync tries
+		// again, and each item counts once.
+		conn.refuse.Store(1)
+		settleUsage(t, w.alpha, lease, unitItems(customer, 1, 3)...)
+		require.Zero(t, conn.refuse.Load(), "the store refused the first insert")
+		balance(t, w.alpha, customer, 997, 3, 1000)
+		require.Equal(t, [3]uint64{3, 3, 3}, storeCounts(t, w))
+
+		// It refuses every try: the sync still answers its receipts and each
+		// item is charged once, the store counts none of them, and a resend
+		// inserts nothing.
+		conn.refuse.Store(1 << 20)
+		lost := unitItems(customer, 4, 2)
+		settleUsage(t, w.alpha, lease, lost...)
+		conn.refuse.Store(0)
+		balance(t, w.alpha, customer, 995, 5, 1000)
+		require.Equal(t, [3]uint64{3, 3, 3}, storeCounts(t, w))
+		settleUsage(t, w.alpha, lease, lost...)
+		balance(t, w.alpha, customer, 995, 5, 1000)
+		require.Equal(t, [3]uint64{3, 3, 3}, storeCounts(t, w))
 	})
 
 	t.Run("OR-J24-S48/while-clickhouse-is-out-of-reach-usage-settles-nothing-and-balances-read-and-move", func(t *testing.T) {

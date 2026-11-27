@@ -2064,7 +2064,7 @@
       "TestLeaseSyncs/OR-J24-S45/a-report-naming-a-customer-another-transaction-spends-does-not-wait"
     ],
     "OR-J24-S47": [
-      "TestUsageStore/OR-J24-S47/a-resend-after-a-failed-sync-charges-once-and-history-counts-both-copies"
+      "TestUsageStore/OR-J24-S47/a-sync-that-fails-between-its-commit-and-its-insert-is-charged-once-and-its-resend-inserts-nothing"
     ],
     "OR-J24-S48": [
       "TestUsageStore/OR-J24-S48/while-clickhouse-is-out-of-reach-usage-settles-nothing-and-balances-read-and-move"
@@ -2593,7 +2593,7 @@
       "TestUsageRecovery/OR-J24-S72/a-resend-after-a-lost-reply-adds-nothing-to-pending"
     ],
     "OR-J24-S73": [
-      "TestUsageRecovery/OR-J24-S73/a-sync-that-failed-after-its-insert-leaves-its-usage-unsettled-and-the-resend-adds-it-once"
+      "TestUsageRecovery/OR-J24-S73/a-sync-that-failed-before-its-commit-inserted-nothing-and-the-resend-adds-it-once"
     ],
     "OR-J24-S74": [
       "TestUsageRecovery/OR-J24-S74/a-posting-before-the-resend-leaves-unsettled-usage-to-it"
@@ -2780,6 +2780,12 @@
     ],
     "OR-J24-S85": [
       "TestUsageRecovery/OR-J24-S85/usage-reported-after-a-lapse-is-split-at-it-and-only-what-came-before-draws-the-lot"
+    ],
+    "OR-J24-S86": [
+      "TestUsageStore/OR-J24-S86/a-store-that-refuses-the-insert-after-the-commit-is-tried-again-and-one-that-refuses-for-good-loses-only-the-counts"
+    ],
+    "OR-J24-S87": [
+      "TestUsageRecovery/OR-J24-S87/a-failed-items-grace-counts-each-failure-once"
     ],
     "OR-J25-S44": [
       "TestBalanceLooks/OR-J25-S44/the-burn-rate-reads-each-ended-quarter-hour-of-usage-history-once"
