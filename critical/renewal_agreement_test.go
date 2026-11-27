@@ -4,7 +4,6 @@ package critical_test
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -164,7 +162,7 @@ func TestSubscriptionGrantRevocations(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, billing.SubscriptionCanceled, canceled.Status)
 			}
-			database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+			database, err := producerDB(a.pool, a.schema)
 			require.NoError(t, err)
 			ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 			q := database.Gen(ctx)

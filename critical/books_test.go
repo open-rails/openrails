@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"regexp"
 	"slices"
 	"strings"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/billingfact"
 	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -378,7 +378,7 @@ func TestBooks(t *testing.T) {
 
 		// The general ledger is opened outside business transactions, never
 		// inside one.
-		database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+		database, err := producerDB(w.pool, w.schema)
 		require.NoError(t, err)
 		require.ErrorIs(t, booksRawTx(t, w, func(ctx context.Context, _ pgx.Tx, _ *gen.Queries) error {
 			return books.Open(ctx, database.DataPool(), mid, "EUR")
@@ -833,7 +833,8 @@ products:
 		fundBooks(t, w, second, "USD", 1000)
 		a, b := first.UUID(), second.UUID()
 		notify := func(ctx context.Context, q *gen.Queries, customer uuid.UUID) error {
-			return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{ID: uuid.New(), MerchantID: mid, CustomerID: customer, EventType: "invoice_due"})
+			_, err := billingfact.Record(ctx, q, billingfact.Fact{ID: uuid.New(), MerchantID: mid, CustomerID: customer, EventType: "invoice_due"})
+			return err
 		}
 		// Every row both commits lock exists, the merchant's stream included.
 		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
@@ -953,7 +954,7 @@ func booksTx(t *testing.T, w *world, fn func(ctx context.Context, q *gen.Queries
 // booksRawTx is booksTx with the transaction, for a statement no query names.
 // It reports rather than fails, so a goroutine may run it.
 func booksRawTx(t *testing.T, w *world, fn func(ctx context.Context, tx pgx.Tx, q *gen.Queries) error) error {
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	if err != nil {
 		return err
 	}
@@ -978,7 +979,7 @@ func booksAwait(step <-chan struct{}, what string) error {
 // a currency becomes sellable do.
 func booksOpen(t *testing.T, w *world, merchant uuid.UUID, currency string) {
 	t.Helper()
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	require.NoError(t, books.Open(t.Context(), database.DataPool(), merchant, currency))
 }

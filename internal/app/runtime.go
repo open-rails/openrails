@@ -541,14 +541,10 @@ func (r *Runtime) StartWorkers(ctx context.Context, fleet *river.Client[pgx.Tx])
 		return nil, err
 	}
 	loopCtx, stopLoops := context.WithCancel(ctx)
-	var pollerDone, dispatchDone chan struct{}
+	var pollerDone chan struct{}
 	if r.SolanaPayPoller != nil {
 		pollerDone = make(chan struct{})
 		go func() { defer close(pollerDone); r.SolanaPayPoller.Start(loopCtx) }()
-	}
-	if r.Messages != nil {
-		dispatchDone = make(chan struct{})
-		go func() { defer close(dispatchDone); r.Messages.Run(loopCtx) }()
 	}
 	var wakeDone chan struct{}
 	if r.Disputes != nil {
@@ -562,7 +558,7 @@ func (r *Runtime) StartWorkers(ctx context.Context, fleet *river.Client[pgx.Tx])
 	}
 	joinLoops := func() {
 		stopLoops()
-		for _, done := range []chan struct{}{pollerDone, dispatchDone, wakeDone, riskDone} {
+		for _, done := range []chan struct{}{pollerDone, wakeDone, riskDone} {
 			if done != nil {
 				<-done
 			}

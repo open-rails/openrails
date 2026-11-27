@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
+	"github.com/open-rails/openrails/internal/billingfact"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -852,8 +853,9 @@ func queueUsageReceipt(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 	if err != nil {
 		return err
 	}
-	return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
+	_, err = billingfact.Record(ctx, q, billingfact.Fact{
 		ID:         uuidutil.DerivedV7(uuidutil.TimeOf(payment), uuidutil.DeterministicNamespace, uuidutil.Name(string(models.NotificationUsageCharged), merchantID.String(), payment.String())),
 		MerchantID: merchantID, CustomerID: invoice.CustomerID, EventType: string(models.NotificationUsageCharged), Data: raw, CreatedAt: now,
 	})
+	return err
 }

@@ -5,7 +5,6 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"os"
 	"regexp"
@@ -22,7 +21,6 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/failpoint"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -727,7 +725,7 @@ func TestDirectoryAuthority(t *testing.T) {
 // raiseRecommendation opens a finding of alpha's that recommends rec.
 func raiseRecommendation(t *testing.T, a *authorityWorld, subject string, rec recommend.Recommendation) billing.FindingID {
 	t.Helper()
-	database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+	database, err := producerDB(a.pool, a.schema)
 	require.NoError(t, err)
 	var finding reconcile.FindingRecord
 	require.NoError(t, database.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
@@ -743,7 +741,7 @@ func raiseRecommendation(t *testing.T, a *authorityWorld, subject string, rec re
 // its kind before anything runs.
 func raiseProposal(t *testing.T, a *authorityWorld, kind billing.ChangeKind) billing.FindingID {
 	t.Helper()
-	database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+	database, err := producerDB(a.pool, a.schema)
 	require.NoError(t, err)
 	var finding reconcile.FindingRecord
 	require.NoError(t, database.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {

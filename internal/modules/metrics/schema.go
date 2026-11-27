@@ -191,15 +191,6 @@ func Schema() SchemaDoc {
 			},
 		},
 		{
-			Intent: "NMI's own approvals and declines by month and kind, per PSP, over its history",
-			Query: Query{
-				Measures: []string{"nmi_history_authorizations"},
-				By:       []string{"time", "nmi_kind", "outcome", "psp"},
-				Grain:    "month",
-				Range:    &QueryRange{Last: "25m"},
-			},
-		},
-		{
 			Intent: "MRR movements per month: new, expansion, contraction, churn and reactivation; the total is net new MRR",
 			Query: Query{
 				Measures: []string{"mrr_movements"},

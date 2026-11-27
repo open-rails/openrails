@@ -12,65 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const createNotification = `-- name: CreateNotification :execrows
-INSERT INTO billing.notification_events (id,merchant_id,customer_id,event_type,data,created_at)
-VALUES($1::uuid,$2::uuid,$3::uuid,$4::text,COALESCE($5,'{}'::jsonb),
-COALESCE(NULLIF($6::timestamptz,'0001-01-01 00:00:00+00'::timestamptz),now()))
-`
-
-type CreateNotificationParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	EventType  string
-	Data       []byte
-	CreatedAt  time.Time
-}
-
-// Immutable customer notification facts.
-func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotificationParams) (int64, error) {
-	result, err := q.db.Exec(ctx, createNotification,
-		arg.ID,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.EventType,
-		arg.Data,
-		arg.CreatedAt,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const createNotificationIfAbsent = `-- name: CreateNotificationIfAbsent :exec
-INSERT INTO billing.notification_events (id,merchant_id,customer_id,event_type,data,created_at)
-VALUES($1::uuid,$2::uuid,$3::uuid,$4::text,COALESCE($5,'{}'::jsonb),
-COALESCE(NULLIF($6::timestamptz,'0001-01-01 00:00:00+00'::timestamptz),now()))
-ON CONFLICT(merchant_id,id) DO NOTHING
-`
-
-type CreateNotificationIfAbsentParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	EventType  string
-	Data       []byte
-	CreatedAt  time.Time
-}
-
-func (q *Queries) CreateNotificationIfAbsent(ctx context.Context, arg CreateNotificationIfAbsentParams) error {
-	_, err := q.db.Exec(ctx, createNotificationIfAbsent,
-		arg.ID,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.EventType,
-		arg.Data,
-		arg.CreatedAt,
-	)
-	return err
-}
-
 const lockNotificationOrdering = `-- name: LockNotificationOrdering :exec
 SELECT pg_advisory_xact_lock(hashtextextended('openrails.notification_ordering:' || $1::uuid::text, 0))
 `
@@ -96,6 +37,57 @@ func (q *Queries) PremiumEndedNotificationExistsSince(ctx context.Context, arg P
 	var found bool
 	err := row.Scan(&found)
 	return found, err
+}
+
+const recordNotification = `-- name: RecordNotification :one
+WITH fact AS (
+    INSERT INTO billing.notification_events (id,merchant_id,customer_id,event_type,data,created_at)
+    VALUES($1::uuid,$2::uuid,$3::uuid,$4::text,COALESCE($5::jsonb,'{}'::jsonb),
+    COALESCE(NULLIF($6::timestamptz,'0001-01-01 00:00:00+00'::timestamptz),now()))
+    ON CONFLICT(merchant_id,id) DO NOTHING
+    RETURNING merchant_id, id, customer_id, event_type, created_at
+), message AS (
+    INSERT INTO billing.customer_messages (merchant_id, customer_id, event_id, event_type, channel, status, attempts)
+    SELECT f.merchant_id, f.customer_id, f.id, f.event_type, 'email', 'queued', 0
+    FROM fact f
+    WHERE NOT billing.billing_restore_active(f.merchant_id)
+    ON CONFLICT (merchant_id, event_id, channel) DO NOTHING
+    RETURNING id
+)
+SELECT f.created_at, m.id AS message_id
+FROM fact f LEFT JOIN message m ON true
+`
+
+type RecordNotificationParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	EventType  string
+	Data       []byte
+	CreatedAt  time.Time
+}
+
+type RecordNotificationRow struct {
+	CreatedAt time.Time
+	MessageID *uuid.UUID
+}
+
+// A customer billing fact, once by its id, with its email message queued: none
+// in a billing restore, or when the fact's message was logged before. No row
+// when the fact was recorded before. Only billingfact.Record runs it, queueing
+// the message's send job in the same transaction.
+func (q *Queries) RecordNotification(ctx context.Context, arg RecordNotificationParams) (RecordNotificationRow, error) {
+	row := q.db.QueryRow(ctx, recordNotification,
+		arg.ID,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.EventType,
+		arg.Data,
+		arg.CreatedAt,
+	)
+	var i RecordNotificationRow
+	err := row.Scan(&i.CreatedAt, &i.MessageID)
+	return i, err
 }
 
 const shareNotificationOrdering = `-- name: ShareNotificationOrdering :exec

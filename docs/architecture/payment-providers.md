@@ -162,8 +162,8 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   A period lapsing without evidence makes a subscription `unverified`, access
   kept; `trg_subscriptions_track_unverified` queues it in
   `subscription_verifications`, and the `Verifier` reads queued ids, 50 per
-  request. `openrails.charge_attributions`, `openrails.nmi_history` and
-  `openrails provider-refresh` (from `psp_refresh_watermarks`) read the rest;
+  request. `openrails.charge_attributions` and `openrails provider-refresh`
+  (from `psp_refresh_watermarks`) read the rest;
   `life.webhooks.silent` fires when webhooks stop but pulls find charges.
 - **Proposals**: only `proposals.Executor` applies a `pull.*` finding's `change`,
   one approval run per approve call, reversed by `openrails undo-run`.
@@ -189,7 +189,7 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   at NMI and Stripe carry the book id (`internal/booktag`).
 
 Other tables: `provider_bills`, `provider_charge_attributions`, `provider_listed_rebills`, `webhook_health`,
-`webhook_health_daily`, `nmi_history_months`, `nmi_bulk_checkpoints`,
+`webhook_health_daily`, `nmi_bulk_checkpoints`,
 `solana_subscriptions`, `solana_pay_references`, `solana_pay_receipts`.
 
 ## Interfaces

@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/billingfact"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -308,10 +309,11 @@ func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.Custom
 		if err != nil {
 			return err
 		}
-		return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
+		_, err = billingfact.Record(ctx, q, billingfact.Fact{
 			ID:         uuidutil.DerivedV7(uuidutil.TimeOf(m.ID), uuidutil.DeterministicNamespace, uuidutil.Name(string(models.NotificationAgreementRevoked), mid.String(), m.ID.String())),
 			MerchantID: mid.UUID(), CustomerID: customer.UUID(), EventType: string(models.NotificationAgreementRevoked), Data: raw, CreatedAt: now,
 		})
+		return err
 	})
 	if err != nil || billed == nil {
 		return nil, err

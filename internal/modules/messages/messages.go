@@ -1,8 +1,8 @@
 // Package messages sends customers their billing messages. Each billing fact
-// (a notification event) queues one message per channel in the transaction
-// that records it; a dispatcher queues each message's send job, and the job
-// decides whether the message goes out, renders it and hands it to the
-// deployment's email sender. The log keeps no body.
+// (a notification event) queues one message and its send job in the
+// transaction that records it (billingfact.Record); the job decides whether
+// the message goes out, renders it and hands it to the deployment's email
+// sender. The log keeps no body.
 package messages
 
 import (
@@ -143,7 +143,7 @@ func Enabled(s billing.MessageSettings, eventType string, data billing.Notificat
 	return byDefault(eventType, data)
 }
 
-// Service dispatches and sends customer messages.
+// Service sends customer messages.
 type Service struct {
 	DB *db.DB
 	// Email is the deployment's sender; nil sends nothing.
