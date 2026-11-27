@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 872,
+  "scenario_count": 874,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3734,6 +3734,11 @@
       "name": "A credit lot whose payment brought no cash defers nothing, raises books.credit.unapplied and commits"
     },
     {
+      "id": "OR-J40-S42",
+      "journey": "J40",
+      "name": "Staff partial and full refunds of revoked or spent purchased credit return 409 resource_conflict and move nothing"
+    },
+    {
       "id": "OR-J04-S80",
       "journey": "J04",
       "name": "Two billing passes started together: one runs its scans and the other exits without a report; the running pass holds a lease row, not a database session"
@@ -3962,6 +3967,11 @@
       "id": "OR-J26-S64",
       "journey": "J26",
       "name": "Running charges bill on the merchant's usage_billing terms with no host setting and no event store: PostgreSQL alone bills them"
+    },
+    {
+      "id": "OR-J26-S65",
+      "journey": "J26",
+      "name": "A customer's admin balance and own summary show the billing mode the gate admits it under: prepaid without a card, arrears with one under the merchant's usage terms"
     },
     {
       "id": "OR-J24-S66",

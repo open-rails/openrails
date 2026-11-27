@@ -246,7 +246,7 @@ balance_notices:
       amount: "0"
 # Accounting is how the merchant's books are dated; a patch replaces it whole.
 accounting:
-  # Timezone is the IANA zone (Europe/Berlin) whose days and months the metrics, MRR reports and usage history group in, and at whose month ends usage posts; empty is UTC.
+  # Timezone is the IANA zone (Europe/Berlin) whose days and months the metrics, MRR reports and usage history group in, and where usage posts at the end of each day; empty is UTC.
   timezone: ""
 # CardVault is where new cards are saved: a card PSP's key, whose own vault (or the custodian it names) holds them, or CardVaultPlatform.
 card_vault: ""

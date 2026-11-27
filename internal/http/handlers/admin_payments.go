@@ -224,7 +224,7 @@ type adminRefundPrepared struct {
 func refundAmountCents(currency string, amountNative int64) (moneyutil.Cents, error) {
 	cents, err := moneyutil.NativeToRailMinorExact(currency, amountNative)
 	if err != nil {
-		return 0, fmt.Errorf("refund amount must be a whole number of cents: %w", err)
+		return 0, fmt.Errorf("refund amount must be a whole number of minor units: %w", err)
 	}
 	return cents, nil
 }
@@ -287,6 +287,9 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 	reservationMetadata := adminRefundMetadata(idempotencyKey, req, "pending", "")
 	reservation, err := paymentService.ReserveRefund(ctx, paymentID, adminRefundReservationTransactionID(paymentID, idempotencyKey), req.Amount, adminRefundReason(req), reservationMetadata)
 	if err != nil {
+		if refusal := refusalOf(err); refusal != nil && refusal.HTTPStatus < http.StatusInternalServerError {
+			return nil, refusal
+		}
 		return nil, fmt.Errorf("reserve refund: %w", err)
 	}
 	if payment.PspID == nil {

@@ -36,7 +36,7 @@ func (s *Service) GetBalance(ctx context.Context, customer identity.CustomerID, 
 		if err != nil {
 			return err
 		}
-		settings, err := s.moneyService().GetAccountSettings(ctx, customer, currency)
+		billingMode, err := s.moneyService().GetAdmissionBillingMode(ctx, customer, currency)
 		if err != nil {
 			return err
 		}
@@ -44,7 +44,7 @@ func (s *Service) GetBalance(ctx context.Context, customer identity.CustomerID, 
 		if err != nil {
 			return err
 		}
-		out, err = s.moneyService().PublicBalance(ctx, bal, billing.BillingMode(settings.BillingMode), owed)
+		out, err = s.moneyService().PublicBalance(ctx, bal, billing.BillingMode(billingMode), owed)
 		return err
 	})
 	if err != nil {
