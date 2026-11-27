@@ -454,6 +454,7 @@ DECLARE
     v_currency text;
     v_product uuid;
     v_price_id uuid;
+    v_contributes boolean;
 BEGIN
     SELECT * INTO v_price FROM billing.prices WHERE merchant_id = s.merchant_id AND id = s.price_id;
     IF NOT FOUND THEN
@@ -486,6 +487,7 @@ BEGIN
     v_currency := v_price.currency;
     v_product := s.product_id;
     v_price_id := s.price_id;
+    v_contributes := v_live;
     -- An end that has come is history: until the subscription adds MRR again
     -- its row keeps what it added and when that ended, which a settlement
     -- dated before the end writes again.
@@ -495,18 +497,19 @@ BEGIN
         v_price_id := v_prev.price_id;
         v_level := v_prev.mrr;
         v_ends := v_prev.ends_at;
+        v_contributes := v_prev.contributes;
     END IF;
     IF v_prev.subscription_id IS NULL THEN
         INSERT INTO billing.subscription_mrr (merchant_id, subscription_id, customer_id, currency, product_id, price_id, mrr, contributes,
             ends_at, changed_at, cause, recorded_currency, recorded_product_id, recorded_price_id, recorded_mrr, recorded_ends_at,
             risk, recorded_risk, risk_changed_at)
-        VALUES (s.merchant_id, s.id, s.customer_id, v_currency, v_product, v_price_id, v_level, v_live,
+        VALUES (s.merchant_id, s.id, s.customer_id, v_currency, v_product, v_price_id, v_level, v_contributes,
             v_ends, p_at, p_cause, v_currency, v_product, v_price_id, 0, NULL,
             v_risk, '{}', CASE WHEN v_risk <> '{}' THEN p_at END);
     ELSIF ROW(v_prev.currency, v_prev.product_id, v_prev.price_id, v_prev.mrr, v_prev.contributes, v_prev.ends_at, v_prev.risk)
-          IS DISTINCT FROM ROW(v_currency, v_product, v_price_id, v_level, v_live, v_ends, v_risk) THEN
+          IS DISTINCT FROM ROW(v_currency, v_product, v_price_id, v_level, v_contributes, v_ends, v_risk) THEN
         UPDATE billing.subscription_mrr
-           SET currency = v_currency, product_id = v_product, price_id = v_price_id, mrr = v_level, contributes = v_live,
+           SET currency = v_currency, product_id = v_product, price_id = v_price_id, mrr = v_level, contributes = v_contributes,
                ends_at = v_ends, risk = v_risk,
                risk_changed_at = CASE WHEN v_prev.risk <> v_risk THEN greatest(p_at, v_prev.risk_changed_at) ELSE v_prev.risk_changed_at END,
                -- A change of what MRR counts, or of when it ends, is dated and

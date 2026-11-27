@@ -13,7 +13,7 @@ migration 0009_usage_receipt_per_posting.up.sql sha256:d384be58251eea8f5c1270889
 migration 0010_amount_low_balance.up.sql sha256:a3c81f7e13cf137c8381c00c235485c03041fa2e0f8ae781f827f52e55a94b55
 migration 0011_customer_destructive_reservations.up.sql sha256:0636ae0008ee371fcb4f6fb70538caa58f5a11d77fc47af876266c6c2e576437
 migration 0012_merchant_invoices_open.up.sql sha256:7dbab0824ef2a266111eb89b0e7875743548d4b4effa1b1cb3845a35a658cca1
-migration 0013_mrr_from_facts.up.sql sha256:d216cc4d01bc800bdf1974660c694512f985fbb3211cd91eff06dd806a16e7b4
+migration 0013_mrr_from_facts.up.sql sha256:b2ffa04bddd9972d347bfc0ceb7ce97fd2ef98e5504d9d7f56e429be9b20dda9
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -5294,6 +5294,7 @@ function billing.refresh_subscription_mrr(billing.subscriptions,timestamp with t
       v_currency text;
       v_product uuid;
       v_price_id uuid;
+      v_contributes boolean;
   BEGIN
       SELECT * INTO v_price FROM billing.prices WHERE merchant_id = s.merchant_id AND id = s.price_id;
       IF NOT FOUND THEN
@@ -5326,6 +5327,7 @@ function billing.refresh_subscription_mrr(billing.subscriptions,timestamp with t
       v_currency := v_price.currency;
       v_product := s.product_id;
       v_price_id := s.price_id;
+      v_contributes := v_live;
       -- An end that has come is history: until the subscription adds MRR again
       -- its row keeps what it added and when that ended, which a settlement
       -- dated before the end writes again.
@@ -5335,18 +5337,19 @@ function billing.refresh_subscription_mrr(billing.subscriptions,timestamp with t
           v_price_id := v_prev.price_id;
           v_level := v_prev.mrr;
           v_ends := v_prev.ends_at;
+          v_contributes := v_prev.contributes;
       END IF;
       IF v_prev.subscription_id IS NULL THEN
           INSERT INTO billing.subscription_mrr (merchant_id, subscription_id, customer_id, currency, product_id, price_id, mrr, contributes,
               ends_at, changed_at, cause, recorded_currency, recorded_product_id, recorded_price_id, recorded_mrr, recorded_ends_at,
               risk, recorded_risk, risk_changed_at)
-          VALUES (s.merchant_id, s.id, s.customer_id, v_currency, v_product, v_price_id, v_level, v_live,
+          VALUES (s.merchant_id, s.id, s.customer_id, v_currency, v_product, v_price_id, v_level, v_contributes,
               v_ends, p_at, p_cause, v_currency, v_product, v_price_id, 0, NULL,
               v_risk, '{}', CASE WHEN v_risk <> '{}' THEN p_at END);
       ELSIF ROW(v_prev.currency, v_prev.product_id, v_prev.price_id, v_prev.mrr, v_prev.contributes, v_prev.ends_at, v_prev.risk)
-            IS DISTINCT FROM ROW(v_currency, v_product, v_price_id, v_level, v_live, v_ends, v_risk) THEN
+            IS DISTINCT FROM ROW(v_currency, v_product, v_price_id, v_level, v_contributes, v_ends, v_risk) THEN
           UPDATE billing.subscription_mrr
-             SET currency = v_currency, product_id = v_product, price_id = v_price_id, mrr = v_level, contributes = v_live,
+             SET currency = v_currency, product_id = v_product, price_id = v_price_id, mrr = v_level, contributes = v_contributes,
                  ends_at = v_ends, risk = v_risk,
                  risk_changed_at = CASE WHEN v_prev.risk <> v_risk THEN greatest(p_at, v_prev.risk_changed_at) ELSE v_prev.risk_changed_at END,
                  -- A change of what MRR counts, or of when it ends, is dated and
