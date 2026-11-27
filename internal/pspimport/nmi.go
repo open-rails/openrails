@@ -134,7 +134,7 @@ func (s *nmiSource) subscription(sub nmi.V5Subscription, row nmi.RecurringReport
 	f.add(FactEmail, row.Email)
 	f.add(FactName, fullName(row.FirstName, row.LastName))
 	// NMI names no currency: the subscription's price denominates its amount.
-	data := subscriptionData{Decimal: sub.DeclaredAmount(), StartedAt: nmiTime(sub.StartDate), Paused: nmiFlag(sub.PausedSubscription)}
+	data := subscriptionData{Decimal: sub.DeclaredAmount(), StartedAt: nmiTime(sub.StartDate)}
 	if data.Decimal == "" {
 		return staged{}, fmt.Errorf("nmi subscription %s states no amount", ref)
 	}
@@ -151,6 +151,11 @@ func (s *nmiSource) subscription(sub nmi.V5Subscription, row nmi.RecurringReport
 	f.add(FactPlan, data.Plan)
 	if next := nmiTime(sub.NextBillingDate); !next.IsZero() {
 		data.NextBillingAt = &next
+	}
+	// A paused schedule bills nothing: its paid time ends at its next
+	// billing date. NMI states no pause date.
+	if nmiFlag(sub.PausedSubscription) {
+		data.Ended, data.EndedAt, data.EndKind = true, data.NextBillingAt, string(reconcile.DeclaredCancelUser)
 	}
 	data.Evidence, _ = json.Marshal(map[string]any{"source": "nmi_psp_import", "subscription": sub, "recurring": row})
 	remote, err := reconcile.NMIRemoteSubscription(sub, now)

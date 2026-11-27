@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 902,
+  "scenario_count": 905,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1757,6 +1757,21 @@
       "id": "OR-J38-S13",
       "journey": "J38",
       "name": "A provider answer no attempt can read fails the import after five attempts with its error, deletable"
+    },
+    {
+      "id": "OR-J38-S14",
+      "journey": "J38",
+      "name": "A Stripe subscription that ended before the import lands canceled at its ended_at for its cancellation reason, with every invoice it paid"
+    },
+    {
+      "id": "OR-J38-S15",
+      "journey": "J38",
+      "name": "A CCBill member who left lands canceled from its signup to its expiry, voluntary when it canceled, with its rebills, priced by its signup when it never rebilled"
+    },
+    {
+      "id": "OR-J38-S16",
+      "journey": "J38",
+      "name": "An NMI schedule paused long ago lands canceled where its paid time ended, not at the import"
     },
     {
       "id": "OR-J38-S42",

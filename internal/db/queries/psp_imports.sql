@@ -65,6 +65,21 @@ FROM unnest(sqlc.arg(kinds)::text[], sqlc.arg(refs)::text[], sqlc.arg(customer_r
 ON CONFLICT (merchant_id, import_id, kind, ref) DO UPDATE SET customer_ref = EXCLUDED.customer_ref, subscription_ref = EXCLUDED.subscription_ref,
     occurred_at = EXCLUDED.occurred_at, facts = EXCLUDED.facts, data = EXCLUDED.data, updated_at = now();
 
+-- name: MergePSPImportRecords :exec
+-- Facts a provider states across several reads (a CCBill member's signup,
+-- then its end) fill one record: each read's keys replace only their own.
+INSERT INTO billing.psp_import_records AS prior (merchant_id, import_id, kind, ref, customer_ref, subscription_ref, occurred_at, facts, data, state)
+SELECT sqlc.arg(merchant_id)::uuid, sqlc.arg(import_id)::uuid, r.kind, r.ref, NULLIF(r.customer_ref, ''), NULLIF(r.subscription_ref, ''),
+    NULLIF(r.occurred_at, '0001-01-01 00:00:00+00'::timestamptz), r.facts, r.data, 'unmatched'
+FROM unnest(sqlc.arg(kinds)::text[], sqlc.arg(refs)::text[], sqlc.arg(customer_refs)::text[], sqlc.arg(subscription_refs)::text[],
+    sqlc.arg(occurred_ats)::timestamptz[], sqlc.arg(facts)::jsonb[], sqlc.arg(data)::jsonb[])
+    AS r(kind, ref, customer_ref, subscription_ref, occurred_at, facts, data)
+ON CONFLICT (merchant_id, import_id, kind, ref) DO UPDATE SET
+    customer_ref = COALESCE(EXCLUDED.customer_ref, prior.customer_ref),
+    subscription_ref = COALESCE(EXCLUDED.subscription_ref, prior.subscription_ref),
+    occurred_at = COALESCE(EXCLUDED.occurred_at, prior.occurred_at),
+    facts = prior.facts || EXCLUDED.facts, data = prior.data || EXCLUDED.data, updated_at = now();
+
 -- name: ListPSPImportRecordsByKind :many
 -- One kind's records in id order, for linking and attribution.
 SELECT * FROM billing.psp_import_records

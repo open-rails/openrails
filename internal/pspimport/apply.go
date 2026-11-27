@@ -393,7 +393,7 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 				}
 			}
 		}
-		rebills := rebillsOf(g.records)
+		rebills, served := rebillsOf(g.records), servedThrough(g.records)
 		declared := map[string]*billing.PaymentMethodRef{}
 		priced := map[string]priceTerms{}
 		declareSub := func(r gen.BillingPspImportRecord) (string, string) {
@@ -401,7 +401,7 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 			if _, done := declared[r.Ref]; done {
 				return src, ""
 			}
-			sub, terms, reason, err := l.subscription(customer, r, vaults, rebills[r.Ref])
+			sub, terms, reason, err := l.subscription(customer, r, vaults, rebills[r.Ref], served[r.Ref])
 			if err != nil {
 				return src, err.Error()
 			}
@@ -598,12 +598,13 @@ func (l *lander) declarePSPCustomer(d *declaration, customer billing.CustomerID,
 }
 
 // subscription declares one staged subscription; reason says why it cannot.
-func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImportRecord, vaults map[string]customerData, rebill rebills) (billing.DeclaredSubscription, priceTerms, string, error) {
+// served is when its latest paid service ended, as its receipts show.
+func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImportRecord, vaults map[string]customerData, rebill rebills, served time.Time) (billing.DeclaredSubscription, priceTerms, string, error) {
 	var data subscriptionData
 	if err := json.Unmarshal(r.Data, &data); err != nil {
 		return billing.DeclaredSubscription{}, priceTerms{}, "", err
 	}
-	price, reason := l.priceOf(r, data.Plan, rebill, rebill.cadence(data.NextBillingAt))
+	price, reason := l.priceOf(r, data.Plan, data.Stated, rebill, rebill.cadence(data.NextBillingAt))
 	switch {
 	case reason != "":
 		return billing.DeclaredSubscription{}, price, reason, nil
@@ -637,22 +638,75 @@ func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImpor
 	scheduled := l.scope.Rail == "nmi" || l.scope.Rail == "ccbill"
 	switch {
 	case data.Ended:
-		at := l.asOf
-		if data.EndedAt != nil {
-			at = *data.EndedAt
-		}
-		sub.Cancel = billing.CancelEvidence{Kind: "provider_terminated", At: at}
-		if data.UserCanceled {
-			sub.Cancel.Kind = "user_canceled"
-		}
-	case data.Paused:
-		// A paused schedule bills nothing: access runs to its paid date.
-		sub.Cancel = billing.CancelEvidence{Kind: "user_canceled", At: l.asOf}
+		// History: it ends where its paid service did, and nothing is
+		// canceled at the provider.
+		end := data.ended(served)
+		sub.PaidThrough, sub.Cancel = &end, data.endEvidence(end, l.asOf)
 	case scheduled && data.NextBillingAt != nil && (data.IntervalHours > 0) != (data.IntervalMonths > 0):
 		sub.AcceptedSchedule = &billing.DeclaredProviderSchedule{SourceReference: l.scope.Rail + "_subscription:" + r.Ref, Amount: data.Amount, Currency: catalog.Currency(data.Currency),
 			IntervalHours: data.IntervalHours, IntervalMonths: data.IntervalMonths, FirstDueAt: *data.NextBillingAt}
 	}
 	return sub, price, "", nil
+}
+
+// ended is when an ended subscription's paid service ended: as the provider
+// states it, else its latest paid service's end, else its start (it never
+// paid).
+func (d subscriptionData) ended(served time.Time) time.Time {
+	switch {
+	case d.EndedAt != nil:
+		return *d.EndedAt
+	case !served.IsZero():
+		return served
+	}
+	return d.StartedAt
+}
+
+// endEvidence is the end's kind and when the cancel was made: as the
+// provider states it, else no later than the end or the read.
+func (d subscriptionData) endEvidence(end, read time.Time) billing.CancelEvidence {
+	kind := d.EndKind
+	if kind == "" {
+		kind = string(reconcile.DeclaredCancelProviderTerminated)
+		if d.CanceledAt != nil {
+			kind = string(reconcile.DeclaredCancelUser)
+		}
+	}
+	at := end
+	if read.Before(at) {
+		at = read
+	}
+	if d.CanceledAt != nil && d.CanceledAt.Before(at) {
+		at = *d.CanceledAt
+	}
+	return billing.CancelEvidence{Kind: kind, At: at}
+}
+
+// servedThrough is when each subscription's latest paid service ended, by
+// subscription ref: a Stripe invoice's latest line period, else the charge.
+func servedThrough(records []gen.BillingPspImportRecord) map[string]time.Time {
+	out := map[string]time.Time{}
+	for _, r := range records {
+		if r.Kind != string(billing.PSPImportTransaction) || r.SubscriptionRef == nil {
+			continue
+		}
+		var data transactionData
+		if json.Unmarshal(r.Data, &data) != nil || !data.Success || data.Type != "sale" && data.Type != "" {
+			continue
+		}
+		end := data.OccurredAt
+		if inv := data.StripeInvoice; inv != nil {
+			for _, line := range inv.Lines {
+				if line.PeriodEnd.After(end) {
+					end = line.PeriodEnd
+				}
+			}
+		}
+		if end.After(out[*r.SubscriptionRef]) {
+			out[*r.SubscriptionRef] = end
+		}
+	}
+	return out
 }
 
 func (c cardData) details() *billing.CardDetails {
@@ -776,8 +830,8 @@ func (t priceTerms) agrees(cadence time.Duration) bool {
 // subscription lands on the price picked for it by hand, else on the one
 // recurring provider price of the PSP its latest rebill equals, read in that
 // price's currency, whose interval agrees with the cadence it rebills at
-// when that is known.
-func (l *lander) priceOf(r gen.BillingPspImportRecord, plan string, rebill rebills, cadence time.Duration) (priceTerms, string) {
+// when that is known; one that never rebilled, on the terms it signed up for.
+func (l *lander) priceOf(r gen.BillingPspImportRecord, plan string, stated *statedTerms, rebill rebills, cadence time.Duration) (priceTerms, string) {
 	if planned[l.scope.Rail] {
 		if plan == "" {
 			return priceTerms{}, "the provider names no plan for it"
@@ -793,6 +847,10 @@ func (l *lander) priceOf(r gen.BillingPspImportRecord, plan string, rebill rebil
 			return price, ""
 		}
 		return priceTerms{}, "its picked price is no longer a live recurring provider price of this PSP: " + pick
+	}
+	terms := "its latest rebill"
+	if rebill.decimal == "" && stated != nil && stated.Decimal != "" {
+		terms, rebill.decimal, cadence = "its signup's recurring amount", stated.Decimal, time.Duration(stated.IntervalHours)*time.Hour
 	}
 	if rebill.decimal == "" {
 		return priceTerms{}, "it has no rebill: 0 match among this PSP's recurring provider prices; " + pick
@@ -812,7 +870,7 @@ func (l *lander) priceOf(r gen.BillingPspImportRecord, plan string, rebill rebil
 		if cadence > 0 {
 			every = fmt.Sprintf(" every %d days", int(cadence/(24*time.Hour)))
 		}
-		return priceTerms{}, fmt.Sprintf("its latest rebill %s%s: %d match among this PSP's recurring provider prices; %s", rebill.decimal, every, len(match), pick)
+		return priceTerms{}, fmt.Sprintf("%s %s%s: %d match among this PSP's recurring provider prices; %s", terms, rebill.decimal, every, len(match), pick)
 	}
 	return match[0], ""
 }
