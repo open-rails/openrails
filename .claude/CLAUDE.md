@@ -224,12 +224,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   `waive_order` destructive kind, idempotency and derived-id namespaces, ledger and books
   sources (`order`, `order_line`). Never rename them.
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
-- Usage events live in ClickHouse (`Deps.ClickHouse`, `internal/eventstore`, its own embedded
-  migrations); money stays in PostgreSQL. Usage posts to the ledger daily, once its day ends in
-  `accounting.timezone`, and before any other movement of the balance, as the period's total
-  price less earlier postings (`usage_postings`); money reads use `FINAL`. Whether
-  `Deps.ClickHouse` is set decides usage: without it the event-backed routes
-  (`Route.EventStore`), catalog declarations and settings answer 409 `event_store_required`.
+- Usage events live in ClickHouse (`Deps.ClickHouse`, `internal/eventstore`, its own embedded migrations): raw events for 90 days, the 15-minute history and limit counters. Money stays in PostgreSQL: intake prices each item once into `usage_totals`, which is the balance's pending; a posting (daily once its day ends in `accounting.timezone`, and before any other movement of the balance) books the period's total price less what its earlier receipts took, as ledger transfers and one immutable `usage_receipts` row. No posting reads ClickHouse. Whether `Deps.ClickHouse` is set decides usage: without it the event-backed routes (`Route.EventStore`), catalog declarations and settings answer 409 `event_store_required`.
 - User-facing records soft-delete: `deleted_at`, and reads filter `deleted_at IS NULL`.
   Hard deletes only for privacy erasure and derived or short-lived rows.
 - Abuse state (rate limits, lockouts, captcha, card-testing counts, replay ids) and
