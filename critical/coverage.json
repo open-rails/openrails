@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 895,
+  "scenario_count": 896,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -4477,6 +4477,11 @@
       "id": "OR-J08-S74",
       "journey": "J08",
       "name": "A purchase that expired unpaid leaves the customer's own invoice list, before and after the pass writes it; read by its id it answers, and the merchant's list keeps it"
+    },
+    {
+      "id": "OR-J08-S75",
+      "journey": "J08",
+      "name": "An upgrade over invoices an earlier build wrote clears the expiry of every merchant invoice (open, with a pay URL, or an imported purchase) and keeps a customer purchase's and the pay URL's own"
     }
   ]
 }

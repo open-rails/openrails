@@ -2902,6 +2902,9 @@
     ],
     "OR-J08-S74": [
       "TestMerchantInvoicesStayOpen/OR-J08-S74/the-customer-list-omits-an-expired-purchase-the-merchant-list-keeps-it"
+    ],
+    "OR-J08-S75": [
+      "TestInvoiceExpiryMigration/OR-J08-S75/an-upgrade-clears-every-merchant-invoices-expiry-and-keeps-a-purchases"
     ]
   }
 }
