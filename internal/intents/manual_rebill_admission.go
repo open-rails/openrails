@@ -38,7 +38,7 @@ var (
 )
 
 // EnqueueCustomer shares the scheduled admission lock and ownership. The HTTP
-// command supplies customer only after verifying a customer-scoped customer action.
+// command supplies customerID only after verifying the customer's own action.
 func (h *ManualRebillHandler) EnqueueCustomer(ctx context.Context, subscriptionID, customerID uuid.UUID, clientKey string, method *uuid.UUID) (gen.BillingProviderIntent, bool, error) {
 	if customerID == uuid.Nil || strings.TrimSpace(clientKey) == "" || len(clientKey) > 255 {
 		return gen.BillingProviderIntent{}, false, errors.New("customer and a 1-255 byte idempotency key required")
