@@ -12,70 +12,61 @@ import (
 	"github.com/google/uuid"
 )
 
-const addUsagePendingAmounts = `-- name: AddUsagePendingAmounts :exec
-INSERT INTO billing.usage_pending_amounts AS p (merchant_id, customer_id, currency, lease_id, amount, updated_at)
-SELECT $1::uuid, m.customer_id, $2::text, $3::uuid, m.amount, $4::timestamptz
-FROM unnest($5::uuid[], $6::bigint[]) AS m(customer_id, amount)
-WHERE m.amount > 0
-ORDER BY m.customer_id
-ON CONFLICT (merchant_id, customer_id, currency, lease_id) DO UPDATE SET
-    amount = p.amount + EXCLUDED.amount, updated_at = EXCLUDED.updated_at
+const addUsageTotals = `-- name: AddUsageTotals :exec
+INSERT INTO billing.usage_totals AS t (merchant_id, customer_id, currency, period_starts_at, period_ends_at, meter_key, cell, print, lapse_at, lease_id,
+    quantity, stated, requests, amount, updated_at)
+SELECT $1::uuid, m.customer_id, m.currency, m.period_starts_at, m.period_ends_at, m.meter_key, m.cell, m.print, m.lapse_at,
+       $2::uuid, m.quantity, m.stated, m.requests, m.amount, $3::timestamptz
+FROM unnest($4::uuid[], $5::text[], $6::timestamptz[], $7::timestamptz[],
+    $8::text[], $9::text[], $10::text[], $11::timestamptz[], $12::bigint[],
+    $13::bigint[], $14::bigint[], $15::bigint[])
+    AS m(customer_id, currency, period_starts_at, period_ends_at, meter_key, cell, print, lapse_at, quantity, stated, requests, amount)
+ORDER BY m.customer_id, m.currency, m.period_starts_at, m.meter_key, m.cell, m.print, m.lapse_at
+ON CONFLICT (merchant_id, customer_id, currency, period_starts_at, meter_key, cell, print, lapse_at, lease_id) DO UPDATE SET
+    quantity = t.quantity + EXCLUDED.quantity, stated = t.stated + EXCLUDED.stated, requests = t.requests + EXCLUDED.requests,
+    amount = t.amount + EXCLUDED.amount, updated_at = EXCLUDED.updated_at
 `
 
-type AddUsagePendingAmountsParams struct {
-	MerchantID  uuid.UUID
-	Currency    string
-	LeaseID     uuid.UUID
-	Now         time.Time
-	CustomerIds []uuid.UUID
-	Amounts     []int64
+type AddUsageTotalsParams struct {
+	MerchantID      uuid.UUID
+	LeaseID         uuid.UUID
+	Now             time.Time
+	CustomerIds     []uuid.UUID
+	Currencies      []string
+	PeriodStartsAts []time.Time
+	PeriodEndsAts   []time.Time
+	MeterKeys       []string
+	Cells           []string
+	Prints          []string
+	LapseAts        []time.Time
+	Quantities      []int64
+	Stateds         []int64
+	Requests        []int64
+	Amounts         []int64
 }
 
-// Intake adds what one lease's usage costs at its provisional prices, per
-// customer, in customer order. Only that lease's syncs write its rows.
-func (q *Queries) AddUsagePendingAmounts(ctx context.Context, arg AddUsagePendingAmountsParams) error {
-	_, err := q.db.Exec(ctx, addUsagePendingAmounts,
+// Intake adds what one lease settled, per customer, currency, pricing period,
+// meter cell, card print and lapse segment, in key order. Only that lease's
+// syncs write its rows; the caller sums each key once.
+func (q *Queries) AddUsageTotals(ctx context.Context, arg AddUsageTotalsParams) error {
+	_, err := q.db.Exec(ctx, addUsageTotals,
 		arg.MerchantID,
-		arg.Currency,
 		arg.LeaseID,
 		arg.Now,
 		arg.CustomerIds,
+		arg.Currencies,
+		arg.PeriodStartsAts,
+		arg.PeriodEndsAts,
+		arg.MeterKeys,
+		arg.Cells,
+		arg.Prints,
+		arg.LapseAts,
+		arg.Quantities,
+		arg.Stateds,
+		arg.Requests,
 		arg.Amounts,
 	)
 	return err
-}
-
-const countUsagePendingByMerchant = `-- name: CountUsagePendingByMerchant :many
-SELECT merchant_id, count(*)::bigint AS customers
-FROM billing.usage_pending
-GROUP BY merchant_id
-ORDER BY merchant_id
-`
-
-type CountUsagePendingByMerchantRow struct {
-	MerchantID uuid.UUID
-	Customers  int64
-}
-
-// CROSS-MERCHANT: whose usage only the event store can post.
-func (q *Queries) CountUsagePendingByMerchant(ctx context.Context) ([]CountUsagePendingByMerchantRow, error) {
-	rows, err := q.db.Query(ctx, countUsagePendingByMerchant)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []CountUsagePendingByMerchantRow
-	for rows.Next() {
-		var i CountUsagePendingByMerchantRow
-		if err := rows.Scan(&i.MerchantID, &i.Customers); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const deleteUsagePending = `-- name: DeleteUsagePending :exec
@@ -94,59 +85,50 @@ func (q *Queries) DeleteUsagePending(ctx context.Context, arg DeleteUsagePending
 	return err
 }
 
-const deleteUsagePendingAmounts = `-- name: DeleteUsagePendingAmounts :exec
-DELETE FROM billing.usage_pending_amounts
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND currency = $3::text
+const foldUsageTotals = `-- name: FoldUsageTotals :exec
+WITH taken AS (
+    DELETE FROM billing.usage_totals
+    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND currency = $3::text
+      AND lease_id <> '00000000-0000-0000-0000-000000000000'::uuid
+      AND ($4::timestamptz IS NULL OR lapse_at < $4::timestamptz AND period_starts_at < $4::timestamptz)
+    RETURNING merchant_id, customer_id, currency, period_starts_at, period_ends_at, meter_key, cell, print, quantity, stated, requests
+)
+INSERT INTO billing.usage_totals AS t (merchant_id, customer_id, currency, period_starts_at, period_ends_at, meter_key, cell, print, lapse_at, lease_id,
+    quantity, stated, requests, amount, updated_at)
+SELECT merchant_id, customer_id, currency, period_starts_at, max(period_ends_at), meter_key, cell, print, period_starts_at,
+       '00000000-0000-0000-0000-000000000000'::uuid, sum(quantity)::bigint, sum(stated)::bigint, sum(requests)::bigint, 0, $5::timestamptz
+FROM taken
+GROUP BY merchant_id, customer_id, currency, period_starts_at, meter_key, cell, print
+ORDER BY period_starts_at, meter_key, cell, print
+ON CONFLICT (merchant_id, customer_id, currency, period_starts_at, meter_key, cell, print, lapse_at, lease_id) DO UPDATE SET
+    quantity = t.quantity + EXCLUDED.quantity, stated = t.stated + EXCLUDED.stated, requests = t.requests + EXCLUDED.requests,
+    updated_at = EXCLUDED.updated_at
 `
 
-type DeleteUsagePendingAmountsParams struct {
+type FoldUsageTotalsParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
+	Cut        *time.Time
+	Now        time.Time
 }
 
-// A posting that took all the event store held clears what was pending.
-func (q *Queries) DeleteUsagePendingAmounts(ctx context.Context, arg DeleteUsagePendingAmountsParams) error {
-	_, err := q.db.Exec(ctx, deleteUsagePendingAmounts, arg.MerchantID, arg.CustomerID, arg.Currency)
+// A posting folds the unposted rows it took (all, or those of the lapse
+// segments and periods before a cut) into each period's posted row. The
+// caller holds the customer's queue row, so no intake writes meanwhile.
+func (q *Queries) FoldUsageTotals(ctx context.Context, arg FoldUsageTotalsParams) error {
+	_, err := q.db.Exec(ctx, foldUsageTotals,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.Cut,
+		arg.Now,
+	)
 	return err
 }
 
-const discardUsagePending = `-- name: DiscardUsagePending :many
-DELETE FROM billing.usage_pending
-WHERE merchant_id = $1::uuid
-RETURNING customer_id, currency, since_at
-`
-
-type DiscardUsagePendingRow struct {
-	CustomerID uuid.UUID
-	Currency   string
-	SinceAt    time.Time
-}
-
-// An operator's discard of one merchant's pending usage; its amounts go with
-// it.
-func (q *Queries) DiscardUsagePending(ctx context.Context, merchantID uuid.UUID) ([]DiscardUsagePendingRow, error) {
-	rows, err := q.db.Query(ctx, discardUsagePending, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []DiscardUsagePendingRow
-	for rows.Next() {
-		var i DiscardUsagePendingRow
-		if err := rows.Scan(&i.CustomerID, &i.Currency, &i.SinceAt); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const getUsagePending = `-- name: GetUsagePending :one
-SELECT merchant_id, customer_id, currency, since_at, due_at, updated_at FROM billing.usage_pending
+SELECT merchant_id, customer_id, currency, due_at, updated_at FROM billing.usage_pending
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND currency = $3::text
 `
 
@@ -163,46 +145,10 @@ func (q *Queries) GetUsagePending(ctx context.Context, arg GetUsagePendingParams
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.Currency,
-		&i.SinceAt,
 		&i.DueAt,
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const getUsagePostingTransferAfter = `-- name: GetUsagePostingTransferAfter :one
-SELECT lt.id
-FROM billing.usage_postings p
-JOIN billing.ledger_transfers lt
-  ON lt.merchant_id = p.merchant_id AND lt.customer_id = p.customer_id AND lt.currency = p.currency
- AND lt.operation = 'usage_posting' AND lt.source = 'usage_posting:' || p.id::text
- AND lt.transfer_type IN ('credit_spend', 'owed_accrual')
-WHERE p.merchant_id = $1::uuid AND p.customer_id = $2::uuid
-  AND p.currency = $3::text AND p.cut_at > $4::timestamptz AND p.amount > 0
-  AND p.period_starts_at <= $4::timestamptz AND p.period_ends_at > $4::timestamptz
-ORDER BY p.created_at, p.id, lt.created_at, lt.id
-LIMIT 1
-`
-
-type GetUsagePostingTransferAfterParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	At         time.Time
-}
-
-// The first ledger leg of the first posting of a customer's usage cut after
-// an instant: what took the usage settled then.
-func (q *Queries) GetUsagePostingTransferAfter(ctx context.Context, arg GetUsagePostingTransferAfterParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, getUsagePostingTransferAfter,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Currency,
-		arg.At,
-	)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
 }
 
 const insertUsageCardPrint = `-- name: InsertUsageCardPrint :exec
@@ -228,34 +174,32 @@ func (q *Queries) InsertUsageCardPrint(ctx context.Context, arg InsertUsageCardP
 	return err
 }
 
-const insertUsagePosting = `-- name: InsertUsagePosting :one
-INSERT INTO billing.usage_postings (merchant_id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines,
-    ingested_through, forgiven, forgiven_lines, created_at)
+const insertUsageReceipt = `-- name: InsertUsageReceipt :one
+INSERT INTO billing.usage_receipts (merchant_id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines,
+    forgiven, forgiven_lines, created_at)
 VALUES ($1::uuid, $2::uuid, $3::text, $4::timestamptz,
     $5::timestamptz, $6::timestamptz, $7::text, $8::bigint,
-    $9::jsonb, $10::timestamptz, $11::bigint, $12::jsonb,
-    $13::timestamptz)
-RETURNING merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, ingested_through, forgiven, forgiven_lines
+    $9::jsonb, $10::bigint, $11::jsonb, $12::timestamptz)
+RETURNING merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven, forgiven_lines
 `
 
-type InsertUsagePostingParams struct {
-	MerchantID      uuid.UUID
-	CustomerID      uuid.UUID
-	Currency        string
-	PeriodStartsAt  time.Time
-	PeriodEndsAt    time.Time
-	CutAt           time.Time
-	Reason          string
-	Amount          int64
-	Lines           []byte
-	IngestedThrough time.Time
-	Forgiven        int64
-	ForgivenLines   []byte
-	Now             time.Time
+type InsertUsageReceiptParams struct {
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	PeriodStartsAt time.Time
+	PeriodEndsAt   time.Time
+	CutAt          time.Time
+	Reason         string
+	Amount         int64
+	Lines          []byte
+	Forgiven       int64
+	ForgivenLines  []byte
+	Now            time.Time
 }
 
-func (q *Queries) InsertUsagePosting(ctx context.Context, arg InsertUsagePostingParams) (BillingUsagePosting, error) {
-	row := q.db.QueryRow(ctx, insertUsagePosting,
+func (q *Queries) InsertUsageReceipt(ctx context.Context, arg InsertUsageReceiptParams) (BillingUsageReceipt, error) {
+	row := q.db.QueryRow(ctx, insertUsageReceipt,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
@@ -265,12 +209,11 @@ func (q *Queries) InsertUsagePosting(ctx context.Context, arg InsertUsagePosting
 		arg.Reason,
 		arg.Amount,
 		arg.Lines,
-		arg.IngestedThrough,
 		arg.Forgiven,
 		arg.ForgivenLines,
 		arg.Now,
 	)
-	var i BillingUsagePosting
+	var i BillingUsageReceipt
 	err := row.Scan(
 		&i.MerchantID,
 		&i.ID,
@@ -283,7 +226,6 @@ func (q *Queries) InsertUsagePosting(ctx context.Context, arg InsertUsagePosting
 		&i.Amount,
 		&i.Lines,
 		&i.CreatedAt,
-		&i.IngestedThrough,
 		&i.Forgiven,
 		&i.ForgivenLines,
 	)
@@ -350,30 +292,30 @@ func (q *Queries) ListDueUsagePending(ctx context.Context, arg ListDueUsagePendi
 	return items, nil
 }
 
-const listForgivenUsagePostings = `-- name: ListForgivenUsagePostings :many
-SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, ingested_through, forgiven, forgiven_lines FROM billing.usage_postings
+const listForgivenUsageReceipts = `-- name: ListForgivenUsageReceipts :many
+SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven, forgiven_lines FROM billing.usage_receipts
 WHERE merchant_id = $1::uuid AND forgiven <> 0
   AND cut_at > $2::timestamptz AND cut_at <= $3::timestamptz
 ORDER BY cut_at, id
 `
 
-type ListForgivenUsagePostingsParams struct {
+type ListForgivenUsageReceiptsParams struct {
 	MerchantID uuid.UUID
 	CutAfter   time.Time
 	CutThrough time.Time
 }
 
-// The merchant's postings that forgave usage or took forgiveness back, cut
+// The merchant's receipts that forgave usage or took forgiveness back, cut
 // after one instant and through another.
-func (q *Queries) ListForgivenUsagePostings(ctx context.Context, arg ListForgivenUsagePostingsParams) ([]BillingUsagePosting, error) {
-	rows, err := q.db.Query(ctx, listForgivenUsagePostings, arg.MerchantID, arg.CutAfter, arg.CutThrough)
+func (q *Queries) ListForgivenUsageReceipts(ctx context.Context, arg ListForgivenUsageReceiptsParams) ([]BillingUsageReceipt, error) {
+	rows, err := q.db.Query(ctx, listForgivenUsageReceipts, arg.MerchantID, arg.CutAfter, arg.CutThrough)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingUsagePosting
+	var items []BillingUsageReceipt
 	for rows.Next() {
-		var i BillingUsagePosting
+		var i BillingUsageReceipt
 		if err := rows.Scan(
 			&i.MerchantID,
 			&i.ID,
@@ -386,7 +328,6 @@ func (q *Queries) ListForgivenUsagePostings(ctx context.Context, arg ListForgive
 			&i.Amount,
 			&i.Lines,
 			&i.CreatedAt,
-			&i.IngestedThrough,
 			&i.Forgiven,
 			&i.ForgivenLines,
 		); err != nil {
@@ -411,7 +352,7 @@ type ListMerchantUsagePendingRow struct {
 	Currency   string
 }
 
-// One merchant's customers whose usage is not posted.
+// One merchant's customers whose usage no posting has taken.
 func (q *Queries) ListMerchantUsagePending(ctx context.Context, merchantID uuid.UUID) ([]ListMerchantUsagePendingRow, error) {
 	rows, err := q.db.Query(ctx, listMerchantUsagePending, merchantID)
 	if err != nil {
@@ -468,35 +409,89 @@ func (q *Queries) ListUsageCardPrints(ctx context.Context, arg ListUsageCardPrin
 	return items, nil
 }
 
-const listUsagePostings = `-- name: ListUsagePostings :many
-SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, ingested_through, forgiven, forgiven_lines FROM billing.usage_postings
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-  AND currency = $3::text AND period_starts_at >= $4::timestamptz
-ORDER BY period_starts_at, created_at, id
+const listUsagePositions = `-- name: ListUsagePositions :many
+SELECT customer_id, currency, period_starts_at, meter_key, cell, sum(quantity)::bigint AS quantity
+FROM billing.usage_totals
+WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
+  AND period_starts_at >= $3::timestamptz
+GROUP BY customer_id, currency, period_starts_at, meter_key, cell
 `
 
-type ListUsagePostingsParams struct {
+type ListUsagePositionsParams struct {
 	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	Currency       string
+	CustomerIds    []uuid.UUID
 	PeriodStartsAt time.Time
 }
 
-// A customer's postings in a currency of the periods from one start on.
-func (q *Queries) ListUsagePostings(ctx context.Context, arg ListUsagePostingsParams) ([]BillingUsagePosting, error) {
-	rows, err := q.db.Query(ctx, listUsagePostings,
+type ListUsagePositionsRow struct {
+	CustomerID     uuid.UUID
+	Currency       string
+	PeriodStartsAt time.Time
+	MeterKey       string
+	Cell           string
+	Quantity       int64
+}
+
+// Where customers stand in each meter cell of their pricing periods from one
+// start on, every lease's settled usage and what posted: the tier position
+// intake prices the next items at.
+func (q *Queries) ListUsagePositions(ctx context.Context, arg ListUsagePositionsParams) ([]ListUsagePositionsRow, error) {
+	rows, err := q.db.Query(ctx, listUsagePositions, arg.MerchantID, arg.CustomerIds, arg.PeriodStartsAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsagePositionsRow
+	for rows.Next() {
+		var i ListUsagePositionsRow
+		if err := rows.Scan(
+			&i.CustomerID,
+			&i.Currency,
+			&i.PeriodStartsAt,
+			&i.MeterKey,
+			&i.Cell,
+			&i.Quantity,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsageReceipts = `-- name: ListUsageReceipts :many
+SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven, forgiven_lines FROM billing.usage_receipts
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND currency = $3::text AND period_starts_at = ANY($4::timestamptz[])
+ORDER BY period_starts_at, created_at, id
+`
+
+type ListUsageReceiptsParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Periods    []time.Time
+}
+
+// A customer's receipts in a currency of some pricing periods: what their
+// postings took.
+func (q *Queries) ListUsageReceipts(ctx context.Context, arg ListUsageReceiptsParams) ([]BillingUsageReceipt, error) {
+	rows, err := q.db.Query(ctx, listUsageReceipts,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
-		arg.PeriodStartsAt,
+		arg.Periods,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingUsagePosting
+	var items []BillingUsageReceipt
 	for rows.Next() {
-		var i BillingUsagePosting
+		var i BillingUsageReceipt
 		if err := rows.Scan(
 			&i.MerchantID,
 			&i.ID,
@@ -509,7 +504,6 @@ func (q *Queries) ListUsagePostings(ctx context.Context, arg ListUsagePostingsPa
 			&i.Amount,
 			&i.Lines,
 			&i.CreatedAt,
-			&i.IngestedThrough,
 			&i.Forgiven,
 			&i.ForgivenLines,
 		); err != nil {
@@ -523,27 +517,27 @@ func (q *Queries) ListUsagePostings(ctx context.Context, arg ListUsagePostingsPa
 	return items, nil
 }
 
-const listUsagePostingsByIDs = `-- name: ListUsagePostingsByIDs :many
-SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, ingested_through, forgiven, forgiven_lines FROM billing.usage_postings
+const listUsageReceiptsByIDs = `-- name: ListUsageReceiptsByIDs :many
+SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven, forgiven_lines FROM billing.usage_receipts
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND id = ANY($3::uuid[])
 `
 
-type ListUsagePostingsByIDsParams struct {
+type ListUsageReceiptsByIDsParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Ids        []uuid.UUID
 }
 
-func (q *Queries) ListUsagePostingsByIDs(ctx context.Context, arg ListUsagePostingsByIDsParams) ([]BillingUsagePosting, error) {
-	rows, err := q.db.Query(ctx, listUsagePostingsByIDs, arg.MerchantID, arg.CustomerID, arg.Ids)
+func (q *Queries) ListUsageReceiptsByIDs(ctx context.Context, arg ListUsageReceiptsByIDsParams) ([]BillingUsageReceipt, error) {
+	rows, err := q.db.Query(ctx, listUsageReceiptsByIDs, arg.MerchantID, arg.CustomerID, arg.Ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingUsagePosting
+	var items []BillingUsageReceipt
 	for rows.Next() {
-		var i BillingUsagePosting
+		var i BillingUsageReceipt
 		if err := rows.Scan(
 			&i.MerchantID,
 			&i.ID,
@@ -556,9 +550,57 @@ func (q *Queries) ListUsagePostingsByIDs(ctx context.Context, arg ListUsagePosti
 			&i.Amount,
 			&i.Lines,
 			&i.CreatedAt,
-			&i.IngestedThrough,
 			&i.Forgiven,
 			&i.ForgivenLines,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsageTotals = `-- name: ListUsageTotals :many
+SELECT merchant_id, customer_id, currency, period_starts_at, period_ends_at, meter_key, cell, print, lapse_at, lease_id, quantity, stated, requests, amount, updated_at FROM billing.usage_totals
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND currency = $3::text
+ORDER BY period_starts_at, meter_key, cell, print, lapse_at, lease_id
+`
+
+type ListUsageTotalsParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// A customer's running totals in a currency: what a posting prices.
+func (q *Queries) ListUsageTotals(ctx context.Context, arg ListUsageTotalsParams) ([]BillingUsageTotal, error) {
+	rows, err := q.db.Query(ctx, listUsageTotals, arg.MerchantID, arg.CustomerID, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingUsageTotal
+	for rows.Next() {
+		var i BillingUsageTotal
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.Currency,
+			&i.PeriodStartsAt,
+			&i.PeriodEndsAt,
+			&i.MeterKey,
+			&i.Cell,
+			&i.Print,
+			&i.LapseAt,
+			&i.LeaseID,
+			&i.Quantity,
+			&i.Stated,
+			&i.Requests,
+			&i.Amount,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -589,7 +631,7 @@ func (q *Queries) LockUsageEventTypes(ctx context.Context, arg LockUsageEventTyp
 }
 
 const lockUsagePending = `-- name: LockUsagePending :one
-SELECT merchant_id, customer_id, currency, since_at, due_at, updated_at FROM billing.usage_pending
+SELECT merchant_id, customer_id, currency, due_at, updated_at FROM billing.usage_pending
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND currency = $3::text
 FOR UPDATE
 `
@@ -607,51 +649,19 @@ func (q *Queries) LockUsagePending(ctx context.Context, arg LockUsagePendingPara
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.Currency,
-		&i.SinceAt,
 		&i.DueAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const recordUsageDiscard = `-- name: RecordUsageDiscard :one
-INSERT INTO billing.maintenance_runs (merchant_id, kind, actor, status, started_at, finished_at, affected, note)
-VALUES ($1::uuid, 'usage_discard', $2::text, 'completed', $3::timestamptz,
-    $3::timestamptz, $4::jsonb, $5::text)
-RETURNING id
-`
-
-type RecordUsageDiscardParams struct {
-	MerchantID uuid.UUID
-	Actor      string
-	Now        time.Time
-	Affected   []byte
-	Note       string
-}
-
-// An operator's discard of a merchant's pending usage, with what was
-// discarded.
-func (q *Queries) RecordUsageDiscard(ctx context.Context, arg RecordUsageDiscardParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, recordUsageDiscard,
-		arg.MerchantID,
-		arg.Actor,
-		arg.Now,
-		arg.Affected,
-		arg.Note,
-	)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
-const setUsagePending = `-- name: SetUsagePending :exec
+const setUsagePendingDue = `-- name: SetUsagePendingDue :exec
 UPDATE billing.usage_pending
-SET since_at = $1::timestamptz, due_at = $2::timestamptz, updated_at = $3::timestamptz
-WHERE merchant_id = $4::uuid AND customer_id = $5::uuid AND currency = $6::text
+SET due_at = $1::timestamptz, updated_at = $2::timestamptz
+WHERE merchant_id = $3::uuid AND customer_id = $4::uuid AND currency = $5::text
 `
 
-type SetUsagePendingParams struct {
-	SinceAt    time.Time
+type SetUsagePendingDueParams struct {
 	DueAt      time.Time
 	Now        time.Time
 	MerchantID uuid.UUID
@@ -659,9 +669,8 @@ type SetUsagePendingParams struct {
 	Currency   string
 }
 
-func (q *Queries) SetUsagePending(ctx context.Context, arg SetUsagePendingParams) error {
-	_, err := q.db.Exec(ctx, setUsagePending,
-		arg.SinceAt,
+func (q *Queries) SetUsagePendingDue(ctx context.Context, arg SetUsagePendingDueParams) error {
+	_, err := q.db.Exec(ctx, setUsagePendingDue,
 		arg.DueAt,
 		arg.Now,
 		arg.MerchantID,
@@ -689,7 +698,7 @@ func (q *Queries) ShareUsageEventTypes(ctx context.Context, arg ShareUsageEventT
 }
 
 const shareUsagePending = `-- name: ShareUsagePending :many
-SELECT customer_id, since_at, due_at FROM billing.usage_pending
+SELECT customer_id, due_at FROM billing.usage_pending
 WHERE merchant_id = $1::uuid AND currency = $2::text
   AND customer_id = ANY($3::uuid[])
 ORDER BY customer_id
@@ -704,14 +713,13 @@ type ShareUsagePendingParams struct {
 
 type ShareUsagePendingRow struct {
 	CustomerID uuid.UUID
-	SinceAt    time.Time
 	DueAt      time.Time
 }
 
 // An intake's hold on the queue rows of its customers in a currency, taken
-// before it inserts its events and kept until it commits: a posting, which
-// locks the row FOR UPDATE, waits for every intake that may have inserted
-// usage, and later intakes insert theirs after it commits. Intakes never
+// before it writes its usage and kept until it commits: a posting, which
+// locks the row FOR UPDATE, waits for every intake that may have settled
+// usage, and later intakes settle theirs after it commits. Intakes never
 // wait on each other here.
 func (q *Queries) ShareUsagePending(ctx context.Context, arg ShareUsagePendingParams) ([]ShareUsagePendingRow, error) {
 	rows, err := q.db.Query(ctx, shareUsagePending, arg.MerchantID, arg.Currency, arg.CustomerIds)
@@ -722,7 +730,7 @@ func (q *Queries) ShareUsagePending(ctx context.Context, arg ShareUsagePendingPa
 	var items []ShareUsagePendingRow
 	for rows.Next() {
 		var i ShareUsagePendingRow
-		if err := rows.Scan(&i.CustomerID, &i.SinceAt, &i.DueAt); err != nil {
+		if err := rows.Scan(&i.CustomerID, &i.DueAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -735,12 +743,12 @@ func (q *Queries) ShareUsagePending(ctx context.Context, arg ShareUsagePendingPa
 
 const upsertUsagePending = `-- name: UpsertUsagePending :exec
 
-INSERT INTO billing.usage_pending AS u (merchant_id, customer_id, currency, since_at, due_at, updated_at)
-SELECT $1::uuid, m.customer_id, $2::text, m.since_at, m.due_at, $3::timestamptz
-FROM unnest($4::uuid[], $5::timestamptz[], $6::timestamptz[]) AS m(customer_id, since_at, due_at)
+INSERT INTO billing.usage_pending AS u (merchant_id, customer_id, currency, due_at, updated_at)
+SELECT $1::uuid, m.customer_id, $2::text, m.due_at, $3::timestamptz
+FROM unnest($4::uuid[], $5::timestamptz[]) AS m(customer_id, due_at)
 ORDER BY m.customer_id
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
-    since_at = LEAST(u.since_at, EXCLUDED.since_at), due_at = LEAST(u.due_at, EXCLUDED.due_at), updated_at = EXCLUDED.updated_at
+    due_at = LEAST(u.due_at, EXCLUDED.due_at), updated_at = EXCLUDED.updated_at
 `
 
 type UpsertUsagePendingParams struct {
@@ -748,23 +756,20 @@ type UpsertUsagePendingParams struct {
 	Currency    string
 	Now         time.Time
 	CustomerIds []uuid.UUID
-	SinceAts    []time.Time
 	DueAts      []time.Time
 }
 
-// What the ledger took of usage, which lives in the event store: who has
-// usage not yet posted and what it costs at provisional prices, each posting,
-// and the rate cards usage was priced under.
+// What the ledger took of usage: who has usage no posting has taken (the
+// queue), the running totals intake settles and postings price, each posting's
+// usage receipt, and the rate cards usage was priced under.
 // Intake queues customers' usage in a currency for posting, in the
-// transaction that commits it, in customer order: the oldest instant and the
-// earliest due date win.
+// transaction that settles it, in customer order: the earliest due date wins.
 func (q *Queries) UpsertUsagePending(ctx context.Context, arg UpsertUsagePendingParams) error {
 	_, err := q.db.Exec(ctx, upsertUsagePending,
 		arg.MerchantID,
 		arg.Currency,
 		arg.Now,
 		arg.CustomerIds,
-		arg.SinceAts,
 		arg.DueAts,
 	)
 	return err

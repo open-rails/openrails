@@ -18,35 +18,26 @@ import (
 
 func newUsageCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "usage", Short: "Operate the usage event store"}
-	var actor, reason string
-	var discard bool
 	attach := &cobra.Command{Use: "attach", Args: cobra.NoArgs, Short: "Attach the configured ClickHouse as the event store in place of the one this database recorded",
 		Long: `Attaches the configured ClickHouse (clickhouse.addr, clickhouse.database) as
 this database's event store, creating its tables, when the database recorded
 another: an empty or different ClickHouse that New refuses.
 
-Usage the ledger has not taken lives only in the recorded store. With any,
-attach refuses unless --discard-pending: then each merchant's pending
-usage is deleted and recorded as a usage_discard maintenance run, with the
-operator and reason, in the transaction that records the new store. The
-discard is one-way; restore the recorded store's backup instead where one
-exists.`,
+Usage the ledger has not taken is in PostgreSQL and posts as before; the
+attached store has none of the recorded one's usage history or limit counts.
+Restore the recorded store's backup instead where one exists.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
 				store, err := openAttachedStore(ctx, database)
 				if err != nil {
 					return err
 				}
-				discarded, err := app.AttachEventStore(ctx, database, store, actor, reason, discard)
-				if err != nil {
+				if err := app.AttachEventStore(ctx, database, store); err != nil {
 					return err
 				}
-				return printJSON(cmd.OutOrStdout(), map[string]any{"store": store.ID(), "discarded": discarded})
+				return printJSON(cmd.OutOrStdout(), map[string]any{"store": store.ID()})
 			})
 		}}
-	attach.Flags().BoolVar(&discard, "discard-pending", false, "discard usage the ledger has not taken (one-way)")
-	attach.Flags().StringVar(&actor, "actor", "", "operator recorded with the attach")
-	attach.Flags().StringVar(&reason, "reason", "", "why the recorded store is replaced")
 	cmd.AddCommand(attach)
 	return cmd
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -27,29 +26,28 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/retention"
-	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // Usage reaches the ledger in postings; until then a customer's balance
-// holds its provisional price (usage_pending_amounts). A posting takes
-// everything the event store holds (its cut is past every usage intake
-// accepted), except one before a credit lot's lapse, cut at it. Per pricing
-// period it posts the price of the period's deduplicated usage before the
-// cut, less what the period's earlier postings took: the balance first, one
-// credit_spend per lot live just before the cut, and the rest owed in one
-// owed_accrual split by meter, at (usage_posting, usage_posting:<id>, 1). A
-// period whose price fell below what posted (a volume tier) carries the
-// difference until its late usage window closes, then credits it back; usage
-// the event store no longer holds is not a price that fell.
+// deducts its provisional price (the unposted running totals, usage_totals).
+// A posting takes every settled usage, except one before a credit lot's
+// lapse, which takes the lapse segments before it. Per pricing period it
+// prices the period's settled quantity (posted and taken), card by card,
+// less what the period's earlier usage receipts took, and writes one usage
+// receipt itemized by meter with one or more ledger transfers: the lots
+// first, one credit_spend each, and the rest owed in one owed_accrual split
+// by meter, at (usage_posting, usage_receipt:<id>, 1). A period whose price
+// fell (a volume tier) is credited at once, as a reversal receipt. The
+// totals it took fold into the period's posted row.
 //
 // Postings run once the accounting-zone day of a customer's oldest pending
 // usage ends (the billing pass's first scan), before a usage invoice bills
 // what is owed, before a credit lot's expiry, revocation or refund (so lots
 // are spent in time order), and before a merchant purge deletes the store.
 
-const usagePostingSourcePrefix = "usage_posting:"
+const usageReceiptSourcePrefix = "usage_receipt:"
 
-// Posting reasons (usage_postings.reason).
+// Posting reasons (usage_receipts.reason).
 const (
 	usagePostingDaily    = "daily"
 	usagePostingBilling  = "billing"
@@ -112,8 +110,9 @@ var _ db.UsageLedger = (*MoneyService)(nil)
 
 // PostUsage posts, in q's transaction and at now, what a customer's usage in
 // a currency costs and the ledger has not taken: everything with a zero cut,
-// else what occurred before cut. reason is usage_postings.reason: credit
-// before a credit lot moves, purge before a merchant purge.
+// else what occurred before cut (a credit lot's lapse). reason is
+// usage_receipts.reason: credit before a credit lot moves, purge before a
+// merchant purge.
 func (s *MoneyService) PostUsage(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, cut, now time.Time, reason string) (bool, error) {
 	if _, bound := merchant.FromContext(ctx); !bound {
 		ctx = merchant.WithID(ctx, billing.MerchantID(merchantID))
@@ -122,17 +121,13 @@ func (s *MoneyService) PostUsage(ctx context.Context, q *gen.Queries, merchantID
 }
 
 // postUsageTx is the one choke point usage reaches the ledger through. Under
-// the customer's lock and its queue row's, it posts each period's settled
-// usage's price before cut less what the period took, credits a period whose
-// price fell once its late window closed, and leaves the queue row at what is
-// left. Usage a sync inserted and never settled is left to the resend that
-// settles it and adds it to pending. A zero cut takes everything: no intake
-// can be settling while the row is locked, so the settled usage the store
-// holds is what was pending and nothing else is, and the pending amounts go.
-// A cut before one already posted takes that one's: usage before it is
-// posted. Of the usage an earlier posting may have read, a line is priced at
-// no less than what posted: usage the store no longer holds is never read as
-// a price that fell, and usage ingested since is priced on top.
+// the customer's lock and its queue row's (every intake of the customer
+// finished, and later ones wait), it prices each period it takes usage of
+// from the running totals, posts what that adds to the period's receipts,
+// folds the totals it took into the posted rows and leaves the queue row due
+// for what is left. A zero cut takes everything; a cut before now (a lot's
+// lapse) takes the lapse segments before it, in the periods that began
+// before it.
 func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, cut time.Time, reason string) (bool, error) {
 	key := gen.GetUsagePendingParams{MerchantID: merchantID, CustomerID: customer, Currency: currency}
 	if _, err := q.GetUsagePending(ctx, key); errors.Is(err, pgx.ErrNoRows) {
@@ -140,53 +135,146 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 	} else if err != nil {
 		return false, err
 	}
-	store := s.eventStore(q)
-	if store == nil {
-		return false, eventstore.Required("posting usage")
-	}
 	if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID, ID: customer}); err != nil {
 		return false, err
 	}
-	row, err := q.LockUsagePending(ctx, gen.LockUsagePendingParams(key))
-	if errors.Is(err, pgx.ErrNoRows) {
+	if _, err := q.LockUsagePending(ctx, gen.LockUsagePendingParams(key)); errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
-	}
-	if err != nil {
+	} else if err != nil {
 		return false, err
 	}
 	now := instant(s.now())
 	everything := cut.IsZero()
 	if horizon := now.Add(retention.UsageClockSkew); everything || cut.After(horizon) {
-		cut = horizon
+		cut, everything = horizon, true
 	}
 	cut = instant(cut)
-	postings, err := q.ListUsagePostings(ctx, gen.ListUsagePostingsParams{MerchantID: merchantID, CustomerID: customer, Currency: currency, PeriodStartsAt: row.SinceAt})
-	if err != nil {
-		return false, err
-	}
-	var prior eventstore.PostingWatermark
-	for _, p := range postings {
-		prior.Cut, prior.Ingested = later(prior.Cut, p.CutAt.UTC()), later(prior.Ingested, p.IngestedThrough.UTC())
-	}
-	// Lots live just before the cut asked for are drawn, and none past now.
+	// Lots live just before the cut are drawn, and none past now.
 	liveAt := earlier(cut, now)
-	cut = later(cut, prior.Cut)
-	unsettled, err := unsettledUsage(ctx, q, store, merchantID, customer, currency, row.SinceAt)
+	totals, err := q.ListUsageTotals(ctx, gen.ListUsageTotalsParams(key))
 	if err != nil {
 		return false, err
 	}
-	rows, err := store.PostingQuantities(ctx, billing.CustomerID(customer), currency, row.SinceAt, cut, prior, unsettled)
-	if err != nil {
-		return false, err
+	taken := periodTotals{}
+	ends := map[time.Time]time.Time{}
+	left := false
+	for _, t := range totals {
+		period := t.PeriodStartsAt.UTC()
+		switch {
+		case t.LeaseID != uuid.Nil && !everything && !(t.LapseAt.Before(cut) && period.Before(cut)):
+			left = true
+			continue
+		case t.LeaseID != uuid.Nil:
+			ends[period] = t.PeriodEndsAt.UTC()
+		}
+		taken.add(period, t)
 	}
-	posted := periodLines{}
-	var prints []string
-	for _, p := range postings {
-		lines, err := decodePostingLines(p.Lines)
+	var periods []time.Time
+	for p := range ends {
+		periods = append(periods, p)
+	}
+	slices.SortFunc(periods, func(a, b time.Time) int { return a.Compare(b) })
+	moved := false
+	if len(periods) > 0 {
+		receipts, err := q.ListUsageReceipts(ctx, gen.ListUsageReceiptsParams{MerchantID: merchantID, CustomerID: customer, Currency: currency, Periods: periods})
 		if err != nil {
 			return false, err
 		}
-		period := p.PeriodStartsAt.UTC()
+		posted, forgiven, err := receiptLines(receipts)
+		if err != nil {
+			return false, err
+		}
+		var prints []string
+		for _, p := range periods {
+			for k := range taken[p] {
+				prints = append(prints, k.print)
+			}
+		}
+		cards, err := loadPrints(ctx, q, merchantID, prints)
+		if err != nil {
+			return false, err
+		}
+		billed, err := q.LatestUsageInvoiceEndInCurrency(ctx, gen.LatestUsageInvoiceEndInCurrencyParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
+		if err != nil {
+			return false, err
+		}
+		for _, period := range periods {
+			target, err := cards.priceQuantities(taken.quantities(period))
+			if err != nil {
+				return moved, err
+			}
+			lines, amount := postingDelta(target[period], posted[period])
+			switch {
+			case amount > 0:
+				err = s.postPeriod(ctx, q, merchantID, customer, currency, period, ends[period], cut, liveAt, reason, amount, lines, billed)
+			case amount < 0:
+				err = s.reversePeriod(ctx, q, merchantID, customer, currency, period, ends[period], cut, amount, forgiven[period], lines)
+			}
+			if err != nil {
+				return moved, err
+			}
+			moved = moved || amount != 0
+		}
+	}
+	fold := gen.FoldUsageTotalsParams{MerchantID: merchantID, CustomerID: customer, Currency: currency, Now: now}
+	if !everything {
+		fold.Cut = &cut
+	}
+	if err := q.FoldUsageTotals(ctx, fold); err != nil {
+		return moved, err
+	}
+	if !left {
+		return moved, q.DeleteUsagePending(ctx, gen.DeleteUsagePendingParams(key))
+	}
+	// What is left occurred at or after the cut.
+	zone, err := s.AccountingZone(ctx)
+	if err != nil {
+		return moved, err
+	}
+	return moved, q.SetUsagePendingDue(ctx, gen.SetUsagePendingDueParams{DueAt: dayAfter(zone, liveAt), Now: now,
+		MerchantID: merchantID, CustomerID: customer, Currency: currency})
+}
+
+// periodTotals are a customer's running totals a posting prices, by period,
+// meter cell and print.
+type periodTotals map[time.Time]map[lineKey]*periodQuantity
+
+func (p periodTotals) add(period time.Time, t gen.BillingUsageTotal) {
+	if p[period] == nil {
+		p[period] = map[lineKey]*periodQuantity{}
+	}
+	k := lineKey{t.MeterKey, t.Cell, t.Print}
+	q := p[period][k]
+	if q == nil {
+		q = &periodQuantity{period: period, meter: t.MeterKey, cell: t.Cell, print: t.Print}
+		p[period][k] = q
+	}
+	q.quantity, q.stated, q.requests = addSat(q.quantity, t.Quantity), addSat(q.stated, t.Stated), addSat(q.requests, t.Requests)
+}
+
+// quantities are one period's totals, in line order.
+func (p periodTotals) quantities(period time.Time) []periodQuantity {
+	out := make([]periodQuantity, 0, len(p[period]))
+	for _, q := range p[period] {
+		out = append(out, *q)
+	}
+	slices.SortFunc(out, func(a, b periodQuantity) int {
+		return cmp.Or(strings.Compare(a.meter, b.meter), strings.Compare(a.cell, b.cell), strings.Compare(a.print, b.print))
+	})
+	return out
+}
+
+// receiptLines are what each period's receipts took, line by line, and what
+// they forgave, by share.
+func receiptLines(receipts []gen.BillingUsageReceipt) (periodLines, map[time.Time]map[forgivenKey]int64, error) {
+	posted := periodLines{}
+	forgiven := map[time.Time]map[forgivenKey]int64{}
+	for _, r := range receipts {
+		period := r.PeriodStartsAt.UTC()
+		lines, err := decodePostingLines(r.Lines)
+		if err != nil {
+			return nil, nil, fmt.Errorf("usage receipt %s: %w", r.ID, err)
+		}
 		if posted[period] == nil {
 			posted[period] = map[lineKey]*PostingLine{}
 		}
@@ -196,279 +284,25 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 			if have == nil {
 				have = &PostingLine{MeterKey: l.MeterKey, Cell: l.Cell, Print: l.Print}
 				posted[period][k] = have
-				prints = append(prints, l.Print)
 			}
 			have.Requests, have.Quantity = addSat(have.Requests, l.Requests), addSat(have.Quantity, l.Quantity)
 			have.Stated, have.Amount = addSat(have.Stated, l.Stated), addSat(have.Amount, l.Amount)
 		}
-	}
-	for _, r := range rows {
-		prints = append(prints, r.Print)
-	}
-	cards, err := loadPrints(ctx, q, merchantID, prints)
-	if err != nil {
-		return false, err
-	}
-	priced, err := s.knownPrints(ctx, q, store, merchantID, customer, currency, row.SinceAt, cards, rows)
-	if err != nil {
-		return false, err
-	}
-	target, err := cards.priceQuantities(takenQuantities(priced, posted))
-	if err != nil {
-		return false, err
-	}
-	ingested := prior.Ingested
-	for _, r := range priced {
-		if r.Read.Requests > 0 || r.Fresh.Requests > 0 {
-			ingested = later(ingested, r.IngestedThrough)
-		}
-	}
-	anchor, err := s.periodAnchorFor(ctx, q, merchantID, customer, currency)
-	if err != nil {
-		return false, err
-	}
-	billed, err := q.LatestUsageInvoiceEndInCurrency(ctx, gen.LatestUsageInvoiceEndInCurrencyParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
-	if err != nil {
-		return false, err
-	}
-	periods := make([]time.Time, 0, len(target)+len(posted))
-	for p := range target {
-		periods = append(periods, p)
-	}
-	for p := range posted {
-		if _, ok := target[p]; !ok {
-			periods = append(periods, p)
-		}
-	}
-	slices.SortFunc(periods, func(a, b time.Time) int { return a.Compare(b) })
-	forgiven := map[time.Time]map[forgivenKey]int64{}
-	for _, p := range postings {
-		lines, err := decodeForgivenLines(p.ForgivenLines)
+		shares, err := decodeForgivenLines(r.ForgivenLines)
 		if err != nil {
-			return false, fmt.Errorf("usage posting %s: %w", p.ID, err)
+			return nil, nil, fmt.Errorf("usage receipt %s: %w", r.ID, err)
 		}
-		period := p.PeriodStartsAt.UTC()
-		for _, l := range lines {
+		for _, l := range shares {
 			if forgiven[period] == nil {
 				forgiven[period] = map[forgivenKey]int64{}
 			}
 			forgiven[period][l.key()] += l.Amount
 		}
 	}
-	var since, due time.Time
-	keep := func(s, d time.Time) {
-		if since.IsZero() || s.Before(since) {
-			since = s
-		}
-		if due.IsZero() || d.Before(due) {
-			due = d
-		}
-	}
-	first, hasLater := earliestLater(rows)
-	if hasLater {
-		zone, err := s.AccountingZone(ctx)
-		if err != nil {
-			return false, err
-		}
-		keep(first, dayAfter(zone, earlier(cut, now)))
-	}
-	moved := false
-	for _, period := range periods {
-		_, end, err := anchor.period(period)
-		if err != nil || !end.After(period) {
-			end = period.AddDate(0, 1, 0)
-		}
-		lines, amount := postingDelta(target[period], posted[period])
-		switch {
-		case amount > 0:
-			if err := s.postPeriod(ctx, q, merchantID, customer, currency, period, end, cut, liveAt, ingested, reason, amount, lines, billed); err != nil {
-				return moved, err
-			}
-			moved = true
-		case amount < 0 && !now.Before(end.Add(retention.UsageIngestWindow)):
-			if err := s.reversePeriod(ctx, q, merchantID, customer, currency, period, end, cut, ingested, amount, forgiven[period], lines); err != nil {
-				return moved, err
-			}
-			moved = true
-		case amount < 0:
-			keep(period, end.Add(retention.UsageIngestWindow))
-		}
-	}
-	if since.IsZero() {
-		return moved, q.DeleteUsagePending(ctx, gen.DeleteUsagePendingParams(key))
-	}
-	if everything && !hasLater {
-		if err := q.DeleteUsagePendingAmounts(ctx, gen.DeleteUsagePendingAmountsParams(key)); err != nil {
-			return moved, err
-		}
-	}
-	return moved, q.SetUsagePending(ctx, gen.SetUsagePendingParams{SinceAt: since, DueAt: later(due, since.Add(time.Microsecond)), Now: now,
-		MerchantID: merchantID, CustomerID: customer, Currency: currency})
+	return posted, forgiven, nil
 }
 
-// unsettledUsage is the customer's usage in a currency from one period start
-// on that the store holds and PostgreSQL never settled: a lease's items past
-// its settled number, or a lease with no row.
-func unsettledUsage(ctx context.Context, q *gen.Queries, store *eventstore.Store, merchantID, customer uuid.UUID, currency string, from time.Time) ([]eventstore.Unsettled, error) {
-	reached, err := store.UsageLeases(ctx, billing.CustomerID(customer), currency, from)
-	if err != nil || len(reached) == 0 {
-		return nil, err
-	}
-	ids := make([]uuid.UUID, 0, len(reached))
-	for id := range reached {
-		ids = append(ids, id)
-	}
-	slices.SortFunc(ids, compareUUID)
-	rows, err := q.ListLeaseSettlements(ctx, gen.ListLeaseSettlementsParams{MerchantID: merchantID, Ids: ids})
-	if err != nil {
-		return nil, err
-	}
-	settled := make(map[uuid.UUID]int64, len(rows))
-	for _, r := range rows {
-		settled[r.ID] = r.SettledThroughN
-	}
-	var out []eventstore.Unsettled
-	for _, id := range ids {
-		through, ok := settled[id]
-		switch {
-		case !ok:
-			out = append(out, eventstore.Unsettled{LeaseID: id, ThroughN: -1})
-		case reached[id] > through:
-			out = append(out, eventstore.Unsettled{LeaseID: id, ThroughN: through})
-		}
-	}
-	return out, nil
-}
-
-// earliestLater is the earliest pricing period with usage at or after a
-// posting's cut: where the customer's queue row stays.
-func earliestLater(rows []eventstore.PostingQuantity) (time.Time, bool) {
-	var first time.Time
-	for _, r := range rows {
-		if r.Later > 0 && (first.IsZero() || r.PeriodStartsAt.Before(first)) {
-			first = r.PeriodStartsAt
-		}
-	}
-	return first, !first.IsZero()
-}
-
-// takenQuantities are what a posting prices, line by line: of the usage an
-// earlier posting may have read, no less than what posted (the store may have
-// lost it), and the rest of the usage before the cut on top.
-func takenQuantities(rows []eventstore.PostingQuantity, posted periodLines) []eventstore.PeriodQuantity {
-	type line struct {
-		period time.Time
-		lineKey
-	}
-	read, fresh := map[line]eventstore.Quantities{}, map[line]eventstore.Quantities{}
-	var order []line
-	add := func(k line) {
-		if _, ok := read[k]; !ok {
-			read[k] = eventstore.Quantities{}
-			order = append(order, k)
-		}
-	}
-	for _, r := range rows {
-		k := line{r.PeriodStartsAt.UTC(), lineKey{r.Meter, r.Cell, r.Print}}
-		add(k)
-		read[k] = sumQuantities(read[k], r.Read)
-		fresh[k] = sumQuantities(fresh[k], r.Fresh)
-	}
-	for period, lines := range posted {
-		for k := range lines {
-			add(line{period, k})
-		}
-	}
-	slices.SortFunc(order, func(a, b line) int {
-		return cmp.Or(a.period.Compare(b.period), strings.Compare(a.meter, b.meter), strings.Compare(a.cell, b.cell), strings.Compare(a.print, b.print))
-	})
-	out := make([]eventstore.PeriodQuantity, 0, len(order))
-	for _, k := range order {
-		taken := read[k]
-		if p := posted[k.period][k.lineKey]; p != nil {
-			taken = eventstore.Quantities{Quantity: max(taken.Quantity, p.Quantity), Stated: max(taken.Stated, p.Stated), Requests: max(taken.Requests, p.Requests)}
-		}
-		taken = sumQuantities(taken, fresh[k])
-		if taken == (eventstore.Quantities{}) {
-			continue
-		}
-		out = append(out, eventstore.PeriodQuantity{PeriodStartsAt: k.period, Meter: k.meter, Cell: k.cell, Print: k.print,
-			Quantity: taken.Quantity, Stated: taken.Stated, Requests: taken.Requests})
-	}
-	return out
-}
-
-func sumQuantities(a, b eventstore.Quantities) eventstore.Quantities {
-	return eventstore.Quantities{Quantity: addSat(a.Quantity, b.Quantity), Stated: addSat(a.Stated, b.Stated), Requests: addSat(a.Requests, b.Requests)}
-}
-
-// knownPrints are the posting's rows whose card prints are recorded. A print
-// the store names but PostgreSQL does not is usage whose intake inserted its
-// events and never committed: one a rate card in force still prices is
-// recorded, dated when its first event was ingested; the rest cannot be
-// priced and are left out, never holding up the customer's other usage.
-func (s *MoneyService) knownPrints(ctx context.Context, q *gen.Queries, store *eventstore.Store, merchantID, customer uuid.UUID, currency string,
-	from time.Time, cards usagePrints, rows []eventstore.PostingQuantity) ([]eventstore.PostingQuantity, error) {
-	var missing []string
-	for _, r := range rows {
-		if _, ok := cards[r.Print]; !ok && !slices.Contains(missing, r.Print) {
-			missing = append(missing, r.Print)
-		}
-	}
-	if len(missing) == 0 {
-		return rows, nil
-	}
-	sources, err := store.PrintSources(ctx, billing.CustomerID(customer), currency, from, missing)
-	if err != nil {
-		return nil, err
-	}
-	var eventTypes []string
-	for _, src := range sources {
-		if !slices.Contains(eventTypes, src.EventType) {
-			eventTypes = append(eventTypes, src.EventType)
-		}
-	}
-	slices.Sort(eventTypes)
-	var recorded []string
-	for _, eventType := range eventTypes {
-		current, err := usageCards(ctx, q, merchantID, eventType, currency)
-		var coded *apperr.Error
-		if errors.As(err, &coded) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		for _, card := range current {
-			print, err := cardPrint(card)
-			if err != nil {
-				return nil, err
-			}
-			src, ok := sources[print]
-			if !ok || !slices.Contains(missing, print) || slices.Contains(recorded, print) {
-				continue
-			}
-			raw, err := json.Marshal(card)
-			if err != nil {
-				return nil, err
-			}
-			if err := q.InsertUsageCardPrint(ctx, gen.InsertUsageCardPrintParams{MerchantID: merchantID, Print: print, Card: raw, Now: src.IngestedAt}); err != nil {
-				return nil, err
-			}
-			recorded = append(recorded, print)
-		}
-	}
-	if len(recorded) > 0 {
-		found, err := loadPrints(ctx, q, merchantID, recorded)
-		if err != nil {
-			return nil, err
-		}
-		maps.Copy(cards, found)
-	}
-	return slices.DeleteFunc(slices.Clone(rows), func(r eventstore.PostingQuantity) bool { _, ok := cards[r.Print]; return !ok }), nil
-}
-
-// postingDelta is what a period's price adds to its postings, line by line,
+// postingDelta is what a period's price adds to its receipts, line by line,
 // and in all.
 func postingDelta(target, posted map[lineKey]*PostingLine) ([]PostingLine, int64) {
 	keys := make([]lineKey, 0, len(target)+len(posted))
@@ -514,7 +348,7 @@ func postingDelta(target, posted map[lineKey]*PostingLine) ([]PostingLine, int64
 // split by meter and dated when the usage occurred but never before the end
 // of the customer's last usage invoice. It draws the lots live just before
 // liveAt; in a merchant's unit, never owed, what they cannot take is forgiven.
-func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, period, end, cut, liveAt, ingested time.Time,
+func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, period, end, cut, liveAt time.Time,
 	reason string, amount int64, lines []PostingLine, billed time.Time) error {
 	encoded, err := json.Marshal(lines)
 	if err != nil {
@@ -541,9 +375,9 @@ func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantI
 			}
 		}
 	}
-	row, err := q.InsertUsagePosting(ctx, gen.InsertUsagePostingParams{MerchantID: merchantID, CustomerID: customer, Currency: currency,
+	row, err := q.InsertUsageReceipt(ctx, gen.InsertUsageReceiptParams{MerchantID: merchantID, CustomerID: customer, Currency: currency,
 		PeriodStartsAt: period, PeriodEndsAt: end, CutAt: cut, Reason: reason, Amount: amount, Forgiven: forgiven, ForgivenLines: split, Lines: encoded,
-		IngestedThrough: ingested, Now: now})
+		Now: now})
 	if err != nil {
 		return err
 	}
@@ -568,22 +402,23 @@ func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantI
 	}
 	posting.posting = &runningChargePosting{through: liveAt, owed: owed, from: period,
 		owedAt: later(earlier(earlier(end, cut).Add(-time.Microsecond), now), billed)}
-	key := MustIdempotencyKey(OpUsagePosting, usagePostingSourcePrefix+row.ID.String(), "1")
+	key := MustIdempotencyKey(OpUsagePosting, usageReceiptSourcePrefix+row.ID.String(), "1")
 	payer := identity.CustomerID(customer)
 	_, _, applied, err := posting.spendBalanceThenOwedTx(ctx, q, payer, customer.String(), currency, key, amount-forgiven, true)
 	if err != nil {
 		return err
 	}
 	if !applied {
-		return fmt.Errorf("usage posting %s: the ledger already held it", row.ID)
+		return fmt.Errorf("usage receipt %s: the ledger already held it", row.ID)
 	}
 	return nil
 }
 
-// reversePeriod credits what a period posted beyond its price, as a lot that
-// never lapses. What the period forgave is taken back first, from its stored
-// shares: only what the ledger took is credited.
-func (s *MoneyService) reversePeriod(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, period, end, cut, ingested time.Time,
+// reversePeriod credits what a period's receipts took beyond its price (a
+// volume tier's fall), as a lot that never lapses. What the period forgave is
+// taken back first, from its stored shares: only what the ledger took is
+// credited.
+func (s *MoneyService) reversePeriod(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, period, end, cut time.Time,
 	amount int64, forgave map[forgivenKey]int64, lines []PostingLine) error {
 	encoded, err := json.Marshal(lines)
 	if err != nil {
@@ -601,9 +436,9 @@ func (s *MoneyService) reversePeriod(ctx context.Context, q *gen.Queries, mercha
 			return err
 		}
 	}
-	row, err := q.InsertUsagePosting(ctx, gen.InsertUsagePostingParams{MerchantID: merchantID, CustomerID: customer, Currency: currency,
+	row, err := q.InsertUsageReceipt(ctx, gen.InsertUsageReceiptParams{MerchantID: merchantID, CustomerID: customer, Currency: currency,
 		PeriodStartsAt: period, PeriodEndsAt: end, CutAt: cut, Reason: usagePostingReversal, Amount: amount, Forgiven: unforgiven, ForgivenLines: split,
-		Lines: encoded, IngestedThrough: ingested, Now: now})
+		Lines: encoded, Now: now})
 	if err != nil {
 		return err
 	}
@@ -621,7 +456,7 @@ func (s *MoneyService) reversePeriod(ctx context.Context, q *gen.Queries, mercha
 	if err != nil {
 		return fmt.Errorf("usage reversal %s: record the lot: %w", row.ID, err)
 	}
-	coord := ledger.Coord{Operation: OpUsagePosting, Source: usagePostingSourcePrefix + row.ID.String(), SourceID: "1"}
+	coord := ledger.Coord{Operation: OpUsagePosting, Source: usageReceiptSourcePrefix + row.ID.String(), SourceID: "1"}
 	if _, err := l.ReverseUsage(ctx, customer, currency, -amount, coord, lot.ID); err != nil {
 		return err
 	}
@@ -637,8 +472,7 @@ func (s *MoneyService) reversePeriod(ctx context.Context, q *gen.Queries, mercha
 
 // PostDueUsage posts, in its own transaction, everything a customer's usage
 // in a currency costs and the ledger has not taken: the daily posting, once
-// the accounting-zone day of its oldest pending usage ended. It also credits a
-// period whose price fell once its late window closed.
+// the accounting-zone day of its oldest pending usage ended.
 func (s *MoneyService) PostDueUsage(ctx context.Context, customer uuid.UUID, currency string, now time.Time) (bool, error) {
 	return s.postUsageOwnTx(ctx, customer, currency, now, usagePostingDaily)
 }
@@ -674,29 +508,29 @@ func (s *MoneyService) postEverything(ctx context.Context, q *gen.Queries, merch
 	return s.postUsageTx(ctx, q, merchantID, customer, currency, time.Time{}, reason)
 }
 
-// usageDeductions are the postings the transfers that took usage belong to,
-// by transfer.
+// usageDeductions are the usage receipts the transfers that took usage
+// belong to, by transfer.
 func usageDeductions(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, transfers []gen.BillingLedgerTransfer) (map[uuid.UUID]*billing.UsageDeduction, error) {
 	ids := map[uuid.UUID][]uuid.UUID{}
-	var postings []uuid.UUID
+	var receipts []uuid.UUID
 	for _, t := range transfers {
-		if t.Operation != string(OpUsagePosting) || !strings.HasPrefix(t.Source, usagePostingSourcePrefix) {
+		if t.Operation != string(OpUsagePosting) || !strings.HasPrefix(t.Source, usageReceiptSourcePrefix) {
 			continue
 		}
-		id, err := uuid.Parse(strings.TrimPrefix(t.Source, usagePostingSourcePrefix))
+		id, err := uuid.Parse(strings.TrimPrefix(t.Source, usageReceiptSourcePrefix))
 		if err != nil {
 			continue
 		}
 		if _, ok := ids[id]; !ok {
-			postings = append(postings, id)
+			receipts = append(receipts, id)
 		}
 		ids[id] = append(ids[id], t.ID)
 	}
 	out := map[uuid.UUID]*billing.UsageDeduction{}
-	if len(postings) == 0 {
+	if len(receipts) == 0 {
 		return out, nil
 	}
-	rows, err := q.ListUsagePostingsByIDs(ctx, gen.ListUsagePostingsByIDsParams{MerchantID: merchantID, CustomerID: customer, Ids: postings})
+	rows, err := q.ListUsageReceiptsByIDs(ctx, gen.ListUsageReceiptsByIDsParams{MerchantID: merchantID, CustomerID: customer, Ids: receipts})
 	if err != nil {
 		return nil, err
 	}

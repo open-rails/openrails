@@ -22,6 +22,6 @@ RETURNING merchant_id, layout, updated_at, updated_by;
 SELECT EXISTS (SELECT 1 FROM billing.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid)::boolean AS has_subscriptions,
     EXISTS (SELECT 1 FROM billing.payments WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND payments.rail IN ('nmi', 'ccbill', 'stripe'))::boolean AS has_card_payments,
     (EXISTS (SELECT 1 FROM billing.usage_pending WHERE usage_pending.merchant_id = sqlc.arg(merchant_id)::uuid)
-     OR EXISTS (SELECT 1 FROM billing.usage_postings WHERE usage_postings.merchant_id = sqlc.arg(merchant_id)::uuid))::boolean AS has_usage,
+     OR EXISTS (SELECT 1 FROM billing.usage_receipts WHERE usage_receipts.merchant_id = sqlc.arg(merchant_id)::uuid))::boolean AS has_usage,
     EXISTS (SELECT 1 FROM billing.credit_grants WHERE credit_grants.merchant_id = sqlc.arg(merchant_id)::uuid AND funding_source IN ('purchase', 'recurring'))::boolean AS has_credits,
     EXISTS (SELECT 1 FROM billing.invoices WHERE invoices.merchant_id = sqlc.arg(merchant_id)::uuid AND purchase_number IS NOT NULL)::boolean AS has_checkouts;

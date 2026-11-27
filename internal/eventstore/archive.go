@@ -20,10 +20,9 @@ import (
 
 // Archive tables, in archive order.
 const (
-	ArchiveEvents     = "usage_events"
-	ArchiveHistory    = "usage_history"
-	ArchiveLimits     = "limit_usage"
-	ArchiveQuantities = "usage_quantities"
+	ArchiveEvents  = "usage_events"
+	ArchiveHistory = "usage_history"
+	ArchiveLimits  = "limit_usage"
 )
 
 // archiveTime is PostgreSQL's text form of a UTC instant, as the archive
@@ -40,7 +39,6 @@ const (
 	kindNullTime
 	kindText
 	kindInt
-	kindUint
 )
 
 // rollup is an archived rollup table: its columns after merchant_id and the
@@ -67,12 +65,6 @@ ORDER BY customer_id, bucket_at, currency, event_type, meter, cell`},
 		`SELECT customer_id, limit_key, window_starts_at, any(window_ends_at), sum(units) AS u
 FROM {database}.limit_usage WHERE merchant_id = %s
 GROUP BY customer_id, limit_key, window_starts_at HAVING u != 0 ORDER BY customer_id, limit_key, window_starts_at`},
-	{ArchiveQuantities, []string{"customer_id", "currency", "period_starts_at", "meter", "cell", "print", "quantity", "stated", "requests"},
-		[]kind{kindUUID, kindText, kindTime, kindText, kindText, kindText, kindInt, kindInt, kindUint},
-		`SELECT customer_id, currency, period_starts_at, meter, cell, print, sum(quantity) AS q, sum(stated) AS st, sum(requests) AS r
-FROM {database}.usage_quantities WHERE merchant_id = %s
-GROUP BY customer_id, currency, period_starts_at, meter, cell, print HAVING q != 0 OR st != 0 OR r != 0
-ORDER BY customer_id, currency, period_starts_at, meter, cell, print`},
 }
 
 // archivedEvent is a usage_events row as the archive carries it.
@@ -175,8 +167,6 @@ func (s *Store) exportRollup(ctx context.Context, mid string, r rollup, emit fun
 				dest[i] = new(string)
 			case kindInt:
 				dest[i] = new(int64)
-			case kindUint:
-				dest[i] = new(uint64)
 			}
 		}
 		if err := rows.Scan(dest...); err != nil {
@@ -199,8 +189,6 @@ func (s *Store) exportRollup(ctx context.Context, mid string, r rollup, emit fun
 				v = *d
 			case *int64:
 				v = strconv.FormatInt(*d, 10)
-			case *uint64:
-				v = strconv.FormatUint(*d, 10)
 			}
 			values[i] = &v
 		}
@@ -304,8 +292,6 @@ func archived(t rollup, r []*string) ([]any, error) {
 			out[i] = v
 		case kindInt:
 			out[i], err = strconv.ParseInt(v, 10, 64)
-		case kindUint:
-			out[i], err = strconv.ParseUint(v, 10, 64)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("eventstore: archived %s.%s: %w", t.table, t.columns[i], err)

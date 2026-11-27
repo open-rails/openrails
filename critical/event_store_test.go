@@ -246,7 +246,7 @@ func storeMigrationsAndIdentity(t *testing.T) {
 		return names
 	}
 	installed := []string{"limit_usage", "limit_usage_mv", "schema_migrations", "store", "usage_events", "usage_events_mv", "usage_history", "usage_history_charges_mv",
-		"usage_history_events_mv", "usage_intake", "usage_quantities", "usage_quantities_mv"}
+		"usage_history_events_mv", "usage_intake"}
 	require.Equal(t, installed, tables())
 
 	// A restart and an explicit migration change nothing.

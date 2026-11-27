@@ -65,6 +65,38 @@ func (q *Queries) DeleteAbandonedInvoiceAttemptsBefore(ctx context.Context, arg 
 	return result.RowsAffected(), nil
 }
 
+const deleteClosedUsageTotals = `-- name: DeleteClosedUsageTotals :execrows
+DELETE FROM billing.usage_totals t
+WHERE (t.merchant_id, t.customer_id, t.currency, t.period_starts_at, t.meter_key, t.cell, t.print, t.lapse_at, t.lease_id) IN (
+    SELECT e.merchant_id, e.customer_id, e.currency, e.period_starts_at, e.meter_key, e.cell, e.print, e.lapse_at, e.lease_id
+    FROM billing.usage_totals e
+    WHERE e.merchant_id = $1::uuid AND e.lease_id = '00000000-0000-0000-0000-000000000000'::uuid
+      AND e.period_ends_at < $2::timestamptz
+      AND NOT EXISTS (SELECT 1 FROM billing.usage_totals u
+          WHERE u.merchant_id = e.merchant_id AND u.customer_id = e.customer_id AND u.currency = e.currency
+            AND u.period_starts_at = e.period_starts_at AND u.lease_id <> '00000000-0000-0000-0000-000000000000'::uuid)
+    ORDER BY e.period_ends_at
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type DeleteClosedUsageTotalsParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+// A period's running totals once its late usage window closed: its posted
+// rows, unless a row of it is still unposted (its posting waits).
+func (q *Queries) DeleteClosedUsageTotals(ctx context.Context, arg DeleteClosedUsageTotalsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteClosedUsageTotals, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteCustomerMessagesBefore = `-- name: DeleteCustomerMessagesBefore :execrows
 DELETE FROM billing.customer_messages m
 WHERE (m.merchant_id, m.id) IN (
@@ -574,6 +606,13 @@ FROM (
       WHERE ($1::uuid IS NULL OR lr.merchant_id > $1::uuid)
         AND lr.listed_at < $17::timestamptz
       ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT ut.merchant_id AS mid
+       FROM billing.usage_totals ut
+      WHERE ($1::uuid IS NULL OR ut.merchant_id > $1::uuid)
+        AND ut.lease_id = '00000000-0000-0000-0000-000000000000'::uuid
+        AND ut.period_ends_at < $18::timestamptz
+      ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid
 LIMIT $3::int
@@ -597,6 +636,7 @@ type ListRetentionWorkMerchantsParams struct {
 	ReplayCutoff             time.Time
 	MessageCutoff            time.Time
 	ListedRebillCutoff       time.Time
+	UsageTotalsCutoff        time.Time
 }
 
 // Retention sweep: due-work discovery.
@@ -622,6 +662,7 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.ReplayCutoff,
 		arg.MessageCutoff,
 		arg.ListedRebillCutoff,
+		arg.UsageTotalsCutoff,
 	)
 	if err != nil {
 		return nil, err

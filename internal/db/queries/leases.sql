@@ -79,11 +79,6 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.customer_id = sqlc.arg(c
   AND (sqlc.narg(except_lease)::uuid IS NULL OR f.lease_id <> sqlc.narg(except_lease)::uuid)
 GROUP BY f.limit_key, f.unit;
 
--- name: ListLeaseSettlements :many
--- How far some leases settled: a posting takes only settled usage.
-SELECT id, settled_through_n FROM billing.leases
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
-
 -- name: ListRunningRatesOf :many
 -- What many customers' running charges accrue per hour, by currency.
 SELECT customer_id, currency, SUM(rate_per_hour)::bigint AS rate_per_hour FROM billing.running_charges
