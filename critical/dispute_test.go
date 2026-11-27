@@ -50,6 +50,7 @@ func TestDisputes(t *testing.T) {
 	t.Run("OR-J46-S16/a-report-on-an-unknown-charge-is-answered", disputeUnknownCharge)
 	t.Run("OR-J46-S17/an-unmatched-nmi-chargeback-is-attached-by-the-operator", disputeNMIAttach)
 	t.Run("OR-J46-S18/a-chargeback-of-a-refunded-charge-says-to-contest-it", disputeNMIRefunded)
+	t.Run("OR-J46-S19/every-notice-of-an-unbookable-stripe-chargeback-is-one-finding", disputeUnbookableOnce)
 }
 
 // disputedMembership is alice's engine-renewed $10 Stripe membership with the
@@ -1281,4 +1282,29 @@ func disputeNMIRefunded(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A Stripe chargeback of a charge already refunded in full cannot be booked.
+// Each notice of the case (created, updated, funds withdrawn) reports the same
+// loss, so staff get one finding to repair, never one per notice.
+func disputeUnbookableOnce(t *testing.T) {
+	m := newDisputedMembership(t)
+	body := stripeNotice(t, "evt_unbookable_refund", "refund.created", stripemock.Object{"id": "re_unbookable", "object": "refund", "amount": int64(1000), "currency": "usd",
+		"charge": m.charge, "payment_intent": m.intent, "status": "succeeded", "reason": "requested_by_customer", "created": m.a.clock.Now().Unix(), "metadata": map[string]string{}})
+	status, raw := callback(t, m.a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
+	require.Equal(t, http.StatusOK, status, raw)
+	require.Len(t, m.reversals(t), 1)
+
+	d := m.dispute("dp_unbookable", "needs_response", "chargeback", "fraudulent")
+	m.notice(t, "evt_unbookable_created", "charge.dispute.created", d)
+	d["status"] = "under_review"
+	m.notice(t, "evt_unbookable_updated", "charge.dispute.updated", d)
+	m.notice(t, "evt_unbookable_withdrawn", "charge.dispute.funds_withdrawn", d)
+
+	require.Len(t, m.reversals(t), 1, "the refund leaves nothing to reverse")
+	require.False(t, m.entitled(t), "the chargeback still ends access")
+	findings, err := m.a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.ledger.unbooked"})
+	require.NoError(t, err)
+	require.Len(t, findings.Items, 1, "one loss, one finding to book it")
+	require.Contains(t, findings.Items[0].SubjectKey, "dp_unbookable")
 }
