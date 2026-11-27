@@ -2091,7 +2091,7 @@
     {
       "id": "OR-J16-S31",
       "journey": "J16",
-      "name": "Held awaiting-method expiry leaves the due pass until its recheck"
+      "name": "A held awaiting-method expiry is taken again by every pass, and one held a day past its due day is reported a day overdue"
     },
     {
       "id": "OR-J16-S32",

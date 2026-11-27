@@ -78,3 +78,27 @@ WHERE stopped_at IS DISTINCT FROM posted_through_at
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET due_at = LEAST(usage_pending.due_at, EXCLUDED.due_at);
 COMMENT ON TABLE billing.usage_pending IS 'A customer with usage or a running charge in a currency no posting has taken: the posting queue. Intake holds the row FOR KEY SHARE from before it writes its usage until it commits, and writes it only to move due_at earlier; a running charge''s start writes it under the customer lock; a posting locks it FOR UPDATE, so it waits for every intake of the customer, and deletes it once nothing is unposted.';
 COMMENT ON COLUMN billing.usage_pending.due_at IS 'When the daily posting takes it: the end of the merchant''s accounting-zone day its oldest unposted usage occurred in, or a running charge was last posted through.';
+
+-- The due pass runs hourly: a row it leaves unchanged is due again at the
+-- next pass, and one left a day shows in the pass's overdue report.
+CREATE OR REPLACE FUNCTION billing.subscriptions_row_version() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    unchanged billing.subscriptions := NEW;
+BEGIN
+    unchanged.facts_authority := OLD.facts_authority;
+    unchanged.row_version := OLD.row_version;
+    unchanged.destructive_run_class := OLD.destructive_run_class;
+    unchanged.rail_subscription_key := OLD.rail_subscription_key;
+    unchanged.checkout_invoice_id := OLD.checkout_invoice_id;
+    IF billing.rail_subscription_key(NEW.rail, NEW.rail_subscription_id) IS NOT DISTINCT FROM OLD.rail_subscription_key THEN
+        unchanged.rail_subscription_id := OLD.rail_subscription_id;
+    END IF;
+    IF unchanged IS NOT DISTINCT FROM OLD THEN
+        RETURN NEW;
+    END IF;
+    NEW.row_version := OLD.row_version + 1;
+    RETURN NEW;
+END;
+$$;
+ALTER TABLE billing.subscriptions DROP COLUMN due_recheck_at;

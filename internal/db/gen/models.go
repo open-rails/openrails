@@ -2399,8 +2399,6 @@ type BillingSubscription struct {
 	ProviderAccessDefaultSnapshot bool
 	// host: a host's legacy book landed the row and may still converge it; provider: provider evidence owns it, and a host book skips it. Moves only from host to provider.
 	FactsAuthority string
-	// The due pass left the row unchanged; it is not due again before this instant.
-	DueRecheckAt *time.Time
 	// rail_subscription_id as an identity (billing.rail_subscription_key): every lookup by provider id matches it. A provider contact matching it spelled otherwise rewrites rail_subscription_id to the provider's spelling.
 	RailSubscriptionKey *string
 	// The earliest retry the network's advice allowed, when that advice set the scheduled retry: at or past the next renewal it deferred every retry, and the case ends at grace_ends_at. NULL when the dunning policy set it.

@@ -37,18 +37,10 @@ const (
 	QueueBilling = "billing"
 	KindDunning  = "openrails.dunning"
 
-	// dueRecheckMin is the shortest wait of a row the pass left unchanged.
-	dueRecheckMin = time.Minute
-
 	// dunningMerchantBatch is one page of the merchants with due work. The
 	// work queue is indexed on the due-dunning predicate, so a pass costs its
 	// ACTIVITY, never the size of the merchant directory.
 	dunningMerchantBatch = 500
-
-	// dueRecheckMax bounds how long a row the pass left unchanged waits before
-	// it is looked at again: an operator's switch or a fixed configuration
-	// takes effect within it.
-	dueRecheckMax = time.Hour
 )
 
 // dunningOutcome classifies what a dunning pass did with one subscription.
@@ -68,7 +60,7 @@ const (
 	// resolved the obligation between this pass's scan and its admission.
 	dunningOutcomeSettled
 	// dunningOutcomeRefused: the row was left as it was (held, refused,
-	// unarmed); it waits for its recheck.
+	// unarmed); it is due again at the next pass.
 	dunningOutcomeRefused
 )
 
@@ -206,14 +198,12 @@ func (w *DunningWorker) due(ctx context.Context) error {
 				for _, sub := range dueSubscriptions {
 					outcome, processErr := w.processSubscription(mctx, &sub, lifecycle, priceSvc, materialize)
 					// One subscription's refusal never fails the pass: it becomes a
-					// standing operator finding, and the row waits for its recheck.
+					// standing operator finding, and the row is due again at the
+					// next pass; one left a day is the pass's overdue report.
 					if err := w.recordSubscriptionOutcome(mctx, &sub, processErr); err != nil {
 						merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, err))
 					}
 					if outcome == dunningOutcomeRefused || processErr != nil {
-						if err := w.deferDue(mctx, &sub, now); err != nil {
-							merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, err))
-						}
 						failCount++
 						continue
 					}
@@ -354,18 +344,6 @@ func (w *DunningWorker) recordSubscriptionOutcome(ctx context.Context, sub *mode
 		Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
 	})
 	return err
-}
-
-// deferDue takes a row the pass left unchanged out of the due set until its
-// recheck: half the time it has been due, at least one pass interval and at
-// most dueRecheckMax.
-func (w *DunningWorker) deferDue(ctx context.Context, sub *models.Subscription, now time.Time) error {
-	due := subscriptions.DueDunningCursorOf(sub).DueAt
-	if due.IsZero() {
-		due = now
-	}
-	wait := min(max(now.Sub(due)/2, dueRecheckMin), dueRecheckMax)
-	return w.DB.Gen(ctx).DeferDueSubscription(ctx, gen.DeferDueSubscriptionParams{MerchantID: sub.MerchantID, ID: sub.ID, RecheckAt: now.Add(wait)})
 }
 
 // processSubscription takes one due subscription's next step.

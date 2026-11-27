@@ -295,7 +295,7 @@
       "TestDunning/OR-J16-S30/a-seen-nmi-decline-opens-dunning-in-one-transaction"
     ],
     "OR-J16-S31": [
-      "TestDunning/OR-J16-S31/held-awaiting-method-expiry-waits-for-its-recheck"
+      "TestDunning/OR-J16-S31/held-awaiting-method-expiry-is-taken-by-every-pass-and-a-day-held-is-overdue"
     ],
     "OR-J16-S32": [
       "TestDunning/OR-J16-S32/due-pass-queues-an-nmi-retry-without-waiting-on-the-gateway"
