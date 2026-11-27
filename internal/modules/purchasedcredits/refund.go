@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // A voluntary refund of a bought lot's payment takes the lot's units off the
@@ -181,11 +182,11 @@ func (s *Service) refundUnits(ctx context.Context, q *gen.Queries, mid uuid.UUID
 		return 0, err
 	}
 	if lot.RevokedAt != nil || (lot.ExpiresAt != nil && !lot.ExpiresAt.After(s.now())) {
-		return 0, fmt.Errorf("credit grant is no longer refundable: %w", billing.ErrConflict)
+		return 0, apperr.Conflictf("credit grant is no longer refundable")
 	}
 	units := proportional(lot.Units, net.Cash+before+requested, paid, false) - proportional(lot.Units, net.Cash+before, paid, false)
 	if units > credits.Remaining(lot) || units > balance-unposted {
-		return 0, fmt.Errorf("refund requires unused purchased credit: %w", billing.ErrConflict)
+		return 0, apperr.Conflictf("refund requires unused purchased credit")
 	}
 	return units, nil
 }

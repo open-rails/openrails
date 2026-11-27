@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -196,6 +197,14 @@ func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.
 			return intents.Ambiguous("record duplicate refusal: " + err.Error())
 		}
 		return intents.Ambiguous("NMI refused the renewal as a duplicate of a recent charge; verifying whether that charge paid this period")
+	}
+	var rejected *nmi.CustomerVaultError
+	if errors.Is(err, nmi.ErrSaleRefused) && errors.As(err, &rejected) {
+		declined := intents.RecurringDecline{ResponseCode: rejected.ResponseCode, Reference: rejected.TransactionID, At: h.now()}
+		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, declined); err != nil {
+			return intents.Ambiguous("retain engine refusal: " + err.Error())
+		}
+		return h.Verify(ctx, in)
 	}
 	if err != nil {
 		return intents.Ambiguous("engine submission requires exact receipt recovery: " + err.Error())
@@ -397,6 +406,59 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Billi
 	}
 	return h.lostSubmission(ctx, in, p)
 }
+
+// Resolve qualifies operator evidence through the renewal's normal completion paths.
+func (h *SubscriptionCollectionHandler) Resolve(ctx context.Context, in gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
+	if in.Rail != "nmi" {
+		return intents.Outcome{}, intents.RejectResolution("only NMI engine renewals accept operator resolution")
+	}
+	if resolution.Step != "" {
+		return intents.Outcome{}, intents.RejectResolution("engine renewal has no steps")
+	}
+	p, err := subscriptions.DecodeSubscriptionCollectionPayload(in)
+	if err != nil {
+		return intents.Outcome{}, err
+	}
+	if !resolution.NotExecuted {
+		receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, h.Resolver, resolution.ProviderReference)
+		if err != nil || !found {
+			return intents.Outcome{}, intents.RejectResolution("exact renewal receipt is unavailable or contradicts accepted terms")
+		}
+		return h.completePaid(ctx, in, p, receipt), nil
+	}
+	if _, paid, err := intents.LoadCollectedReceipt(in); err != nil {
+		return intents.Outcome{}, intents.RejectResolution("cannot read retained renewal receipt: %v", err)
+	} else if paid {
+		return intents.Outcome{}, intents.RejectResolution("renewal has a collected receipt; use --receipt")
+	}
+	// NMI answered approved with this transaction: only its receipt settles it.
+	if _, retained, err := intents.LoadCollectionCandidate(in); err != nil {
+		return intents.Outcome{}, intents.RejectResolution("cannot read retained renewal candidate: %v", err)
+	} else if retained {
+		return intents.Outcome{}, intents.RejectResolution("renewal has a retained collection candidate; use --receipt")
+	}
+	if _, paid, err := intents.ReadNMICollectionReceipt(ctx, in, h.Resolver, ""); err != nil {
+		return intents.Outcome{}, intents.RejectResolution("NMI renewal receipt search is inconclusive: %v", err)
+	} else if paid {
+		return intents.Outcome{}, intents.RejectResolution("NMI shows a collected renewal; use --receipt")
+	}
+	order, err := intents.ReadNMIOrderAttempts(ctx, in, h.Resolver)
+	if err != nil {
+		return intents.Outcome{}, intents.RejectResolution("NMI order search is unavailable: %v", err)
+	}
+	if order.Declined {
+		refusal := intents.RecurringDecline{ResponseCode: order.DeclineCode, Reference: order.DeclineTransactionID, Issuer: order.DeclineIssuer, At: order.DeclineAt}
+		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, refusal); err != nil {
+			return intents.Outcome{}, err
+		}
+		return h.completeDeclined(ctx, in, p, refusal), nil
+	}
+	if order.Transactions != 0 {
+		return intents.Outcome{}, intents.RejectResolution("NMI order holds transactions without one definitive decline; use --receipt for a collected renewal")
+	}
+	return h.completeNotExecuted(ctx, in, p, "not_executed", "operator attested release after NMI order search showed zero transactions"), nil
+}
+
 func (h *SubscriptionCollectionHandler) completeEvidence(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
 	if receipt, found, err := intents.LoadCollectedReceipt(in); err != nil {
 		return intents.Ambiguous(err.Error()), true
@@ -427,7 +489,7 @@ func (h *SubscriptionCollectionHandler) lifecycle(d *db.DB) *subscriptions.Subsc
 	lc.SetConfig(h.Config)
 	return lc
 }
-func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, outcome intents.Outcome, apply func(context.Context, *db.DB, *models.Subscription) error) intents.Outcome {
+func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, outcome intents.Outcome, apply func(context.Context, *db.DB, *models.Subscription, gen.BillingProviderIntent) error) intents.Outcome {
 	if err := h.hit(ctx, in, failpoint.BeforeComplete); err != nil {
 		return intents.Ambiguous(err.Error())
 	}
@@ -447,7 +509,7 @@ func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.B
 			return err
 		}
 		if current.Status != intents.StatusSucceeded && current.Status != intents.StatusFailedTerminal {
-			if err := apply(ctx, d, sub); err != nil {
+			if err := apply(ctx, d, sub, current); err != nil {
 				return err
 			}
 		}
@@ -483,11 +545,11 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 		}
 	}
 	outcome := intents.Succeeded(map[string]any{"transaction_id": retained.TransactionID(), "rail": in.Rail, "verified_existing": true})
-	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
-		if err := h.renewMembership(ctx, d, in, p, retained, params, sub); err != nil {
+	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription, current gen.BillingProviderIntent) error {
+		if err := h.renewMembership(ctx, d, current, p, retained, params, sub); err != nil {
 			return err
 		}
-		return h.renewalInvoicePaid(ctx, d, in, p, retained.TransactionID())
+		return h.renewalInvoicePaid(ctx, d, in, p, retained.TransactionID(), params.KeepCanceled)
 	})
 }
 
@@ -511,7 +573,21 @@ func (h *SubscriptionCollectionHandler) renewMembership(ctx context.Context, d *
 			}
 			return nil
 		}
-		if sub.Status == models.StatusCanceled || (!current && !replay) {
+		if current && sub.Status == models.StatusCanceled && sub.CanceledAt != nil && sub.EndedAt != nil && !sub.EndedAt.Before(p.PreviousPeriodEnd) && sub.CancelType != nil && (*sub.CancelType == models.CancelTypeUser || *sub.CancelType == models.CancelTypeMerchant) {
+			params.KeepCanceled = intents.EvidenceString(in, "cancel_revoked_access_at") == ""
+			// A replacement holding the slot (live, paid through now, awaiting its
+			// first payment or an unpaid invoice) means the late charge is refunded.
+			if params.KeepCanceled {
+				slot := intents.MembershipSlot{MerchantID: in.MerchantID, CustomerID: sub.CustomerID, ProductID: p.Renewal.ProductID, At: h.now()}
+				var held *apperr.Error
+				if err := slot.Refuse(ctx, d.Gen(ctx)); errors.As(err, &held) {
+					params.KeepCanceled = false
+				} else if err != nil {
+					return err
+				}
+			}
+		}
+		if sub.Status == models.StatusCanceled && !params.KeepCanceled || (!current && !replay) {
 			params.PaymentMetadata = map[string]any{"refund_review": "accepted engine charge completed after lifecycle changed"}
 			if err := h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params); err != nil || sub.Status != models.StatusCanceled {
 				return err
@@ -539,7 +615,7 @@ func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in 
 	if declined.IsZero() {
 		declined = h.now()
 	}
-	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
+	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription, _ gen.BillingProviderIntent) error {
 		if err := recordEngineAttempt(ctx, d, in, p, attempts.Attempt{Answer: answer, TransactionID: reference}, declined); err != nil {
 			return err
 		}
@@ -570,7 +646,7 @@ func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in 
 			if gate := destructive.New(d).Check(ctx, in.MerchantID); !gate.Allowed {
 				blocked = gate.Reason
 			}
-			return h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Prepared: &p.Renewal, DeclinedMethodRef: p.Instrument.RailMethodRef, Rail: models.Rail(in.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureID: in.ID, FailureCode: &code, FailureReason: &reason, Decline: action, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked, RetryAfter: verdict.RetryAfter, DeclinedAt: declined})
+			return h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Prepared: &p.Renewal, DeclinedMethodRef: p.Instrument.RailMethodRef, Rail: models.Rail(in.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureID: in.ID, FailureCode: &code, FailureReason: &reason, Decline: action, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked, RetryAfter: verdict.RetryAfter, DeclinedAt: declined, CustomerAttempt: p.Initiator == charge.InitiatorCustomer})
 		}
 		return nil
 	})
@@ -585,12 +661,18 @@ func (h *SubscriptionCollectionHandler) completeNotExecuted(ctx context.Context,
 		}
 	}
 	outcome := intents.TerminalWithEvidence(reason, map[string]any{"not_executed": true, "declined": false, "not_executed_code": code})
-	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, _ *models.Subscription) error {
+	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription, current gen.BillingProviderIntent) error {
+		if intents.EvidenceString(current, unresolvedRenewalGraceKey) != "" && sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) {
+			if err := h.lifecycle(d).SetSubmittedRenewalGrace(ctx, d, sub, false); err != nil {
+				return err
+			}
+		}
 		return h.renewalInvoiceUnpaid(ctx, d, in, p, billing.DeclineReason("try_again_later").Failure())
 	})
 }
 
 var _ intents.Handler = (*SubscriptionCollectionHandler)(nil)
+var _ intents.OperatorResolver = (*SubscriptionCollectionHandler)(nil)
 
 // recordEngineAttempt records an engine charge's answer for its rebill cycle
 // (#1111) in the completion transaction.

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
-import { Link, useNavigate, useParams } from "react-router-dom"
-import { SignInDialog } from "@openrails/auth-ui"
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
+import { OwnerSetup, SignInDialog } from "@openrails/auth-ui"
+import { readSetupToken } from "@openrails/auth-ui/client"
 import { useAuth } from "@openrails/auth-ui/react"
 import { BuyButton, ProductList } from "@openrails/billing-ui"
 import type { Price, Product } from "@openrails/billing-ui/client"
@@ -128,5 +129,19 @@ export function CourseBuyPage() {
       />
       <SignInDialog open={signingIn} onOpenChange={setSigningIn} />
     </>
+  )
+}
+
+// SetupPage opens the first owner's setup link: while no account holds a
+// root role, ak.Start logs a single-use /setup#token=… link at the issuer's
+// origin. It creates the owner account and signs them in.
+export function SetupPage() {
+  const navigate = useNavigate()
+  const { hash } = useLocation()
+  return (
+    <OwnerSetup
+      token={readSetupToken(hash)}
+      navigate={(to) => navigate(to, { replace: true })}
+    />
   )
 }

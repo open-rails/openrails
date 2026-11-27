@@ -677,24 +677,58 @@ export const usageRowSchema = z.object({
 export type UsageRow = z.infer<typeof usageRowSchema>
 
 /**
- * One page of the customer's usage in `currency` over [`from`, `to`): its
- * groups by total amount, largest first, then by key. `next_cursor` reads the
- * next page; null on the last.
+ * One page of the customer's usage in `currency` over the days of `timezone`
+ * overlapping [`from`, `to`): its groups by total amount, largest first, then
+ * by key, each at the prices usage was taken at. `discount` is what volume
+ * tiers took off the window, so the rows less it are what posts.
+ * `next_cursor` reads the next page; null on the last.
  */
 export const usageSchema = z.object({
   customer_id: z.string(),
   currency: z.string(),
+  timezone: z.string(),
   from: time,
   to: time,
   /** `event_type | invoker | meter`; kept open for new values. */
   group_by: z.string(),
   rows: z.array(usageRowSchema),
+  discount: amount,
   next_cursor: z
     .string()
     .nullish()
     .transform((v) => v ?? null),
 })
 export type Usage = z.infer<typeof usageSchema>
+
+/**
+ * One bucket of a usage series: its local start, its groups and what volume
+ * tiers took off it.
+ */
+export const usageBucketSchema = z.object({
+  starts_at: time,
+  rows: z.array(usageRowSchema),
+  discount: amount,
+})
+export type UsageBucket = z.infer<typeof usageBucketSchema>
+
+/**
+ * The customer's usage over time: one bucket per `interval` of `timezone`'s
+ * calendar from `from` to `to` (the asked window widened to whole buckets),
+ * empty ones included. Hours count from each day's first instant, so a day
+ * the clocks change has 23 or 25; weeks start Monday.
+ */
+export const usageSeriesSchema = z.object({
+  customer_id: z.string(),
+  currency: z.string(),
+  /** `hour | day | week | month`; kept open for new values. */
+  interval: z.string(),
+  timezone: z.string(),
+  from: time,
+  to: time,
+  group_by: z.string(),
+  buckets: z.array(usageBucketSchema),
+})
+export type UsageSeries = z.infer<typeof usageSeriesSchema>
 
 /** Currency code (upper case) to its native-unit scale. */
 export type CurrencyScales = Readonly<Record<string, number>>

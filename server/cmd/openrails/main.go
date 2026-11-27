@@ -123,7 +123,7 @@ func newRootCmd() *cobra.Command {
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, newMigrateStatusCmd())
 	// Drop cobra's auto-generated `completion` subcommand.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newSetupLinkCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newCatalogCmd(), newPruneCmd(), newProposalsCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd(), newNMICmd(), newSolanaPayCmd(), newBookCmd(), newMerchantCmd(), newMerchantsCmd(), newWorkersCmd(), newProviderRefreshCmd(), newAdminLockoutsCmd(), newDestructiveHoldsCmd(), newUsageCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newSetupLinkCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newCatalogCmd(), newPruneCmd(), newProposalsCmd(), newUndoRunCmd(), newIntentsCmd(), newDisputesCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd(), newNMICmd(), newSolanaPayCmd(), newBookCmd(), newMerchantCmd(), newMerchantsCmd(), newWorkersCmd(), newProviderRefreshCmd(), newAdminLockoutsCmd(), newDestructiveHoldsCmd(), newUsageCmd())
 	rootCmd.AddCommand(versionCmd)
 	return rootCmd
 }

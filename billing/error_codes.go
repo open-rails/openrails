@@ -130,6 +130,12 @@ const (
 	// CodeInvalidQuery: a query parameter is malformed or out of range;
 	// param is the parameter.
 	CodeInvalidQuery ErrorCode = "invalid_query"
+	// CodeTooManyBuckets: a series' window at its interval holds more
+	// buckets than it answers; param is interval.
+	CodeTooManyBuckets ErrorCode = "too_many_buckets"
+	// CodeUsageEventsExpired: a read by invoker reaches before the raw
+	// usage events kept (90 days); param is the window's start.
+	CodeUsageEventsExpired ErrorCode = "usage_events_expired"
 	// CodeInvalidCursor: the list cursor is not one this list issued.
 	CodeInvalidCursor        ErrorCode = "invalid_cursor"
 	CodeUnsupportedMediaType ErrorCode = "unsupported_media_type"
@@ -324,6 +330,8 @@ var errorCodes = []ErrorCodeInfo{
 	// Request shape and transport.
 	{CodeUnknownField, 400, invalid, "The JSON body names a field the route does not accept; param is the field."},
 	{CodeInvalidQuery, 400, invalid, "A query parameter is malformed or out of range; param is the parameter."},
+	{CodeTooManyBuckets, 400, invalid, "The window at the interval holds more buckets than a series answers (a usage series: 1,000); shorten the window or widen the interval. param is interval."},
+	{CodeUsageEventsExpired, 400, invalid, "Usage by invoker reads raw usage events, kept 90 days; the window starts before them. History by event type and meter reaches back further. param is the window's start."},
 	{CodeInvalidCursor, 400, invalid, "The cursor is not one this list issued."},
 	{CodeEventCursorExpired, 410, invalid, "The event cursor is no longer retained; resynchronize current state."},
 	{CodeInvalidRequestBody, 400, invalid, "The request body could not be read or is not one JSON value."},

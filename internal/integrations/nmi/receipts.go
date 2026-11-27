@@ -63,7 +63,7 @@ func (c *NMIClient) ConfirmLiveSubscription(ctx context.Context, subscriptionID,
 }
 
 // ConfirmRefund reads the refund transaction by its exact id and requires an
-// approved refund of exactly amount and currency on the original transaction's vault. A
+// approved refund of exactly amount and currency of the original transaction, on its vault. A
 // zero amount means a full refund of the original sale.
 func (c *NMIClient) ConfirmRefund(ctx context.Context, originalTransactionID, refundTransactionID string, amount moneyutil.Cents, currency string) error {
 	original, found, err := c.GetPayment(ctx, originalTransactionID)
@@ -98,6 +98,13 @@ func (c *NMIClient) ConfirmRefund(ctx context.Context, originalTransactionID, re
 		return receiptMismatch("refund %s is not on the original transaction's customer vault", refundTransactionID)
 	case !successfulAction(refund, "refund", amount):
 		return receiptMismatch("refund %s has no successful refund of %d minor units", refundTransactionID, amount)
+	}
+	report, err := c.scoped().TransactionReport(ctx, QueryFilter{TransactionID: refundTransactionID})
+	if err != nil {
+		return err
+	}
+	if len(report.Transactions) != 1 || report.Transactions[0].TransactionID != refundTransactionID || report.Transactions[0].OriginalTransactionID != originalTransactionID {
+		return receiptMismatch("refund %s is not a refund of transaction %s", refundTransactionID, originalTransactionID)
 	}
 	return nil
 }

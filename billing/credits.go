@@ -450,12 +450,11 @@ type MerchantSettings struct {
 // AccountingSettings date a merchant's books.
 type AccountingSettings struct {
 	// Timezone is the IANA zone (Europe/Berlin) whose days and months the
-	// metrics, MRR reports and usage history group in, and at whose month
-	// ends usage posts; empty is UTC. Rollups are kept in UTC quarter hours,
-	// and usage history in UTC hours, so a change regroups every day and
-	// month, past ones too; a zone whose offset is not whole hours has its
-	// usage days cut at the hour. Posted books keep their effective instants
-	// and never change.
+	// metrics, MRR reports and usage history group in, and where usage posts
+	// at the end of each day; empty is UTC. Rollups and usage history are
+	// kept in UTC quarter hours, so a change regroups every day and month,
+	// past ones too. Posted books keep their effective instants and never
+	// change.
 	Timezone string `json:"timezone,omitempty"`
 }
 
@@ -584,7 +583,9 @@ type DunningPolicy struct {
 	// AccessWhileRenewalHeld is DunningAccessKeep (default: a renewal with no
 	// outcome because collection is stopped keeps access until it is
 	// attempted) or DunningAccessSuspend (access ends at the renewal
-	// allowance, min(24h, max(2h, period/10)) past the paid period).
+	// allowance, min(24h, max(2h, period/10)) past the paid period, while
+	// nothing is sent). An NMI charge sent but unresolved keeps access
+	// under either policy; proven nonexecution restores this held-renewal rule.
 	AccessWhileRenewalHeld DunningAccess `json:"access_while_renewal_held,omitempty"`
 }
 

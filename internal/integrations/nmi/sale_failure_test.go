@@ -19,6 +19,20 @@ func TestSaleRefusalClassification(t *testing.T) {
 			if errors.Is(err, ErrSaleRefused) != refused || !RequiresVerification(err) {
 				t.Fatalf("classification: %v", err)
 			}
+			for _, state := range []string{"", "failed", "complete", "pending", "unknown"} {
+				for _, success := range []string{"0", "1", ""} {
+					action := QueryAction{ActionType: "sale", Success: success, ResponseCode: fmt.Sprint(code)}
+					got, closed := action.DefinitiveDecline(state)
+					want := refused && success == "0" && (state == "" || state == "failed" || state == "complete")
+					if closed != want || (closed && got != code) {
+						t.Fatalf("query refusal %d/%s/%s: %d, %t", code, state, success, got, closed)
+					}
+					action.ActionType = "validate"
+					if _, closed := action.DefinitiveDecline(state); closed {
+						t.Fatalf("gateway refusal qualified a validation: %d/%s/%s", code, state, success)
+					}
+				}
+			}
 			if refused {
 				var detail *CustomerVaultError
 				if !errors.As(err, &detail) || detail.ResponseCode != code || detail.LocalizationID == "" || detail.CustomerVaultID != "vault" {
@@ -41,9 +55,18 @@ func TestSaleRefusalClassification(t *testing.T) {
 			t.Fatalf("unreadable answer %q: %v", raw, err)
 		}
 	}
-	_, err := ParseSaleResponse("response=3&response_code=300&responsetext=Duplicate+transaction", 100, "USD")
-	if !errors.Is(err, ErrDuplicateTransaction) || errors.Is(err, ErrSaleRefused) || !RequiresVerification(err) {
-		t.Fatalf("duplicate: %v", err)
+	for _, text := range []string{"Duplicate transaction", "  DUPLICATE TRANSACTION REFID:3187654321  "} {
+		fields.Set("responsetext", text)
+		_, err := ParseSaleResponse(fields.Encode(), 100, "USD")
+		if !errors.Is(err, ErrDuplicateTransaction) || errors.Is(err, ErrSaleRefused) || !RequiresVerification(err) {
+			t.Fatalf("duplicate: %v", err)
+		}
+		for _, state := range []string{"", "failed", "complete"} {
+			action := QueryAction{ActionType: "sale", Success: "0", ResponseCode: "300", ResponseText: text}
+			if _, closed := action.DefinitiveDecline(state); closed {
+				t.Fatalf("duplicate query refusal closed: %q/%s", text, state)
+			}
+		}
 	}
 }
 

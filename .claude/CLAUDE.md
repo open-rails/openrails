@@ -225,8 +225,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   sources (`order`, `order_line`). Never rename them.
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
 - Usage events live in ClickHouse (`Deps.ClickHouse`, `internal/eventstore`, its own embedded
-  migrations); money stays in PostgreSQL. Usage posts to the ledger at each month's end in
-  `accounting.timezone` and before any other movement of the balance, as the period's total
+  migrations); money stays in PostgreSQL. Usage posts to the ledger daily, once its day ends in
+  `accounting.timezone`, and before any other movement of the balance, as the period's total
   price less earlier postings (`usage_postings`); money reads use `FINAL`. Whether
   `Deps.ClickHouse` is set decides usage: without it the event-backed routes
   (`Route.EventStore`), catalog declarations and settings answer 409 `event_store_required`.

@@ -186,8 +186,11 @@ func (s *Service) respondChargeback(ctx context.Context, id uuid.UUID) error {
 	done := func(ctx context.Context, d *db.DB) error {
 		return d.Gen(ctx).MarkDisputeResponded(ctx, gen.MarkDisputeRespondedParams{MerchantID: mid.UUID(), ID: id, RespondedAt: s.now()})
 	}
-	if dispute.Kind != string(billing.DisputeChargeback) || dispute.Status == string(billing.DisputeWon) || dispute.PaymentID == nil {
+	if dispute.Kind != string(billing.DisputeChargeback) || dispute.Status == string(billing.DisputeWon) {
 		return done(ctx, s.DB)
+	}
+	if dispute.PaymentID == nil {
+		return q.MarkUnmatchedDisputeResponded(ctx, gen.MarkUnmatchedDisputeRespondedParams{MerchantID: mid.UUID(), ID: id, RespondedAt: s.now()})
 	}
 	payment, err := payments.NewPaymentService(s.DB, s.Clock).GetByID(ctx, *dispute.PaymentID)
 	if err != nil {

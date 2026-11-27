@@ -355,13 +355,15 @@ type itemCharge struct {
 	meter, cell, print string
 	model              catalog.Model
 	quantity, stated   int64
-	amount             int64
+	amount, discount   int64
 }
 
 // priceItems resolves each item's cards and quantities and prices them
 // provisionally: each group sharing a period, meter cell and print is
 // charged R(Q + Σq) - R(Q) at the period position Q intake read, never below
-// zero, shared out by quantity.
+// zero, shared out by quantity. Where a volume tier's price falls, the fall
+// is the group's discount, shared the same way, for history: amounts less
+// discounts sum to the period's price.
 func (s *MoneyService) priceItems(ctx context.Context, q *gen.Queries, b *UsageIntake, defs []limits.Definition, meters map[string]limits.Meter,
 	granted map[uuid.UUID]map[string]bool, anchors map[account]periodAnchor) ([]pricedItem, error) {
 	priced := make([]pricedItem, len(b.items))
@@ -514,7 +516,7 @@ func (s *MoneyService) priceItems(ctx context.Context, q *gen.Queries, b *UsageI
 			}
 		}
 		before = max(before, 0)
-		shares := make([]int64, len(g.members))
+		shares, discounts := make([]int64, len(g.members)), make([]int64, len(g.members))
 		if g.card.Price.Model == catalog.ModelDynamic {
 			for j, m := range g.members {
 				if m.quantity > 0 {
@@ -530,13 +532,13 @@ func (s *MoneyService) priceItems(ctx context.Context, q *gen.Queries, b *UsageI
 			for j, m := range g.members {
 				quantities[j] = m.quantity
 			}
-			shares = share(max(amount, 0), quantities)
+			shares, discounts = share(max(amount, 0), quantities), share(max(-amount, 0), quantities)
 		}
 		position[g.account][g.key] = addSat(before, g.total)
 		for j, m := range g.members {
 			p := &priced[m.item]
 			p.charges = append(p.charges, itemCharge{meter: g.key.meter, cell: g.key.cell, print: g.print, model: g.card.Price.Model,
-				quantity: m.quantity, stated: m.stated, amount: shares[j]})
+				quantity: m.quantity, stated: m.stated, amount: shares[j], discount: discounts[j]})
 		}
 	}
 	for i := range b.items {
@@ -634,6 +636,9 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 			}
 			for _, fp := range periods {
 				end := fp.end
+				if !end.After(b.now) {
+					continue
+				}
 				p.limits = append(p.limits, eventstore.UsageLimit{Key: failedLimitKey(it.Currency, fp.window.Key, it.Delegated, it.Invoker),
 					WindowStartsAt: fp.start, WindowEndsAt: &end, Units: *it.Amount})
 			}
@@ -642,8 +647,11 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 		}
 		amount := res.Amount
 		res.Units = map[string]int64{catalog.BalanceLimit: amount}
+		// A window that ended before the intake is over: usage counts toward
+		// it no more (a late resend's included) and opens nothing; its rows
+		// are deleted a day after its end (retention.LimitWindows).
 		add := func(key string, w limits.Window, units int64) {
-			if units == 0 {
+			if units == 0 || over(w, b.now) {
 				return
 			}
 			p.limits = append(p.limits, eventstore.UsageLimit{Key: key, WindowStartsAt: w.StartsAt.UTC(), WindowEndsAt: w.EndsAt, Units: units})
@@ -689,6 +697,9 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 			if !counts || units == 0 {
 				continue
 			}
+			if c.Opens && over(limits.Opening(def.Reset, at), b.now) || !c.Opens && over(bucketed(def.Reset, c.Window, at), b.now) {
+				continue
+			}
 			w := c.Window
 			switch {
 			case c.Opens:
@@ -726,6 +737,11 @@ func (b *UsageIntake) keep(customer uuid.UUID, key string, c limits.Claim) {
 		}
 	}
 	b.opens[customer] = append(b.opens[customer], limitOpening{key: key, window: c.Window, capacity: c.Capacity})
+}
+
+// over reports a window that ended at or before now.
+func over(w limits.Window, now time.Time) bool {
+	return w.EndsAt != nil && !w.EndsAt.After(now)
 }
 
 // bucketed is where a limit counts an item in window w: a rolling or rate
@@ -833,9 +849,8 @@ func (b *UsageIntake) event(i int, it UsageItem, p pricedItem) *eventstore.Usage
 	res := b.Results[i]
 	outcome := eventstore.UsageSucceeded
 	charged, forgiven := int64(0), int64(0)
-	amount := res.Amount
 	if it.Failed {
-		outcome, charged, forgiven, amount = eventstore.UsageFailed, res.Amount, res.Forgiven, res.Amount
+		outcome, charged, forgiven = eventstore.UsageFailed, res.Amount, res.Forgiven
 	}
 	admitted := admittedAt(it, b.now)
 	invokerType := string(billing.InvokerTypeCustomer)
@@ -849,10 +864,11 @@ func (b *UsageIntake) event(i int, it UsageItem, p pricedItem) *eventstore.Usage
 	e := &eventstore.UsageEvent{EventID: it.EventID, CustomerID: billing.CustomerID(it.Customer.UUID()), Currency: it.Currency, EventType: it.EventType,
 		Invoker: it.Invoker, InvokerType: invokerType, Outcome: outcome, Source: it.Source, SourceID: it.SourceID, LeaseID: it.LeaseID,
 		N: uint64(max(it.N, 0)), OccurredAt: it.OccurredAt, AdmittedAt: admitted, IngestedAt: b.now, PeriodStartsAt: period,
-		Dimensions: it.Dimensions, Metadata: it.metadata, Amount: amount, Stated: it.Amount,
+		Dimensions: it.Dimensions, Metadata: it.metadata, Stated: it.Amount,
 		Charged: charged, Forgiven: forgiven, Limits: p.limits}
 	for _, c := range p.charges {
-		e.Charges = append(e.Charges, eventstore.UsageCharge{Meter: c.meter, Cell: c.cell, Print: c.print, Quantity: c.quantity, Stated: c.stated})
+		e.Charges = append(e.Charges, eventstore.UsageCharge{Meter: c.meter, Cell: c.cell, Print: c.print, Quantity: c.quantity, Stated: c.stated,
+			Amount: c.amount, Discount: c.discount})
 	}
 	return e
 }
@@ -902,7 +918,7 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 		// charge posts below.
 		m.pending = addSat(m.pending, b.Results[i].Amount)
 		if zone == nil {
-			if zone, err = s.accountingZone(ctx); err != nil {
+			if zone, err = s.AccountingZone(ctx); err != nil {
 				return err
 			}
 		}

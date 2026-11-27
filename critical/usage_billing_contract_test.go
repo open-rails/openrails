@@ -542,7 +542,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.False(t, invoice.Usage.PeriodStartsAt.After(occurred), "the period %s..%s covers the usage at %s",
 			invoice.Usage.PeriodStartsAt, invoice.Usage.PeriodEndsAt, occurred)
 		require.True(t, occurred.Before(invoice.Usage.PeriodEndsAt))
-		require.False(t, invoice.Usage.PeriodEndsAt.Before(a.clock.Now()), "and runs to its bill")
+		require.False(t, invoice.Usage.PeriodEndsAt.Before(a.clock.Now()), "and runs to its bill: %s, now %s", invoice.Usage.PeriodEndsAt, a.clock.Now())
 	})
 	t.Run("OR-J26-S58/revoking-the-agreement-bills-todays-usage", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, false)
@@ -654,5 +654,51 @@ func TestUsageBillingContracts(t *testing.T) {
 		out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}})
 		require.NotNil(t, out.LimitSets[0].Refusal)
 		require.Equal(t, billing.DenyDelinquentUnpaidInvoice, out.LimitSets[0].Refusal.DenyCode)
+	})
+	t.Run("OR-J26-S65/customer-balances-show-the-admitted-mode-prepaid-without-a-card-and-arrears-with-one", func(t *testing.T) {
+		a, _, alice := usageBillingAccount(t, false)
+		bob := billing.CustomerID(uuid.MustParse(a.bob.ID))
+		_, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{
+			{CustomerID: bob, Currency: "USD", Amount: 1_000_000, Source: "merchant", SourceID: "usage-mode"},
+			{CustomerID: alice, Currency: "USD", Amount: 1_000_000, Source: "merchant", SourceID: "usage-mode"},
+		})
+		require.NoError(t, err)
+		var settings int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(a.world, "money_settings")+" WHERE merchant_id=$1 AND customer_id=$2",
+			a.alpha.MerchantID().UUID(), bob.UUID()).Scan(&settings))
+		require.Zero(t, settings)
+		for _, customer := range []struct {
+			id         billing.CustomerID
+			token      string
+			mode       billing.BillingMode
+			creditLine int64
+		}{
+			{bob, a.bobToken, billing.BillingModePrepaid, 0},
+			{alice, a.aliceToken, billing.BillingModeArrears, 30_000_000},
+		} {
+			admin, err := a.alphaRemote.GetBalance(t.Context(), customer.id, billing.GetBalanceParams{Currency: "USD"})
+			require.NoError(t, err)
+			require.Equal(t, customer.mode, admin.BillingMode)
+			require.EqualValues(t, 1_000_000, admin.BalanceAmount)
+			status, raw := a.request(t, http.MethodGet, "/v1/me", customer.token, nil)
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var me billing.CustomerAccount
+			require.NoError(t, json.Unmarshal(raw, &me))
+			require.Len(t, me.Balances, 1)
+			require.Equal(t, catalog.Currency("USD"), me.Balances[0].Currency)
+			require.Equal(t, customer.mode, me.Balances[0].BillingMode)
+			limits, err := a.alphaRemote.ListCustomerLimits(t.Context(), billing.CustomerLimitListParams{CustomerID: customer.id})
+			require.NoError(t, err)
+			require.Empty(t, limits.Next)
+			var balanceLine billing.CustomerLimit
+			for _, line := range limits.Items {
+				if line.Limit == catalog.BalanceLimit && line.Unit == "USD" {
+					balanceLine = line
+					break
+				}
+			}
+			require.Equal(t, catalog.BalanceLimit, balanceLine.Limit)
+			require.Equal(t, admin.BalanceAmount+customer.creditLine, balanceLine.Capacity)
+		}
 	})
 }

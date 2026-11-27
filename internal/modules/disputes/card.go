@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -115,9 +116,9 @@ func ChargeSubscriptions(ctx context.Context, d *db.DB, payment *models.Payment)
 // at once with its access when revoke, else at period end. A subscription
 // no longer active is left as it is.
 func endSubscription(ctx context.Context, d *db.DB, lc *subscriptions.SubscriptionLifecycleService, id uuid.UUID, cancelType models.CancelType, revoke bool, cause string) error {
-	sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, id)
+	sub, err := subscriptions.NewSubscriptionRepo(d).GetByID(ctx, id)
 	if err != nil {
-		return fmt.Errorf("lock subscription %s: %w", id, err)
+		return fmt.Errorf("load subscription %s: %w", id, err)
 	}
 	rail := sub.Rail
 	_, err = lc.CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{
@@ -154,7 +155,29 @@ func raiseCustomerReview(ctx context.Context, d *db.DB, dispute gen.BillingDispu
 	if note != "" {
 		action += " " + note
 	}
-	action += " Review the customer: refund or block further purchases if the pattern continues."
+	var refunded, chargeAmount int64
+	var currency string
+	if dispute.PaymentID != nil {
+		charge, err := d.Gen(ctx).GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: dispute.MerchantID, ID: *dispute.PaymentID})
+		if err != nil {
+			return fmt.Errorf("read disputed charge: %w", err)
+		}
+		chargeAmount, currency = charge.Amount, charge.Currency
+		rows, err := d.Gen(ctx).ListRefundsForPayment(ctx, gen.ListRefundsForPaymentParams{MerchantID: dispute.MerchantID, RefundedPaymentID: dispute.PaymentID})
+		if err != nil {
+			return fmt.Errorf("read disputed charge refunds: %w", err)
+		}
+		for _, row := range rows {
+			if row.Status == "succeeded" && row.ReversalKind != nil && *row.ReversalKind == "refund" {
+				refunded -= row.Amount
+			}
+		}
+	}
+	if refunded > 0 {
+		action += fmt.Sprintf(" The charge was already refunded (%s of %s): contest the chargeback with your processor and cite the refund.", moneyutil.FormatAmount(refunded, currency), moneyutil.FormatAmount(chargeAmount, currency))
+	} else {
+		action += " OpenRails does not block customers; to stop serving this customer, suspend their account in your application."
+	}
 	_, err = (&reconcile.PGStore{DB: d}).RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingCustomerReview, SubjectKey: id, Severity: reconcile.SeverityMedium, RecommendedAction: action,
 		Evidence: map[string]any{"customer_id": id, "dispute_id": billing.DisputeID(dispute.ID).String(), "reason": dispute.Reason,

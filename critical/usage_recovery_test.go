@@ -286,7 +286,7 @@ products:
 		postDays(t, fleet)
 		balance(t, w.alpha, customer, 700, 0, 700)
 		// Fixture: the store is restored from a backup older than that usage.
-		for _, table := range []string{"usage_events", "limit_usage", "usage_quantities", "usage_minutes", "usage_history"} {
+		for _, table := range []string{"usage_events", "limit_usage", "usage_quantities", "usage_history"} {
 			require.NoError(t, w.deps.ClickHouse.Exec(t.Context(), "ALTER TABLE `"+w.schema+"`."+table+" DELETE WHERE merchant_id = toUUID(?) SETTINGS mutations_sync = 2",
 				w.alpha.MerchantID().String()))
 		}
@@ -308,7 +308,7 @@ products:
 		require.Len(t, usageDeductions(t, w.alpha, customer), 2)
 	})
 
-	t.Run("OR-J24-S63/an-erasure-run-again-after-stopping-part-way-keeps-history-whole", func(t *testing.T) {
+	t.Run("OR-J24-S63/an-erasure-run-again-after-stopping-part-way-clears-the-events-and-leaves-history-alone", func(t *testing.T) {
 		var conn *failingConn
 		a := newAuthorityWorld(t, func(w *world) {
 			w.deps.UserInfo = nil
@@ -327,19 +327,24 @@ products:
 		settleUsage(t, a.alpha, newLease(), numbered(1, usageInput(customer, "first", 2), usageInput(customer, "second", 3))...)
 		w := a.world
 
-		// The erasure's job stops between folding the history and deleting
-		// its invokers' rows; River runs it again.
+		// The erasure's job stops at the events' update; River runs it again.
+		history := func() [3]uint64 {
+			return [3]uint64{storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m}"),
+				storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"),
+				storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_history WHERE merchant_id = {m}")}
+		}
+		before := history()
 		events := erasureEvents(t, w)
-		stop := ".usage_history DELETE"
+		stop := ".usage_events UPDATE"
 		conn.fail.Store(&stop)
 		status, raw = a.request(t, "DELETE", "/v1/app/scim/v2/Users/"+id, provisioner.Token, nil)
 		require.Equal(t, http.StatusNoContent, status, string(raw))
 		require.Equal(t, river.EventKindJobFailed, awaitErasure(t, events), "the first run stops part way")
 		require.Equal(t, river.EventKindJobCompleted, awaitErasure(t, events), "the next finishes")
 
-		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND invoker != ''"))
-		require.EqualValues(t, 2, storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"), "each event once")
-		require.EqualValues(t, 5, storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_history WHERE merchant_id = {m}"), "quantities once")
+		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m} AND (invoker != '' OR metadata != '')"))
+		require.Equal(t, before, history(), "history names no invoker: erasure leaves it as it was")
+		require.EqualValues(t, [3]uint64{before[0], 2, 5}, before, "each event once, quantities once")
 		balance(t, a.alpha, customer, 500, 500, 1000)
 	})
 

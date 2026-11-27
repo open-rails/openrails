@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,15 +13,40 @@ import (
 )
 
 // Usage measures read the event store's usage history by day of the
-// merchant's accounting zone, priced as a customer's usage reports price it:
-// each day's share of its period's price, so the days and the months they
-// fold into sum to what posts.
+// merchant's accounting zone, at the prices intake took (less a volume
+// tier's discount), so the days and the months they fold into sum to what
+// posts. History names no invoker: a plan grouped or filtered by invoker
+// reads raw usage events, kept eventstore.EventsKept (ValidateIn refuses a
+// range that starts before them).
 // They compile to no SQL; their groups are folded here.
 
 func storeFamily(f Family) bool { return f == FamUsage || f == FamUsageCharged }
 
 // usageCharges are the charges a priced history row counts in.
 var usageCharges = []string{"charged", "forgiven"}
+
+// usagePart is one outcome's share of a usage row: its events (event rows
+// only), what it charged and what grace forgave.
+type usagePart struct {
+	outcome                  string
+	units, charged, forgiven int64
+}
+
+// usageParts splits a row by outcome: failed usage is counted beside the
+// rest, never a row of its own.
+func usageParts(r eventstore.UsageBucket) [2]usagePart {
+	ok := usagePart{outcome: "succeeded", charged: r.Amount - r.Discount}
+	if r.Meter == "" {
+		ok.units = r.Requests - r.FailedRequests
+	}
+	return [2]usagePart{ok, {outcome: "failed", units: r.FailedRequests, charged: r.FailedAmount, forgiven: r.Forgiven}}
+}
+
+// byInvoker reports a plan that groups or filters usage by invoker.
+func (p *Plan) byInvoker() bool {
+	_, filtered := p.Filters["invoker"]
+	return filtered || slices.Contains(p.Dims, "invoker")
+}
 
 // runUsage folds the plan's usage measures into groups.
 func (s *Service) runUsage(ctx context.Context, plan *Plan, groups map[string]*group) error {
@@ -38,7 +64,13 @@ func (s *Service) runUsage(ctx context.Context, plan *Plan, groups map[string]*g
 		return nil
 	}
 	svc := money.NewMoneyService(s.db)
-	rows, err := svc.UsageHistory(ctx, eventstore.HistoryFilter{From: plan.From, To: plan.To})
+	var rows []eventstore.UsageBucket
+	var err error
+	if plan.byInvoker() {
+		rows, err = svc.UsageEvents(ctx, eventstore.HistoryFilter{From: plan.From, To: plan.To, Zone: plan.zone()})
+	} else {
+		rows, err = svc.UsageHistory(ctx, eventstore.HistoryFilter{From: plan.From, To: plan.To})
+	}
 	if err != nil {
 		return err
 	}
@@ -52,10 +84,10 @@ func (s *Service) runUsage(ctx context.Context, plan *Plan, groups map[string]*g
 		for _, r := range forgiven {
 			var bucket time.Time
 			if plan.HasTime {
-				bucket = truncGrain(r.BucketAt, plan.Grain, plan.zone())
+				bucket = calendarutil.BucketStart(r.BucketAt, plan.Grain, plan.zone())
 			}
 			values := map[string]string{"currency": r.Currency, "customer": r.CustomerID.String(), "invoker": r.Invoker,
-				"outcome": string(r.Outcome), "rate_card": r.EventType}
+				"outcome": "succeeded", "rate_card": r.EventType}
 			for _, charge := range usageCharges {
 				values["charge"] = charge
 				dims, ok := usageDimsOf(plan, values)
@@ -77,44 +109,44 @@ func (s *Service) runUsage(ctx context.Context, plan *Plan, groups map[string]*g
 	for _, r := range rows {
 		var bucket time.Time
 		if plan.HasTime {
-			bucket = truncGrain(r.BucketAt, plan.Grain, plan.zone())
+			bucket = calendarutil.BucketStart(r.BucketAt, plan.Grain, plan.zone())
 		}
-		values := map[string]string{"currency": r.Currency, "customer": r.CustomerID.String(), "invoker": r.Invoker,
-			"outcome": string(r.Outcome), "rate_card": r.EventType}
-		for _, charge := range usageCharges {
-			values["charge"] = charge
-			amount := r.Amount
-			if charge == "forgiven" {
-				amount = r.Forgiven
-			}
-			for _, m := range leaves {
-				if m.Family == FamUsage && charge != usageCharges[0] {
-					continue
+		for _, part := range usageParts(r) {
+			values := map[string]string{"currency": r.Currency, "customer": r.CustomerID.String(), "invoker": r.Invoker,
+				"outcome": part.outcome, "rate_card": r.EventType}
+			for _, charge := range usageCharges {
+				values["charge"] = charge
+				amount := part.charged
+				if charge == "forgiven" {
+					amount = part.forgiven
 				}
-				dims, ok := usageDimsOf(plan, values)
-				if !ok {
-					continue
+				for _, m := range leaves {
+					if m.Family == FamUsage && charge != usageCharges[0] {
+						continue
+					}
+					dims, ok := usageDimsOf(plan, values)
+					if !ok {
+						continue
+					}
+					g := ensureGroup(groups, bucket, dims)
+					v := g.vals[m.Name]
+					switch m.Name {
+					case "usage_charged":
+						v.n += amount
+					case "usage_units":
+						v.n += part.units
+					case "active_customers":
+						k := groupKey(bucket, dims)
+						if distinct[k] == nil {
+							distinct[k] = map[uuid.UUID]bool{}
+						}
+						if !distinct[k][r.CustomerID.UUID()] {
+							distinct[k][r.CustomerID.UUID()] = true
+							v.n++
+						}
+					}
+					g.vals[m.Name] = v
 				}
-				g := ensureGroup(groups, bucket, dims)
-				v := g.vals[m.Name]
-				switch m.Name {
-				case "usage_charged":
-					v.n += amount
-				case "usage_units":
-					if r.Meter == "" {
-						v.n += r.Requests
-					}
-				case "active_customers":
-					k := groupKey(bucket, dims)
-					if distinct[k] == nil {
-						distinct[k] = map[uuid.UUID]bool{}
-					}
-					if !distinct[k][r.CustomerID.UUID()] {
-						distinct[k][r.CustomerID.UUID()] = true
-						v.n++
-					}
-				}
-				g.vals[m.Name] = v
 			}
 		}
 	}
@@ -204,7 +236,7 @@ func (s *Service) depletionBurns(ctx context.Context, plan *Plan) ([]burn, error
 			if _, ok := sums[k]; !ok {
 				order = append(order, k)
 			}
-			sums[k] += r.Amount
+			sums[k] += r.Cost()
 		}
 	}
 	out := make([]burn, 0, len(order))

@@ -404,6 +404,21 @@ func (w *DunningWorker) processSubscription(
 		}
 		return dunningOutcomeWindowExpired, nil
 	}
+	if sub.TerminalHeld() {
+		blocked := ""
+		if materialize {
+			blocked = "a limited write posture holds local terminal cancellations"
+		} else if gate := destructive.New(w.DB).Check(ctx, sub.MerchantID); !gate.Allowed {
+			blocked = gate.Reason
+		}
+		if _, err := lifecycle.EndHeldOutcome(ctx, w.DB, sub, blocked); err != nil {
+			return dunningOutcomeFailed, err
+		}
+		if blocked != "" {
+			return dunningOutcomeRefused, nil
+		}
+		return dunningOutcomeWindowExpired, nil
+	}
 	if sub.Status == models.StatusPastDue && sub.NextRetryAt == nil && sub.CollectionPolicy != models.CollectionPolicyEngine {
 		// Grace ended and the provider never said renewed or canceled: ask it.
 		if _, err := lifecycle.AskProviderPastGrace(ctx, w.DB, sub, w.now()); err != nil {

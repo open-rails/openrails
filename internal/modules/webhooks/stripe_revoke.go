@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -23,9 +24,21 @@ func revokeStripeMembership(ctx context.Context, database *db.DB, lc *subscripti
 
 	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := database.NewWithPgxTx(tx)
+		observed, err := subscriptions.NewSubscriptionRepo(d).GetByID(ctx, subID)
+		if err != nil {
+			return fmt.Errorf("load stripe subscription %s: %w", subID, err)
+		}
+		if observed.CollectionPolicy == models.CollectionPolicyEngine {
+			if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: observed.MerchantID, ID: observed.CustomerID}); err != nil {
+				return err
+			}
+		}
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, subID)
 		if err != nil {
 			return fmt.Errorf("lock stripe subscription %s: %w", subID, err)
+		}
+		if sub.CustomerID != observed.CustomerID || sub.CollectionPolicy != observed.CollectionPolicy {
+			return fmt.Errorf("stripe cancellation: accepted customer or collection ownership changed")
 		}
 		reason := feedback(sub)
 		rail := models.RailStripe

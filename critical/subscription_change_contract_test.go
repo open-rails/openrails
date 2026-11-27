@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/nmimock"
@@ -240,7 +241,7 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		require.NoError(t, err)
 		seat, err := w.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: seats.ID, Key: "team-day", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24), Quantity: &catalog.Quantity{Min: 1, Max: 5}})
 		require.NoError(t, err)
-		invoice := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: seat.ID, Quantity: ptr(1)}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
+		invoice := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: seat.ID, Quantity: ptr(3)}}, ExpectedTotal: ptr(int64(30_000_000)), Reusable: ptr(true),
 			Payment: &billing.InvoicePaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
 		status, raw = w.request(t, http.MethodPost, "/v1/me/invoices", w.aliceToken, invoice, map[string]string{"Idempotency-Key": "team-purchase"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
@@ -249,11 +250,19 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		require.Equal(t, billing.InvoiceComplete, bought.Status, string(raw))
 		team := *bought.Lines[0].SubscriptionID
 		w.clock.Advance(12 * time.Hour)
-		status, raw = w.request(t, http.MethodPost, "/v1/me/subscriptions/"+team.String()+"/change", w.aliceToken, map[string]any{"quantity": 2}, map[string]string{"Idempotency-Key": "more-seats"})
+		status, raw = w.request(t, http.MethodPost, "/v1/me/subscriptions/"+team.String()+"/change", w.aliceToken, map[string]any{"quantity": 5}, map[string]string{"Idempotency-Key": "more-seats"})
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var added billing.SubscriptionChange
 		require.NoError(t, json.Unmarshal(raw, &added))
 		require.Equal(t, "succeeded", added.Status, string(raw))
+		require.Equal(t, "Now 5 seats", added.Message)
+		var message string
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT result_evidence->>'message' FROM "+pgx.Identifier{w.schema, "provider_intents"}.Sanitize()+" WHERE merchant_id=$1 AND subscription_id=$2 AND payload->'terms'->'adds' IS NOT NULL", w.alpha.MerchantID().UUID(), team.UUID()).Scan(&message))
+		require.Equal(t, "Now 5 seats", message)
+		status, raw = w.request(t, http.MethodPost, "/v1/me/subscriptions/"+team.String()+"/change", w.aliceToken, map[string]any{"quantity": 5}, map[string]string{"Idempotency-Key": "more-seats"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.NoError(t, json.Unmarshal(raw, &added))
+		require.Equal(t, "Now 5 seats", added.Message)
 		charged, err := w.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: team})
 		require.NoError(t, err)
 		require.Len(t, charged.Items, 2, "the purchase and the added seats")

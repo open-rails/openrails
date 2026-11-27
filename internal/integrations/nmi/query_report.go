@@ -219,15 +219,15 @@ func (a QueryAction) Is(kind string) bool {
 // Succeeded reports an approved action.
 func (a QueryAction) Succeeded() bool { return strings.TrimSpace(a.Success) == "1" }
 
-// DefinitiveDecline distinguishes a completed processor refusal from errors,
-// unreadable outcomes, and transactions the gateway can still execute.
+// DefinitiveDecline distinguishes a completed refusal from errors, unreadable
+// outcomes, and transactions the gateway can still execute.
 func (a QueryAction) DefinitiveDecline(condition string) (int, bool) {
 	if strings.TrimSpace(a.Success) != "0" {
 		return 0, false
 	}
 	state := strings.ToLower(strings.TrimSpace(condition))
 	code, err := strconv.Atoi(strings.TrimSpace(a.ResponseCode))
-	return code, err == nil && code >= 200 && code < 300 &&
+	return code, err == nil && (code >= 200 && code < 300 || a.Is("sale") && IsSaleRefusalCode(code) && !duplicateRefusal(code, a.ResponseText)) &&
 		(state == "" || state == "failed" || state == "complete")
 }
 
@@ -356,4 +356,31 @@ func flagSet(v string) bool {
 		return true
 	}
 	return false
+}
+
+// ReadRefundTransactions lists successful refunds of the original sale since since.
+func (c *NMIClient) ReadRefundTransactions(ctx context.Context, originalTransactionID string, since time.Time) ([]string, error) {
+	c = c.scoped()
+	var ids []string
+	seen := map[string]bool{}
+	filter := QueryFilter{ActionType: "refund", StartDate: since.UTC().Truncate(time.Second).Format(QueryTimeFormat)}
+	err := c.PageTransactions(ctx, filter, time.Now(), func(page []QueryTransaction) error {
+		for _, txn := range page {
+			if txn.OriginalTransactionID != originalTransactionID || seen[txn.TransactionID] {
+				continue
+			}
+			for _, action := range txn.Actions {
+				if action.Is("refund") && action.Succeeded() {
+					ids = append(ids, txn.TransactionID)
+					seen[txn.TransactionID] = true
+					break
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
 }

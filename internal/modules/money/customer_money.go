@@ -72,9 +72,9 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 		if err != nil {
 			return err
 		}
-		mode := map[key]string{}
+		settingsByKey := map[key]gen.BillingMoneySetting{}
 		for _, row := range settings {
-			mode[key{row.CustomerID, row.Currency}] = row.BillingMode
+			settingsByKey[key{row.CustomerID, row.Currency}] = row
 			if row.DefaultPaymentMethodID != nil {
 				m := out[row.CustomerID]
 				m.Defaults = append(m.Defaults, billing.DefaultPaymentMethod{Currency: catalog.Currency(row.Currency), PaymentMethodID: billing.PaymentMethodID(*row.DefaultPaymentMethodID)})
@@ -91,9 +91,16 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 				}
 				bal.Pending, bal.Accrued = row.Pending, row.Accrued
 			}
-			billingMode := mode[k]
-			if billingMode == "" {
-				billingMode = BillingModePrepaid
+			billingMode := BillingModePrepaid
+			if !IsMerchantUnit(k.currency) {
+				row, ok := settingsByKey[k]
+				if !ok {
+					row = gen.BillingMoneySetting{MerchantID: mid.UUID(), CustomerID: k.customer, Currency: k.currency, BillingMode: BillingModePrepaid}
+				}
+				billingMode, err = s.usageAdmissionBillingMode(ctx, row)
+				if err != nil {
+					return err
+				}
 			}
 			b, err := s.PublicBalance(ctx, bal, billing.BillingMode(billingMode), owed[k])
 			if err != nil {

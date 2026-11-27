@@ -471,8 +471,8 @@ products:
 		require.Equal(t, http.StatusNoContent, status, string(raw))
 		require.Equal(t, river.EventKindJobCompleted, awaitErasure(t, events))
 		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m} AND (invoker != '' OR metadata != '')"))
-		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND invoker != ''"))
 		require.EqualValues(t, 2, storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_history WHERE merchant_id = {m}"), "quantities stay")
+		require.EqualValues(t, 200, storeCount(t, w, "SELECT toUInt64(sum(amount)) FROM {db}.usage_history WHERE merchant_id = {m}"), "and what it cost")
 		balance(t, a.alpha, customer, 800, 200, 1000)
 	})
 
@@ -507,7 +507,7 @@ products:
 			"SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE meter = '' AND merchant_id = ",
 			"SELECT toUInt64(sum(quantity)) FROM {db}.usage_history WHERE merchant_id = ",
 			"SELECT toUInt64(sum(quantity)) FROM {db}.usage_quantities WHERE merchant_id = ",
-			"SELECT toUInt64(sum(amount)) FROM {db}.usage_minutes WHERE merchant_id = ",
+			"SELECT toUInt64(sum(amount)) FROM {db}.usage_history WHERE merchant_id = ",
 			"SELECT toUInt64(sum(units)) FROM {db}.limit_usage WHERE merchant_id = ",
 		} {
 			require.Equal(t, storeCount(t, source, q+merchant), storeCount(t, target, q+merchant), q)
@@ -532,7 +532,7 @@ products:
 		require.EqualValues(t, 2, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL"), "each merchant's item is its own event")
 	})
 
-	t.Run("OR-J24-S67/history-is-utc-hours-grouped-into-the-zones-days-as-read-a-25-hour-day-a-zone-change-and-burn-included", func(t *testing.T) {
+	t.Run("OR-J24-S67/history-is-utc-quarter-hours-grouped-into-the-zones-days-as-read-a-25-hour-day-a-zone-change-and-burn-included", func(t *testing.T) {
 		newYork, err := time.LoadLocation("America/New_York")
 		require.NoError(t, err)
 		// The next New York day of 25 hours, when its clocks fall back.
@@ -564,8 +564,8 @@ products:
 		// A lease minted now by the world's clock, a year ahead of the real one.
 		settleUsage(t, a.alpha, leaseMintedAt(a.clock.Now()), numbered(1, items...)...)
 		w := a.world
-		require.EqualValues(t, 4, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"), "one row an hour")
-		require.Zero(t, storeCount(t, w, "SELECT countIf(toMinute(bucket_at) != 0) FROM {db}.usage_history WHERE merchant_id = {m}"), "buckets are whole UTC hours")
+		require.EqualValues(t, 4, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"), "one row a quarter hour")
+		require.Zero(t, storeCount(t, w, "SELECT countIf(toMinute(bucket_at) % 15 != 0 OR toSecond(bucket_at) != 0) FROM {db}.usage_history WHERE merchant_id = {m}"), "buckets are whole UTC quarter hours")
 
 		// Read by day, an hour counts on the day of the zone it starts in.
 		days := func(in *time.Location) map[string]int64 {
@@ -585,7 +585,7 @@ products:
 		want := func(in *time.Location) map[string]int64 {
 			out := map[string]int64{}
 			for i := range at {
-				key := calendarDayStart(at[i].Truncate(time.Hour), in).UTC().Format(time.RFC3339)
+				key := calendarDayStart(at[i].Truncate(15*time.Minute), in).UTC().Format(time.RFC3339)
 				out[key+" usage_units"]++
 				out[key+" usage_charged"] += units[i] * 100
 			}

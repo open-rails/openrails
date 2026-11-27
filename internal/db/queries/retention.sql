@@ -103,6 +103,7 @@ FROM (
        FROM billing.limit_windows lw
       WHERE (sqlc.narg(after)::uuid IS NULL OR lw.merchant_id > sqlc.narg(after)::uuid)
         AND lw.window_ends_at < sqlc.arg(limit_window_cutoff)::timestamptz
+        AND (lw.reached_at IS NULL OR lw.window_ends_at < sqlc.arg(reached_limit_window_cutoff)::timestamptz)
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
     (SELECT DISTINCT le.merchant_id AS mid
@@ -254,14 +255,16 @@ WHERE ctid IN (
     LIMIT sqlc.arg(row_limit)::int
 );
 
--- A closed limit window past the replay horizon; a row another writer
--- holds waits for a later pass.
+-- A closed limit window past its retention: one that reached its capacity
+-- after reached_cutoff, any other after cutoff; a row another writer holds
+-- waits for a later pass.
 -- name: DeleteLimitWindowsBefore :execrows
 DELETE FROM billing.limit_windows w
 WHERE (w.merchant_id, w.customer_id, w.limit_key, w.window_starts_at) IN (
     SELECT e.merchant_id, e.customer_id, e.limit_key, e.window_starts_at
     FROM billing.limit_windows e
     WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.window_ends_at < sqlc.arg(cutoff)::timestamptz
+      AND (e.reached_at IS NULL OR e.window_ends_at < sqlc.arg(reached_cutoff)::timestamptz)
     ORDER BY e.window_ends_at
     LIMIT sqlc.arg(row_limit)::int
     FOR UPDATE SKIP LOCKED

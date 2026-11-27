@@ -9,7 +9,7 @@ import (
 )
 
 // ValidateSubscriptionCollectionTerminal retains the accepted obligation and
-// positive terminal proof through archive/reload. Generic terminal statuses,
+// terminal evidence through archive/reload. Generic terminal statuses,
 // disappeared provider searches and expired leases are not retry authority.
 func ValidateSubscriptionCollectionTerminal(in gen.BillingProviderIntent) error {
 	if _, err := subscriptions.DecodeSubscriptionCollectionPayload(in); err != nil {
@@ -44,10 +44,15 @@ func ValidateSubscriptionCollectionTerminal(in gen.BillingProviderIntent) error 
 		return errors.New("engine operation has no qualified terminal outcome")
 	}
 	var result struct {
-		Declined        bool   `json:"declined"`
-		ResponseCode    int    `json:"response_code"`
-		NotExecuted     bool   `json:"not_executed"`
-		NotExecutedCode string `json:"not_executed_code"`
+		Declined           bool   `json:"declined"`
+		ResponseCode       int    `json:"response_code"`
+		NotExecuted        bool   `json:"not_executed"`
+		NotExecutedCode    string `json:"not_executed_code"`
+		OperatorResolution struct {
+			Actor       string `json:"actor"`
+			Reason      string `json:"reason"`
+			NotExecuted bool   `json:"not_executed"`
+		} `json:"operator_resolution"`
 	}
 	if err := json.Unmarshal(in.ResultEvidence, &result); err != nil {
 		return err
@@ -69,7 +74,10 @@ func ValidateSubscriptionCollectionTerminal(in gen.BillingProviderIntent) error 
 	}
 	if EvidenceString(in, "submitted_at") != "" {
 		code, _ := proof.Refusal()
-		if !notExecuted || code != result.NotExecutedCode {
+		// An operator may release a submitted NMI renewal on an attested empty order.
+		operator := result.OperatorResolution
+		attested := in.Rail == "nmi" && result.NotExecutedCode == "not_executed" && operator.NotExecuted && operator.Actor != "" && operator.Reason != ""
+		if (!notExecuted && !attested) || (notExecuted && code != result.NotExecutedCode) {
 			return errors.New("fenced engine operation cannot be released without positive nonexecution")
 		}
 	}

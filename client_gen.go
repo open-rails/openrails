@@ -582,6 +582,29 @@ func (c *Client) GetBalance(ctx context.Context, customerID billing.CustomerID, 
 	return &out, nil
 }
 
+// GetUsage reads a page of a customer's usage report in params.Currency: its
+// groups over the days of params.Timezone (the merchant's accounting zone
+// when empty) overlapping [From, To), as the customer reads it.
+func (c *Client) GetUsage(ctx context.Context, customerID billing.CustomerID, params billing.GetUsageParams) (*billing.Usage, error) {
+	var out billing.Usage
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/customers/{customer_id}/usage", args: []string{customerID.String()}, query: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetUsageSeries reads a customer's usage over time in params.Currency, as
+// the customer reads it: one bucket per params.Interval on params.Timezone's
+// calendar overlapping [From, To). More than billing.MaxUsageBuckets buckets
+// is refused (billing.CodeTooManyBuckets).
+func (c *Client) GetUsageSeries(ctx context.Context, customerID billing.CustomerID, params billing.GetUsageSeriesParams) (*billing.UsageSeries, error) {
+	var out billing.UsageSeries
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/customers/{customer_id}/usage/series", args: []string{customerID.String()}, query: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // StartRunningCharge starts charging a customer at a rate per hour, or
 // answers the charge params.Reference already names. A changed term is
 // billing.ErrIdempotencyKeyReused; a MinimumAmount the customer's capacity
@@ -675,8 +698,8 @@ func (c *Client) ListCustomerLimits(ctx context.Context, params billing.Customer
 // attributes, the pricing a gate costs requests with, and how many of the
 // merchant's leases are live. The first sync under a new LeaseID creates the
 // lease; a lease answers resends for 61 days after its last sync. Settled
-// usage posts to the ledger at each month's end in the merchant's accounting
-// zone and before any other movement of the customer's balance.
+// usage posts to the ledger daily, once its day ends in the merchant's
+// accounting zone, and before any other movement of the customer's balance.
 func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams) (*billing.SyncLeasesResult, error) {
 	var out billing.SyncLeasesResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/leases/sync", body: params}, &out); err != nil {

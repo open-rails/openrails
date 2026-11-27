@@ -240,7 +240,7 @@ func usageMeterSemanticsEqual(left, right catalogrules.Meter) bool {
 }
 
 // meterActivity sets each meter's latest usage, by its event type, from the
-// event store: the start of the UTC hour it last had usage in.
+// event store: the start of the UTC quarter hour it last had usage in.
 func (s *MoneyService) meterActivity(ctx context.Context, meters []billing.Meter) error {
 	store := s.db.EventStore()
 	if store == nil || len(meters) == 0 {
