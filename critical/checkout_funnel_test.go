@@ -601,7 +601,7 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.Equal(t, "renewals", *checkout.Attribution.Campaign)
 		// The renewal's cash counts where and from what its checkout came.
 		window := &billing.MetricsRange{From: due.Add(-48 * time.Hour).Format(time.DateOnly), To: due.Add(24 * time.Hour).Format(time.DateOnly)}
-		usd := map[string][]string{"currency": {"USD"}}
+		usd := map[string][]string{"currency": {"USD"}, "cash_kind": {"payment"}}
 		require.Equal(t, map[string]int64{"SE": 20_000_000},
 			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"country"}, Filters: usd, Range: window}), "country", "cash"))
 		require.Equal(t, map[string]int64{"renewals": 20_000_000},

@@ -14,15 +14,17 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// CacheTTL is how long a result of a plan reading the MRR facts is served
-// again: a cancellation at period end counts at most this late.
+// CacheTTL is how long a result of a plan reading the MRR facts or the live
+// revenue schedules is served again: a cancellation at period end, or a new
+// schedule's runoff, counts at most this late.
 const CacheTTL = 60 * time.Second
 
 // memoryEntries bounds the process cache: past it, expired entries go, then
 // all.
 const memoryEntries = 1024
 
-// resultCache holds the results of plans reading the MRR facts, by merchant
+// resultCache holds the results of plans reading the MRR facts or the live
+// revenue schedules (cached), by merchant
 // and plan, in Redis when configured and in process memory otherwise. Each
 // key computes once at a time: in this process, and across processes while
 // one holds its Redis lock.
@@ -46,18 +48,20 @@ type flight struct {
 	err  error
 }
 
-// CacheMRR caches the results of plans that read the MRR facts for CacheTTL,
-// in rdb when set; now is the clock the TTL runs on.
-func (s *Service) CacheMRR(rdb redis.UniversalClient, now func() time.Time) {
+// Cache caches the results of the plans cached reports for CacheTTL, in rdb
+// when set; now is the clock the TTL runs on.
+func (s *Service) Cache(rdb redis.UniversalClient, now func() time.Time) {
 	s.cache = &resultCache{rdb: rdb, now: now, memory: map[string]cachedResult{}, pending: map[string]*flight{}}
 }
 
-// readsMRR reports a plan any of whose measures reads the MRR facts.
-func readsMRR(plan *Plan) bool {
+// cached reports a plan any of whose measures reads the MRR facts or runs
+// the live revenue schedules forward: reads that grow with subscriptions.
+// The books' rollups are read by day and answer at once uncached.
+func cached(plan *Plan) bool {
 	for _, m := range plan.Measures {
 		for _, leaf := range m.components() {
 			switch leaf.Family {
-			case FamMRR, FamMRRFlows, FamMRRBase, FamMRRTrailing, FamScheduled, FamCohort, FamRisk, FamRiskFlows:
+			case FamMRR, FamMRRFlows, FamMRRBase, FamMRRTrailing, FamScheduled, FamCohort, FamRisk, FamRiskFlows, FamRunoff:
 				return true
 			}
 		}
@@ -227,5 +231,5 @@ func (c *resultCache) computeOnce(ctx context.Context, key string, compute func(
 
 // cacheable reports whether plan's results are cached for merchantID.
 func (s *Service) cacheable(plan *Plan, merchantID uuid.UUID) bool {
-	return s.cache != nil && merchantID != uuid.Nil && readsMRR(plan)
+	return s.cache != nil && merchantID != uuid.Nil && cached(plan)
 }

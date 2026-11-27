@@ -1857,6 +1857,17 @@
     "OR-J53-S09": [
       "TestReporting/OR-J53-S09/nmis-own-history-is-no-measure-authorizations-are-measured-on-attempts"
     ],
+    "OR-J53-S10": [
+      "TestRevenueBases/OR-J53-S10/a-subscription-a-purchase-a-refund-and-a-won-dispute-equal-the-books-and-the-payments"
+    ],
+    "OR-J53-S11": [
+      "TestRevenueBases/OR-J53-S11/credits-spent-and-lapsed-and-usage-owed-and-collected-equal-the-books/credits",
+      "TestRevenueBases/OR-J53-S11/credits-spent-and-lapsed-and-usage-owed-and-collected-equal-the-books/usage",
+      "TestRevenueBases/OR-J53-S11/credits-spent-and-lapsed-and-usage-owed-and-collected-equal-the-books"
+    ],
+    "OR-J53-S12": [
+      "TestRevenueBases/OR-J53-S12/the-accounting-basis-leads-the-overview-and-a-balance-names-its-account"
+    ],
     "OR-J43-S01": [
       "TestConfigurationHistory/OR-J43-S01/an-edit-and-its-entry-commit-and-roll-back-together"
     ],
@@ -2675,6 +2686,9 @@
       "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refund-chargeback-then-won",
       "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refund-reserved-then-chargeback-then-won",
       "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled"
+    ],
+    "OR-J40-S50": [
+      "TestBooksMeasures/OR-J40-S50/every-books-measure-answers-from-rollups-and-a-past-value-stays"
     ],
     "OR-J47-S01": [
       "TestCheckoutFunnel/OR-J47-S01/steps-are-recorded-where-the-customer-takes-them"

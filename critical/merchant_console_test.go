@@ -537,8 +537,8 @@ func TestMerchantConsole(t *testing.T) {
 
 	t.Run("OR-J38-S85/console-dashboard-shows-merchant-units-at-their-scale", func(t *testing.T) {
 		// Alice buys a pack of each of alpha's units, CREDITS (scale 2) and
-		// GOLD (scale 0), by card: credits sold in units the registry does
-		// not know.
+		// GOLD (scale 0), by card: credit held in units the registry does not
+		// know.
 		s, _ := unitPaymentWorld(t, 0)
 		credits := s.pack(t, "credits-20", "CREDITS", 2000, 365, unitPrice{"usd", 20_000_000, "USD"})
 		gold := s.pack(t, "gold-400", "GOLD", 400, 365, unitPrice{"usd", 20_000_000, "USD"})

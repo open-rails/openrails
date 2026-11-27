@@ -65,7 +65,7 @@ func Schema() SchemaDoc {
 			Name: m.Name, Class: m.Class, Unit: m.Unit,
 			Group: m.Group, Direction: m.Direction, Thresholds: thresholds,
 			Description: m.Description, Formula: m.Formula,
-			Dims: m.Dims, DimValues: dimValues, Money: m.Money, UTCDays: m.utcDays(), Program: m.Program,
+			Dims: m.Dims, DimValues: dimValues, Money: m.Money, UTCDays: m.utcDays(), Program: m.Program, Per: m.Per,
 		})
 	}
 	for i := range Dimensions {
@@ -97,6 +97,25 @@ func Schema() SchemaDoc {
 				By:       []string{"time", "cash_kind"},
 				Grain:    "auto",
 				Range:    &QueryRange{Last: "90d"},
+			},
+		},
+		{
+			Intent: "revenue on both bases by month: recognised revenue (accrual) against cash collected, each by the revenue account it funds",
+			Query: Query{
+				Measures: []string{"recognized_revenue", "cash"},
+				By:       []string{"time", "account"},
+				Grain:    "month",
+				Range:    &QueryRange{Last: "12m"},
+			},
+		},
+		{
+			Intent: "deferred revenue and prepaid credit liability at each month's start",
+			Query: Query{
+				Measures: []string{"balance"},
+				By:       []string{"time", "account"},
+				Grain:    "month",
+				Range:    &QueryRange{Last: "6m"},
+				Filters:  map[string][]string{"account": {"deferred_revenue", "deferred_revenue_credit"}},
 			},
 		},
 		{

@@ -290,3 +290,30 @@ func maxTime(a, b time.Time) time.Time {
 	}
 	return b
 }
+
+// Runoff is one recognition a live schedule will post: its amount (negative
+// for a forfeit taken back) and the instant it will be dated.
+type Runoff struct {
+	Dated  time.Time
+	Amount int64
+}
+
+// RunoffOf is what a live schedule will recognise through until if nothing
+// reverses it, posting by posting as the recognition job will post them: each
+// month boundary in loc, its end and an early end's forfeit.
+func RunoffOf(ctx context.Context, row gen.BillingRevenueSchedule, loc *time.Location, until time.Time) ([]Runoff, error) {
+	s := scheduleOf(row)
+	steps, _, err := s.progress(ctx, loc, until, true)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Runoff, 0, len(steps))
+	for _, st := range steps {
+		amount := st.amount
+		if st.op == OpReinstatement {
+			amount = -amount
+		}
+		out = append(out, Runoff{Dated: st.dated, Amount: amount})
+	}
+	return out, nil
+}

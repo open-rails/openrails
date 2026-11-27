@@ -3,22 +3,25 @@ package dashboard
 import (
 	"testing"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
 func TestDefaultWidgetsValidateForEveryProfile(t *testing.T) {
 	for bits := range 32 {
 		p := Profile{Subscriptions: bits&1 != 0, CardPayments: bits&2 != 0, Usage: bits&4 != 0, Credits: bits&8 != 0, Checkouts: bits&16 != 0}
-		widgets := DefaultWidgets(p)
-		if verr := ValidateWidgets(widgets); verr != nil {
-			t.Errorf("%+v: %v", p, verr)
-		}
-		first := "cash"
-		if p.Subscriptions || Empty(p) {
-			first = "mrr"
-		}
-		if widgets[0].Query.Measures[0] != first {
-			t.Errorf("%+v: the overview starts with %s", p, widgets[0].ID)
+		for _, basis := range []billing.AccountingBasis{billing.AccountingAccrual, billing.AccountingCash} {
+			widgets := DefaultWidgets(p, basis)
+			if verr := ValidateWidgets(widgets); verr != nil {
+				t.Errorf("%+v %s: %v", p, basis, verr)
+			}
+			first := map[billing.AccountingBasis]string{billing.AccountingAccrual: "recognized_revenue", billing.AccountingCash: "cash"}[basis]
+			if p.Subscriptions || Empty(p) {
+				first = "mrr"
+			}
+			if widgets[0].Query.Measures[0] != first {
+				t.Errorf("%+v %s: the overview starts with %s", p, basis, widgets[0].ID)
+			}
 		}
 	}
 }

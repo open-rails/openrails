@@ -124,6 +124,9 @@ type MetricsMeasure struct {
 	// standing (ListDisputePrograms) says which level is reached, minimum
 	// counts applied, which the ratio alone does not.
 	Program DisputeProgram `json:"program,omitempty"`
+	// Per is a dimension a query groups the measure by or filters to one
+	// value of (balance by account): its sum across it means nothing.
+	Per string `json:"per,omitempty"`
 }
 
 // MetricsDimension is one axis to group or filter by.

@@ -14,6 +14,7 @@ migration 0010_amount_low_balance.up.sql sha256:a3c81f7e13cf137c8381c00c235485c0
 migration 0011_customer_destructive_reservations.up.sql sha256:0636ae0008ee371fcb4f6fb70538caa58f5a11d77fc47af876266c6c2e576437
 migration 0012_merchant_invoices_open.up.sql sha256:7dbab0824ef2a266111eb89b0e7875743548d4b4effa1b1cb3845a35a658cca1
 migration 0013_mrr_from_facts.up.sql sha256:b2ffa04bddd9972d347bfc0ceb7ce97fd2ef98e5504d9d7f56e429be9b20dda9
+migration 0014_books_measures.up.sql sha256:fd19d9cdd4aa630365eadfa680cd70c95cece7811f41178c29f5151924bf2035
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -2932,6 +2933,7 @@ table billing.revenue_schedules
   constraint revenue_schedules_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id)
   index CREATE INDEX revenue_schedules_due_idx ON billing.revenue_schedules USING btree (next_recognition_at, merchant_id, id) WHERE (next_recognition_at IS NOT NULL)
   index CREATE UNIQUE INDEX revenue_schedules_invoice_line_id_key ON billing.revenue_schedules USING btree (merchant_id, invoice_line_id, currency)
+  index CREATE INDEX revenue_schedules_live_idx ON billing.revenue_schedules USING btree (merchant_id, next_recognition_at) WHERE (next_recognition_at IS NOT NULL)
   index CREATE UNIQUE INDEX revenue_schedules_pkey ON billing.revenue_schedules USING btree (merchant_id, id)
   index CREATE INDEX revenue_schedules_product_access_id_idx ON billing.revenue_schedules USING btree (merchant_id, product_access_id) WHERE (product_access_id IS NOT NULL)
   index CREATE INDEX revenue_schedules_subscription_id_idx ON billing.revenue_schedules USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)

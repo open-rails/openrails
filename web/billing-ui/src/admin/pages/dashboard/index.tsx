@@ -173,7 +173,8 @@ function firstArea(access: AdminAccess): string {
   return "/settings"
 }
 
-// useCurrencies lists the currencies with activity in the range, the one
+// useCurrencies lists the currencies with activity in the range (cash,
+// usage, credits sold, or credit held in a merchant's own unit), the one
 // with the most cash (in major units) first.
 function useCurrencies(range: DashboardRange, enabled: boolean): string[] {
   const { adminQueries } = useAdminServices()
@@ -185,15 +186,28 @@ function useCurrencies(range: DashboardRange, enabled: boolean): string[] {
     }),
     enabled,
   })
+  const { data: held } = useQuery({
+    ...adminQueries.widgetMetrics({
+      measures: ["balance"],
+      by: ["currency"],
+      range: metricsRange(range),
+      filters: { account: ["customer_units"] },
+    }),
+    enabled,
+  })
   return React.useMemo(() => {
     if (!data) return []
     const cash = data.columns.findIndex((c) => c.name === "cash")
     const major = (row: (typeof data.rows)[number]) =>
       Number(row[cash] ?? 0) / 10 ** (currencyScale(String(row[0])) ?? 0)
-    return [...data.rows]
+    const listed = [...data.rows]
       .sort((a, b) => major(b) - major(a))
       .map((row) => String(row[0]))
-  }, [data])
+    for (const row of held?.rows ?? []) {
+      if (!listed.includes(String(row[0]))) listed.push(String(row[0]))
+    }
+    return listed
+  }, [data, held])
 }
 
 const COMPARES: { value: Compare; label: string }[] = [

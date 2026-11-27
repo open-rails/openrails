@@ -16,6 +16,7 @@ sql:
       - "internal/migrate/postgres/0011_customer_destructive_reservations.up.sql"
       - "internal/migrate/postgres/0012_merchant_invoices_open.up.sql"
       - "internal/migrate/postgres/0013_mrr_from_facts.up.sql"
+      - "internal/migrate/postgres/0014_books_measures.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

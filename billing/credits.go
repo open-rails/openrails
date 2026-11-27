@@ -455,7 +455,20 @@ type AccountingSettings struct {
 	// past ones too. Posted books keep their effective instants and never
 	// change.
 	Timezone string `json:"timezone,omitempty"`
+	// Basis is which view of revenue the overview leads with: accrual
+	// (recognised revenue, the default) or cash (cash collected). Both are
+	// read from the same postings; nothing is kept per basis.
+	Basis AccountingBasis `json:"basis,omitempty"`
 }
+
+// AccountingBasis is a view of revenue: accrual (as the books recognise it)
+// or cash (as it is collected).
+type AccountingBasis string
+
+const (
+	AccountingAccrual AccountingBasis = "accrual"
+	AccountingCash    AccountingBasis = "cash"
+)
 
 // BillingPolicy declares one named billing policy (or#897): the caps it sets,
 // any of them; the binding says who it applies to.

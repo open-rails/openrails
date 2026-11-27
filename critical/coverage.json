@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 905,
+  "scenario_count": 909,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3324,6 +3324,21 @@
       "name": "NMI's own transaction history is no measure: the schema names no nmi_history measure or nmi_kind dimension, and a query naming nmi_history_authorizations is refused unknown_measure"
     },
     {
+      "id": "OR-J53-S10",
+      "journey": "J53",
+      "name": "Over a known history (a subscription, a one-time purchase, a partial refund, a chargeback and its won dispute, Stripe's fees) in a New York merchant, recognized_revenue by month and account equals the general ledger's income-statement transfers grouped by New York months, cash by kind equals the payments and the fees, deferred revenue at each month's start equals the transfers before it, and the waterfall predicts what the recognition job posts"
+    },
+    {
+      "id": "OR-J53-S11",
+      "journey": "J53",
+      "name": "Credit bought, spent and lapsed is credits sold, usage revenue and breakage, its money held at the pack's rate until it lapses; usage owed beyond the balance is usage revenue and receivable until remitted, then cash; each equals the books"
+    },
+    {
+      "id": "OR-J53-S12",
+      "journey": "J53",
+      "name": "accounting.basis cash leads the overview with cash collected and the accrual default with recognised revenue, both bases answering on either; a balance read across accounts is refused with dimension_required; the migration drops saved widgets naming outstanding_credit_liability, outstanding_owed, stream or credits_sold by customer, and deletes a layout it empties"
+    },
+    {
       "id": "OR-J43-S01",
       "journey": "J43",
       "name": "A catalog edit and its history entry commit together, and a refused edit rolls both back"
@@ -4107,6 +4122,11 @@
       "id": "OR-J40-S29",
       "journey": "J40",
       "name": "A merchant's refund of a usage invoice's payment, made through OpenRails or observed from the provider, records and leaves its owed settled; a chargeback after a refund owes again only what the refund left, keeps it if the refund settles later, and its won dispute settles it and gives the loss back"
+    },
+    {
+      "id": "OR-J40-S50",
+      "journey": "J40",
+      "name": "Every books measure (recognized_revenue, balance, credits_sold, cash with its fees, scheduled_revenue) by each of its dimensions, by time and not, in two zones, plans with no sequential scan of payments, revenue schedules or the books' rollups and no read of ledger_transfers, and a month and a balance read in the past read the same once later postings land"
     },
     {
       "id": "OR-J47-S01",

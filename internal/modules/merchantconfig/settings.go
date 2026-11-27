@@ -134,13 +134,20 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 			return Settings{}, fmt.Errorf("%s must be >= 0", name)
 		}
 	}
-	cfg.AccountingTimezone = DefaultAccountingTimezone
+	cfg.AccountingTimezone, cfg.AccountingBasis = DefaultAccountingTimezone, billing.AccountingAccrual
 	if in.Accounting != nil {
 		zone, err := NormalizeAccountingTimezone(in.Accounting.Timezone)
 		if err != nil {
 			return Settings{}, err
 		}
 		cfg.AccountingTimezone = zone
+		switch basis := billing.AccountingBasis(strings.TrimSpace(string(in.Accounting.Basis))); basis {
+		case "":
+		case billing.AccountingAccrual, billing.AccountingCash:
+			cfg.AccountingBasis = basis
+		default:
+			return Settings{}, fmt.Errorf("accounting.basis must be %q or %q", billing.AccountingAccrual, billing.AccountingCash)
+		}
 	}
 	cfg.RepriceNoticeWindowDays, cfg.ArrearsGraceDays = in.RepriceNoticeWindowDays, in.ArrearsGraceDays
 	if in.BillingPeriodBoundary != "" {

@@ -13,6 +13,7 @@ export type AccessTenure = {
 
 export type AccountingSettings = {
   timezone?: string
+  basis?: "accrual" | "cash"
 }
 
 export type AdjustCustomerLimitParams = {
@@ -1643,6 +1644,7 @@ export type MetricsMeasure = {
   money?: boolean
   utc_days?: boolean
   program?: "acquirer" | "mastercard_ecp" | "mastercard_efm" | "stripe" | "visa_vamp"
+  per?: string
 }
 
 export type MetricsOrder = {

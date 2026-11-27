@@ -286,11 +286,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	if err != nil {
 		return nil, err
 	}
-	// MRR reads are cached for a minute, in Redis when configured.
+	// MRR and revenue-runoff reads are cached for a minute, in Redis when
+	// configured.
 	if nilRedis(redisClient) {
-		serviceInstances.MetricsService.CacheMRR(nil, clock.Now)
+		serviceInstances.MetricsService.Cache(nil, clock.Now)
 	} else {
-		serviceInstances.MetricsService.CacheMRR(redisClient, clock.Now)
+		serviceInstances.MetricsService.Cache(redisClient, clock.Now)
 	}
 	database.SetUsageLedger(serviceInstances.MoneyService)
 

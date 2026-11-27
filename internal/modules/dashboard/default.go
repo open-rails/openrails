@@ -28,9 +28,15 @@ const (
 // profile shows it sells. Sections without data are left out; an empty
 // merchant gets the tiles of a subscription business and no sections. Every
 // widget follows the range the viewer picks (its saved range, the last 30
-// days, is the default) at a grain that fits it.
-func DefaultWidgets(p Profile) []Widget {
+// days, is the default) at a grain that fits it. basis picks the revenue tile
+// and which view of revenue leads its section: recognised revenue (accrual)
+// or cash collected; the section shows both.
+func DefaultWidgets(p Profile, basis billing.AccountingBasis) []Widget {
 	empty := Empty(p)
+	revenue := []string{"recognized_revenue", "cash"}
+	if basis == billing.AccountingCash {
+		revenue = []string{"cash", "recognized_revenue"}
+	}
 	subscriptions, cards := p.Subscriptions || empty, p.CardPayments || empty
 	var l layout
 
@@ -42,7 +48,11 @@ func DefaultWidgets(p Profile) []Widget {
 		l.tile("kpi-nrr", "Net revenue retention", "nrr", nil)
 		l.tile("kpi-at-risk", "At-risk MRR", "mrr_at_risk", nil)
 	}
-	l.tile("kpi-cash", "Cash collected", "cash", nil)
+	if revenue[0] == "cash" {
+		l.tile("kpi-cash", "Cash collected", "cash", nil)
+	} else {
+		l.tile("kpi-revenue", "Recognised revenue", "recognized_revenue", nil)
+	}
 	if subscriptions {
 		l.tile("kpi-first-try-rebill", "First-try rebill approval", "first_try_rebill_approval_rate", nil)
 	}
@@ -57,7 +67,7 @@ func DefaultWidgets(p Profile) []Widget {
 		l.tile("kpi-active-customers", "Active customers", "active_customers", nil)
 	}
 	if p.Credits {
-		l.tile("kpi-credits-sold", "Credits sold", "credits_sold", nil)
+		l.tile("kpi-outstanding-credit", "Outstanding credit", "balance", map[string][]string{"account": {"customer_units"}})
 	}
 	if p.Checkouts {
 		l.tile("kpi-checkout-conversion", "Checkout conversion", "checkout_conversion_rate", nil)
@@ -66,10 +76,21 @@ func DefaultWidgets(p Profile) []Widget {
 		return l.widgets
 	}
 
-	l.section("revenue", "Revenue and cash",
+	accrual := []Widget{
+		chart("revenue-by-account", "Recognised revenue by account", "area", series([]string{"recognized_revenue"}, "account")),
+		chart("deferred-revenue", "Deferred revenue", "line", metrics.Query{Measures: []string{"balance"}, By: []string{"time", "account"}, Grain: "auto",
+			Filters: map[string][]string{"account": {"deferred_revenue", "deferred_revenue_credit"}}}),
+	}
+	cash := []Widget{
 		chart("cash-by-kind", "Cash by kind", "bar", series([]string{"cash"}, "cash_kind")),
 		chart("cash-by-psp", "Cash by PSP", "donut", metrics.Query{Measures: []string{"cash"}, By: []string{"psp"}}),
-	)
+	}
+	if revenue[0] == "cash" {
+		accrual, cash = cash, accrual
+	}
+	l.section("revenue", "Revenue and cash", append(append([]Widget{
+		wide(fixed("revenue-vs-cash", "Recognised revenue against cash by month", "line", monthly(revenue))),
+	}, accrual...), cash...)...)
 	if p.Subscriptions {
 		l.section("recurring", "Recurring",
 			chart("mrr", "MRR", "line", series([]string{"mrr"})),
@@ -152,7 +173,13 @@ func DefaultWidgets(p Profile) []Widget {
 		)
 	}
 	if p.Credits {
-		credits = append(credits, chart("depletion-risk", "Customers at depletion risk", "line", series([]string{"customers_at_depletion_risk"})))
+		credits = append(credits,
+			chart("outstanding-credit", "Outstanding credit, in money and in units", "line", metrics.Query{Measures: []string{"balance"}, By: []string{"time", "account"}, Grain: "auto",
+				Filters: map[string][]string{"account": {"deferred_revenue_credit", "customer_units"}}}),
+			fixed("breakage", "Breakage by month: credit lapsed and revoked", "bar", metrics.Query{Measures: []string{"recognized_revenue"}, By: []string{"time", "transfer_type"},
+				Grain: "month", Range: &metrics.QueryRange{Last: "12m"}, Filters: map[string][]string{"account": {"breakage_revenue"}}}),
+			chart("depletion-risk", "Customers at depletion risk", "line", series([]string{"customers_at_depletion_risk"})),
+		)
 	}
 	l.section("credits-usage", "Credits and usage", credits...)
 	return l.widgets
