@@ -4924,8 +4924,7 @@
           "root": "root:customer:read"
         },
         "x-openrails-errors": [
-          "invalid_param",
-          "service_credential_customer_scope_denied"
+          "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -5111,8 +5110,7 @@
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_param",
-          "invalid_query",
-          "service_credential_customer_scope_denied"
+          "invalid_query"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -5173,8 +5171,7 @@
           "root": "root:entitlements:read"
         },
         "x-openrails-errors": [
-          "invalid_param",
-          "service_credential_customer_scope_denied"
+          "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
@@ -5307,8 +5304,7 @@
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_param",
-          "invalid_query",
-          "service_credential_customer_scope_denied"
+          "invalid_query"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -5320,7 +5316,7 @@
           "admin"
         ],
         "operationId": "CreateProductAccess",
-        "description": "CreateProductAccess grants 1 to billing.MaxBatchItems products free, across any customers, all or none; the answer is in request order. Each grant is a window of its product: the customer holds the product's current keys while it is live. idempotencyKey is required: a retry with it replays the first answer and grants nothing again.",
+        "description": "CreateProductAccess grants 1 to billing.MaxBatchItems products free, across any customers, all or none; the answer is in request order. Each grant is a window of its product: the customer holds the product's current keys while it is live. idempotencyKey is required: a retry with it replays the first answer and grants nothing again; a retry with other items or terms is idempotency_key_reused. A retry after staff removed a window it granted (revoked before it started) is resource_conflict; grant again under a new key.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -5379,8 +5375,8 @@
           "idempotency_key_required",
           "idempotency_key_reused",
           "invalid_param",
-          "resource_not_found",
-          "service_credential_customer_scope_denied"
+          "resource_conflict",
+          "resource_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",

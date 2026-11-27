@@ -36,6 +36,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND kind = 'access' AND event = 
   AND source_type = 'grant' AND source_id = sqlc.arg(idempotency_key)::text AND grant_reason <> 'migration'
   AND import_root_id IS NULL;
 
+-- name: LockAccessGrantKey :exec
+-- Requests under one product-access Idempotency-Key run one at a time.
+SELECT pg_advisory_xact_lock(hashtextextended('access-grant-key:' || sqlc.arg(merchant_id)::uuid::text || ':' || sqlc.arg(idempotency_key)::text, 0));
+
 -- name: LockImportedGrantSource :exec
 SELECT pg_advisory_xact_lock(hashtextextended('imported-grant:' || sqlc.arg(merchant_id)::uuid::text || ':' || sqlc.arg(source_id)::text, 0));
 
