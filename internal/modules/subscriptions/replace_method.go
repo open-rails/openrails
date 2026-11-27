@@ -17,11 +17,15 @@ import (
 // card resumes dunning, and a delinquent one retries at the next due pass
 // instead of waiting out the old card's schedule or its network advice.
 func ReplaceMethod(sub *models.Subscription, now time.Time) error {
+	held := sub.TerminalHeld()
 	forgetAdvice(sub)
 	if _, err := Transition(sub, lifecycle.MethodReplaced{}, now); err != nil {
 		return fmt.Errorf("replace method on %s: %w", sub.ID, err)
 	}
 	if sub.Status == models.StatusPastDue {
+		if held {
+			sub.GraceEndsAt = nil
+		}
 		sub.NextRetryAt = &now
 		sub.RecordHistoryDecision(lifecycle.Name(lifecycle.MethodReplaced{}))
 	}

@@ -1999,6 +1999,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		advice := subscription.RetryAdvisedAt
 		adviceDeferred := subscription.AdviceDeferred()
 		deferred := false
+		customerRetry := false
 		var event lifecycle.Event
 		// A decline opens the dunning case under the merchant's policy of the
 		// moment; the rest of the case runs under it.
@@ -2024,6 +2025,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		default:
 			// Bucket 1: keep the schedule, a function of the billing cycle.
+			customerRetry = params.CustomerAttempt && !params.Terminal
 			cycleHours := 0
 			if subscription.CollectionPolicy == models.CollectionPolicyEngine {
 				accepted := params.Prepared
@@ -2062,7 +2064,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 			// A processor try-again answer gets the short transient ladder first;
 			// those quick retries are not dunning failures.
-			if !params.Terminal && decline.Classify(string(subscription.Rail), normalize.FromPtr(params.FailureCode)).Transient {
+			if !params.Terminal && !customerRetry && decline.Classify(string(subscription.Rail), normalize.FromPtr(params.FailureCode)).Transient {
 				if next, ok := policy.NextTransientAttempt(subscription.TransientRetries, declined); ok {
 					subscription.TransientRetries++
 					subscription.LastRetryAt = &declined
@@ -2084,7 +2086,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				}
 			}
 			terminal := params.Terminal
-			if !terminal {
+			if !terminal && !customerRetry {
 				subscription.LastRetryAt = &declined
 				if subscription.RetryAttempts == nil {
 					attempts := 1
@@ -2112,10 +2114,19 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				event = lifecycle.DunningExhausted{At: now}
 				deferred = advice != nil && !params.Terminal
 			default:
-				event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}
-				nextRetry, ok, err := policy.NextAttemptAt(cycleHours, *subscription.RetryAttempts, declined)
-				if err != nil {
-					return err
+				var nextRetry time.Time
+				ok := true
+				if customerRetry {
+					if subscription.NextRetryAt == nil || params.RetryAfter <= 0 {
+						break
+					}
+					nextRetry = *subscription.NextRetryAt
+				} else {
+					event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}
+					nextRetry, ok, err = policy.NextAttemptAt(cycleHours, *subscription.RetryAttempts, declined)
+					if err != nil {
+						return err
+					}
 				}
 				// The network's earliest retry, from the decline, or an earlier
 				// decline's that still stands: the case's end moves with it
@@ -2124,6 +2135,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				earliest := declined.Add(params.RetryAfter)
 				if advice != nil && advice.After(earliest) {
 					earliest = *advice
+				}
+				if customerRetry && !earliest.After(nextRetry) {
+					break
 				}
 				subscription.NextRetryAt, subscription.RetryAdvisedAt = nil, nil
 				if ok && earliest.After(nextRetry) {
@@ -2150,6 +2164,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			if _, err := Transition(subscription, event, now); err != nil {
 				return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
 			}
+		}
+		if _, held := event.(lifecycle.TerminalHeld); held && subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusPastDue {
+			subscription.GraceEndsAt = &now
 		}
 		if subscription.Status == models.StatusAwaitingMethod && subscription.GraceEndsAt == nil {
 			deadline, err := awaitMethodDeadline(ctx, db, priceService, subscription)
