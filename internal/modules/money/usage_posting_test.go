@@ -1,90 +1,59 @@
 package money
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/eventstore"
+	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// A posting cut behind now can find usage at or after its cut in two
-// periods, in whatever order the store groups them: the unposted mark stays
-// at the earlier, or that period's tail is never posted.
-func TestUnpostedMarkStaysAtTheEarliestPeriodWithLaterUsage(t *testing.T) {
+// Usage counts in the lapse segment it occurred in: the latest lapse at or
+// before it, else its period's start. A lapse at the usage's own instant has
+// passed; one before its period is the period's start.
+func TestUsageCountsInTheLapseSegmentItOccurredIn(t *testing.T) {
 	nov := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-	dec := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
-	rows := []eventstore.PostingQuantity{
-		{PeriodStartsAt: dec, Meter: "work", Print: "a", Later: 3},
-		{PeriodStartsAt: nov, Meter: "work", Print: "a", Read: eventstore.Quantities{Quantity: 5, Requests: 5}, Later: 2},
-		{PeriodStartsAt: nov, Meter: "other", Print: "b", Read: eventstore.Quantities{Quantity: 1, Requests: 1}},
-	}
-	first, ok := earliestLater(rows)
-	require.True(t, ok)
-	require.Equal(t, nov, first)
-
-	_, ok = earliestLater(rows[2:])
-	require.False(t, ok, "nothing at or after the cut leaves no mark")
+	at := func(day int) time.Time { return nov.AddDate(0, 0, day-1) }
+	lapses := []time.Time{at(1).Add(-time.Hour), at(5), at(20)}
+	require.Equal(t, nov, lapseSegment(lapses, nov, at(3)), "a lapse before the period is its start")
+	require.Equal(t, at(5), lapseSegment(lapses, nov, at(5)), "a lapse at the instant has passed")
+	require.Equal(t, at(5), lapseSegment(lapses, nov, at(19)))
+	require.Equal(t, at(20), lapseSegment(lapses, nov, at(25)))
+	require.Equal(t, nov, lapseSegment(nil, nov, at(25)))
 }
 
-// Usage an earlier posting may have read is taken at no less than what
-// posted: events the store lost are not a price that fell, and usage
-// ingested since is priced on top. With nothing lost it is the store's
-// total.
-func TestTakenQuantitiesNeverFallBelowWhatPosted(t *testing.T) {
+// A posting prices a period's posted row and the unposted rows it takes as
+// one total per line, less what the period's receipts took: two leases'
+// usage at a graduated card crosses the band once, however it was split, and
+// a volume tier's fall comes back as a negative line.
+func TestAPostingPricesThePeriodsTotalLessItsReceipts(t *testing.T) {
 	nov := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-	posted := periodLines{nov: {lineKey{"work", "", "a"}: {MeterKey: "work", Print: "a", Requests: 10, Quantity: 1000, Stated: 7, Amount: 1000}}}
-	taken := func(rows ...eventstore.PostingQuantity) []eventstore.PeriodQuantity {
-		return takenQuantities(rows, posted)
+	row := func(lease uuid.UUID, quantity, requests int64) gen.BillingUsageTotal {
+		return gen.BillingUsageTotal{PeriodStartsAt: nov, MeterKey: "work", Print: "a", LeaseID: lease, Quantity: quantity, Requests: requests}
 	}
-	line := func(q, s, r int64) eventstore.PeriodQuantity {
-		return eventstore.PeriodQuantity{PeriodStartsAt: nov, Meter: "work", Print: "a", Quantity: q, Stated: s, Requests: r}
-	}
+	taken := periodTotals{}
+	taken.add(nov, row(uuid.Nil, 80, 8))
+	taken.add(nov, row(uuid.New(), 15, 3))
+	taken.add(nov, row(uuid.New(), 15, 2))
+	require.Equal(t, []periodQuantity{{period: nov, meter: "work", print: "a", quantity: 110, requests: 13}}, taken.quantities(nov))
 
-	// Nothing lost: what was read and what is fresh, as the store has them.
-	whole := eventstore.PostingQuantity{PeriodStartsAt: nov, Meter: "work", Print: "a",
-		Read: eventstore.Quantities{Quantity: 1000, Stated: 7, Requests: 10}, Fresh: eventstore.Quantities{Quantity: 50, Stated: 1, Requests: 2}}
-	require.Equal(t, []eventstore.PeriodQuantity{line(1050, 8, 12)}, taken(whole))
-
-	// A restore lost 900 of the 1,000 posted, and 100 arrived since: the 100
-	// are priced on top of what posted, not taken as the period's total.
-	restored := eventstore.PostingQuantity{PeriodStartsAt: nov, Meter: "work", Print: "a",
-		Read: eventstore.Quantities{Quantity: 100, Requests: 1}, Fresh: eventstore.Quantities{Quantity: 100, Requests: 1}}
-	require.Equal(t, []eventstore.PeriodQuantity{line(1100, 7, 11)}, taken(restored))
-
-	// Another store attached, or the merchant's usage deleted: nothing read
-	// is what posted.
-	require.Equal(t, []eventstore.PeriodQuantity{line(1000, 7, 10)}, taken())
-
-	// A line no posting took is the store's.
-	other := eventstore.PostingQuantity{PeriodStartsAt: nov, Meter: "other", Print: "b", Fresh: eventstore.Quantities{Quantity: 4, Requests: 4}}
-	require.Equal(t, []eventstore.PeriodQuantity{
-		{PeriodStartsAt: nov, Meter: "other", Print: "b", Quantity: 4, Requests: 4},
-		line(1000, 7, 10),
-	}, taken(other))
-
-	// Usage only after the cut is nothing to price.
-	require.Equal(t, []eventstore.PeriodQuantity{line(1000, 7, 10)}, taken(eventstore.PostingQuantity{PeriodStartsAt: nov, Meter: "late", Print: "c", Later: 3}))
-}
-
-// A volume tier's price may still fall on a total no smaller than what
-// posted: that is the credit a period carries.
-func TestAVolumeCrossingStillCreditsWhatPosted(t *testing.T) {
-	nov := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-	p := prints(volume(10, 5, 10))
-	posted := periodLines{nov: {lineKey{"work", "", "a"}: {MeterKey: "work", Print: "a", Requests: 1, Quantity: 8, Amount: 80}}}
-	rows := []eventstore.PostingQuantity{{PeriodStartsAt: nov, Meter: "work", Print: "a",
-		Read: eventstore.Quantities{Quantity: 8, Requests: 1}, Fresh: eventstore.Quantities{Quantity: 4, Requests: 1}}}
-	target, err := p.priceQuantities(takenQuantities(rows, posted))
+	lines, err := json.Marshal([]PostingLine{{MeterKey: "work", Print: "a", Requests: 8, Quantity: 80, Amount: 800}})
 	require.NoError(t, err)
-	_, amount := postingDelta(target[nov], posted[nov])
-	require.EqualValues(t, 12*5-80, amount)
+	posted, forgiven, err := receiptLines([]gen.BillingUsageReceipt{{PeriodStartsAt: nov, Lines: lines}})
+	require.NoError(t, err)
+	require.Empty(t, forgiven)
 
-	// The same fall in the store's total from lost events is not one.
-	lost := []eventstore.PostingQuantity{{PeriodStartsAt: nov, Meter: "work", Print: "a", Fresh: eventstore.Quantities{Quantity: 1, Requests: 1}}}
-	target, err = p.priceQuantities(takenQuantities(lost, posted))
+	target, err := prints(graduated(10, 5, 100)).priceQuantities(taken.quantities(nov))
+	require.NoError(t, err)
+	delta, amount := postingDelta(target[nov], posted[nov])
+	require.EqualValues(t, 20*10+10*5, amount, "the band is crossed once, at the period's total")
+	require.Equal(t, []PostingLine{{MeterKey: "work", Print: "a", Requests: 5, Quantity: 30, Amount: 250}}, delta)
+
+	target, err = prints(volume(10, 5, 100)).priceQuantities(taken.quantities(nov))
 	require.NoError(t, err)
 	_, amount = postingDelta(target[nov], posted[nov])
-	require.EqualValues(t, 9*10-80, amount, "9 units at the first band: the new unit is charged, nothing is credited")
+	require.EqualValues(t, 110*5-800, amount, "the fall is credited at the posting that takes it")
 }

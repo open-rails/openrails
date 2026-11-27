@@ -258,7 +258,8 @@ type RowStats struct {
 	Customers        int64            `json:"customers_with_transfers"`
 	LedgerTransfers  int64            `json:"ledger_transfers"`
 	ByType           map[string]int64 `json:"ledger_transfers_by_type"`
-	UsagePostings    int64            `json:"usage_postings"`
+	UsageReceipts    int64            `json:"usage_receipts"`
+	UsageTotals      int64            `json:"usage_totals"`
 	Unposted         int64            `json:"usage_pending"`
 	UsageEvents      int64            `json:"usage_events"`
 	PerCustomerMax   int64            `json:"ledger_transfers_per_customer_max"`
@@ -276,7 +277,8 @@ func (e *env) rowStats(ctx context.Context, w *WorldResult, schema string) *RowS
 	t := pgx.Identifier{schema}.Sanitize()
 	q("SELECT count(*), count(DISTINCT customer_id) FROM "+t+".ledger_transfers WHERE customer_id IS NOT NULL", &r.LedgerTransfers, &r.Customers)
 	q("SELECT coalesce(max(n), 0) FROM (SELECT count(*) n FROM "+t+".ledger_transfers WHERE customer_id IS NOT NULL GROUP BY customer_id) x", &r.PerCustomerMax)
-	q("SELECT count(*) FROM "+t+".usage_postings", &r.UsagePostings)
+	q("SELECT count(*) FROM "+t+".usage_receipts", &r.UsageReceipts)
+	q("SELECT count(*) FROM "+t+".usage_totals", &r.UsageTotals)
 	q("SELECT count(*) FROM "+t+".usage_pending", &r.Unposted)
 	if rows, err := e.pool.Query(ctx, "SELECT transfer_type, count(*) FROM "+t+".ledger_transfers GROUP BY 1"); err == nil {
 		for rows.Next() {
@@ -351,11 +353,9 @@ type QueryStats struct {
 
 const queryKinds = `multiIf(
   query_kind = 'Insert' AND query ILIKE '%usage_intake%', 'insert_usage',
-  query ILIKE '%usage_events FINAL ARRAY JOIN%', 'posting_final_scan',
-  query ILIKE '%usage_events ARRAY JOIN%', 'print_sources',
-  query ILIKE '%usage_events%', 'dedup_lookup',
+  query ILIKE '%usage_events FINAL ARRAY JOIN%', 'forgiveness_shares',
+  query ILIKE '%usage_events%', 'usage_events',
   query ILIKE '%limit_usage%', 'view_limit_usage',
-  query ILIKE '%usage_quantities%', 'view_usage_quantities',
   query ILIKE '%usage_history%', 'usage_history',
   'other')`
 

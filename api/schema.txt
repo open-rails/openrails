@@ -6,6 +6,7 @@ migration 0002_ledger_balance.up.sql sha256:b6b26bda613c49cc07120269833eccf88c8b
 migration 0003_transfer_types.up.sql sha256:e995e170597775acff551d82f2f7cff698bc09799c04554a30ed2ec755fb6d40
 migration 0004_customer_paid_totals.up.sql sha256:4b9a2facc723bab9d8579e3955f6c2cbe4f16e9f6df45b2f19d080be61007dbd
 migration 0005_usage_quarter_hours.up.sql sha256:289f968ac3d0bbce937f66f71f850c8a9d5a0ffc96b52c23ee45a504b50ae07a
+migration 0006_usage_receipts.up.sql sha256:73fca1d59b23e1c17080b6a429b13e59232a6a2e745fd6b8035808402f8dc677
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -3608,30 +3609,15 @@ table billing.usage_pending
   column merchant_id uuid NOT NULL
   column customer_id uuid NOT NULL
   column currency text NOT NULL
-  column since_at timestamp with time zone NOT NULL
   column due_at timestamp with time zone NOT NULL
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   constraint usage_pending_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint usage_pending_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
-  constraint usage_pending_due_at_check CHECK ((due_at > since_at))
   constraint usage_pending_pkey PRIMARY KEY (merchant_id, customer_id, currency)
   index CREATE INDEX usage_pending_due_at_idx ON billing.usage_pending USING btree (due_at, merchant_id, customer_id, currency)
   index CREATE UNIQUE INDEX usage_pending_pkey ON billing.usage_pending USING btree (merchant_id, customer_id, currency)
 
-table billing.usage_pending_amounts
-  column merchant_id uuid NOT NULL
-  column customer_id uuid NOT NULL
-  column currency text NOT NULL
-  column lease_id uuid NOT NULL
-  column amount bigint NOT NULL
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint usage_pending_amounts_amount_check CHECK ((amount > 0))
-  constraint usage_pending_amounts_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-  constraint usage_pending_amounts_pending_fkey FOREIGN KEY (merchant_id, customer_id, currency) REFERENCES billing.usage_pending(merchant_id, customer_id, currency) ON DELETE CASCADE
-  constraint usage_pending_amounts_pkey PRIMARY KEY (merchant_id, customer_id, currency, lease_id)
-  index CREATE UNIQUE INDEX usage_pending_amounts_pkey ON billing.usage_pending_amounts USING btree (merchant_id, customer_id, currency, lease_id)
-
-table billing.usage_postings
+table billing.usage_receipts
   column merchant_id uuid NOT NULL
   column id uuid NOT NULL DEFAULT uuidv7()
   column customer_id uuid NOT NULL
@@ -3643,22 +3629,51 @@ table billing.usage_postings
   column amount bigint NOT NULL
   column lines jsonb NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column ingested_through timestamp with time zone NOT NULL
   column forgiven bigint NOT NULL
   column forgiven_lines jsonb
-  constraint usage_postings_amount_check CHECK (((amount <> 0) AND ((reason = 'reversal'::text) = (amount < 0))))
-  constraint usage_postings_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-  constraint usage_postings_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint usage_postings_forgiven_check CHECK (((forgiven = 0) OR ((currency <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text])) AND (((reason <> 'reversal'::text) AND (forgiven > 0) AND (forgiven <= amount)) OR ((reason = 'reversal'::text) AND (forgiven < 0) AND (forgiven >= amount))))))
-  constraint usage_postings_forgiven_lines_check CHECK ((((forgiven = 0) = (forgiven_lines IS NULL)) AND ((forgiven_lines IS NULL) OR ((jsonb_typeof(forgiven_lines) = 'array'::text) AND (octet_length((forgiven_lines)::text) <= 262144)))))
-  constraint usage_postings_lines_check CHECK (((jsonb_typeof(lines) = 'array'::text) AND (octet_length((lines)::text) <= 262144)))
-  constraint usage_postings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint usage_postings_period_ends_at_check CHECK ((period_ends_at > period_starts_at))
-  constraint usage_postings_pkey PRIMARY KEY (merchant_id, id)
-  constraint usage_postings_reason_check CHECK ((reason = ANY (ARRAY['daily'::text, 'billing'::text, 'credit'::text, 'purge'::text, 'reversal'::text])))
-  index CREATE INDEX usage_postings_forgiven_idx ON billing.usage_postings USING btree (merchant_id, cut_at) WHERE (forgiven <> 0)
-  index CREATE INDEX usage_postings_period_idx ON billing.usage_postings USING btree (merchant_id, customer_id, currency, period_starts_at)
-  index CREATE UNIQUE INDEX usage_postings_pkey ON billing.usage_postings USING btree (merchant_id, id)
+  constraint usage_receipts_amount_check CHECK (((amount <> 0) AND ((reason = 'reversal'::text) = (amount < 0))))
+  constraint usage_receipts_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint usage_receipts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint usage_receipts_forgiven_check CHECK (((forgiven = 0) OR ((currency <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text])) AND (((reason <> 'reversal'::text) AND (forgiven > 0) AND (forgiven <= amount)) OR ((reason = 'reversal'::text) AND (forgiven < 0) AND (forgiven >= amount))))))
+  constraint usage_receipts_forgiven_lines_check CHECK ((((forgiven = 0) = (forgiven_lines IS NULL)) AND ((forgiven_lines IS NULL) OR ((jsonb_typeof(forgiven_lines) = 'array'::text) AND (octet_length((forgiven_lines)::text) <= 262144)))))
+  constraint usage_receipts_lines_check CHECK (((jsonb_typeof(lines) = 'array'::text) AND (octet_length((lines)::text) <= 262144)))
+  constraint usage_receipts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint usage_receipts_period_ends_at_check CHECK ((period_ends_at > period_starts_at))
+  constraint usage_receipts_pkey PRIMARY KEY (merchant_id, id)
+  constraint usage_receipts_reason_check CHECK ((reason = ANY (ARRAY['daily'::text, 'billing'::text, 'credit'::text, 'purge'::text, 'reversal'::text])))
+  index CREATE INDEX usage_receipts_forgiven_idx ON billing.usage_receipts USING btree (merchant_id, cut_at) WHERE (forgiven <> 0)
+  index CREATE INDEX usage_receipts_period_idx ON billing.usage_receipts USING btree (merchant_id, customer_id, currency, period_starts_at)
+  index CREATE UNIQUE INDEX usage_receipts_pkey ON billing.usage_receipts USING btree (merchant_id, id)
+
+table billing.usage_totals
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column currency text NOT NULL
+  column period_starts_at timestamp with time zone NOT NULL
+  column period_ends_at timestamp with time zone NOT NULL
+  column meter_key text NOT NULL
+  column cell text NOT NULL
+  column print text NOT NULL
+  column lapse_at timestamp with time zone NOT NULL
+  column lease_id uuid NOT NULL
+  column quantity bigint NOT NULL
+  column stated bigint NOT NULL
+  column requests bigint NOT NULL
+  column amount bigint NOT NULL
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint usage_totals_amount_check CHECK ((amount >= 0))
+  constraint usage_totals_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint usage_totals_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
+  constraint usage_totals_meter_key_check CHECK ((btrim(meter_key) <> ''::text))
+  constraint usage_totals_period_check CHECK (((period_ends_at > period_starts_at) AND (lapse_at >= period_starts_at) AND (lapse_at < period_ends_at)))
+  constraint usage_totals_pkey PRIMARY KEY (merchant_id, customer_id, currency, period_starts_at, meter_key, cell, print, lapse_at, lease_id)
+  constraint usage_totals_posted_check CHECK (((lease_id <> '00000000-0000-0000-0000-000000000000'::uuid) OR ((amount = 0) AND (lapse_at = period_starts_at))))
+  constraint usage_totals_print_fkey FOREIGN KEY (merchant_id, print) REFERENCES billing.usage_card_prints(merchant_id, print)
+  constraint usage_totals_quantity_check CHECK ((quantity >= 0))
+  constraint usage_totals_requests_check CHECK ((requests > 0))
+  constraint usage_totals_stated_check CHECK ((stated >= 0))
+  index CREATE INDEX usage_totals_closed_idx ON billing.usage_totals USING btree (merchant_id, period_ends_at) WHERE (lease_id = '00000000-0000-0000-0000-000000000000'::uuid)
+  index CREATE UNIQUE INDEX usage_totals_pkey ON billing.usage_totals USING btree (merchant_id, customer_id, currency, period_starts_at, meter_key, cell, print, lapse_at, lease_id)
 
 table billing.user_destructive_reservations
   column merchant_id uuid NOT NULL
@@ -4789,8 +4804,8 @@ function billing.guard_billing_restore_receipt()
                     'subscriptions',
                     'usage_card_prints',
                     'usage_pending',
-                    'usage_pending_amounts',
-                    'usage_postings',
+                    'usage_receipts',
+                    'usage_totals',
                     'webhook_events',
                     'webhook_health',
                     'webhook_health_daily']::text[])

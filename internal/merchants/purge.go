@@ -594,7 +594,7 @@ func (s *Service) postUsage(ctx context.Context, id billing.MerchantID) (*events
 		}
 		usage := db.UsageLedgerOf(q)
 		if usage == nil {
-			return fmt.Errorf("%w: its pending usage cannot post", billing.ErrEventStoreRequired)
+			return errors.New("no usage ledger is bound: its pending usage cannot post")
 		}
 		now := time.Now().UTC()
 		for _, r := range rows {

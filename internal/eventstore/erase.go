@@ -10,7 +10,7 @@ import (
 )
 
 // usageTables are the usage family's tables: raw events, then the rollups.
-var usageTables = []string{"usage_events", "limit_usage", "usage_quantities", "usage_history"}
+var usageTables = []string{"usage_events", "limit_usage", "usage_history"}
 
 // exec runs a statement that names the context's merchant, waiting for a
 // mutation to finish.

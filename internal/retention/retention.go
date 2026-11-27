@@ -61,6 +61,10 @@ const (
 	Leases = 61 * Day
 	// LimitAdjustments keeps a limit adjustment's replay record 61 days.
 	LimitAdjustments = 61 * Day
+	// UsageTotals keeps a pricing period's running totals a day past its late
+	// usage window: no usage enters the period after the window, and the day
+	// covers the syncs in flight at its close.
+	UsageTotals = UsageIngestWindow + Day
 	// Carts keeps a cart 30 days past its last change.
 	Carts = 30 * Day
 	// ResolvedFindings keeps a resolved reconciliation finding 12 months past

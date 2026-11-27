@@ -2065,7 +2065,7 @@
       "TestLeaseSyncs/OR-J24-S45/a-report-naming-a-customer-another-transaction-spends-does-not-wait"
     ],
     "OR-J24-S47": [
-      "TestUsageStore/OR-J24-S47/a-resend-after-a-lost-commit-inserts-nothing-twice"
+      "TestUsageStore/OR-J24-S47/a-sync-that-fails-between-its-commit-and-its-insert-is-charged-once-and-its-resend-inserts-nothing"
     ],
     "OR-J24-S48": [
       "TestUsageStore/OR-J24-S48/while-clickhouse-is-out-of-reach-usage-settles-nothing-and-balances-read-and-move"
@@ -2073,7 +2073,7 @@
     "OR-J24-S49": [
       "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total",
       "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total/graduated-across-two-postings",
-      "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total/a-volume-crossing-is-carried-and-credited-at-period-close",
+      "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total/a-volume-crossing-is-credited-at-the-posting-that-takes-it",
       "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total/a-card-revision-mid-period-is-priced-card-by-card"
     ],
     "OR-J24-S50": [
@@ -2083,7 +2083,7 @@
       "TestUsageStore/OR-J24-S51/every-limit-kind-reads-its-use-from-the-event-store"
     ],
     "OR-J24-S52": [
-      "TestUsageStore/OR-J24-S52/a-database-with-pending-usage-starts-without-its-store-and-opens-a-finding"
+      "TestUsageStore/OR-J24-S52/a-database-with-pending-usage-starts-without-its-store-and-posts-it"
     ],
     "OR-J24-S53": [
       "TestUsageStore/OR-J24-S53/erasure-clears-invoker-and-metadata-and-keeps-quantities-and-money"
@@ -2100,16 +2100,6 @@
     "OR-J24-S57": [
       "TestUsageStore/OR-J24-S57/usage-history-folds-into-the-merchants-days-and-regroups-when-its-zone-changes"
     ],
-    "OR-J24-S58": [
-      "TestUsageRecovery/OR-J24-S58/an-event-keeps-its-identity-across-attempts",
-      "TestUsageRecovery/OR-J24-S58/an-event-keeps-its-identity-across-attempts/a-lease-item-without-occurred-at-resent-after-a-lost-commit-charges-once"
-    ],
-    "OR-J24-S59": [
-      "TestUsageRecovery/OR-J24-S59/a-resent-item-counts-in-the-session-its-first-attempt-opened"
-    ],
-    "OR-J24-S60": [
-      "TestUsageRecovery/OR-J24-S60/an-insert-whose-caller-gave-up-finishes-before-the-resend-looks"
-    ],
     "OR-J24-S61": [
       "TestUsageRecovery/OR-J24-S61/a-lot-lapsing-mid-month-funds-exactly-the-usage-before-its-lapse",
       "TestUsageRecovery/OR-J24-S61/a-lot-lapsing-mid-month-funds-exactly-the-usage-before-its-lapse/usage-after-the-lapse-holds-back-nothing",
@@ -2120,11 +2110,6 @@
     ],
     "OR-J24-S63": [
       "TestUsageRecovery/OR-J24-S63/an-erasure-run-again-after-stopping-part-way-clears-the-events-and-leaves-history-alone"
-    ],
-    "OR-J24-S64": [
-      "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting",
-      "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting/a-print-a-card-in-force-names-is-recorded-again",
-      "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting/one-nothing-names-is-left-out"
     ],
     "OR-J24-S65": [
       "TestUsageRecovery/OR-J24-S65/a-merchants-configuration-first-read-inside-a-balance-look-loads"
@@ -2609,7 +2594,7 @@
       "TestUsageRecovery/OR-J24-S72/a-resend-after-a-lost-reply-adds-nothing-to-pending"
     ],
     "OR-J24-S73": [
-      "TestUsageRecovery/OR-J24-S73/a-sync-that-failed-after-its-insert-leaves-its-usage-unsettled-and-the-resend-adds-it-once"
+      "TestUsageRecovery/OR-J24-S73/a-sync-that-failed-before-its-commit-inserted-nothing-and-the-resend-adds-it-once"
     ],
     "OR-J24-S74": [
       "TestUsageRecovery/OR-J24-S74/a-posting-before-the-resend-leaves-unsettled-usage-to-it"
@@ -2790,6 +2775,18 @@
     ],
     "OR-J24-S83": [
       "TestUsageSeries/OR-J24-S83/a-late-item-whose-limit-window-ended-settles-and-counts-toward-no-window"
+    ],
+    "OR-J24-S84": [
+      "TestUsageStore/OR-J24-S84/a-posting-takes-exactly-what-is-pending-priced-on-the-periods-total"
+    ],
+    "OR-J24-S85": [
+      "TestUsageRecovery/OR-J24-S85/usage-reported-after-a-lapse-is-split-at-it-and-only-what-came-before-draws-the-lot"
+    ],
+    "OR-J24-S86": [
+      "TestUsageStore/OR-J24-S86/a-store-that-refuses-the-insert-after-the-commit-is-tried-again-and-one-that-refuses-for-good-loses-only-the-counts"
+    ],
+    "OR-J24-S87": [
+      "TestUsageRecovery/OR-J24-S87/a-failed-items-grace-counts-each-failure-once"
     ],
     "OR-J25-S44": [
       "TestBalanceLooks/OR-J25-S44/the-burn-rate-reads-each-ended-quarter-hour-of-usage-history-once"

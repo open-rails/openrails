@@ -901,7 +901,7 @@
     {
       "id": "OR-J24-S47",
       "journey": "J24",
-      "name": "A resend after a sync whose events reached the store but whose transaction never committed inserts nothing twice: raw usage, FINAL and the rollups agree"
+      "name": "A sync that commits and stops before its insert is charged once and counted nowhere in the store; its resend answers the receipts and inserts nothing, and the next item counts once in raw usage, history and its spend window"
     },
     {
       "id": "OR-J24-S48",
@@ -911,7 +911,7 @@
     {
       "id": "OR-J24-S49",
       "journey": "J24",
-      "name": "A period posts the price of its total: graduated across two postings, a volume crossing carried and credited once its late window closed, a card revision priced card by card"
+      "name": "A period posts the price of its total: graduated across two postings, a volume crossing credited at the posting that takes it, a card revision priced card by card"
     },
     {
       "id": "OR-J24-S50",
@@ -926,7 +926,7 @@
     {
       "id": "OR-J24-S52",
       "journey": "J24",
-      "name": "A database with pending usage starts without its store: the merchant's usage is refused and named in a finding, balances read from PostgreSQL, and other customers and running charges bill; an empty store is refused, and usage attach discards the pending usage only with --discard-pending, on the record"
+      "name": "A database with pending usage starts without its store: new usage is refused, its pending usage reads and posts from PostgreSQL, and other customers and running charges bill; an empty store is refused until usage attach records it"
     },
     {
       "id": "OR-J24-S53",
@@ -954,21 +954,6 @@
       "name": "Usage history folds into the days of the merchant's accounting zone (23:30 in Kolkata is that day), a zone change regroups the past, and the days sum to what posts"
     },
     {
-      "id": "OR-J24-S58",
-      "journey": "J24",
-      "name": "A lease item that names no occurred_at resent after a commit that was lost finds the event the first attempt inserted and charges once"
-    },
-    {
-      "id": "OR-J24-S59",
-      "journey": "J24",
-      "name": "An item resent after a commit that was lost counts in the session window its first attempt opened, not one opened at the resend"
-    },
-    {
-      "id": "OR-J24-S60",
-      "journey": "J24",
-      "name": "A sync whose caller gives up while its insert is sent still finishes the insert before it lets go of its locks: the resend inserts nothing and the rollups count each item once"
-    },
-    {
       "id": "OR-J24-S61",
       "journey": "J24",
       "name": "A lot lapsing mid-month funds exactly the usage and running charges before its lapse, however much usage came after it; only that usage is owed"
@@ -982,11 +967,6 @@
       "id": "OR-J24-S63",
       "journey": "J24",
       "name": "A usage erasure that stopped at its events' update, run again, clears them and leaves the history as it was: each event in it once"
-    },
-    {
-      "id": "OR-J24-S64",
-      "journey": "J24",
-      "name": "Usage priced under a card print whose intake never committed holds up no posting: a print a card in force names is recorded again, and one nothing names is left out"
     },
     {
       "id": "OR-J24-S65",
@@ -1591,7 +1571,7 @@
     {
       "id": "OR-J23-S38",
       "journey": "J23",
-      "name": "Two gates and an unreachable OpenRails keep deciding on their views and together spend at most what was left, each its share; what a flush resends is settled once"
+      "name": "Two gates and an unreachable OpenRails keep deciding on their views and together spend at most what was left, each its share; what a flush resends is settled once, and a sync sent in the outage that fails after OpenRails is back fails no flush begun after it"
     },
     {
       "id": "OR-J23-S40",
@@ -3176,7 +3156,7 @@
     {
       "id": "OR-J48-S10",
       "journey": "J48",
-      "name": "A period in a unit whose volume price falls below what posted is credited once its late window closes, taking back what the period forgave, from the shares its posting stored, before crediting what the lots paid beyond its price"
+      "name": "A period in a unit whose volume price falls below what its receipts took is credited at the posting that takes the usage, taking back what the period forgave, from the shares its receipt stored, before crediting what the lots paid beyond its price"
     },
     {
       "id": "OR-J48-S11",
@@ -4011,12 +3991,12 @@
     {
       "id": "OR-J24-S73",
       "journey": "J24",
-      "name": "A sync that failed after inserting its first chunk leaves that usage unsettled; the resend adds each item to pending once, priced from the period's start"
+      "name": "A sync that failed before its commit inserted nothing; the resend adds each item to pending once, priced from the period's start, and the store counts each once"
     },
     {
       "id": "OR-J24-S74",
       "journey": "J24",
-      "name": "A posting before the resend leaves usage a failed sync inserted to the resend, which adds it to pending once; the next posting takes it once"
+      "name": "A posting before the resend leaves usage a failed sync did not settle to the resend, which adds it to pending once; the next posting takes it once"
     },
     {
       "id": "OR-J24-S75",
@@ -4292,6 +4272,26 @@
       "id": "OR-J24-S83",
       "journey": "J24",
       "name": "An item settled days after its admission, its limit window over, settles without error and counts toward no window: no limit_usage row and no window row; usage admitted now counts in its live window"
+    },
+    {
+      "id": "OR-J24-S84",
+      "journey": "J24",
+      "name": "A posting takes exactly what is pending, priced on the period's total: two gates' usage across a graduated band posts the price their running totals held, folded into the period's posted row, and leaves nothing queued"
+    },
+    {
+      "id": "OR-J24-S85",
+      "journey": "J24",
+      "name": "Usage reported after a credit lot lapsed, from either side of the lapse, is split at it in the running totals: the posting before the lapse draws the lot for the usage before it only, and the rest is owed"
+    },
+    {
+      "id": "OR-J24-S86",
+      "journey": "J24",
+      "name": "A store that refuses a sync's insert after its commit is tried again: once it takes the usage each item counts once; one that refuses every try still answers the receipts and charges each item once, counting none of them, and a resend inserts nothing"
+    },
+    {
+      "id": "OR-J24-S87",
+      "journey": "J24",
+      "name": "A failed item's grace counts each failure once: the resend of a sync that failed reads no copy of its own failure, and a later chunk of one sync counts the failures of the chunks before it"
     },
     {
       "id": "OR-J25-S44",

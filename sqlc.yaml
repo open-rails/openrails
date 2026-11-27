@@ -8,6 +8,7 @@ sql:
       - "internal/migrate/postgres/0003_transfer_types.up.sql"
       - "internal/migrate/postgres/0004_customer_paid_totals.up.sql"
       - "internal/migrate/postgres/0005_usage_quarter_hours.up.sql"
+      - "internal/migrate/postgres/0006_usage_receipts.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:
