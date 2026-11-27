@@ -93,7 +93,7 @@ type gateWire struct {
 }
 
 // syncHold keeps one sync in flight: held closes once it is, and it goes on
-// as it was sent once released.
+// once released, unreachable if OpenRails was when it was held.
 type syncHold struct {
 	held, release chan struct{}
 	once          sync.Once
@@ -120,15 +120,17 @@ func (h *syncHold) wait(t *testing.T) {
 }
 
 func (w *gateWire) RoundTrip(r *http.Request) (*http.Response, error) {
-	down := w.down.Load()
+	var h *syncHold
 	if r.URL.Path == "/v1/app/leases/sync" {
-		if h := w.hold.Swap(nil); h != nil {
-			close(h.held)
-			select {
-			case <-h.release:
-			case <-r.Context().Done():
-				return nil, r.Context().Err()
-			}
+		h = w.hold.Swap(nil)
+	}
+	down := w.down.Load()
+	if h != nil {
+		close(h.held)
+		select {
+		case <-h.release:
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
 		}
 	}
 	if down {
@@ -383,16 +385,32 @@ func TestGate(t *testing.T) {
 		customer := gateCustomer(t, a)
 
 		// A lost reply is resent under the same numbers and settles once.
+		// The usage waits out a sync that cannot reach OpenRails, so the
+		// flush's own sync carries it and loses the reply.
 		client, wire := gateRemote(t, a)
 		g := newGate(t, client, openrails.GateDeps{})
-		for i := range 4 {
+		_, err := g.Consume(t.Context(), gateWork(customer, "lost-0", 2))
+		require.NoError(t, err)
+		gateFlush(t, g)
+		wire.down.Store(true)
+		sent := wire.holdSync(t)
+		for i := 1; i < 4; i++ {
 			_, err := g.Consume(t.Context(), gateWork(customer, fmt.Sprintf("lost-%d", i), 2))
 			require.NoError(t, err)
 		}
+		sent.wait(t)
+		wire.down.Store(false)
 		wire.dropReply.Store(1)
-		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-		defer cancel()
-		require.ErrorIs(t, g.Flush(ctx), openrails.ErrUnavailable)
+		flushed := make(chan error, 1)
+		go func() {
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
+			flushed <- g.Flush(ctx)
+		}()
+		time.Sleep(100 * time.Millisecond)
+		sent.free()
+		require.ErrorIs(t, <-flushed, openrails.ErrUnavailable)
+		require.Zero(t, wire.dropReply.Load(), "the flush's sync lost its reply")
 		gateFlush(t, g)
 		require.EqualValues(t, 8, customerLimit(t, a.alpha, customer, "daily").Used)
 
@@ -409,7 +427,7 @@ func TestGate(t *testing.T) {
 		gateFlush(t, plain)
 		durableWire.down.Store(true)
 		plainWire.down.Store(true)
-		_, err := durable.Consume(t.Context(), gateWork(customer, "unsent-durable", 3))
+		_, err = durable.Consume(t.Context(), gateWork(customer, "unsent-durable", 3))
 		require.NoError(t, err)
 		_, err = plain.Consume(t.Context(), gateWork(customer, "unsent-plain", 5))
 		require.NoError(t, err)
