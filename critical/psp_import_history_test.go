@@ -3,6 +3,7 @@
 package critical_test
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -99,9 +100,10 @@ func TestPSPImportHistory(t *testing.T) {
 		}
 		require.NoError(t, iw.link(t, imp.ID, billing.LinkPSPImportParams{}))
 		recs := iw.apply(t, imp.ID)
-		for _, ref := range []string{alice, bob, carolSub} {
-			require.Equal(t, billing.PSPImportImported, recs[ref].State, "%s: %v", ref, deref(recs[ref].Reason))
+		for ref, r := range recs {
+			require.Equal(t, billing.PSPImportImported, r.State, "%s %s: %v", r.Kind, ref, deref(r.Reason))
 		}
+		require.Empty(t, iw.findingErrors(t), "history raises no finding")
 
 		a := only(t, iw, customerOf(iw.alice))
 		ended(t, a, t0, t0.Add(95*day), t0.Add(95*day), "provider")
@@ -111,6 +113,7 @@ func TestPSPImportHistory(t *testing.T) {
 		c := only(t, iw, customerOf(carol))
 		ended(t, c, t0, t0.Add(60*day), t0.Add(60*day), "provider")
 
+		require.Equal(t, []int64{5_000_000, 9_990_000, 9_990_000, 14_990_000}, paid(t, iw, customerOf(iw.alice)))
 		// Alice's bills date her price change: two on Basic, then the
 		// proration and a renewal on Plus.
 		invoices, err := iw.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{SubscriptionID: a.ID, PageRequest: billing.PageRequest{Limit: 100}})
@@ -127,7 +130,6 @@ func TestPSPImportHistory(t *testing.T) {
 			slices.Sort(amounts)
 		}
 		require.Equal(t, map[billing.PriceID][]int64{prices["price_basic"].ID: {9_990_000, 9_990_000}, prices["price_plus"].ID: {5_000_000, 14_990_000}}, billed)
-		require.Equal(t, []int64{5_000_000, 9_990_000, 9_990_000, 14_990_000}, paid(t, iw, customerOf(iw.alice)))
 		require.Equal(t, []int64{9_990_000}, paid(t, iw, customerOf(iw.bob)))
 		require.Equal(t, []int64{9_990_000, 9_990_000}, paid(t, iw, customerOf(carol)))
 		for _, who := range []billing.CustomerID{customerOf(iw.alice), customerOf(iw.bob), customerOf(carol)} {
@@ -244,4 +246,14 @@ func TestPSPImportHistory(t *testing.T) {
 		require.Equal(t, []int64{20_000_000, 20_000_000}, paid(t, iw, customerOf(iw.alice)))
 		require.False(t, iw.entitled(t, customerOf(iw.alice), "member:gold"))
 	})
+}
+
+// findingErrors lists the merchant's findings, each with the error its
+// evidence names.
+func (iw *importWorld) findingErrors(t *testing.T) string {
+	t.Helper()
+	var out string
+	require.NoError(t, iw.pool.QueryRow(t.Context(), fmt.Sprintf(`SELECT COALESCE(string_agg(finding_type || ' ' || subject_key || ' ' || COALESCE(evidence->>'error', ''), E'\n' ORDER BY finding_type, subject_key), '')
+		FROM %s WHERE merchant_id = $1`, iw.table("reconciliation_findings")), iw.alpha.MerchantID().UUID()).Scan(&out))
+	return out
 }
