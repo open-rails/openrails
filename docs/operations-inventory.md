@@ -156,7 +156,7 @@ and egress receipt. A separate rehearsal from a fresh snapshot gets its own ID.
 <details>
 <summary>Named SQL writes and owned billing tables</summary>
 
-The source scan found 512 named SQL statements in 94 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
+The source scan found 511 named SQL statements in 94 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
 
 | Query source | Statements with explicit writes | Targets |
 | --- | ---: | --- |
@@ -192,7 +192,7 @@ The source scan found 512 named SQL statements in 94 files with an explicit qual
 | [mandates.sql](../internal/db/queries/mandates.sql) | 8 | `host_outbox`, `mandates` |
 | [merchant_archive.sql](../internal/db/queries/merchant_archive.sql) | 1 | `merchants` |
 | [merchant_binding.sql](../internal/db/queries/merchant_binding.sql) | 1 | `merchants` |
-| [merchant_config.sql](../internal/db/queries/merchant_config.sql) | 2 | `reconciliation_findings` |
+| [merchant_config.sql](../internal/db/queries/merchant_config.sql) | 1 | `reconciliation_findings` |
 | [merchant_controls.sql](../internal/db/queries/merchant_controls.sql) | 2 | `merchant_controls` |
 | [merchant_leases.sql](../internal/db/queries/merchant_leases.sql) | 2 | `merchant_leases` |
 | [merchant_lifecycle.sql](../internal/db/queries/merchant_lifecycle.sql) | 21 | `customer_contacts`, `disputes`, `fraud_reports`, `mandates`, `money_settings`, `network_activity_daily`, `operation_log`, `invoice_attempts`, `payment_attempts`, `payment_method_versions`, `payment_methods`, `payments`, `product_access`, `provider_intents`, `provisioning_tokens`, `psp_customers`, `rebill_cycles`, `solana_pay_receipts`, `solana_pay_references`, `stripe_fee_reads`, `subscriptions` |

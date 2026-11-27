@@ -146,7 +146,7 @@ func Notify(ctx context.Context, database *db.DB, f Finding, now time.Time) erro
 		if err != nil || n == 0 {
 			return err
 		}
-		return Queue(ctx, database, tx, mid.UUID(), f.ID, f.Severity, notifiedAt)
+		return queue(ctx, database, tx, mid.UUID(), f.ID, f.Severity, notifiedAt)
 	})
 	if err != nil {
 		return fmt.Errorf("claim finding notification: %w", err)
@@ -154,9 +154,9 @@ func Notify(ctx context.Context, database *db.DB, f Finding, now time.Time) erro
 	return nil
 }
 
-// Queue commits the alert of a finding's notification episode in tx, the
+// queue commits the alert of a finding's notification episode in tx, the
 // transaction that claimed it. A low finding stays in the console.
-func Queue(ctx context.Context, database *db.DB, tx pgx.Tx, merchantID, findingID uuid.UUID, severity string, notifiedAt time.Time) error {
+func queue(ctx context.Context, database *db.DB, tx pgx.Tx, merchantID, findingID uuid.UUID, severity string, notifiedAt time.Time) error {
 	if severity == "low" {
 		return nil
 	}

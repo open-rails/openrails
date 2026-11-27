@@ -1233,9 +1233,6 @@
     "OR-J06-S61": [
       "TestStripeWebhookDueWork/OR-J06-S61/a-superseded-endpoint-is-retired-by-the-pass-scheduled-at-its-deadline"
     ],
-    "OR-J06-S62": [
-      "TestStripeWebhookDueWork/OR-J06-S62/an-unresolved-undeclared-account-alerts-again-once-a-day"
-    ],
     "OR-J06-S63": [
       "TestStripeWebhookDueWork/OR-J06-S63/a-psp-change-while-its-pass-runs-reaches-stripe-without-the-backstop"
     ],
@@ -2893,6 +2890,9 @@
     ],
     "OR-J25-S49": [
       "TestLowBalanceAmounts/OR-J25-S49/with-no-amount-set-a-running-charge-is-told-only-when-depleted-at-its-exact-instant"
+    ],
+    "OR-J06-S87": [
+      "TestStripeWebhookDueWork/OR-J06-S87/an-unresolved-undeclared-account-alerts-once-and-stays-open"
     ]
   }
 }
