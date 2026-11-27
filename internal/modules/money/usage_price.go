@@ -14,7 +14,6 @@ import (
 
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -23,10 +22,9 @@ import (
 // by card, in the order the cards' prints were first written, each card
 // pricing its own quantity on top of the earlier cards' (R_p(Q_<p + q_p) -
 // R_p(Q_<p)); a dynamic card charges what was stated. Within one card the
-// invoice usage arrived in changes nothing, so late usage and concurrent gates
+// order usage arrived in changes nothing, so late usage and concurrent gates
 // price exactly and per-unit rounding happens once per total. A posting takes
-// the price less what earlier postings took, and history shares it across
-// days the same way, so the days sum to what posts.
+// the price less what the period's earlier usage receipts took.
 
 // printCard is a card print's terms and when it was first written.
 type printCard struct {
@@ -131,13 +129,21 @@ type lineKey struct {
 // periodLines are each period's priced lines, by meter cell and print.
 type periodLines map[time.Time]map[lineKey]*PostingLine
 
+// periodQuantity is a customer's settled usage of one meter cell under one
+// card print in a pricing period.
+type periodQuantity struct {
+	period                     time.Time
+	meter, cell, print         string
+	quantity, stated, requests int64
+}
+
 // priceQuantities prices a customer's period quantities: the price of each
 // period's total, line by line.
-func (p usagePrints) priceQuantities(rows []eventstore.PeriodQuantity) (periodLines, error) {
+func (p usagePrints) priceQuantities(rows []periodQuantity) (periodLines, error) {
 	cells := map[cellKey][]printQuantity{}
 	for _, r := range rows {
-		k := cellKey{r.PeriodStartsAt.UTC(), r.Meter, r.Cell}
-		cells[k] = append(cells[k], printQuantity{print: r.Print, quantity: r.Quantity, stated: r.Stated, requests: r.Requests})
+		k := cellKey{r.period, r.meter, r.cell}
+		cells[k] = append(cells[k], printQuantity{print: r.print, quantity: r.quantity, stated: r.stated, requests: r.requests})
 	}
 	out := periodLines{}
 	for k, qs := range cells {
@@ -156,12 +162,6 @@ func (p usagePrints) priceQuantities(rows []eventstore.PeriodQuantity) (periodLi
 		}
 	}
 	return out, nil
-}
-
-// known keeps the quantities whose prints are recorded: an unlocked read may
-// see usage whose prints its intake has not committed yet.
-func (p usagePrints) known(rows []eventstore.PeriodQuantity) []eventstore.PeriodQuantity {
-	return slices.DeleteFunc(rows, func(r eventstore.PeriodQuantity) bool { _, ok := p[r.Print]; return !ok })
 }
 
 // PostingLine is what a posting added for one meter cell under one card

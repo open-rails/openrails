@@ -1543,9 +1543,6 @@
     "internal/api": [
       "type ErrorResponse struct {\n\tError ErrorDetails `json:\"error\"`\n}"
     ],
-    "internal/app": [
-      "type UsageDiscard struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tRunID      uuid.UUID `json:\"run_id\"`\n\tCustomers  int       `json:\"customers\"`\n}"
-    ],
     "internal/archivewire": [
       "type Header struct {\n\tTenantID                 string `json:\"tenant_id,omitempty\"`\n\tCatalogRevision          int64  `json:\"catalog_revision\"`\n\tKind                     string `json:\"kind\"`\n\tVersion                  int    `json:\"version\"`\n\tMerchantID               string `json:\"merchant_id\"`\n\tConsistency              string `json:\"consistency\"`\n\tRequiredCutoverCondition string `json:\"required_cutover_condition\"`\n}",
       "type Info struct {\n\tTenantID   string `json:\"tenant_id,omitempty\"`\n\tMerchantID string `json:\"merchant_id\"`\n\tDigest     string `json:\"digest\"`\n\tRows       int64  `json:\"rows\"`\n}",
@@ -2563,26 +2560,6 @@
       "fmt": "fmt",
       "http": "net/http"
     },
-    "internal/app/event_store.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "config": "github.com/open-rails/openrails/internal/config",
-      "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "driver": "github.com/ClickHouse/clickhouse-go/v2/lib/driver",
-      "errors": "errors",
-      "eventstore": "github.com/open-rails/openrails/internal/eventstore",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "json": "encoding/json",
-      "logx": "github.com/open-rails/openrails/internal/logx",
-      "migrate": "github.com/open-rails/openrails/internal/migrate",
-      "slices": "slices",
-      "slog": "log/slog",
-      "strings": "strings",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
-    },
     "internal/archivewire/wire.go": {
       "bufio": "bufio",
       "bytes": "bytes",
@@ -2813,7 +2790,6 @@
       "fmt": "fmt",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "strconv": "strconv",
-      "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
@@ -3994,7 +3970,6 @@
       "cmp": "cmp",
       "context": "context",
       "errors": "errors",
-      "eventstore": "github.com/open-rails/openrails/internal/eventstore",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",

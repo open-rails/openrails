@@ -9,9 +9,9 @@ import (
 )
 
 // intake takes a chunk of the sync's usage into the event store: priced and
-// located, inserted and waited for (what an earlier attempt inserted is
-// skipped), then the PostgreSQL side in the sync's transaction. While the
-// store is out of reach the sync fails whole and settles nothing.
+// located, inserted and waited for, then the PostgreSQL side in the sync's
+// transaction. While the store is out of reach the sync fails whole and
+// settles nothing.
 func (r *syncRun) intake(items []money.UsageItem) ([]money.UsageResult, error) {
 	in, err := r.money.PrepareUsageTx(r.ctx, r.q, r.DB.EventStore(), items)
 	if err != nil {

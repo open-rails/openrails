@@ -15,23 +15,15 @@ import (
 // The archive's event store section is the merchant's usage in ClickHouse
 // (contract.EventStoreProfiles), after every table of PostgreSQL. Export
 // writes it from the deployment's store; a deployment without one exports
-// none, and refuses a merchant with usage the ledger has not taken. Restore
-// needs a store, refuses a merchant that already has usage there, inserts
-// each table's rows as archived, and deletes them again when the restore
-// fails.
+// none (what posting needs is PostgreSQL's). Restore needs a store, refuses a
+// merchant that already has usage there, inserts each table's rows as
+// archived, and deletes them again when the restore fails.
 
 const eventStorePrefix = "event_store."
 
 func exportUsage(ctx context.Context, database *db.DB, q *gen.Queries, id billing.MerchantID, w *archivewire.Writer) error {
 	store := database.EventStore()
 	if store == nil {
-		pending, err := q.ListMerchantUsagePending(ctx, id.UUID())
-		if err != nil {
-			return err
-		}
-		if len(pending) > 0 {
-			return &Error{Code: "unsupported_state", Table: "usage_pending", Count: int64(len(pending)), Err: billing.ErrEventStoreRequired}
-		}
 		return nil
 	}
 	current, merchantID := "", id.String()

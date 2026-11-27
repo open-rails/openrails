@@ -54,53 +54,6 @@ func awaitErasure(t *testing.T, events <-chan *river.Event) river.EventKind {
 	}
 }
 
-// loseLeaseCommit is the fixture of a sync whose events reached the store
-// and whose transaction never committed: the lease settled nothing and the
-// customer has no pending usage.
-func loseLeaseCommit(t *testing.T, w *world, lease billing.LeaseID) {
-	t.Helper()
-	leases, pending := pgx.Identifier{w.schema, "leases"}.Sanitize(), pgx.Identifier{w.schema, "usage_pending"}.Sanitize()
-	_, err := w.pool.Exec(t.Context(), "UPDATE "+leases+" SET settled_through_n = 0, receipts = '[]'::jsonb WHERE merchant_id = $1 AND id = $2",
-		w.alpha.MerchantID().UUID(), lease.UUID())
-	require.NoError(t, err)
-	_, err = w.pool.Exec(t.Context(), "DELETE FROM "+pending+" WHERE merchant_id = $1", w.alpha.MerchantID().UUID())
-	require.NoError(t, err)
-}
-
-// abandoningConn is the world's ClickHouse; armed, the usage insert's caller
-// gives up as the insert is sent, and an insert still bound to the caller's
-// context is cut short as the driver cuts it.
-type abandoningConn struct {
-	driver.Conn
-	abandon atomic.Pointer[context.CancelFunc]
-}
-
-func (c *abandoningConn) PrepareBatch(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-	batch, err := c.Conn.PrepareBatch(ctx, query, opts...)
-	if err != nil || !strings.Contains(query, "usage_intake") {
-		return batch, err
-	}
-	if cancel := c.abandon.Swap(nil); cancel != nil {
-		return &abandonedBatch{Batch: batch, ctx: ctx, cancel: *cancel}, nil
-	}
-	return batch, nil
-}
-
-type abandonedBatch struct {
-	driver.Batch
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (b *abandonedBatch) Send() error {
-	b.cancel()
-	if err := b.ctx.Err(); err != nil {
-		_ = b.Batch.Abort()
-		return err
-	}
-	return b.Batch.Send()
-}
-
 // failingConn is the world's ClickHouse failing, once armed, the next
 // statement that names fail.
 type failingConn struct {
@@ -116,89 +69,6 @@ func (c *failingConn) Exec(ctx context.Context, query string, args ...any) error
 }
 
 func TestUsageRecovery(t *testing.T) {
-	t.Run("OR-J24-S58/an-event-keeps-its-identity-across-attempts", func(t *testing.T) {
-		t.Run("a-lease-item-without-occurred-at-resent-after-a-lost-commit-charges-once", func(t *testing.T) {
-			w := newWorld(t, earlyInMonth)
-			usageMeter(t, w.alpha, 100)
-			customer, _ := fundedCustomer(t, w)
-			lease := newLease()
-			items := numbered(1, usageInput(customer, "a", 1), usageInput(customer, "b", 2))
-			settleUsage(t, w.alpha, lease, items...)
-			loseLeaseCommit(t, w, lease)
-
-			// The batch reporter resends from its cursor two minutes later: its
-			// items name no time.
-			w.clock.Advance(2 * time.Minute)
-			settleUsage(t, w.alpha, lease, items...)
-			require.EqualValues(t, 2, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"), "the resend inserts nothing")
-			require.EqualValues(t, 2, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"))
-			balance(t, w.alpha, customer, 700, 300, 1000)
-			fleet := startFleet(t, w)
-			nextMonth(w)
-			postDays(t, fleet)
-			balance(t, w.alpha, customer, 700, 0, 700)
-		})
-	})
-
-	t.Run("OR-J24-S59/a-resent-item-counts-in-the-session-its-first-attempt-opened", func(t *testing.T) {
-		w := newWorld(t)
-		applyLimits(t, w.alpha, `schema_version: 1
-meters:
-  work: {event_type: work, value_property: units, aggregation: sum}
-limits:
-  session: {unit: units, reset: {kind: session, window_seconds: 3600}, counts: [{meter: work}]}
-products:
-  plan: {display_name: Plan, limits: {session: "100"}}
-`)
-		customer := billing.CustomerID(uuid.New())
-		grantLimitProduct(t, w.alpha, customer, "plan", 24*30)
-		lease := newLease()
-		opened := w.clock.Now().UTC().Truncate(time.Second)
-		item := workReport(customer, "first", 10)
-		item.OccurredAt = w.clock.Now().UTC()
-		items := numbered(1, item)
-		settleUsage(t, w.alpha, lease, items...)
-		require.EqualValues(t, 10, customerLimit(t, w.alpha, customer, "session").Used)
-		// Fixture: the sync that opened the session reached the store and never
-		// committed.
-		loseLeaseCommit(t, w, lease)
-		_, err := w.pool.Exec(t.Context(), "DELETE FROM "+pgx.Identifier{w.schema, "limit_windows"}.Sanitize()+" WHERE merchant_id = $1 AND customer_id = $2",
-			w.alpha.MerchantID().UUID(), customer.UUID())
-		require.NoError(t, err)
-
-		w.clock.Advance(10 * time.Minute)
-		settleUsage(t, w.alpha, lease, items...)
-		session := customerLimit(t, w.alpha, customer, "session")
-		require.NotNil(t, session.WindowStartsAt)
-		require.True(t, opened.Equal(*session.WindowStartsAt), "the resend opens the session its units were counted in: %s", session.WindowStartsAt)
-		require.EqualValues(t, 10, session.Used)
-	})
-
-	t.Run("OR-J24-S60/an-insert-whose-caller-gave-up-finishes-before-the-resend-looks", func(t *testing.T) {
-		var conn *abandoningConn
-		w := newWorld(t, func(w *world) {
-			conn = &abandoningConn{Conn: w.deps.ClickHouse}
-			w.deps.ClickHouse = conn
-		})
-		usageMeter(t, w.alpha, 100)
-		customer, _ := fundedCustomer(t, w)
-		lease := newLease()
-		items := numbered(1, usageInput(customer, "a", 1), usageInput(customer, "b", 2))
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		conn.abandon.Store(&cancel)
-		_, err := w.alpha.SyncLeases(ctx, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
-		require.Error(t, err, "the caller gave up")
-		require.EqualValues(t, 2, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"),
-			"the insert finished before the sync let go of its locks")
-
-		settleUsage(t, w.alpha, lease, items...)
-		require.EqualValues(t, 2, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"), "the resend inserts nothing")
-		require.EqualValues(t, 3, storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_quantities WHERE merchant_id = {m}"), "the rollups count each once")
-		require.EqualValues(t, 2, storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"))
-		balance(t, w.alpha, customer, 700, 300, 1000)
-	})
-
 	t.Run("OR-J24-S61/a-lot-lapsing-mid-month-funds-exactly-the-usage-before-its-lapse", func(t *testing.T) {
 		lapsing := func(t *testing.T, w *world, customer billing.CustomerID, amount int64) (billing.CreditGrantID, time.Time) {
 			t.Helper()
@@ -252,6 +122,53 @@ products:
 		})
 	})
 
+	t.Run("OR-J24-S85/usage-reported-after-a-lapse-is-split-at-it-and-only-what-came-before-draws-the-lot", func(t *testing.T) {
+		w := newWorld(t, earlyInMonth)
+		usageMeter(t, w.alpha, 1)
+		customer := billing.CustomerID(uuid.New())
+		lapse := w.clock.Now().UTC().Add(time.Hour).Truncate(time.Second)
+		grants, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 100,
+			Source: "critical", SourceID: "lapsing", ExpiresAt: &lapse}})
+		require.NoError(t, err)
+		// One sync after the lapse, before any look expired the lot, carries
+		// usage from either side of it.
+		advanceTo(w, lapse.Add(30*time.Minute))
+		before := usageInput(customer, "before", 60)
+		before.OccurredAt = lapse.Add(-30 * time.Minute)
+		after := usageInput(customer, "after", 25)
+		after.OccurredAt = lapse.Add(10 * time.Minute)
+		settleUsage(t, w.alpha, newLease(), numbered(1, before, after)...)
+		type segment struct {
+			at       time.Time
+			quantity int64
+		}
+		var segments []segment
+		rows, err := w.pool.Query(t.Context(), "SELECT lapse_at, sum(quantity)::bigint FROM "+pgx.Identifier{w.schema, "usage_totals"}.Sanitize()+
+			" WHERE merchant_id = $1 AND customer_id = $2 GROUP BY lapse_at ORDER BY lapse_at", w.alpha.MerchantID().UUID(), customer.UUID())
+		require.NoError(t, err)
+		for rows.Next() {
+			var s segment
+			require.NoError(t, rows.Scan(&s.at, &s.quantity))
+			segments = append(segments, s)
+		}
+		require.NoError(t, rows.Err())
+		require.Len(t, segments, 2, "the running totals split at the lapse")
+		require.EqualValues(t, 60, segments[0].quantity)
+		require.True(t, segments[1].at.Equal(lapse), "what came after the lapse is its own segment: %s", segments[1].at)
+		require.EqualValues(t, 25, segments[1].quantity)
+
+		fleet := quietFleet(t, w)
+		require.False(t, runPass(t, fleet))
+		require.Eventually(t, func() bool { return lotExpired(t, w.alpha, grants[0].ID) > 0 }, 15*time.Second, 50*time.Millisecond, "the watch expires the lot")
+		grant, err := w.alpha.GetCreditGrant(t.Context(), grants[0].ID)
+		require.NoError(t, err)
+		require.EqualValues(t, 60, grant.SpentAmount, "the posting before the lapse took only the usage before it")
+		require.EqualValues(t, 40, grant.ExpiredAmount)
+		nextMonth(w)
+		require.False(t, runPass(t, fleet))
+		require.EqualValues(t, 25, owed(t, w.alpha, customer), "the usage after the lapse is owed")
+	})
+
 	t.Run("OR-J24-S65/a-merchants-configuration-first-read-inside-a-balance-look-loads", func(t *testing.T) {
 		w := newWorld(t, earlyInMonth)
 		usageMeter(t, w.alpha, 1)
@@ -286,7 +203,7 @@ products:
 		postDays(t, fleet)
 		balance(t, w.alpha, customer, 700, 0, 700)
 		// Fixture: the store is restored from a backup older than that usage.
-		for _, table := range []string{"usage_events", "limit_usage", "usage_quantities", "usage_history"} {
+		for _, table := range []string{"usage_events", "limit_usage", "usage_history"} {
 			require.NoError(t, w.deps.ClickHouse.Exec(t.Context(), "ALTER TABLE `"+w.schema+"`."+table+" DELETE WHERE merchant_id = toUUID(?) SETTINGS mutations_sync = 2",
 				w.alpha.MerchantID().String()))
 		}
@@ -346,51 +263,6 @@ products:
 		require.Equal(t, before, history(), "history names no invoker: erasure leaves it as it was")
 		require.EqualValues(t, [3]uint64{before[0], 2, 5}, before, "each event once, quantities once")
 		balance(t, a.alpha, customer, 500, 500, 1000)
-	})
-
-	t.Run("OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting", func(t *testing.T) {
-		// orphan settles usage under a revised card and forgets that card's
-		// print, as an intake that inserted its events and never committed.
-		orphan := func(t *testing.T) (*world, billing.CustomerID, *billing.SetMeterParams) {
-			t.Helper()
-			w := newWorld(t, earlyInMonth)
-			_, params := usageMeter(t, w.alpha, 100)
-			customer, _ := fundedCustomer(t, w)
-			lease := newLease()
-			settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "first-card", 2))...)
-			w.clock.Advance(time.Minute)
-			params.RateCard.Value.Price.PerUnit.UnitAmount = 300
-			_, err := w.alpha.SetMeter(t.Context(), "compute", params)
-			require.NoError(t, err)
-			settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "second-card", 1))...)
-			prints := pgx.Identifier{w.schema, "usage_card_prints"}.Sanitize()
-			removed, err := w.pool.Exec(t.Context(), "DELETE FROM "+prints+" WHERE merchant_id = $1 AND created_at = (SELECT max(created_at) FROM "+prints+" WHERE merchant_id = $1)",
-				w.alpha.MerchantID().UUID())
-			require.NoError(t, err)
-			require.EqualValues(t, 1, removed.RowsAffected())
-			return w, customer, &params
-		}
-		t.Run("a-print-a-card-in-force-names-is-recorded-again", func(t *testing.T) {
-			w, customer, _ := orphan(t)
-			fleet := startFleet(t, w)
-			nextMonth(w)
-			postDays(t, fleet)
-			deductions := usageDeductions(t, w.alpha, customer)
-			require.Len(t, deductions, 1)
-			require.EqualValues(t, -500, deductions[0].Amount, "2 at 100, then 1 at 300")
-		})
-		t.Run("one-nothing-names-is-left-out", func(t *testing.T) {
-			w, customer, params := orphan(t)
-			params.RateCard.Value.Price.PerUnit.UnitAmount = 500
-			_, err := w.alpha.SetMeter(t.Context(), "compute", *params)
-			require.NoError(t, err)
-			fleet := startFleet(t, w)
-			nextMonth(w)
-			postDays(t, fleet)
-			deductions := usageDeductions(t, w.alpha, customer)
-			require.Len(t, deductions, 1)
-			require.EqualValues(t, -200, deductions[0].Amount, "the usage that can be priced posts")
-		})
 	})
 
 	t.Run("OR-J24-S72/a-resend-after-a-lost-reply-adds-nothing-to-pending", func(t *testing.T) {

@@ -2,6 +2,8 @@ module github.com/open-rails/openrails/critical/server-fixture
 
 go 1.26.10
 
+toolchain go1.26.11
+
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0

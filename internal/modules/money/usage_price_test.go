@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/eventstore"
 )
 
 func graduated(first, rest int64, upTo int64) catalog.RatePrice {
@@ -70,23 +69,23 @@ func TestCellPriceIsThePriceOfTheTotal(t *testing.T) {
 	require.Error(t, err, "a print with no card is not priced")
 }
 
-// A posting takes the price less what earlier postings took, line by line;
+// A posting takes the price less what earlier receipts took, line by line;
 // a volume crossing leaves a negative remainder.
 func TestPostingDeltaTakesWhatIsLeft(t *testing.T) {
 	period := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	p := prints(volume(10, 5, 100))
-	target, err := p.priceQuantities([]eventstore.PeriodQuantity{{PeriodStartsAt: period, Meter: "work", Print: "a", Quantity: 90, Requests: 3}})
+	target, err := p.priceQuantities([]periodQuantity{{period: period, meter: "work", print: "a", quantity: 90, requests: 3}})
 	require.NoError(t, err)
 	lines, amount := postingDelta(target[period], nil)
 	require.EqualValues(t, 900, amount)
 	require.Len(t, lines, 1)
 	posted := map[lineKey]*PostingLine{{"work", "", "a"}: &lines[0]}
-	again, err := p.priceQuantities([]eventstore.PeriodQuantity{{PeriodStartsAt: period, Meter: "work", Print: "a", Quantity: 90, Requests: 3}})
+	again, err := p.priceQuantities([]periodQuantity{{period: period, meter: "work", print: "a", quantity: 90, requests: 3}})
 	require.NoError(t, err)
 	none, amount := postingDelta(again[period], posted)
 	require.Empty(t, none)
 	require.Zero(t, amount, "a repeated read posts nothing")
-	crossed, err := p.priceQuantities([]eventstore.PeriodQuantity{{PeriodStartsAt: period, Meter: "work", Print: "a", Quantity: 110, Requests: 4}})
+	crossed, err := p.priceQuantities([]periodQuantity{{period: period, meter: "work", print: "a", quantity: 110, requests: 4}})
 	require.NoError(t, err)
 	reversal, amount := postingDelta(crossed[period], posted)
 	require.EqualValues(t, 550-900, amount)
