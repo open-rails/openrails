@@ -181,6 +181,44 @@ func TestPublicEntitlements(t *testing.T) {
 		require.NoError(t, err)
 		datedRevoke()
 	})
+	t.Run("OR-J27-S17/a-window-wider-than-its-grant-is-cut-back-to-the-grant", func(t *testing.T) {
+		a, _ := newPaymentWorld(t, func(w *world) { publicPastClock(w, 72*time.Hour) })
+		a.clock.Advance(48 * time.Hour)
+		grant := publicGrant(t, a, "one-day-comp", 24)
+		// Drift no writer makes: the window starts a day early and runs a month late.
+		_, err := a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" SET starts_at=$1, ends_at=$2 WHERE merchant_id=$3 AND id=$4",
+			grant.StartsAt.Add(-24*time.Hour), grant.EndsAt.Add(30*24*time.Hour), a.alpha.MerchantID().UUID(), grant.ID.UUID())
+		require.NoError(t, err)
+		publicAccess(t, a, grant.EndsAt.Add(time.Hour), true)
+
+		database, err := producerDB(a.pool, a.schema)
+		require.NoError(t, err)
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		customer := uuid.MustParse(a.alice.ID)
+		convergeCustomer := func(status billing.FindingStatus) {
+			t.Helper()
+			_, err := converge.NewConvergeEngine(database, a.clock).Converge(ctx, converge.Scope{Merchant: a.alpha.MerchantID(), Customer: &customer})
+			require.NoError(t, err)
+			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "derive.grant_effect.mismatch", Status: status})
+			require.NoError(t, err)
+			require.Len(t, findings.Items, 1)
+			require.Equal(t, "product_access:"+grant.ID.UUID().String(), findings.Items[0].SubjectKey)
+		}
+		// Cutting access back waits for the merchant's destructive switch.
+		convergeCustomer("reconcile_required")
+		publicAccess(t, a, grant.EndsAt.Add(time.Hour), true)
+		armDestructive(t, a, true)
+		convergeCustomer("auto_fixed")
+
+		rows, err := a.alpha.ListProductAccess(t.Context(), billing.ProductAccessListParams{IDs: []billing.ProductAccessID{grant.ID}})
+		require.NoError(t, err)
+		require.Len(t, rows.Items, 1)
+		require.True(t, rows.Items[0].StartsAt.Equal(grant.StartsAt), "starts at the grant's start: %s", rows.Items[0].StartsAt)
+		require.True(t, rows.Items[0].EndsAt.Equal(*grant.EndsAt), "ends at the grant's end: %s", rows.Items[0].EndsAt)
+		require.Nil(t, rows.Items[0].RevokedAt)
+		publicAccess(t, a, a.clock.Now(), true)
+		publicAccess(t, a, grant.EndsAt.Add(time.Hour), false)
+	})
 	t.Run("OR-J27-S03/exact-window-boundaries-and-historical-tenure", func(t *testing.T) {
 		a, _ := newPaymentWorld(t, func(w *world) { publicPastClock(w, 48*time.Hour) })
 		grant := publicGrant(t, a, "six-hour-window", 6)

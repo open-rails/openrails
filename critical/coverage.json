@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 883,
+  "scenario_count": 884,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2532,6 +2532,11 @@
       "id": "OR-J27-S16",
       "journey": "J27",
       "name": "Exact checks and prefix pages stay on their indexes for a customer holding 10,000 of 40,000 products"
+    },
+    {
+      "id": "OR-J27-S17",
+      "journey": "J27",
+      "name": "A live access window wider than its grant is cut back to the grant's dates"
     },
     {
       "id": "OR-J04-S42",

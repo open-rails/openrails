@@ -312,3 +312,26 @@ UPDATE billing.product_access pa SET
 WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.grant_id = sqlc.arg(grant_id)::uuid
   AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
   AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(as_of)::timestamptz);
+
+-- name: BoundProductAccessToGrant :execrows
+-- Cuts a live window back to its grant's dates. A window with no part inside
+-- the grant is revoked.
+WITH bound AS (
+    SELECT pa.id, GREATEST(pa.starts_at, g.starts_at) AS starts_at,
+           CASE WHEN g.ends_at IS NULL THEN pa.ends_at
+                WHEN pa.ends_at IS NULL THEN g.ends_at
+                ELSE LEAST(pa.ends_at, g.ends_at) END AS ends_at
+    FROM billing.product_access pa
+    JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
+    WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.id = sqlc.arg(id)::uuid
+      AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+      AND (pa.starts_at < g.starts_at OR g.ends_at IS NOT NULL AND (pa.ends_at IS NULL OR pa.ends_at > g.ends_at))
+)
+UPDATE billing.product_access pa SET
+    starts_at = CASE WHEN b.ends_at IS NULL OR b.starts_at < b.ends_at THEN b.starts_at ELSE pa.starts_at END,
+    ends_at = CASE WHEN b.ends_at IS NULL OR b.starts_at < b.ends_at THEN b.ends_at ELSE pa.ends_at END,
+    revoked_at = CASE WHEN b.ends_at IS NULL OR b.starts_at < b.ends_at THEN NULL ELSE sqlc.arg(now)::timestamptz END,
+    revoke_reason = CASE WHEN b.ends_at IS NULL OR b.starts_at < b.ends_at THEN NULL ELSE 'outside_grant' END,
+    updated_at = sqlc.arg(now)::timestamptz
+FROM bound b
+WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.id = b.id;

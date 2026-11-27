@@ -108,14 +108,16 @@ follows what OpenRails recorded of a provider, never a guess. A refund that
 revokes access does so in the transaction that records the refund; canceling a
 subscription's recurrence never shortens a paid period; an uncertain or
 `unverified` subscription keeps its access. Repair rechecks recorded evidence and
-never reopens access a recorded revocation ended.
+never reopens access a recorded revocation ended. A live window never covers more
+than its grant: convergence cuts a wider one back to the grant's dates, once the
+merchant's destructive switch is armed.
 Checks:
 - `internal/intents/refund.go` calls `RevokeRefundedPaymentAccess` with the
   refund's transaction (`txDB`).
 - `lifecycle.EndAccess` revokes only renewal grace unless the effect sets
   `Revoke` (`internal/modules/subscriptions/effects.go`).
 - OR-J27-S05, OR-J27-S07, OR-J27-S08 and OR-J27-S09 cover repair, a late
-  chargeback and uncertain state.
+  chargeback and uncertain state; OR-J27-S17 a window wider than its grant.
 
 ### 3. Exact money
 Access windows and keys carry no amounts; credit lots (`credit_grants`) belong to [Credits](credits.md). In-flight reports and limit windows are `int64` native units of one currency each. The one FX use converts a spend window's cap declared in another currency to the request's (`SpendgatePolicyLoader.convert`): a cap, never a ledger amount.
@@ -208,7 +210,7 @@ Checks:
 ## Tests
 
 Critical journeys, over real PostgreSQL, Redis and Vault:
-- **J27**, entitlements: OR-J27-S01 to S04 (window union, revocation, boundaries, archive and refund), S05 to S09 (subscription closure and repair), S10 to S12 (imported grants), S13 and S14 (the SDK cache: scoped allowed keys, cutoff, Redis sharing, live denial, a purchase seen at once), S16 (read plans at 10,000 held products).
+- **J27**, entitlements: OR-J27-S01 to S04 (window union, revocation, boundaries, archive and refund), S05 to S09 (subscription closure and repair), S10 to S12 (imported grants), S13 and S14 (the SDK cache: scoped allowed keys, cutoff, Redis sharing, live denial, a purchase seen at once), S16 (read plans at 10,000 held products), S17 (a window wider than its grant).
 - **J23**, limits and the gate: OR-J23-S04, S05 (a host transaction), S07 to S18 (declarations, capacity, windows, overruns, spend caps), S19 to S22, S24, S27, S37, S38, S40, S41 (the gate: lost replies, outbox, closing, in-flight reports, the bound, offline shares and resends, idle stop, window resets), S33 (a window in the policy's `policy_currency`), S35 (a limit counting two meters by weight), S36 (a field a limit does not take refused), S42 (one policy's cap on what is owed and its spend window, and a customer's own credit limit over the cap).
 - **J24**, leases and views: OR-J24-S03, S14, S16, S18 to S20, S23 to S27, S29, S31 to S34, S37, S38, S42, S43, S45 (lease lifetime, views, limit sets, admission windows, bounded syncs, view refusals, lock order).
 - Also OR-J22-S06 and OR-J22-S50 (lapsed credit), OR-J29-S08, OR-J31-S14.

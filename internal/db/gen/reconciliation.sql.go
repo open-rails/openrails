@@ -728,6 +728,80 @@ func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAban
 	return items, nil
 }
 
+const listAccessWindowsWiderThanGrant = `-- name: ListAccessWindowsWiderThanGrant :many
+SELECT pa.id AS access_id, pa.customer_id, pa.product_id, pa.grant_id,
+       pa.starts_at, pa.ends_at, g.starts_at AS grant_starts_at, g.ends_at AS grant_ends_at
+FROM billing.product_access pa
+JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
+WHERE pa.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR pa.customer_id = $2::uuid)
+  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+  AND (pa.ends_at IS NULL OR pa.ends_at > $3::timestamptz)
+  AND (pa.starts_at < g.starts_at OR g.ends_at IS NOT NULL AND (pa.ends_at IS NULL OR pa.ends_at > g.ends_at))
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.grants t
+      WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+        AND t.event IN ('revoke', 'expire', 'supersede'))
+ORDER BY pa.created_at, pa.id
+LIMIT $4::int
+`
+
+type ListAccessWindowsWiderThanGrantParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Now        time.Time
+	RowLimit   int32
+}
+
+type ListAccessWindowsWiderThanGrantRow struct {
+	AccessID      uuid.UUID
+	CustomerID    uuid.UUID
+	ProductID     uuid.UUID
+	GrantID       uuid.UUID
+	StartsAt      time.Time
+	EndsAt        *time.Time
+	GrantStartsAt time.Time
+	GrantEndsAt   *time.Time
+}
+
+// derive.grant_effect.mismatch (window direction): a live window that starts
+// before its grant or ends after it. Every writer copies the grant's dates or
+// narrows them, so the wider part has no grant behind it. Terminated grants
+// are derive.grant_effect.excess's. NULL customer_id = merchant-wide.
+func (q *Queries) ListAccessWindowsWiderThanGrant(ctx context.Context, arg ListAccessWindowsWiderThanGrantParams) ([]ListAccessWindowsWiderThanGrantRow, error) {
+	rows, err := q.db.Query(ctx, listAccessWindowsWiderThanGrant,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAccessWindowsWiderThanGrantRow
+	for rows.Next() {
+		var i ListAccessWindowsWiderThanGrantRow
+		if err := rows.Scan(
+			&i.AccessID,
+			&i.CustomerID,
+			&i.ProductID,
+			&i.GrantID,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.GrantStartsAt,
+			&i.GrantEndsAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActionablePullFindingsForPSP = `-- name: ListActionablePullFindingsForPSP :many
 SELECT id, merchant_id, finding_type, rail, psp_id, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, change, source, evidence_digest, approval_run_id, pull_id, dismissed_at FROM billing.reconciliation_findings
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
