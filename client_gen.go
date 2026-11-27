@@ -208,8 +208,8 @@ func (c *Client) CreatePrice(ctx context.Context, params billing.CreatePricePara
 
 // CreateProviderPrice links a price a provider owns and runs to a product (a
 // legacy NMI plan, a Stripe price, a CCBill FlexForm). Its terms are read
-// from the provider, declared for CCBill; nothing is written to the
-// provider.
+// from the provider, declared for CCBill, and for an NMI plan NMI does not
+// answer for until it does; nothing is written to the provider.
 func (c *Client) CreateProviderPrice(ctx context.Context, params billing.CreateProviderPriceParams) (*billing.Price, error) {
 	var out billing.Price
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/catalog/provider-prices", body: params}, &out); err != nil {

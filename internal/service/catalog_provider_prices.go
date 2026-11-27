@@ -30,14 +30,16 @@ import (
 var ErrProviderPriceUnreadable = apperr.New(http.StatusBadGateway, billing.CodeProviderPriceUnreadable, "the provider did not answer for the provider price's terms; retry")
 
 // providerPrice is a provider price ready to write: its PSP, the provider's
-// object (the binding) and the terms the provider states, or CCBill declares.
+// object (the binding) and the terms the provider states, or the declaration
+// states for CCBill and for an NMI plan NMI has not answered for.
 type providerPrice struct {
 	productKey, key string
 	account         merchants.PSPScope
 	request         billing.CreatePriceParams
 	link            map[string]string
-	// cached is why the stored terms were kept: the provider did not answer.
-	cached        string
+	// notice says where terms the provider did not state came from, or how
+	// the provider's differ from the declared ones.
+	notice        string
 	months        *int
 	accessDefault bool
 }
@@ -61,8 +63,13 @@ func checkProviderPriceRail(pspKey, rail string, decl catalogwire.ApplyProviderP
 		if decl.PlanID == "" || len(refs) != 1 {
 			return apperr.Invalidf("PSP %q is on NMI: a provider price names its plan_id", pspKey)
 		}
-		if decl.DeclaresTerms() {
-			return apperr.Invalidf("an NMI plan's terms are read from NMI: declare plan_id, and currency or access_duration when needed")
+		if decl.TrialUnitAmount != nil {
+			return apperr.Invalidf("an NMI plan states no trial: declare its amount and billing_interval only")
+		}
+		if decl.UnitAmount != nil {
+			if err := moneyutil.RequireFiatCurrency(string(decl.Currency)); err != nil {
+				return apperr.Invalidf("%v", err)
+			}
 		}
 	case models.RailStripe:
 		if decl.PriceID == "" || len(refs) != 1 {
@@ -95,9 +102,7 @@ func (s *Service) readProviderPriceTerms(ctx context.Context, account merchants.
 	var ref string
 	switch models.Rail(account.Rail) {
 	case models.RailCCBill:
-		terms := providerPriceTerms{currency: moneyutil.NormalizeCurrency(string(decl.Currency)), unitAmount: *decl.UnitAmount, billingIntervalHours: decl.BillingIntervalHours,
-			trialUnitAmount: decl.TrialUnitAmount, trialDurationHours: decl.TrialDurationHours}
-		return terms, decl.References(), nil
+		return declaredTerms(decl), decl.References(), nil
 	case models.RailNMI:
 		ref = decl.PlanID
 	case models.RailStripe:
@@ -122,6 +127,29 @@ func (s *Service) readProviderPriceTerms(ctx context.Context, account merchants.
 		return providerPriceTerms{}, nil, apperr.Invalidf("%s %q does not exist at %s: a provider price names an existing one", providerObjectNoun(account.Rail), ref, account.Key)
 	}
 	return observedTerms(account, decl, obj)
+}
+
+// declaredTerms are the terms a declaration states.
+func declaredTerms(decl catalogwire.ApplyProviderPrice) providerPriceTerms {
+	return providerPriceTerms{currency: moneyutil.NormalizeCurrency(string(decl.Currency)), unitAmount: *decl.UnitAmount, billingIntervalHours: decl.BillingIntervalHours,
+		trialUnitAmount: decl.TrialUnitAmount, trialDurationHours: decl.TrialDurationHours}
+}
+
+// termsDiffer says how an NMI plan's terms differ from declared ones; "" when
+// they agree.
+func termsDiffer(nmi, declared providerPriceTerms) string {
+	var out []string
+	if nmi.unitAmount != declared.unitAmount || nmi.currency != declared.currency {
+		out = append(out, fmt.Sprintf("NMI's amount is %s, the declared %s", moneyutil.FormatAmount(nmi.unitAmount, nmi.currency), moneyutil.FormatAmount(declared.unitAmount, declared.currency)))
+	}
+	if nmi.billingIntervalMonths != nil || optionalHours(nmi.billingIntervalHours) != optionalHours(declared.billingIntervalHours) {
+		cadence := "every " + optionalHours(nmi.billingIntervalHours) + " hours"
+		if nmi.billingIntervalMonths != nil {
+			cadence = "every " + optionalHours(nmi.billingIntervalMonths) + " calendar months"
+		}
+		out = append(out, fmt.Sprintf("NMI bills %s, the declaration every %s hours", cadence, optionalHours(declared.billingIntervalHours)))
+	}
+	return strings.Join(out, "; ")
 }
 
 func providerObjectNoun(rail string) string {
@@ -224,12 +252,23 @@ func (s *Service) prepareProviderPrice(ctx context.Context, accounts []merchants
 	}
 	out := &providerPrice{productKey: product.Key, key: key, account: account}
 	terms, ids, err := s.readProviderPriceTerms(ctx, account, decl)
+	// NMI states an NMI plan's terms: declared ones stand in until it answers,
+	// and are only compared when it does.
+	declaresNMI := models.Rail(account.Rail) == models.RailNMI && decl.UnitAmount != nil
 	if errors.Is(err, ErrProviderPriceUnreadable) && current != nil {
 		if _, link, ok := current.ProviderLink(); ok && link[models.RailKeyPSPID] == account.ID.String() && sameProviderRefs(link, decl.References()) {
-			out.cached = err.Error()
+			out.notice = "keeps its cached terms: " + err.Error()
 			terms = providerPriceTerms{unitAmount: current.Amount, currency: current.Currency, billingIntervalHours: current.ProviderBillingInterval(), billingIntervalMonths: current.ProviderBillingMonths(), trialUnitAmount: current.TrialUnitAmount, trialDurationHours: current.TrialDurationHours}
 			ids = maps.Clone(link)
 			err = nil
+		}
+	}
+	if errors.Is(err, ErrProviderPriceUnreadable) && declaresNMI {
+		out.notice = "takes its declared terms, unconfirmed until NMI answers: " + err.Error()
+		terms, ids, err = declaredTerms(decl), decl.References(), nil
+	} else if err == nil && declaresNMI && out.notice == "" {
+		if differ := termsDiffer(terms, declaredTerms(decl)); differ != "" {
+			out.notice = "takes NMI's terms, not the declared ones: " + differ
 		}
 	}
 	if err != nil {
@@ -377,8 +416,8 @@ func (s *Service) providerObjectHolders(ctx context.Context, productKey string, 
 }
 
 // CreateProviderPrice links a price a provider owns and runs to a product:
-// its terms are read from the provider (declared for CCBill), and nothing is
-// written to the provider.
+// its terms are read from the provider (declared for CCBill, and for an NMI
+// plan until NMI answers), and nothing is written to the provider.
 func (s *Service) CreateProviderPrice(ctx context.Context, params billing.CreateProviderPriceParams) (*billing.Price, error) {
 	price, err := s.createProviderPrice(ctx, params)
 	if err == nil {

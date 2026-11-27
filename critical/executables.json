@@ -2838,6 +2838,9 @@
     ],
     "OR-J04-S96": [
       "TestSubmittedRenewalGrace/OR-J04-S96/keep-policy-verification-does-not-lock-the-membership"
+    ],
+    "OR-J38-S98": [
+      "TestPSPImport/OR-J38-S98/nmi-plan-declared-terms-stand-in-until-nmi-answers"
     ]
   }
 }

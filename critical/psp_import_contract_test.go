@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1369,5 +1370,75 @@ func TestPSPImport(t *testing.T) {
 		currency, total := accepted("host-yen")
 		require.Equal(t, "JPY", currency)
 		require.EqualValues(t, 10_000_000, total)
+	})
+
+	t.Run("OR-J38-S98/nmi-plan-declared-terms-stand-in-until-nmi-answers", func(t *testing.T) {
+		iw := newImportWorld(t, "nmi")
+		iw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
+		iw.nmi.AddPlan(nmimock.Plan{ID: "silver", Name: "Silver", Amount: "10.00", Days: 30})
+		var down atomic.Bool
+		down.Store(true)
+		iw.nmi.Intercept(func(r *http.Request) bool { return strings.Contains(r.URL.Path, "/plans/") }, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
+			if down.Load() {
+				return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+			}
+			return serve(), nil
+		})
+		apply := func(planTerms string) *billing.CatalogApplicationReceipt {
+			document, err := catalog.ParseApplicationYAML([]byte("schema_version: 1\nproducts:\n  gold:\n    display_name: Gold\n    entitlements: [member:gold]\n    provider_prices:\n" + planTerms))
+			require.NoError(t, err)
+			receipt, err := iw.alphaRemote.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
+			require.NoError(t, err)
+			return receipt
+		}
+		price := func(key string) billing.Price {
+			prices, err := iw.alpha.ListPrices(t.Context(), billing.PriceListParams{ProductKey: "gold", Key: key})
+			require.NoError(t, err)
+			require.Len(t, prices.Items, 1, key)
+			return prices.Items[0]
+		}
+
+		// NMI does not answer: a plan declaring its terms takes them,
+		// unconfirmed, with a warning.
+		receipt := apply("      nmi-gold: {psp: nmi, plan_id: gold, amount: 20 USD, billing_interval: 30 days, archived: true}\n")
+		require.Len(t, receipt.Warnings, 1)
+		require.False(t, receipt.Warnings[0].Refused)
+		require.Equal(t, "nmi-gold", receipt.Warnings[0].Key)
+		require.Contains(t, receipt.Warnings[0].Message, "declared terms")
+		gold := price("nmi-gold")
+		require.EqualValues(t, 20_000_000, gold.UnitAmount)
+		require.Equal(t, catalog.Currency("USD"), gold.Currency)
+		require.Equal(t, 720, *gold.BillingIntervalHours)
+		require.Equal(t, "gold", gold.Provider.IDs["plan_id"])
+		verified, err := iw.alphaRemote.VerifyPrice(t.Context(), gold.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SyncStatusUnknown, verified.Provider.SyncStatus, "unconfirmed until NMI answers")
+		// A plan stating no terms is still refused.
+		_, err = iw.alphaRemote.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductKey: "gold", Key: "nmi-silver", PSP: "nmi", PlanID: "silver"})
+		requireCode(t, err, billing.CodeProviderPriceUnreadable)
+
+		// NMI answers: the declared terms are confirmed in place.
+		down.Store(false)
+		verified, err = iw.alphaRemote.VerifyPrice(t.Context(), gold.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SyncStatusInSync, verified.Provider.SyncStatus)
+		require.Empty(t, verified.Provider.Drift)
+
+		// NMI's terms win over a declaration that differs, which is reported.
+		receipt = apply("      nmi-gold: {psp: nmi, plan_id: gold, amount: 20 USD, billing_interval: 30 days, archived: true}\n" +
+			"      nmi-silver: {psp: nmi, plan_id: silver, amount: 12 USD, billing_interval: 30 days, archived: true}\n")
+		require.Len(t, receipt.Warnings, 1)
+		require.False(t, receipt.Warnings[0].Refused)
+		require.Equal(t, "nmi-silver", receipt.Warnings[0].Key)
+		require.Contains(t, receipt.Warnings[0].Message, "12.00")
+		silver := price("nmi-silver")
+		require.EqualValues(t, 10_000_000, silver.UnitAmount)
+		require.Equal(t, gold.ID, price("nmi-gold").ID, "confirmed terms keep the declared price")
+
+		// An NMI plan states no trial.
+		_, err = iw.alphaRemote.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductKey: "gold", Key: "nmi-trial", PSP: "nmi", PlanID: "gold",
+			UnitAmount: new(int64(20_000_000)), Currency: "USD", BillingIntervalHours: new(720), TrialUnitAmount: new(int64(1_000_000)), TrialDurationHours: new(168)})
+		requireCode(t, err, billing.CodeInvalidParam)
+		require.Empty(t, iw.nmi.Unexpected())
 	})
 }
