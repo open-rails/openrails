@@ -2058,6 +2058,15 @@
     "OR-J01-S38": [
       "TestStaffAccounts/OR-J01-S38/a-server-whose-staff-sign-in-elsewhere-advertises-no-groups-or-setup"
     ],
+    "OR-J01-S39": [
+      "TestStaffAccounts/OR-J01-S39/a-root-operator-creates-a-merchant-from-the-console-and-owns-it"
+    ],
+    "OR-J01-S40": [
+      "TestStaffAccounts/OR-J01-S40/only-a-root-operator-holding-the-create-permission-creates-a-merchant"
+    ],
+    "OR-J01-S41": [
+      "TestConsoleFirstRun/OR-J01-S41/the-setup-link-creates-the-owner-then-the-first-merchant-and-asks-for-a-payment-provider"
+    ],
     "OR-J24-S42": [
       "TestLeaseSyncs/OR-J24-S42/a-view-request-is-refused-alone-and-the-sync-stands"
     ],
@@ -2754,6 +2763,9 @@
     ],
     "OR-J38-S97": [
       "TestCCBillIdentity/OR-J38-S97/a-second-rebill-past-the-cycles-billing-day-is-an-extra-capture"
+    ],
+    "OR-J38-S98": [
+      "TestMerchantConsole/OR-J38-S98/console-overview-asks-for-a-payment-provider-until-one-is-armed"
     ],
     "OR-J24-S76": [
       "TestUsageSeries/OR-J24-S76/an-hourly-series-across-a-clock-change-has-each-of-the-days-hours"

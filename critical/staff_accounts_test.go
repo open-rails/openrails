@@ -19,6 +19,7 @@ import (
 
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/helpers/smtp/smtptest"
+	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -208,6 +209,76 @@ func TestStaffAccounts(t *testing.T) {
 		groups = fixtureRouteGroups(t, headless)
 		require.Contains(t, groups, "groups")
 		require.NotContains(t, groups, "setup")
+	})
+
+	t.Run("OR-J01-S39/a-root-operator-creates-a-merchant-from-the-console-and-owns-it", func(t *testing.T) {
+		s := startStaffServer(t, newWorld(t), vaultOverlay(t))
+		owner, session := s.owner(t)
+		ownerID := owner.userID(t, session)
+		before := owner.consoleMerchants(t, session)
+
+		// The console's New merchant, as its page sends it.
+		status, raw := owner.call(t, http.MethodPost, "/admin/merchants", session, map[string]string{"name": "acme-shop", "display_name": "Acme Shop"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var created consoleMerchant
+		require.NoError(t, json.Unmarshal(raw, &created))
+		require.Equal(t, "acme-shop", created.Slug)
+		require.Equal(t, "Acme Shop", created.DisplayName, "Vault holds configuration: the display name is written")
+		require.Equal(t, "owner", created.Role)
+		require.Equal(t, "merchant:owner", owner.groupMembers(t, session, created.ID)[ownerID], "the operator who created it owns its team")
+		after := owner.consoleMerchants(t, session)
+		require.Len(t, after, len(before)+1)
+		require.Contains(t, after, created.ID)
+		require.Equal(t, "Acme Shop", after[created.ID].DisplayName)
+
+		// A name held, a malformed one and an unknown field create nothing.
+		for _, refused := range []struct {
+			body   map[string]string
+			status int
+			code   string
+		}{
+			{map[string]string{"name": "acme-shop"}, http.StatusConflict, "resource_conflict"},
+			{map[string]string{"name": "Not A Name"}, http.StatusBadRequest, "invalid_param"},
+			{map[string]string{"name": "other-shop", "owner": ownerID}, http.StatusBadRequest, "unknown_field"},
+		} {
+			status, raw = owner.call(t, http.MethodPost, "/admin/merchants", session, refused.body)
+			require.Equal(t, refused.status, status, string(raw))
+			require.Contains(t, string(raw), refused.code)
+		}
+		require.Len(t, owner.consoleMerchants(t, session), len(after))
+	})
+
+	t.Run("OR-J01-S40/only-a-root-operator-holding-the-create-permission-creates-a-merchant", func(t *testing.T) {
+		// Behind the deployment's proxy, so the second invitee registers
+		// from an address of its own.
+		s := startStaffServer(t, newWorld(t), map[string]any{"trusted_proxies": []string{"127.0.0.1/32"}})
+		owner, session := s.owner(t)
+		status, raw := owner.call(t, http.MethodPost, "/admin/merchants", session, map[string]string{"name": "team-shop"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var shop consoleMerchant
+		require.NoError(t, json.Unmarshal(raw, &shop))
+		count := len(owner.consoleMerchants(t, session))
+
+		// The merchant's staff, who are no root operators.
+		staff := s.invitee(t, owner, session, shop.ID, "merchant:support", "shopsupport@critical.invalid", "shopsupport", "")
+		// An operator of the directory who reads it alone.
+		viewer := s.invitee(t, owner, session, "root", "root:merchant-directory-viewer", "dirviewer@critical.invalid", "dirviewer", "203.0.113.7")
+		for name, caller := range map[string]staffSession{"the merchant's staff": staff, "an operator without root:merchants:create": viewer} {
+			status, raw = caller.b.call(t, http.MethodPost, "/admin/merchants", caller.session, map[string]string{"name": "refused-shop"})
+			require.Equal(t, http.StatusForbidden, status, "%s: %s", name, raw)
+			require.Contains(t, string(raw), "permission_required")
+		}
+		require.True(t, viewer.b.consoleRoot(t, viewer.session), "the viewer is a root operator")
+		require.Contains(t, staff.b.consoleMerchants(t, staff.session), shop.ID, "the staff member reaches the merchant")
+
+		// No credential is refused; a file holds configuration, so a display
+		// name is refused before anything is created.
+		status, raw = s.browser(t).call(t, http.MethodPost, "/admin/merchants", "", map[string]string{"name": "refused-shop"})
+		require.Equal(t, http.StatusUnauthorized, status, string(raw))
+		status, raw = owner.call(t, http.MethodPost, "/admin/merchants", session, map[string]string{"name": "refused-shop", "display_name": "Refused"})
+		require.Equal(t, http.StatusConflict, status, string(raw))
+		require.Contains(t, string(raw), "merchant_config_read_only")
+		require.Len(t, owner.consoleMerchants(t, session), count, "nothing refused was created")
 	})
 }
 
@@ -477,4 +548,93 @@ func mailTo(t *testing.T, mail *smtptest.Server, address, about string) smtptest
 		return false
 	}, 30*time.Second, 100*time.Millisecond, "a message to %s about %q", address, about)
 	return found
+}
+
+// vaultOverlay is configuration in a fresh KV mount of the critical Vault.
+func vaultOverlay(t *testing.T) map[string]any {
+	t.Helper()
+	addr, token := os.Getenv("OPENRAILS_CRITICAL_VAULT_ADDR"), os.Getenv("OPENRAILS_CRITICAL_VAULT_TOKEN")
+	require.NotEmpty(t, addr, "critical configuration cases require real Vault")
+	require.NotEmpty(t, token)
+	t.Setenv(vaulttest.AddrEnv, addr)
+	t.Setenv(vaulttest.TokenEnv, token)
+	vault := vaulttest.New(t)
+	return map[string]any{"vault": map[string]any{"address": addr, "token": token, "kv_mount": vault.Config().KVMount}}
+}
+
+// consoleMerchant is a merchant as the console's directory and New merchant
+// answer it.
+type consoleMerchant struct {
+	ID          string `json:"id"`
+	Slug        string `json:"slug"`
+	DisplayName string `json:"display_name"`
+	Role        string `json:"role"`
+}
+
+// consoleMerchants are the merchants the console's directory lists for the
+// session, by id.
+func (b *staffBrowser) consoleMerchants(t *testing.T, session string) map[string]consoleMerchant {
+	t.Helper()
+	status, raw := b.call(t, http.MethodGet, "/admin/merchants", session, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var page struct{ Data []consoleMerchant }
+	require.NoError(t, json.Unmarshal(raw, &page))
+	out := make(map[string]consoleMerchant, len(page.Data))
+	for _, m := range page.Data {
+		out[m.ID] = m
+	}
+	return out
+}
+
+// userID is the session's account id.
+func (b *staffBrowser) userID(t *testing.T, session string) string {
+	t.Helper()
+	status, raw := b.call(t, http.MethodGet, "/auth/v1/me", session, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var me struct{ ID string }
+	require.NoError(t, json.Unmarshal(raw, &me))
+	require.NotEmpty(t, me.ID, string(raw))
+	return me.ID
+}
+
+// groupMembers are a group's people, each account id with its role.
+func (b *staffBrowser) groupMembers(t *testing.T, session, group string) map[string]string {
+	t.Helper()
+	status, raw := b.call(t, http.MethodGet, "/auth/v1/groups/"+group+"/members", session, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var page struct {
+		Data []struct {
+			Subject struct{ ID string }
+			Role    string
+		}
+	}
+	require.NoError(t, json.Unmarshal(raw, &page))
+	out := make(map[string]string, len(page.Data))
+	for _, m := range page.Data {
+		out[m.Subject.ID] = m.Role
+	}
+	return out
+}
+
+// staffSession is a signed-in person: their browser and session.
+type staffSession struct {
+	b       *staffBrowser
+	session string
+}
+
+// invitee is a person the owner invites into group with role, registered
+// through the invitation's link from forwardedFor ("" for none) and signed
+// in.
+func (s *staffServer) invitee(t *testing.T, owner *staffBrowser, session, group, role, email, username, forwardedFor string) staffSession {
+	t.Helper()
+	status, raw := owner.call(t, http.MethodPost, "/auth/v1/groups/"+group+"/invitations", session, map[string]string{"email": email, "role": role})
+	require.Equal(t, http.StatusCreated, status, string(raw))
+	var created struct{ Code string }
+	require.NoError(t, json.Unmarshal(raw, &created))
+	b := s.browser(t)
+	b.forwardedFor = forwardedFor
+	status, raw = b.register(t, email, username, created.Code)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	signedIn, _ := b.enroll(t, raw)
+	return staffSession{b, signedIn}
 }
