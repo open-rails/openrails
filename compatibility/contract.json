@@ -713,7 +713,7 @@
       "type CreateCreditGrantBatchParams struct {\n\tItems []CreateCreditGrantParams `json:\"items\"`\n}",
       "type CreateCreditGrantBatchResult struct {\n\tItems []CreditGrant `json:\"items\"`\n}",
       "type CreateCreditGrantParams struct {\n\tCustomerID    CustomerID         `json:\"customer_id\"`\n\tCurrency      catalog.Currency   `json:\"currency\"`\n\tAmount        int64              `json:\"amount,string\"`\n\tSourceID      string             `json:\"source_id\"`\n\tSource        string             `json:\"source\"`\n\tFundingSource CreditGrantFunding `json:\"funding_source,omitempty\"`\n\tInvoker       string             `json:\"invoker,omitempty\"`\n\tExpiresAt     *time.Time         `json:\"expires_at,omitempty\"`\n\tDescription   *string            `json:\"description,omitempty\"`\n}",
-      "type CreateInvoiceParams struct {\n\tCustomerID CustomerID          `json:\"customer_id\"`\n\tLines      []InvoiceLineParams `json:\"lines\"`\n\tExpiresAt  *time.Time          `json:\"expires_at,omitempty\"`\n\n\tPayURL *InvoicePayURLParams `json:\"pay_url,omitempty\"`\n\n\tAttribution *InvoiceAttribution `json:\"attribution,omitempty\"`\n}",
+      "type CreateInvoiceParams struct {\n\tCustomerID CustomerID          `json:\"customer_id\"`\n\tLines      []InvoiceLineParams `json:\"lines\"`\n\n\tPayURL *InvoicePayURLParams `json:\"pay_url,omitempty\"`\n\n\tAttribution *InvoiceAttribution `json:\"attribution,omitempty\"`\n}",
       "type CreateMerchantParams struct {\n\tName        string `json:\"name\"`\n\tDisplayName string `json:\"display_name\"`\n}",
       "type CreateMyInvoiceParams struct {\n\tLines         []InvoiceLineParams   `json:\"lines,omitempty\"`\n\tCart          bool                  `json:\"cart,omitempty\"`\n\tExpectedTotal *int64                `json:\"expected_total,omitempty,string\"`\n\tPayment       *InvoicePaymentParams `json:\"payment,omitempty\"`\n\tReusable      *bool                 `json:\"reusable,omitempty\"`\n\n\tPayURL *MyInvoicePayURLParams `json:\"pay_url,omitempty\"`\n\n\tAttribution *InvoiceAttribution `json:\"attribution,omitempty\"`\n}",
       "type CreatePSPImportParams struct {\n\tPSP          PSPRef          `json:\"psp\"`\n\tHistorySince *time.Time      `json:\"history_since,omitempty\"`\n\tRules        []PSPImportRule `json:\"rules,omitempty\"`\n}",
@@ -5195,7 +5195,6 @@
       "sha256": "crypto/sha256",
       "slices": "slices",
       "strings": "strings",
-      "time": "time",
       "uuid": "github.com/google/uuid"
     },
     "internal/service/operational_reads.go": {

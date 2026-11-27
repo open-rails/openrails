@@ -424,7 +424,7 @@ A price id is `product-key:price-key:v1` (`billing.ParsePriceID`). Edits are mer
 
 ## Invoices and checkout
 
-Every bill is an invoice: a purchase, a renewal OpenRails or a provider runs, a usage bill. An invoice's lines are priced and frozen; its payments are the money that moved. `status` is `open`, `processing`, `complete`, `canceled`, `expired`, `void` (a renewal left unowed, or a voided usage invoice) or `uncollectible` (a usage invoice written off); `collection_owner` says who collects (`engine`, `nmi_schedule`, `provider`).
+Every bill is an invoice: a purchase, a renewal OpenRails or a provider runs, a usage bill. An invoice's lines are priced and frozen; its payments are the money that moved. `status` is `open`, `processing`, `complete`, `canceled`, `expired`, `void` (a renewal left unowed, or a voided usage invoice) or `uncollectible` (a usage invoice written off); `collection_owner` says who collects (`engine`, `nmi_schedule`, `provider`). Only a customer's own purchase (`origin: customer`) expires, a day after it is made, as a Stripe Checkout session does; a merchant invoice, a renewal and a usage bill never do. The customer's `GET /v1/me/invoices` leaves out purchases that expired unpaid; the merchant's list keeps them.
 
 **In the browser** the signed-in customer buys with billing-ui. Your server reads
 the products it sells (`ListProducts`, `billing.BuyerPrices`) into its page:
@@ -493,8 +493,7 @@ or the redirect to `success_url`.
   [standalone.md](standalone.md#configuration-reference)).
 - `success_url` and `cancel_url` may name any https site; `{INVOICE_ID}` becomes the
   invoice's id. The URL lasts an hour (30 minutes to 24 hours with `ExpiresAt`);
-  an invoice with no expiry of its own expires with it. Ordinary invoice reads show
-  `pay_url: null`.
+  the invoice stays open after it. Ordinary invoice reads show `pay_url: null`.
 - `SavedPaymentMethods` offers the customer's saved cards; set it only when your
   site signed them in. `Embedded: true` makes a URL your registered sites frame.
 - The page takes cards in the PSP's own fields, runs a bank's challenge in place,
@@ -508,7 +507,7 @@ Paying in the customer's own API (`POST /v1/me/invoices` with `payment`, or `/{i
 | Method | Use it to |
 |---|---|
 | `PreviewInvoice` | price lines, with refusals and the `payment_options` that can take them |
-| `CreateInvoice` | an unpaid invoice for a customer, open 30 days unless `ExpiresAt`; only that customer pays it, signed in or through `pay_url`; takes `idempotencyKey` |
+| `CreateInvoice` | a bill for a customer: open until paid or canceled, it never expires; only that customer pays it, signed in or through `pay_url`; takes `idempotencyKey` |
 | `GetInvoice`, `ListInvoices` | read invoices: filter by customer, price, subscription, `origin` (`customer`, `merchant`, `subscription`, `usage`), status, overdue |
 | `GetInvoicePaymentAttempt` | the outcome of one pay attempt by its idempotency key, after a lost response |
 | `CancelInvoice` | withdraw an open invoice `CreateInvoice` made (settle an unresolved payment first) |

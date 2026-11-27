@@ -699,7 +699,7 @@ type BillingInvoice struct {
 	AttemptID        *uuid.UUID
 	PaymentID        *uuid.UUID
 	LastPaymentError []byte
-	// When an unpaid purchase expires; a renewal has none.
+	// When a customer's unpaid purchase (origin customer) expires; no other invoice expires.
 	ExpiresAt   *time.Time
 	CompletedAt *time.Time
 	CanceledAt  *time.Time
@@ -710,7 +710,7 @@ type BillingInvoice struct {
 	PaymentStatus string
 	// sha256 of the pay URL's secret; the secret is never stored. Set once on a merchant invoice; on a customer's own invoice, again each time the customer asks for its pay URL, which ends the last.
 	PayUrlSecretHash []byte
-	// When the pay URL stops working; no later than the invoice's own expiry.
+	// When the pay URL stops working: a customer purchase's with the purchase, a merchant invoice's on its own while the invoice stays open.
 	PayUrlExpiresAt *time.Time
 	// Where a merchant invoice's pay URL returns once paid. NULL on a customer's own embedded pay URL, which returns nowhere: the frame tells its page.
 	SuccessUrl          *string

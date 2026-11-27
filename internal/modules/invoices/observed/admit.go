@@ -89,10 +89,6 @@ func admit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, b Bill, no
 		params.PeriodStartsAt = nil
 		params.PeriodEndsAt = nil
 		params.DueAt = nil
-		if b.Owner == OwnerEngine {
-			expiry := now.Add(24 * time.Hour)
-			params.ExpiresAt = &expiry
-		}
 	}
 	invoice, err := q.CreateObservedInvoice(ctx, params)
 	if err != nil {

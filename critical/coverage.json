@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 892,
+  "scenario_count": 895,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2601,7 +2601,7 @@
     {
       "id": "OR-J08-S71",
       "journey": "J08",
-      "name": "An open invoice past its expiry reads expired, without next action or payment options, in every read and list, and cannot be canceled"
+      "name": "An open purchase past its expiry reads expired, without next action or payment options, in every read and the merchant's lists, leaves the customer's own list, and cannot be canceled"
     },
     {
       "id": "OR-J12-S70",
@@ -2626,7 +2626,7 @@
     {
       "id": "OR-J04-S37",
       "journey": "J04",
-      "name": "An invoice expiry backlog past one batch is expired by one billing pass"
+      "name": "A purchase expiry backlog past one batch is expired by one billing pass"
     },
     {
       "id": "OR-J04-S38",
@@ -4071,7 +4071,7 @@
     {
       "id": "OR-J47-S02",
       "journey": "J47",
-      "name": "A merchant's pay URL is opened only when its page reads it; an expired checkout is abandoned at the step it reached"
+      "name": "A merchant's pay URL is opened only when its page reads it; its bill stays open after the pay URL expires, and canceled it is abandoned at the step it reached"
     },
     {
       "id": "OR-J47-S04",
@@ -4151,7 +4151,7 @@
     {
       "id": "OR-J09-S74",
       "journey": "J09",
-      "name": "An empty NMI order releases after 24 hours, passes sale archive validation, and the merchant can cancel the reopened invoice or let it expire"
+      "name": "An empty NMI order releases after 24 hours, passes sale archive validation, and the merchant can cancel the reopened invoice or the customer's purchase expires"
     },
     {
       "id": "OR-J09-S75",
@@ -4462,6 +4462,21 @@
       "id": "OR-J06-S87",
       "journey": "J06",
       "name": "An unresolved undeclared account alerts its operator once: later billing passes alert it no more and its finding stays open"
+    },
+    {
+      "id": "OR-J08-S72",
+      "journey": "J08",
+      "name": "A merchant invoice never expires: well past 30 days it is open, has no expiry and its customer pays it"
+    },
+    {
+      "id": "OR-J08-S73",
+      "journey": "J08",
+      "name": "A merchant cancels its own invoice well past 30 days: no expiry closed it first"
+    },
+    {
+      "id": "OR-J08-S74",
+      "journey": "J08",
+      "name": "A purchase that expired unpaid leaves the customer's own invoice list, before and after the pass writes it; read by its id it answers, and the merchant's list keeps it"
     }
   ]
 }

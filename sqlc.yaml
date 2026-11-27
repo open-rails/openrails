@@ -14,6 +14,7 @@ sql:
       - "internal/migrate/postgres/0009_usage_receipt_per_posting.up.sql"
       - "internal/migrate/postgres/0010_amount_low_balance.up.sql"
       - "internal/migrate/postgres/0011_customer_destructive_reservations.up.sql"
+      - "internal/migrate/postgres/0012_merchant_invoices_open.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

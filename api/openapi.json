@@ -15996,10 +15996,6 @@
               "$ref": "#/components/schemas/InvoiceLineParams"
             }
           },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          },
           "pay_url": {
             "$ref": "#/components/schemas/InvoicePayURLParams"
           },

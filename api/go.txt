@@ -1620,7 +1620,6 @@ pkg openrails/billing, type CreateCreditGrantParams struct, SourceID string `jso
 pkg openrails/billing, type CreateInvoiceParams struct
 pkg openrails/billing, type CreateInvoiceParams struct, Attribution *InvoiceAttribution `json:"attribution,omitempty"`
 pkg openrails/billing, type CreateInvoiceParams struct, CustomerID CustomerID `json:"customer_id"`
-pkg openrails/billing, type CreateInvoiceParams struct, ExpiresAt *time.Time `json:"expires_at,omitempty"`
 pkg openrails/billing, type CreateInvoiceParams struct, Lines []InvoiceLineParams `json:"lines"`
 pkg openrails/billing, type CreateInvoiceParams struct, PayURL *InvoicePayURLParams `json:"pay_url,omitempty"`
 pkg openrails/billing, type CreateMerchantParams struct

@@ -39,7 +39,7 @@ func purchasedSale(t *testing.T, configure ...func(*world)) (*authorityWorld, *p
 func purchasedNMISale(t *testing.T) (*authorityWorld, *nmiJournal, billing.PaymentID) {
 	t.Helper()
 	a, p := newNMIWorld(t)
-	invoice := nmiCheckoutInvoice(t, a, "refund-sale", false, 48*time.Hour)
+	invoice := nmiCheckoutInvoice(t, a, "refund-sale", false)
 	invoice = payNMICheckout(t, a, invoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), true)
 	require.Equal(t, billing.InvoiceComplete, invoice.Status)
 	require.NotNil(t, invoice.Payment.PaymentID)

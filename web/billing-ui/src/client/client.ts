@@ -659,7 +659,8 @@ export function createBillingClient(options: BillingClientOptions = {}) {
 
     /**
      * The customer's invoices, newest first: `origin: "usage"` their usage
-     * invoices, `overdue` those still owed past their due date.
+     * invoices, `overdue` those still owed past their due date. A page leaves
+     * out purchases that expired unpaid; `ids` answers each as it is.
      */
     listInvoices(
       opts: CursorOptions & {

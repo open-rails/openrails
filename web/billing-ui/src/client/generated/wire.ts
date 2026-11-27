@@ -421,7 +421,6 @@ export type CreateCreditGrantParams = {
 export type CreateInvoiceParams = {
   customer_id?: string
   lines?: InvoiceLineParams[]
-  expires_at?: string
   pay_url?: InvoicePayURLParams
   attribution?: InvoiceAttribution
 }

@@ -2893,6 +2893,15 @@
     ],
     "OR-J06-S87": [
       "TestStripeWebhookDueWork/OR-J06-S87/an-unresolved-undeclared-account-alerts-once-and-stays-open"
+    ],
+    "OR-J08-S72": [
+      "TestMerchantInvoicesStayOpen/OR-J08-S72/a-merchant-invoice-is-open-and-payable-well-past-30-days"
+    ],
+    "OR-J08-S73": [
+      "TestMerchantInvoicesStayOpen/OR-J08-S73/a-merchant-cancels-its-invoice-well-past-30-days"
+    ],
+    "OR-J08-S74": [
+      "TestMerchantInvoicesStayOpen/OR-J08-S74/the-customer-list-omits-an-expired-purchase-the-merchant-list-keeps-it"
     ]
   }
 }
