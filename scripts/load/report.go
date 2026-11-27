@@ -173,9 +173,6 @@ func summarize(r *Results) string {
 		if pr.Close != nil {
 			p("- Month-end close of %d customers including the heavy one: %s in %.1f s, %d postings. %s", pr.Customers+2, pr.Close.State, pr.Close.Seconds, pr.CloseCustomers, pr.Close.Error)
 		}
-		if q, ok := pr.Queries["posting_final_scan"]; ok {
-			p("- Posting scans (`usage_events FINAL`): %d, p50 %.0f ms, p99 %.0f ms, max %d ms (the heavy customer), up to %d rows and %s of memory.", q.Count, q.P50MS, q.P99MS, q.MaxMS, q.MaxRows, mb(q.MaxMemory))
-		}
 		p("")
 		queryTable(p, pr.Queries)
 		rowsAndDisk(p, pr.Rows, pr.Storage)
@@ -336,8 +333,8 @@ func rowsAndDisk(p func(string, ...any), rows *RowStats, storage []TableStorage)
 		for _, k := range sortedKeys(rows.ByType) {
 			types = append(types, fmt.Sprintf("%s %d", k, rows.ByType[k]))
 		}
-		p("Rows: %d usage events; %d ledger transfers over %d customers (%.2f a customer, at most %d); by type: %s. %d usage postings, %d customers with unposted usage.",
-			rows.UsageEvents, rows.LedgerTransfers, rows.Customers, rows.TransfersPerUser, rows.PerCustomerMax, strings.Join(types, ", "), rows.UsagePostings, rows.Unposted)
+		p("Rows: %d usage events; %d ledger transfers over %d customers (%.2f a customer, at most %d); by type: %s. %d usage receipts, %d running totals, %d customers with unposted usage.",
+			rows.UsageEvents, rows.LedgerTransfers, rows.Customers, rows.TransfersPerUser, rows.PerCustomerMax, strings.Join(types, ", "), rows.UsageReceipts, rows.UsageTotals, rows.Unposted)
 		p("")
 	}
 	if len(storage) == 0 {

@@ -204,12 +204,12 @@ func (e *env) runPosting(ctx context.Context) *PostingResult {
 	now := clock.Now().UTC()
 	clock.Advance(time.Date(now.Year(), now.Month()+1, 1, 0, 1, 0, 0, time.UTC).Sub(now))
 	var before int64
-	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_postings").Scan(&before)
+	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_receipts").Scan(&before)
 	logf("[posting] closing the month for %d customers", plan.PostingCustomers+2)
 	r.Close = runPass(ctx, fleet)
 	logf("[posting] close: %s in %.1fs %s", r.Close.State, r.Close.Seconds, r.Close.Error)
 	var after2, unposted int64
-	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_postings").Scan(&after2)
+	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_receipts").Scan(&after2)
 	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_pending WHERE due_at <= $1", clock.Now()).Scan(&unposted)
 	r.CloseCustomers = after2 - before
 	r.check("month-end-close-posts-everyone", r.Close.State == "completed" && unposted == 0, "%d postings by the close, %d customers still due", r.CloseCustomers, unposted)
@@ -337,7 +337,7 @@ func runPass(ctx context.Context, fleet *river.Client[pgx.Tx]) *PassResult {
 // with ClickHouse's deduplicated total: every event posted once.
 func (e *env) checkPostedOnce(ctx context.Context, r *PostingResult, schema string, merchant billing.MerchantID) {
 	posted := map[string]int64{}
-	rows, err := e.pool.Query(ctx, "SELECT customer_id::text, sum(amount)::bigint FROM "+pgx.Identifier{schema}.Sanitize()+".usage_postings WHERE merchant_id = $1 GROUP BY 1", merchant.UUID())
+	rows, err := e.pool.Query(ctx, "SELECT customer_id::text, sum(amount)::bigint FROM "+pgx.Identifier{schema}.Sanitize()+".usage_receipts WHERE merchant_id = $1 GROUP BY 1", merchant.UUID())
 	if err != nil {
 		r.fail("postings: %v", err)
 		return

@@ -4,8 +4,8 @@
 //
 // A sync takes no customer's lock. Its transaction locks its own lease row
 // and shares the merchant's catalog fence; its intake is append-only (events
-// into the event store, then the lease's numbering and receipts and pending
-// amounts, the posting queue row held by key share), and its in-flight report
+// into the event store, then the lease's numbering and receipts and running
+// totals, the posting queue row held by key share), and its in-flight report
 // writes only its own rows. Only a window that must open or a failed item's charge takes
 // that customer's lock (money.PrepareUsageTx). Views are read after the
 // commit, in batches, in one snapshot (views.go).
