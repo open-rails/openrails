@@ -156,7 +156,7 @@ and egress receipt. A separate rehearsal from a fresh snapshot gets its own ID.
 <details>
 <summary>Named SQL writes and owned billing tables</summary>
 
-The source scan found 511 named SQL statements in 94 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
+The source scan found 509 named SQL statements in 93 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
 
 | Query source | Statements with explicit writes | Targets |
 | --- | ---: | --- |
@@ -255,27 +255,25 @@ The source scan found 511 named SQL statements in 94 files with an explicit qual
 | [webhook_events.sql](../internal/db/queries/webhook_events.sql) | 2 | `webhook_events` |
 | [webhook_health.sql](../internal/db/queries/webhook_health.sql) | 5 | `psp_refresh_watermarks`, `webhook_health`, `webhook_health_daily` |
 
-The migrations declare these 135 billing tables; usage events live in the event store (ClickHouse), not here. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
+The migrations declare these 123 billing tables; usage events live in the event store (ClickHouse), not here. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
 
 - `balance_watches`, `book_identity`, `books_starts`, `carts`, `catalog_applications`, `catalog_field_owners`, `catalog_limits`
-- `catalog_meters`, `catalog_product_limits`, `catalog_rate_cards`, `change_log`, `credit_grant_events`, `credit_grants`
-- `credit_reversal_shares`, `custodians`, `customer_contacts`, `customer_delinquency`, `customer_destructive_reservations`, `customer_invoice_profiles`, `customer_limit_overrides`, `customer_low_balance_lines`
-- `customer_messages`, `customer_mrr`, `customers`, `dashboard_configs`, `destructive_actions`, `destructive_holds`, `destructive_run_before_images`
+- `catalog_meters`, `catalog_product_limits`, `catalog_rate_cards`, `change_log`, `credit_grant_events`, `credit_grants`, `credit_reversal_shares`
+- `custodians`, `customer_contacts`, `customer_delinquency`, `customer_destructive_reservations`, `customer_invoice_profiles`, `customer_limit_overrides`, `customer_low_balance_lines`
+- `customer_messages`, `customer_paid_totals`, `customers`, `dashboard_configs`, `destructive_actions`, `destructive_holds`, `destructive_run_before_images`
 - `disputes`, `event_store`, `eventlog_events`, `eventlog_migrations`, `eventlog_pending`, `eventlog_streams`, `fraud_reports`
-- `grants`, `host_outbox`, `idempotency_keys`, `lease_in_flight`, `leases`, `ledger_accounts`, `ledger_daily`
-- `ledger_rollup_pending`, `ledger_transfers`, `ledger_type_totals`, `ledger_units`, `limit_adjustments`, `limit_windows`, `maintenance_runs`
-- `mandates`, `merchant_controls`, `merchant_leases`, `merchant_slug_aliases`, `merchants`, `money_settings`, `mrr_cohort_flows`
-- `mrr_customer_flows`, `mrr_customer_totals`, `mrr_flows`, `mrr_movement_lines`, `mrr_movements`, `mrr_product_flows`, `mrr_product_totals`
-- `mrr_risk_cases`, `mrr_risk_due`, `mrr_risk_episodes`, `mrr_risk_flows`, `mrr_risk_totals`, `mrr_scheduled`, `mrr_streak_flows`
-- `mrr_totals`, `network_activity_daily`, `nmi_bulk_checkpoints`, `notification_channel_state`, `notification_events`
-- `notification_issue_revisions`, `operation_log`, `invoice_attempts`, `invoice_lines`, `invoices`, `owed_items`, `ownership_claims`
+- `grants`, `host_outbox`, `idempotency_keys`, `invoice_attempts`, `invoice_lines`, `invoices`, `lease_in_flight`
+- `leases`, `ledger_accounts`, `ledger_daily`, `ledger_rollup_pending`, `ledger_transfers`, `ledger_type_totals`, `ledger_units`
+- `limit_adjustments`, `limit_windows`, `maintenance_runs`, `mandates`, `merchant_controls`, `merchant_leases`, `merchant_slug_aliases`
+- `merchants`, `money_settings`, `mrr_movement_lines`, `mrr_movements`, `mrr_risk_cases`, `mrr_risk_episodes`, `network_activity_daily`
+- `nmi_bulk_checkpoints`, `notification_channel_state`, `notification_events`, `notification_issue_revisions`, `operation_log`, `owed_items`, `ownership_claims`
 - `parked_provider_subscriptions`, `payment_attempts`, `payment_method_versions`, `payment_methods`, `payments`, `periodic_leases`, `price_keys`
 - `price_migrations`, `price_psp_bindings`, `prices`, `product_access`, `product_entitlements`, `products`, `provider_bills`
-- `provider_catalog_objects`, `provider_charge_attributions`, `provider_cycle_receipts`, `provider_intents`, `provider_schedules`, `provisioning_tokens`, `psp_customers`
-- `psp_import_basis`, `psp_import_mappings`, `psp_import_records`, `psp_imports`, `psp_refresh_watermarks`, `psps`, `rebill_cycles`
-- `reconciliation_findings`, `reconciliation_state`, `revenue_schedules`, `running_charges`, `scheduled_changes`, `solana_crankers`, `solana_pay_receipts`
-- `solana_pay_references`, `solana_subscriptions`, `stored_card_checks`, `stripe_fee_reads`, `subscription_billing_changes`, `subscription_cancellations`, `subscription_mrr`
-- `subscription_status_transitions`, `subscription_verifications`, `subscriptions`, `usage_card_prints`, `usage_pending`, `usage_receipts`, `usage_totals`
-- `webhook_events`, `webhook_health`, `webhook_health_daily`
+- `provider_catalog_objects`, `provider_charge_attributions`, `provider_cycle_receipts`, `provider_intents`, `provider_listed_rebills`, `provider_schedules`, `provisioning_tokens`
+- `psp_customers`, `psp_import_basis`, `psp_import_mappings`, `psp_import_records`, `psp_imports`, `psp_refresh_watermarks`, `psps`
+- `rebill_cycles`, `reconciliation_findings`, `reconciliation_state`, `revenue_schedules`, `running_charges`, `scheduled_changes`, `solana_crankers`
+- `solana_pay_receipts`, `solana_pay_references`, `solana_subscriptions`, `stored_card_checks`, `stripe_fee_reads`, `subscription_billing_changes`, `subscription_cancellations`
+- `subscription_mrr`, `subscription_status_transitions`, `subscription_verifications`, `subscriptions`, `usage_card_prints`, `usage_pending`, `usage_receipts`
+- `usage_totals`, `webhook_events`, `webhook_health`, `webhook_health_daily`
 
 </details>

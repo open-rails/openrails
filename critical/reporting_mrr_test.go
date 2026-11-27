@@ -25,28 +25,27 @@ import (
 )
 
 // Recurring revenue reporting: the MRR measures over four months of two
-// customers, the dispute programs' levels on the overview, and the rollups
+// customers, the dispute programs' levels on the overview, and the facts
 // that answer every MRR measure.
 func TestReportingMRR(t *testing.T) {
 	t.Run("OR-J53-S06/recurring-measures-over-four-months-equal-the-movements", recurringMeasures)
 	t.Run("OR-J53-S07/the-chargeback-ratio-tile-and-charts-carry-the-dispute-programs-levels", programLevels)
-	t.Run("OR-J42-S30/every-mrr-measure-plans-on-rollups-without-a-sequential-scan-of-movements-or-subscriptions", mrrOnRollups)
+	t.Run("OR-J42-S30/every-mrr-measure-reads-its-facts-in-one-index-only-range-scan-bounded-by-their-instant", mrrOnFacts)
 	t.Run("OR-J42-S32/mrr-leaving-a-product-a-currency-and-a-customer-settles", mrrLeaves)
 	t.Run("OR-J42-S33/a-refund-that-revokes-access-finalizes-and-takes-the-customer-out-once", mrrRefunded)
 }
 
-// distinctCustomers is the merchant's customers with MRR, as their totals
-// row has it, which agrees with their flows summed.
+// distinctCustomers is the merchant's customers with MRR now, each once: the
+// customer-level logo changes of the movements dated by now, never below
+// none on the way.
 func distinctCustomers(t *testing.T, w *world) int64 {
 	t.Helper()
-	mid := w.alpha.MerchantID().UUID()
-	var n int64
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT COALESCE((SELECT customers FROM "+booksTable(w, "mrr_customer_totals")+" WHERE merchant_id = $1), 0)",
-		mid).Scan(&n))
-	var flows int64
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(logos), 0)::bigint FROM "+booksTable(w, "mrr_customer_flows")+" WHERE merchant_id = $1",
-		mid).Scan(&flows))
-	require.Equal(t, n, flows, "the distinct customers are their flows summed")
+	var n, low int64
+	require.NoError(t, w.pool.QueryRow(t.Context(), `SELECT COALESCE(sum(d), 0)::bigint, COALESCE(min(running), 0)::bigint FROM (
+		SELECT customer_logo_delta AS d, sum(customer_logo_delta) OVER (ORDER BY occurred_at, id) AS running
+		FROM `+booksTable(w, "mrr_movements")+` WHERE merchant_id = $1 AND occurred_at <= $2) x`,
+		w.alpha.MerchantID().UUID(), w.clock.Now()).Scan(&n, &low))
+	require.GreaterOrEqual(t, low, int64(0), "never fewer than no customers")
 	return n
 }
 
@@ -74,14 +73,14 @@ func mrrRefunded(t *testing.T) {
 	moves := mrrMoves(t, a.world, a.alpha, customerOf(a.alice))
 	require.Equal(t, []string{mrrKind("USD", "new", weeklyTenMRR), mrrKind("USD", "churn", -weeklyTenMRR)}, mrrKinds(moves), "one churn")
 	require.Equal(t, -1, moves[1].Logo)
-	require.Equal(t, [3]int64{0, 0, 0}, mrrTotals(t, a.world, a.alpha, "USD"))
+	require.Equal(t, [3]int64{0, 0, 0}, mrrTotals(t, a.world, a.alpha, "USD", a.clock.Now()))
 }
 
 // MRR leaving a product, a currency and a customer settles, each fall moving
-// the product totals and the distinct customers down: Alice's euro plan ends
+// the products' MRR and the distinct customers down: Alice's euro plan ends
 // at once while her dollar day plan stays, so she stays a customer; Bob's
-// only plan ends at once; then Alice cancels the day plan and the billing
-// pass's MRR scan churns her at its end. None is left.
+// only plan ends at once; then Alice cancels the day plan and its end churns
+// her, with no job. None is left.
 func mrrLeaves(t *testing.T) {
 	a, p := newPaymentWorld(t, func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) })
 	daily := mrrPlan(t, a.alpha, "s32-daily", billing.CreatePriceParams{UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
@@ -96,8 +95,8 @@ func mrrLeaves(t *testing.T) {
 	customers := func() int64 { return distinctCustomers(t, a.world) }
 	products := func() map[string]int64 {
 		t.Helper()
-		rows, err := a.pool.Query(t.Context(), "SELECT currency || ' ' || mrr::text || ' ' || subscribers::text FROM "+booksTable(a.world, "mrr_product_totals")+
-			" WHERE merchant_id = $1", mid)
+		rows, err := a.pool.Query(t.Context(), "SELECT currency || ' ' || sum(delta)::text || ' ' || sum(subscriber_delta)::text FROM "+booksTable(a.world, "mrr_movement_lines")+
+			" WHERE merchant_id = $1 AND occurred_at <= $2 GROUP BY currency, product_id", mid, a.clock.Now())
 		require.NoError(t, err)
 		listed, err := pgx.CollectRows(rows, pgx.RowTo[string])
 		require.NoError(t, err)
@@ -119,10 +118,9 @@ func mrrLeaves(t *testing.T) {
 	require.EqualValues(t, 1, customers())
 
 	customerCancel(t, a, day.ID)
+	require.EqualValues(t, 1, customers(), "Alice adds her MRR until the end")
 	a.clock.Advance(day.CurrentPeriodEndsAt.Sub(a.clock.Now()))
-	fleet := startFleet(t, a.world)
-	runRegistered(t, fleet, "openrails.billing_pass", 2)
-	require.Eventually(t, func() bool { return customers() == 0 }, 20*time.Second, 20*time.Millisecond, "the period's end churns Alice")
+	require.EqualValues(t, 0, customers(), "the period's end churns Alice")
 	require.Equal(t, map[string]int64{"USD 0 0": 2, "EUR 0 0": 1}, products())
 	require.EqualValues(t, 0, whole(t, only(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"subscribers"},
 		Range: &billing.MetricsRange{From: a.clock.Now().AddDate(0, 0, -1).Format(time.DateOnly), To: a.clock.Now().Format(time.DateOnly)}}))["subscribers"]))
@@ -344,6 +342,8 @@ func recurringMeasures(t *testing.T) {
 	require.Equal(t, map[string]int64{"churn": -10_000_000}, scheduled())
 	_, err = a.alpha.ResumeSubscription(t.Context(), back.ID)
 	require.NoError(t, err)
+	require.Equal(t, map[string]int64{"churn": -10_000_000}, scheduled(), "the same read is served from the cache for a minute")
+	a.clock.Advance(metrics.CacheTTL)
 	require.Empty(t, scheduled(), "a resume takes the scheduled churn back")
 
 	// Each cancel decision counts in the month it was made, by its type and
@@ -428,19 +428,29 @@ func programLevels(t *testing.T) {
 
 // Every MRR measure, by itself, by each dimension it declares, by two, and
 // filtered by currency and by product, over time and not, in UTC and in New
-// York, plans on indexes: with sequential scans off no relation is scanned
-// whole, every scan's index condition names the merchant, and a rollup kept
-// by time is read by its time.
-func mrrOnRollups(t *testing.T) {
+// York, reads its facts as the indexes allow: with sequential scans off no
+// relation is scanned whole and every scan's index condition names the
+// merchant; a movement, line, case or episode is read by an index-only scan
+// bounded by its instant, run once: no read repeats per edge.
+func mrrOnFacts(t *testing.T) {
 	a, _, sub := purchasedMembership(t)
 	york, err := time.LoadLocation("America/New_York")
 	require.NoError(t, err)
-	byTime := map[string]string{"mrr_flows": "bucket_at", "mrr_product_flows": "bucket_at", "mrr_customer_flows": "bucket_at", "mrr_streak_flows": "bucket_at",
-		"mrr_cohort_flows": "cohort_at", "mrr_risk_flows": "bucket_at", "mrr_scheduled": "effective_at", "subscription_cancellations": "decided_at",
-		"customer_mrr": "first_active_at"}
+	// The facts' visibility is known, as it is on any table vacuumed once.
+	facts := map[string]string{"mrr_movements": "occurred_at", "mrr_movement_lines": "occurred_at", "mrr_risk_cases": "closed_at", "mrr_risk_episodes": "_at"}
+	for table := range facts {
+		_, err := a.pool.Exec(t.Context(), "VACUUM (ANALYZE) "+booksTable(a.world, table))
+		require.NoError(t, err)
+	}
+	byTime := map[string]string{"subscription_cancellations": "decided_at"}
+	// What MRR is read from: the facts, and the state at-risk MRR and
+	// scheduled changes are read from now.
+	readable := []string{"mrr_movements", "mrr_movement_lines", "mrr_risk_cases", "mrr_risk_episodes", "subscription_mrr", "subscriptions",
+		"money_settings", "payment_methods", "customer_delinquency", "scheduled_changes", "prices", "subscription_cancellations"}
 	names := []string{"mrr", "subscribers", "arpa", "ltv", "mrr_movements", "subscriber_movements", "scheduled_mrr", "cancellations",
 		"subscriber_churn_rate", "nrr", "grr", "cohort_retention", "mrr_at_risk", "at_risk_recovery_rate"}
 	window := &billing.MetricsRange{From: a.clock.Now().AddDate(0, -3, 0).Format(time.DateOnly), To: a.clock.Now().Format(time.DateOnly)}
+	past := &billing.MetricsRange{From: a.clock.Now().AddDate(0, -3, 0).Format(time.DateOnly), To: a.clock.Now().AddDate(0, 0, -1).Format(time.DateOnly)}
 	planned := 0
 	for _, zone := range []*time.Location{time.UTC, york} {
 		for _, name := range names {
@@ -466,77 +476,86 @@ func mrrOnRollups(t *testing.T) {
 			}
 			for _, v := range variants {
 				for _, timed := range []bool{false, true} {
-					q := billing.QueryMetricsParams{Measures: []string{name}, By: v.by, Filters: v.filters, Range: window}
-					if name == "cohort_retention" {
-						if timed {
-							continue
-						}
-						q.By = []string{"cohort", "months_since_start"}
-						for _, d := range v.by {
-							if !slices.Contains(q.By, d) {
-								q.By = append(q.By, d)
-							}
-						}
-					}
-					if name == "scheduled_mrr" {
-						q.Range = &billing.MetricsRange{Next: "12w"}
-					}
-					if timed {
-						q.By, q.Grain = append([]string{"time"}, q.By...), "week"
-					}
-					plan, refused := metrics.ValidateIn(&q, a.clock.Now(), zone)
-					require.Nil(t, refused, "%+v", q)
-					statements, err := metrics.Statements(plan, a.alpha.MerchantID().UUID())
-					require.NoError(t, err)
-					require.NotEmpty(t, statements)
-					for _, st := range statements {
-						sql, err := sqlschema.Rewrite(st.SQL, a.schema)
-						require.NoError(t, err)
-						explained := explainWithoutSeqScan(t, a.pool, sql, st.Args, "%s: %s", st.Family, sql)
-						var plans []struct {
-							Plan planNode `json:"Plan"`
-						}
-						require.NoError(t, json.Unmarshal([]byte(explained), &plans))
-						nodes := plans[0].Plan.all()
-						for k, node := range nodes {
-							if node.Relation == "" {
+					for _, rng := range []*billing.MetricsRange{window, past} {
+						q := billing.QueryMetricsParams{Measures: []string{name}, By: v.by, Filters: v.filters, Range: rng}
+						if name == "cohort_retention" {
+							if timed {
 								continue
 							}
-							where := fmt.Sprintf("%s by %v in %s, %s", name, q.By, zone, node.Relation)
-							require.NotEqual(t, "Seq Scan", node.Type, "%s is scanned whole: %s", where, explained)
-							require.NotEqual(t, "mrr_movements", node.Relation, "%s reads the movements", where)
-							cond := node.IndexCond + node.RecheckCond
-							if node.Type == "Bitmap Heap Scan" && k+1 < len(nodes) {
-								cond += nodes[k+1].IndexCond
-							}
-							require.Contains(t, cond, "merchant_id", "%s: %s", where, explained)
-							if column, ok := byTime[node.Relation]; ok {
-								require.Contains(t, cond, column, "%s: %s", where, explained)
+							q.By = []string{"cohort", "months_since_start"}
+							for _, d := range v.by {
+								if !slices.Contains(q.By, d) {
+									q.By = append(q.By, d)
+								}
 							}
 						}
-						planned++
+						if name == "scheduled_mrr" {
+							q.Range = &billing.MetricsRange{Next: "12w"}
+						}
+						if timed {
+							q.By, q.Grain = append([]string{"time"}, q.By...), "week"
+						}
+						plan, refused := metrics.ValidateIn(&q, a.clock.Now(), zone)
+						require.Nil(t, refused, "%+v", q)
+						statements, err := metrics.Statements(plan, a.alpha.MerchantID().UUID())
+						require.NoError(t, err)
+						require.NotEmpty(t, statements)
+						for _, st := range statements {
+							sql, err := sqlschema.Rewrite(st.SQL, a.schema)
+							require.NoError(t, err)
+							explained := explainWithoutSeqScan(t, a.pool, sql, st.Args, "%s: %s", st.Family, sql)
+							var plans []struct {
+								Plan planNode `json:"Plan"`
+							}
+							require.NoError(t, json.Unmarshal([]byte(explained), &plans))
+							nodes := plans[0].Plan.all()
+							for k, node := range nodes {
+								if node.Relation == "" {
+									continue
+								}
+								where := fmt.Sprintf("%s by %v in %s, %s", name, q.By, zone, node.Relation)
+								require.NotEqual(t, "Seq Scan", node.Type, "%s is scanned whole: %s", where, explained)
+								require.Contains(t, readable, node.Relation, "%s is no fact of MRR: %s", where, explained)
+								cond := node.IndexCond + node.RecheckCond
+								if node.Type == "Bitmap Heap Scan" && k+1 < len(nodes) {
+									cond += nodes[k+1].IndexCond
+								}
+								require.Contains(t, cond, "merchant_id", "%s: %s", where, explained)
+								if column, ok := byTime[node.Relation]; ok {
+									require.Contains(t, cond, column, "%s: %s", where, explained)
+								}
+								if column, ok := facts[node.Relation]; ok {
+									require.Equal(t, "Index Only Scan", node.Type, "%s reads the heap: %s", where, explained)
+									// A covering index of another order may serve a read whose
+									// bound selects every row: the bound is then its filter.
+									require.Contains(t, cond+node.Filter, column, "%s is not bounded by its instant: %s", where, explained)
+									require.LessOrEqual(t, node.Loops, 1.0, "%s runs once per edge: %s", where, explained)
+								}
+							}
+							planned++
+						}
 					}
 				}
 			}
 		}
 	}
-	require.Greater(t, planned, 200)
+	require.Greater(t, planned, 300)
 }
 
-// explainWithoutSeqScan is the JSON plan of sql with sequential scans off. Its
-// transaction always ends, so a failed plan leaves no connection held for the
-// world's teardown to wait on.
+// explainWithoutSeqScan is the JSON plan of sql, run, with sequential and
+// bitmap scans off. Its transaction always ends, so a failed plan leaves no
+// connection held for the world's teardown to wait on.
 func explainWithoutSeqScan(t *testing.T, pool *pgxpool.Pool, sql string, args []any, msg ...any) string {
 	t.Helper()
 	tx, err := pool.Begin(t.Context())
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	for _, set := range []string{"SET LOCAL enable_seqscan = off", "SET LOCAL statement_timeout = '30s'", "SET LOCAL lock_timeout = '10s'"} {
+	for _, set := range []string{"SET LOCAL enable_seqscan = off", "SET LOCAL enable_bitmapscan = off", "SET LOCAL statement_timeout = '30s'", "SET LOCAL lock_timeout = '10s'"} {
 		_, err = tx.Exec(t.Context(), set)
 		require.NoError(t, err)
 	}
 	var explained string
-	require.NoError(t, tx.QueryRow(t.Context(), "EXPLAIN (FORMAT JSON) "+sql, args...).Scan(&explained), msg...)
+	require.NoError(t, tx.QueryRow(t.Context(), "EXPLAIN (ANALYZE, FORMAT JSON) "+sql, args...).Scan(&explained), msg...)
 	return explained
 }
 
@@ -546,6 +565,8 @@ type planNode struct {
 	Relation    string     `json:"Relation Name"`
 	IndexCond   string     `json:"Index Cond"`
 	RecheckCond string     `json:"Recheck Cond"`
+	Filter      string     `json:"Filter"`
+	Loops       float64    `json:"Actual Loops"`
 	Plans       []planNode `json:"Plans"`
 }
 

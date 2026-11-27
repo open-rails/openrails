@@ -69,7 +69,6 @@ var excludedTables = map[string]string{
 	"provider_catalog_objects":      "provider observations; the destination observes again",
 	"provider_listed_rebills":       "provider observations: the rebills a CCBill read listed; the destination reads again",
 	"parked_provider_subscriptions": "converge working state: the next provider event parks again",
-	"mrr_risk_due":                  "MRR risk work queue: the destination's next change of a card or delinquency queues again",
 	"ledger_type_totals":            "derived: the transfers rebuild it as they are restored, and the restore check proves it",
 	"ledger_daily":                  "derived: the transfers rebuild it as they are restored, and the restore check proves it",
 	"ledger_rollup_pending":         "transaction scratch, empty at commit",

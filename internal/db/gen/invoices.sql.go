@@ -395,18 +395,20 @@ SELECT
      WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
        AND status = 'complete' AND (origin IN ('customer', 'merchant') OR subscription_bill_kind = 'initial')
        AND currency = ANY($3::text[]))::int AS purchases,
-    EXISTS (SELECT 1 FROM billing.customer_mrr
+    EXISTS (SELECT 1 FROM billing.mrr_movements
             WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-              AND first_active_at IS NOT NULL)::boolean AS had_mrr,
-    EXISTS (SELECT 1 FROM billing.customer_mrr
-            WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-              AND mrr > 0)::boolean AS has_mrr
+              AND occurred_at <= $4::timestamptz)::boolean AS had_mrr,
+    EXISTS (SELECT 1 FROM billing.mrr_movements v
+            WHERE v.merchant_id = $1::uuid AND v.customer_id = $2::uuid
+              AND v.occurred_at <= $4::timestamptz
+            GROUP BY v.currency HAVING sum(v.delta) > 0)::boolean AS has_mrr
 `
 
 type GetCheckoutCustomerParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Money      []string
+	At         time.Time
 }
 
 type GetCheckoutCustomerRow struct {
@@ -417,9 +419,15 @@ type GetCheckoutCustomerRow struct {
 
 // Who a new checkout's customer is: their paid purchases (complete invoices in
 // money, never a merchant's unit, and observed initial enrollments), whether
-// they ever had MRR with the merchant, and whether they have any now.
+// they ever had MRR with the merchant, and whether they have any at at: a
+// currency whose movements by then add up to more than none.
 func (q *Queries) GetCheckoutCustomer(ctx context.Context, arg GetCheckoutCustomerParams) (GetCheckoutCustomerRow, error) {
-	row := q.db.QueryRow(ctx, getCheckoutCustomer, arg.MerchantID, arg.CustomerID, arg.Money)
+	row := q.db.QueryRow(ctx, getCheckoutCustomer,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Money,
+		arg.At,
+	)
 	var i GetCheckoutCustomerRow
 	err := row.Scan(&i.Purchases, &i.HadMrr, &i.HasMrr)
 	return i, err

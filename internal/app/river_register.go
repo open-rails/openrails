@@ -183,10 +183,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if err := addWorker(workers, &riverjobs.CustomerMessageWorker{Messages: r.Messages}); err != nil {
 		return fmt.Errorf("add customer message worker: %w", err)
 	}
-	// MRR risk: the backstop of the drain each queued change wakes.
-	if err := addWorker(workers, &riverjobs.MRRRiskWorker{Risk: r.MRRRisk}); err != nil {
-		return fmt.Errorf("add mrr risk worker: %w", err)
-	}
 	if err := addWorker(workers, &riverjobs.ContactErasureWorker{DB: r.DB, Admissions: r.DestructiveAdmissions}); err != nil {
 		return fmt.Errorf("add contact erasure worker: %w", err)
 	}
@@ -224,8 +220,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		riverjobs.Scan{Kind: money.KindUsageInvoices, Run: usage.Pass, DueBy: usage.DueBy},
 		riverjobs.Scan{Kind: riverjobs.KindStoredCardRefreshDue, Run: storedCards.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindOperationWakes, Run: (&riverjobs.OperationWakes{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
-		// Cancellations at period end leave MRR at their end.
-		riverjobs.Scan{Kind: riverjobs.KindMRRDue, Run: (&riverjobs.MRRDueWorker{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
 		// Stripe's fees on the charges, refunds and disputes recorded since.
 		riverjobs.Scan{Kind: riverjobs.KindStripeFees, Run: (&fees.StripeReader{DB: r.DB, Rails: r.RailConfigs, Stripe: r.StripeClients, Log: r.Log}).Pass},
 	)
@@ -418,9 +412,6 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 	}
 	if r.Messages == nil {
 		return fmt.Errorf("billing worker runtime customer messages are required")
-	}
-	if r.MRRRisk == nil {
-		return fmt.Errorf("billing worker runtime mrr risk is required")
 	}
 	return nil
 }

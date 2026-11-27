@@ -25,7 +25,8 @@ import (
 // Service executes validated metrics plans. Merchant scoping is structural:
 // every statement runs inside MerchantTx with an explicit merchant predicate.
 type Service struct {
-	db *db.DB
+	db    *db.DB
+	cache *resultCache
 }
 
 // NewService binds the metrics engine to the database.
@@ -80,8 +81,20 @@ func (s *Service) Zone(ctx context.Context) (*time.Location, error) {
 	return time.LoadLocation(settings.Config.AccountingTimezone)
 }
 
-// Execute runs a validated plan and returns the merged tabular result.
+// Execute runs a validated plan and returns the merged tabular result; a
+// plan reading the MRR facts may be answered from the cache (CacheMRR).
 func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.cacheable(plan, mid.UUID()) {
+		return s.cache.do(ctx, cacheKey(s.db.DataPool().Schema(), mid.UUID(), plan), func(ctx context.Context) (*Result, error) { return s.execute(ctx, plan) })
+	}
+	return s.execute(ctx, plan)
+}
+
+func (s *Service) execute(ctx context.Context, plan *Plan) (*Result, error) {
 	rows, err := s.run(ctx, plan)
 	if err != nil {
 		return nil, err

@@ -1124,31 +1124,35 @@ func (q *Queries) ListActiveSubscriptionsByCustomer(ctx context.Context, arg Lis
 }
 
 const listAtRiskSubscriptionsPage = `-- name: ListAtRiskSubscriptionsPage :many
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_invoice_id FROM billing.subscription_mrr r
-JOIN billing.subscriptions sub ON sub.merchant_id = r.merchant_id AND sub.id = r.subscription_id
-WHERE r.merchant_id = $1::uuid AND r.risk <> '{}'
-  AND ($2::text IS NULL OR $2::text = ANY(r.risk))
-  AND ($3::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
-      WHERE e.merchant_id = r.merchant_id AND e.subscription_id = r.subscription_id AND e.status = 'scheduled'
-        AND e.effective_at <= $3::timestamptz))
-  AND sub.merchant_id = $1::uuid AND ($4::uuid IS NULL OR sub.customer_id = $4::uuid)
-  AND ($5::text IS NULL OR sub.status::text = $5::text)
-  AND ($6::uuid IS NULL OR sub.price_id = $6::uuid)
-  AND ($7::text IS NULL OR sub.rail = $7::text)
-  AND ($8::timestamptz IS NULL OR sub.created_at >= $8::timestamptz)
-  AND ($9::timestamptz IS NULL OR sub.created_at <= $9::timestamptz)
-  AND ($10::timestamptz IS NULL OR sub.canceled_at >= $10::timestamptz)
-  AND ($11::timestamptz IS NULL OR sub.canceled_at <= $11::timestamptz)
-  AND ($12::timestamptz IS NULL OR sub.current_period_ends_at <= $12::timestamptz)
-  AND (NOT $13::boolean OR sub.status IN ('past_due', 'awaiting_method'))
-  AND ($14::timestamptz IS NULL OR (sub.created_at, sub.id) < ($14::timestamptz, $15::uuid))
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_invoice_id FROM billing.subscriptions sub
+WHERE sub.id IN (SELECT n.subscription_id FROM billing.mrr_risk_now($1::uuid, $2::timestamptz) n
+                 WHERE $3::text IS NULL OR $3::text = ANY(n.reasons))
+  AND ($4::timestamptz IS NULL OR sub.id IN (
+      SELECT m.subscription_id FROM billing.subscription_mrr m
+      WHERE m.merchant_id = $1::uuid AND m.mrr > 0
+        AND m.ends_at > $2::timestamptz AND m.ends_at <= $4::timestamptz
+      UNION ALL
+      SELECT x.subscription_id FROM billing.mrr_scheduled_changes($1::uuid) x
+      WHERE x.effective_at <= $4::timestamptz))
+  AND sub.merchant_id = $1::uuid AND ($5::uuid IS NULL OR sub.customer_id = $5::uuid)
+  AND ($6::text IS NULL OR sub.status::text = $6::text)
+  AND ($7::uuid IS NULL OR sub.price_id = $7::uuid)
+  AND ($8::text IS NULL OR sub.rail = $8::text)
+  AND ($9::timestamptz IS NULL OR sub.created_at >= $9::timestamptz)
+  AND ($10::timestamptz IS NULL OR sub.created_at <= $10::timestamptz)
+  AND ($11::timestamptz IS NULL OR sub.canceled_at >= $11::timestamptz)
+  AND ($12::timestamptz IS NULL OR sub.canceled_at <= $12::timestamptz)
+  AND ($13::timestamptz IS NULL OR sub.current_period_ends_at <= $13::timestamptz)
+  AND (NOT $14::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND ($15::timestamptz IS NULL OR (sub.created_at, sub.id) < ($15::timestamptz, $16::uuid))
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC, sub.id DESC
-LIMIT $16::int
+LIMIT $17::int
 `
 
 type ListAtRiskSubscriptionsPageParams struct {
 	MerchantID            uuid.UUID
+	At                    time.Time
 	RiskReason            *string
 	ScheduledChangeBefore *time.Time
 	CustomerID            *uuid.UUID
@@ -1166,11 +1170,12 @@ type ListAtRiskSubscriptionsPageParams struct {
 	RowLimit              int32
 }
 
-// The subscriptions whose MRR is at risk (for risk_reason, when set), read
-// from subscription_mrr's index of at-risk rows: the same filters and orders.
+// The subscriptions whose MRR is at risk at at (for risk_reason, when set), as
+// state says (billing.mrr_risk_now): the same filters and orders.
 func (q *Queries) ListAtRiskSubscriptionsPage(ctx context.Context, arg ListAtRiskSubscriptionsPageParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listAtRiskSubscriptionsPage,
 		arg.MerchantID,
+		arg.At,
 		arg.RiskReason,
 		arg.ScheduledChangeBefore,
 		arg.CustomerID,
@@ -1248,32 +1253,36 @@ func (q *Queries) ListAtRiskSubscriptionsPage(ctx context.Context, arg ListAtRis
 }
 
 const listAtRiskSubscriptionsPageByCanceledAt = `-- name: ListAtRiskSubscriptionsPageByCanceledAt :many
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_invoice_id FROM billing.subscription_mrr r
-JOIN billing.subscriptions sub ON sub.merchant_id = r.merchant_id AND sub.id = r.subscription_id
-WHERE r.merchant_id = $1::uuid AND r.risk <> '{}'
-  AND ($2::text IS NULL OR $2::text = ANY(r.risk))
-  AND ($3::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
-      WHERE e.merchant_id = r.merchant_id AND e.subscription_id = r.subscription_id AND e.status = 'scheduled'
-        AND e.effective_at <= $3::timestamptz))
-  AND sub.merchant_id = $1::uuid AND ($4::uuid IS NULL OR sub.customer_id = $4::uuid)
-  AND ($5::text IS NULL OR sub.status::text = $5::text)
-  AND ($6::uuid IS NULL OR sub.price_id = $6::uuid)
-  AND ($7::text IS NULL OR sub.rail = $7::text)
-  AND ($8::timestamptz IS NULL OR sub.created_at >= $8::timestamptz)
-  AND ($9::timestamptz IS NULL OR sub.created_at <= $9::timestamptz)
-  AND ($10::timestamptz IS NULL OR sub.canceled_at >= $10::timestamptz)
-  AND ($11::timestamptz IS NULL OR sub.canceled_at <= $11::timestamptz)
-  AND ($12::timestamptz IS NULL OR sub.current_period_ends_at <= $12::timestamptz)
-  AND (NOT $13::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_invoice_id FROM billing.subscriptions sub
+WHERE sub.id IN (SELECT n.subscription_id FROM billing.mrr_risk_now($1::uuid, $2::timestamptz) n
+                 WHERE $3::text IS NULL OR $3::text = ANY(n.reasons))
+  AND ($4::timestamptz IS NULL OR sub.id IN (
+      SELECT m.subscription_id FROM billing.subscription_mrr m
+      WHERE m.merchant_id = $1::uuid AND m.mrr > 0
+        AND m.ends_at > $2::timestamptz AND m.ends_at <= $4::timestamptz
+      UNION ALL
+      SELECT x.subscription_id FROM billing.mrr_scheduled_changes($1::uuid) x
+      WHERE x.effective_at <= $4::timestamptz))
+  AND sub.merchant_id = $1::uuid AND ($5::uuid IS NULL OR sub.customer_id = $5::uuid)
+  AND ($6::text IS NULL OR sub.status::text = $6::text)
+  AND ($7::uuid IS NULL OR sub.price_id = $7::uuid)
+  AND ($8::text IS NULL OR sub.rail = $8::text)
+  AND ($9::timestamptz IS NULL OR sub.created_at >= $9::timestamptz)
+  AND ($10::timestamptz IS NULL OR sub.created_at <= $10::timestamptz)
+  AND ($11::timestamptz IS NULL OR sub.canceled_at >= $11::timestamptz)
+  AND ($12::timestamptz IS NULL OR sub.canceled_at <= $12::timestamptz)
+  AND ($13::timestamptz IS NULL OR sub.current_period_ends_at <= $13::timestamptz)
+  AND (NOT $14::boolean OR sub.status IN ('past_due', 'awaiting_method'))
   AND sub.canceled_at IS NOT NULL
-  AND ($14::timestamptz IS NULL OR (sub.canceled_at, sub.id) < ($14::timestamptz, $15::uuid))
+  AND ($15::timestamptz IS NULL OR (sub.canceled_at, sub.id) < ($15::timestamptz, $16::uuid))
   AND sub.deleted_at IS NULL
 ORDER BY sub.canceled_at DESC, sub.id DESC
-LIMIT $16::int
+LIMIT $17::int
 `
 
 type ListAtRiskSubscriptionsPageByCanceledAtParams struct {
 	MerchantID            uuid.UUID
+	At                    time.Time
 	RiskReason            *string
 	ScheduledChangeBefore *time.Time
 	CustomerID            *uuid.UUID
@@ -1295,6 +1304,7 @@ type ListAtRiskSubscriptionsPageByCanceledAtParams struct {
 func (q *Queries) ListAtRiskSubscriptionsPageByCanceledAt(ctx context.Context, arg ListAtRiskSubscriptionsPageByCanceledAtParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listAtRiskSubscriptionsPageByCanceledAt,
 		arg.MerchantID,
+		arg.At,
 		arg.RiskReason,
 		arg.ScheduledChangeBefore,
 		arg.CustomerID,
@@ -1372,32 +1382,36 @@ func (q *Queries) ListAtRiskSubscriptionsPageByCanceledAt(ctx context.Context, a
 }
 
 const listAtRiskSubscriptionsPageByPeriodEnd = `-- name: ListAtRiskSubscriptionsPageByPeriodEnd :many
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_invoice_id FROM billing.subscription_mrr r
-JOIN billing.subscriptions sub ON sub.merchant_id = r.merchant_id AND sub.id = r.subscription_id
-WHERE r.merchant_id = $1::uuid AND r.risk <> '{}'
-  AND ($2::text IS NULL OR $2::text = ANY(r.risk))
-  AND ($3::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
-      WHERE e.merchant_id = r.merchant_id AND e.subscription_id = r.subscription_id AND e.status = 'scheduled'
-        AND e.effective_at <= $3::timestamptz))
-  AND sub.merchant_id = $1::uuid AND ($4::uuid IS NULL OR sub.customer_id = $4::uuid)
-  AND ($5::text IS NULL OR sub.status::text = $5::text)
-  AND ($6::uuid IS NULL OR sub.price_id = $6::uuid)
-  AND ($7::text IS NULL OR sub.rail = $7::text)
-  AND ($8::timestamptz IS NULL OR sub.created_at >= $8::timestamptz)
-  AND ($9::timestamptz IS NULL OR sub.created_at <= $9::timestamptz)
-  AND ($10::timestamptz IS NULL OR sub.canceled_at >= $10::timestamptz)
-  AND ($11::timestamptz IS NULL OR sub.canceled_at <= $11::timestamptz)
-  AND ($12::timestamptz IS NULL OR sub.current_period_ends_at <= $12::timestamptz)
-  AND (NOT $13::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_invoice_id FROM billing.subscriptions sub
+WHERE sub.id IN (SELECT n.subscription_id FROM billing.mrr_risk_now($1::uuid, $2::timestamptz) n
+                 WHERE $3::text IS NULL OR $3::text = ANY(n.reasons))
+  AND ($4::timestamptz IS NULL OR sub.id IN (
+      SELECT m.subscription_id FROM billing.subscription_mrr m
+      WHERE m.merchant_id = $1::uuid AND m.mrr > 0
+        AND m.ends_at > $2::timestamptz AND m.ends_at <= $4::timestamptz
+      UNION ALL
+      SELECT x.subscription_id FROM billing.mrr_scheduled_changes($1::uuid) x
+      WHERE x.effective_at <= $4::timestamptz))
+  AND sub.merchant_id = $1::uuid AND ($5::uuid IS NULL OR sub.customer_id = $5::uuid)
+  AND ($6::text IS NULL OR sub.status::text = $6::text)
+  AND ($7::uuid IS NULL OR sub.price_id = $7::uuid)
+  AND ($8::text IS NULL OR sub.rail = $8::text)
+  AND ($9::timestamptz IS NULL OR sub.created_at >= $9::timestamptz)
+  AND ($10::timestamptz IS NULL OR sub.created_at <= $10::timestamptz)
+  AND ($11::timestamptz IS NULL OR sub.canceled_at >= $11::timestamptz)
+  AND ($12::timestamptz IS NULL OR sub.canceled_at <= $12::timestamptz)
+  AND ($13::timestamptz IS NULL OR sub.current_period_ends_at <= $13::timestamptz)
+  AND (NOT $14::boolean OR sub.status IN ('past_due', 'awaiting_method'))
   AND sub.current_period_ends_at IS NOT NULL
-  AND ($14::timestamptz IS NULL OR (sub.current_period_ends_at, sub.id) > ($14::timestamptz, $15::uuid))
+  AND ($15::timestamptz IS NULL OR (sub.current_period_ends_at, sub.id) > ($15::timestamptz, $16::uuid))
   AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at, sub.id
-LIMIT $16::int
+LIMIT $17::int
 `
 
 type ListAtRiskSubscriptionsPageByPeriodEndParams struct {
 	MerchantID            uuid.UUID
+	At                    time.Time
 	RiskReason            *string
 	ScheduledChangeBefore *time.Time
 	CustomerID            *uuid.UUID
@@ -1419,6 +1433,7 @@ type ListAtRiskSubscriptionsPageByPeriodEndParams struct {
 func (q *Queries) ListAtRiskSubscriptionsPageByPeriodEnd(ctx context.Context, arg ListAtRiskSubscriptionsPageByPeriodEndParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listAtRiskSubscriptionsPageByPeriodEnd,
 		arg.MerchantID,
+		arg.At,
 		arg.RiskReason,
 		arg.ScheduledChangeBefore,
 		arg.CustomerID,
@@ -1880,27 +1895,32 @@ func (q *Queries) ListRespelledSubscriptions(ctx context.Context, arg ListRespel
 }
 
 const listScheduledSubscriptionsPage = `-- name: ListScheduledSubscriptionsPage :many
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_invoice_id FROM billing.mrr_scheduled e
-JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
-WHERE e.merchant_id = $1::uuid AND e.status = 'scheduled' AND e.effective_at <= $2::timestamptz
-  AND sub.merchant_id = $1::uuid AND ($3::uuid IS NULL OR sub.customer_id = $3::uuid)
-  AND ($4::text IS NULL OR sub.status::text = $4::text)
-  AND ($5::uuid IS NULL OR sub.price_id = $5::uuid)
-  AND ($6::text IS NULL OR sub.rail = $6::text)
-  AND ($7::timestamptz IS NULL OR sub.created_at >= $7::timestamptz)
-  AND ($8::timestamptz IS NULL OR sub.created_at <= $8::timestamptz)
-  AND ($9::timestamptz IS NULL OR sub.canceled_at >= $9::timestamptz)
-  AND ($10::timestamptz IS NULL OR sub.canceled_at <= $10::timestamptz)
-  AND ($11::timestamptz IS NULL OR sub.current_period_ends_at <= $11::timestamptz)
-  AND (NOT $12::boolean OR sub.status IN ('past_due', 'awaiting_method'))
-  AND ($13::timestamptz IS NULL OR (sub.created_at, sub.id) < ($13::timestamptz, $14::uuid))
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_invoice_id FROM billing.subscriptions sub
+WHERE sub.id IN (SELECT m.subscription_id FROM billing.subscription_mrr m
+                 WHERE m.merchant_id = $1::uuid AND m.mrr > 0
+                   AND m.ends_at > $2::timestamptz AND m.ends_at <= $3::timestamptz
+                 UNION ALL
+                 SELECT x.subscription_id FROM billing.mrr_scheduled_changes($1::uuid) x
+                 WHERE x.effective_at <= $3::timestamptz)
+  AND sub.merchant_id = $1::uuid AND ($4::uuid IS NULL OR sub.customer_id = $4::uuid)
+  AND ($5::text IS NULL OR sub.status::text = $5::text)
+  AND ($6::uuid IS NULL OR sub.price_id = $6::uuid)
+  AND ($7::text IS NULL OR sub.rail = $7::text)
+  AND ($8::timestamptz IS NULL OR sub.created_at >= $8::timestamptz)
+  AND ($9::timestamptz IS NULL OR sub.created_at <= $9::timestamptz)
+  AND ($10::timestamptz IS NULL OR sub.canceled_at >= $10::timestamptz)
+  AND ($11::timestamptz IS NULL OR sub.canceled_at <= $11::timestamptz)
+  AND ($12::timestamptz IS NULL OR sub.current_period_ends_at <= $12::timestamptz)
+  AND (NOT $13::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND ($14::timestamptz IS NULL OR (sub.created_at, sub.id) < ($14::timestamptz, $15::uuid))
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC, sub.id DESC
-LIMIT $15::int
+LIMIT $16::int
 `
 
 type ListScheduledSubscriptionsPageParams struct {
 	MerchantID            uuid.UUID
+	At                    time.Time
 	ScheduledChangeBefore time.Time
 	CustomerID            *uuid.UUID
 	Status                *string
@@ -1917,11 +1937,14 @@ type ListScheduledSubscriptionsPageParams struct {
 	RowLimit              int32
 }
 
-// The subscriptions whose MRR is scheduled to change by scheduled_change_before,
-// read from mrr_scheduled's index: the same filters and orders as above.
+// The subscriptions whose MRR is scheduled to change by scheduled_change_before:
+// a cancellation at period end ending by then (subscription_mrr's index of
+// ends) or a scheduled change a renewal bills by then. The same filters and
+// orders as above.
 func (q *Queries) ListScheduledSubscriptionsPage(ctx context.Context, arg ListScheduledSubscriptionsPageParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listScheduledSubscriptionsPage,
 		arg.MerchantID,
+		arg.At,
 		arg.ScheduledChangeBefore,
 		arg.CustomerID,
 		arg.Status,
@@ -1998,28 +2021,33 @@ func (q *Queries) ListScheduledSubscriptionsPage(ctx context.Context, arg ListSc
 }
 
 const listScheduledSubscriptionsPageByCanceledAt = `-- name: ListScheduledSubscriptionsPageByCanceledAt :many
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_invoice_id FROM billing.mrr_scheduled e
-JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
-WHERE e.merchant_id = $1::uuid AND e.status = 'scheduled' AND e.effective_at <= $2::timestamptz
-  AND sub.merchant_id = $1::uuid AND ($3::uuid IS NULL OR sub.customer_id = $3::uuid)
-  AND ($4::text IS NULL OR sub.status::text = $4::text)
-  AND ($5::uuid IS NULL OR sub.price_id = $5::uuid)
-  AND ($6::text IS NULL OR sub.rail = $6::text)
-  AND ($7::timestamptz IS NULL OR sub.created_at >= $7::timestamptz)
-  AND ($8::timestamptz IS NULL OR sub.created_at <= $8::timestamptz)
-  AND ($9::timestamptz IS NULL OR sub.canceled_at >= $9::timestamptz)
-  AND ($10::timestamptz IS NULL OR sub.canceled_at <= $10::timestamptz)
-  AND ($11::timestamptz IS NULL OR sub.current_period_ends_at <= $11::timestamptz)
-  AND (NOT $12::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_invoice_id FROM billing.subscriptions sub
+WHERE sub.id IN (SELECT m.subscription_id FROM billing.subscription_mrr m
+                 WHERE m.merchant_id = $1::uuid AND m.mrr > 0
+                   AND m.ends_at > $2::timestamptz AND m.ends_at <= $3::timestamptz
+                 UNION ALL
+                 SELECT x.subscription_id FROM billing.mrr_scheduled_changes($1::uuid) x
+                 WHERE x.effective_at <= $3::timestamptz)
+  AND sub.merchant_id = $1::uuid AND ($4::uuid IS NULL OR sub.customer_id = $4::uuid)
+  AND ($5::text IS NULL OR sub.status::text = $5::text)
+  AND ($6::uuid IS NULL OR sub.price_id = $6::uuid)
+  AND ($7::text IS NULL OR sub.rail = $7::text)
+  AND ($8::timestamptz IS NULL OR sub.created_at >= $8::timestamptz)
+  AND ($9::timestamptz IS NULL OR sub.created_at <= $9::timestamptz)
+  AND ($10::timestamptz IS NULL OR sub.canceled_at >= $10::timestamptz)
+  AND ($11::timestamptz IS NULL OR sub.canceled_at <= $11::timestamptz)
+  AND ($12::timestamptz IS NULL OR sub.current_period_ends_at <= $12::timestamptz)
+  AND (NOT $13::boolean OR sub.status IN ('past_due', 'awaiting_method'))
   AND sub.canceled_at IS NOT NULL
-  AND ($13::timestamptz IS NULL OR (sub.canceled_at, sub.id) < ($13::timestamptz, $14::uuid))
+  AND ($14::timestamptz IS NULL OR (sub.canceled_at, sub.id) < ($14::timestamptz, $15::uuid))
   AND sub.deleted_at IS NULL
 ORDER BY sub.canceled_at DESC, sub.id DESC
-LIMIT $15::int
+LIMIT $16::int
 `
 
 type ListScheduledSubscriptionsPageByCanceledAtParams struct {
 	MerchantID            uuid.UUID
+	At                    time.Time
 	ScheduledChangeBefore time.Time
 	CustomerID            *uuid.UUID
 	Status                *string
@@ -2040,6 +2068,7 @@ type ListScheduledSubscriptionsPageByCanceledAtParams struct {
 func (q *Queries) ListScheduledSubscriptionsPageByCanceledAt(ctx context.Context, arg ListScheduledSubscriptionsPageByCanceledAtParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listScheduledSubscriptionsPageByCanceledAt,
 		arg.MerchantID,
+		arg.At,
 		arg.ScheduledChangeBefore,
 		arg.CustomerID,
 		arg.Status,
@@ -2116,28 +2145,33 @@ func (q *Queries) ListScheduledSubscriptionsPageByCanceledAt(ctx context.Context
 }
 
 const listScheduledSubscriptionsPageByPeriodEnd = `-- name: ListScheduledSubscriptionsPageByPeriodEnd :many
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_invoice_id FROM billing.mrr_scheduled e
-JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
-WHERE e.merchant_id = $1::uuid AND e.status = 'scheduled' AND e.effective_at <= $2::timestamptz
-  AND sub.merchant_id = $1::uuid AND ($3::uuid IS NULL OR sub.customer_id = $3::uuid)
-  AND ($4::text IS NULL OR sub.status::text = $4::text)
-  AND ($5::uuid IS NULL OR sub.price_id = $5::uuid)
-  AND ($6::text IS NULL OR sub.rail = $6::text)
-  AND ($7::timestamptz IS NULL OR sub.created_at >= $7::timestamptz)
-  AND ($8::timestamptz IS NULL OR sub.created_at <= $8::timestamptz)
-  AND ($9::timestamptz IS NULL OR sub.canceled_at >= $9::timestamptz)
-  AND ($10::timestamptz IS NULL OR sub.canceled_at <= $10::timestamptz)
-  AND ($11::timestamptz IS NULL OR sub.current_period_ends_at <= $11::timestamptz)
-  AND (NOT $12::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_invoice_id FROM billing.subscriptions sub
+WHERE sub.id IN (SELECT m.subscription_id FROM billing.subscription_mrr m
+                 WHERE m.merchant_id = $1::uuid AND m.mrr > 0
+                   AND m.ends_at > $2::timestamptz AND m.ends_at <= $3::timestamptz
+                 UNION ALL
+                 SELECT x.subscription_id FROM billing.mrr_scheduled_changes($1::uuid) x
+                 WHERE x.effective_at <= $3::timestamptz)
+  AND sub.merchant_id = $1::uuid AND ($4::uuid IS NULL OR sub.customer_id = $4::uuid)
+  AND ($5::text IS NULL OR sub.status::text = $5::text)
+  AND ($6::uuid IS NULL OR sub.price_id = $6::uuid)
+  AND ($7::text IS NULL OR sub.rail = $7::text)
+  AND ($8::timestamptz IS NULL OR sub.created_at >= $8::timestamptz)
+  AND ($9::timestamptz IS NULL OR sub.created_at <= $9::timestamptz)
+  AND ($10::timestamptz IS NULL OR sub.canceled_at >= $10::timestamptz)
+  AND ($11::timestamptz IS NULL OR sub.canceled_at <= $11::timestamptz)
+  AND ($12::timestamptz IS NULL OR sub.current_period_ends_at <= $12::timestamptz)
+  AND (NOT $13::boolean OR sub.status IN ('past_due', 'awaiting_method'))
   AND sub.current_period_ends_at IS NOT NULL
-  AND ($13::timestamptz IS NULL OR (sub.current_period_ends_at, sub.id) > ($13::timestamptz, $14::uuid))
+  AND ($14::timestamptz IS NULL OR (sub.current_period_ends_at, sub.id) > ($14::timestamptz, $15::uuid))
   AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at, sub.id
-LIMIT $15::int
+LIMIT $16::int
 `
 
 type ListScheduledSubscriptionsPageByPeriodEndParams struct {
 	MerchantID            uuid.UUID
+	At                    time.Time
 	ScheduledChangeBefore time.Time
 	CustomerID            *uuid.UUID
 	Status                *string
@@ -2158,6 +2192,7 @@ type ListScheduledSubscriptionsPageByPeriodEndParams struct {
 func (q *Queries) ListScheduledSubscriptionsPageByPeriodEnd(ctx context.Context, arg ListScheduledSubscriptionsPageByPeriodEndParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listScheduledSubscriptionsPageByPeriodEnd,
 		arg.MerchantID,
+		arg.At,
 		arg.ScheduledChangeBefore,
 		arg.CustomerID,
 		arg.Status,
