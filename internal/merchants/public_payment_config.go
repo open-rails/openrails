@@ -259,11 +259,7 @@ func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, armed f
 			}
 		}
 		if armed != nil {
-			armCtx := ctx
-			if platform != nil && scope.Rail == string(models.RailNMI) {
-				armCtx = db.WithCustodianID(ctx, platform.ID)
-			}
-			ok, err := armed(armCtx, scope)
+			ok, err := armed(armContext(ctx, platform, scope), scope)
 			if err != nil && storeFailure(err) {
 				return nil, fmt.Errorf("resolve %s account %s: %w", scope.Rail, scope.AccountID, err)
 			}
@@ -311,6 +307,45 @@ func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, armed f
 		out[i].Routed = selectors == nil || selectors[out[i].Key] || selectors[string(out[i].Rail)]
 	}
 	return out, nil
+}
+
+// ArmedPSPs reports which of pspIDs are armed, as PublicPSPs asks it of
+// each: live, and its full credential shape resolving through armed. A store
+// failure is an error; any other refusal leaves the PSP unarmed.
+func (s *Service) ArmedPSPs(ctx context.Context, id billing.MerchantID, pspIDs []billing.PSPID, armed func(context.Context, PSPScope) (bool, error)) (map[billing.PSPID]bool, error) {
+	out := make(map[billing.PSPID]bool, len(pspIDs))
+	if len(pspIDs) == 0 || armed == nil {
+		return out, nil
+	}
+	j, err := s.load(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	platform, err := s.PlatformCardCustodian(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for _, pspID := range pspIDs {
+		scope, ok := j.byID(pspID.UUID())
+		if !ok || scope.Archived {
+			continue
+		}
+		ok, err := armed(armContext(ctx, platform, scope), scope)
+		if err != nil && storeFailure(err) {
+			return nil, fmt.Errorf("resolve %s account %s: %w", scope.Rail, scope.AccountID, err)
+		}
+		out[pspID] = err == nil && ok
+	}
+	return out, nil
+}
+
+// armContext is where scope resolves: the platform's card custodian holds
+// an NMI PSP's cards when the merchant uses it.
+func armContext(ctx context.Context, platform *CustodianScope, scope PSPScope) context.Context {
+	if platform != nil && scope.Rail == string(models.RailNMI) {
+		return db.WithCustodianID(ctx, platform.ID)
+	}
+	return ctx
 }
 
 // pspSelectors is every PSP key or rail the merchant's PSP routing

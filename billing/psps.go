@@ -54,6 +54,10 @@ type PSP struct {
 	// OpenObligations counts the subscriptions and operations still bound to
 	// the PSP; an archived PSP with none is drained.
 	OpenObligations int64 `json:"open_obligations"`
+	// Armed is whether new payments can use it: it is live and its full
+	// credential set resolves, as purchase asks. Customers' payment pages
+	// offer armed PSPs alone.
+	Armed bool `json:"armed"`
 	PSPFields
 	Credentials map[string]PSPCredential `json:"credentials"`
 	// Revision advances with every change; an update may name the revision

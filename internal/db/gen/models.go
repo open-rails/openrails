@@ -27,9 +27,9 @@ type BillingBalanceWatch struct {
 	UpdatedAt  time.Time
 	// When the customer was funded (a deposit, a credit grant, a reinstatement or a payment of what it owes) since its last notice; only funding re-arms a notice, and a notice clears it.
 	FundedAt *time.Time
-	// Exponentially weighted rate of usage spend, one-hour time constant, in native units per hour: each look adds the per-minute spend (usage_minutes) of the minutes ended since rate_sampled_at.
+	// Exponentially weighted rate of usage spend, one-hour time constant, in native units per hour: each look adds what the usage history's quarter hours that ended since rate_sampled_at cost.
 	UsageRatePerHour int64
-	// The instant usage_rate_per_hour was sampled at; minutes before it are not read again.
+	// The instant usage_rate_per_hour was sampled at; quarter hours ended before it are not read again.
 	RateSampledAt *time.Time
 	// The available amount (balance less held) at or under which the balance is low, as the last look found the line; null with no line.
 	LowLineAmount *int64
@@ -386,6 +386,17 @@ type BillingCustomerMrr struct {
 	Subscriptions int32
 	// When the customer first had MRR in the currency: its cohort.
 	FirstActiveAt *time.Time
+}
+
+// What a customer paid in a currency, net of refunds and chargebacks, and when it first paid: what the merchant's trust tier rules read. Written only by the payments trigger, which rebuilds it on restore.
+type BillingCustomerPaidTotal struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	// Settled receipts (books.ReceiptOf: taken at a rail on a PSP, or recorded by the merchant) plus the signed amounts of their settled refunds, chargebacks and won disputes, in native units.
+	NetPaidAmount int64
+	// The earliest settled receipt's purchased_at; NULL when none counts.
+	FirstPaidAt *time.Time
 }
 
 // Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|cohort|funnel|heading|programs), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant's profile.
@@ -957,7 +968,7 @@ type BillingLimitAdjustment struct {
 	CreatedAt      time.Time
 }
 
-// One customer's window of one limit, identified by the server clock: a session or first-use window a use opened, a window staff adjusted, or one whose usage reached capacity; a rolling limit's bucket, a rate or lifetime limit's one row, or a billing policy's spend window (spend:<identity>). What usage took of it is in the event store (limit_usage). Retention: rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does.
+// One customer's window of one limit, identified by the server clock: a session or first-use window a use opened, a window staff adjusted, or one whose usage reached capacity; a rolling limit's bucket, a rate or lifetime limit's one row, or a billing policy's spend window (spend:<identity>). What usage took of it is in the event store (limit_usage). Usage settled after a window ended counts toward it no more. Retention: rows are deleted a day after window_ends_at, 61 days after it once reached_at is set; a row without an end stays while its customer does.
 type BillingLimitWindow struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -2530,52 +2541,60 @@ type BillingUsageCardPrint struct {
 	CreatedAt  time.Time
 }
 
-// A customer whose usage in a currency the ledger has not taken in full: the posting queue. Intake holds the row FOR KEY SHARE from before it inserts its events until it commits, and writes it only to move since_at or due_at earlier; a posting locks it FOR UPDATE, takes every usage the event store holds and deletes the customer's usage_pending_amounts. A posting that leaves nothing to post deletes it.
+// A customer with usage in a currency no posting has taken: the posting queue. Intake holds the row FOR KEY SHARE from before it writes its usage until it commits, and writes it only to move due_at earlier; a posting locks it FOR UPDATE, so it waits for every intake of the customer, and deletes it once nothing is unposted.
 type BillingUsagePending struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
-	// The start of the oldest pricing period whose usage may not be posted in full: a posting reads from it.
-	SinceAt time.Time
-	// When the daily posting takes it: the end of the merchant's accounting-zone day its oldest pending usage occurred in, or when a period whose price fell may be credited.
+	// When the daily posting takes it: the end of the merchant's accounting-zone day its oldest unposted usage occurred in.
 	DueAt     time.Time
 	UpdatedAt time.Time
 }
 
-// The provisional price of a customer's usage in a currency that no posting has taken, per lease that took it: the balance is the customer's ledger account less their sum. A lease's syncs serialize on the lease, so intakes never wait on each other here; a posting deletes the rows it took.
-type BillingUsagePendingAmount struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	LeaseID    uuid.UUID
-	// What the lease's settled usage costs at the provisional prices intake gave it, in the currency's native units.
-	Amount    int64
-	UpdatedAt time.Time
-}
-
-// One posting of a customer's usage in one pricing period to the ledger: the price of the period's deduplicated usage before cut_at, less what its earlier postings took. A posting draws the balance first, one credit_spend per lot, and leaves the rest owed in one owed_accrual, at (usage_posting, usage_posting:<id>, 1); a reversal credits a period whose price fell, as usage_reversed. Retention: permanent, never pruned.
-type BillingUsagePosting struct {
+// What one posting took of a customer's usage in one pricing period, never changed once written: the price of the period's settled quantity less what its earlier receipts took, itemized by meter. The posting draws the lots first, one credit_spend each, and leaves the rest owed in one owed_accrual, at (usage_posting, usage_receipt:<id>, 1); a reversal credits a period whose price fell, as usage_reversed. Retention: permanent, never pruned.
+type BillingUsageReceipt struct {
 	MerchantID     uuid.UUID
 	ID             uuid.UUID
 	CustomerID     uuid.UUID
 	Currency       string
 	PeriodStartsAt time.Time
 	PeriodEndsAt   time.Time
-	// Usage that occurred before it is in the posting: past every usage the event store held (now plus the usage clock skew), or a credit lot's lapse.
+	// The receipt took the settled usage that occurred before it: a credit lot's lapse, else all of it (the posting's instant plus the usage clock skew).
 	CutAt time.Time
-	// daily: once the accounting-zone day of the oldest pending usage ended (the month-end close is its last day's); billing: before a usage invoice is billed; credit: before a credit lot's expiry, revocation or refund; purge: before a merchant purge deletes the event store's usage; reversal: a period whose price fell below what posted, once its late usage window closed.
+	// daily: once the accounting-zone day of the oldest pending usage ended; billing: before a usage invoice is billed; credit: before a credit lot's expiry, revocation or refund, or an invoice paid from the balance; purge: before a merchant purge; reversal: the period's price fell below what its receipts took (a volume tier).
 	Reason string
-	// What the posting moved: positive for usage, negative for a reversal.
+	// What the posting took: positive for usage, negative for a reversal.
 	Amount int64
-	// Per meter, cell and card print, what the posting added: [{meter_key, cell, print, requests, quantity, stated, amount}].
+	// Per meter, cell and card print, what the posting added: [{meter_key, cell, print, requests, quantity, stated, amount}]. A period's receipts sum to the price of its settled usage.
 	Lines     []byte
 	CreatedAt time.Time
-	// The latest ingestion among the usage the posting read before its cut, or an earlier posting's when later: a later posting counts usage that occurred before cut_at and was ingested by then at no less than what posted.
-	IngestedThrough time.Time
 	// Of amount, what the ledger did not take: usage in a merchant's unit its lots could not cover, never owed (positive); a reversal's share that took back forgiveness rather than credit (negative). Zero in a registry currency.
 	Forgiven int64
 	// How forgiven is shared, as the posting computed it: [{invoker, event_type, meter_key, cell, amount}], by what the period charged each before the cut, to the largest remainder; a reversal takes back from the period's shares the same way. NULL when nothing was forgiven.
 	ForgivenLines []byte
+}
+
+// A customer's settled usage of one meter cell under one card print in one pricing period: the next item's tier position, pending usage and what a posting prices. Intake adds to its lease's row (only that lease's syncs write it, so gates never wait on each other); a posting folds the rows it took into the posted row (lease_id the nil UUID) and deletes them. Retention: rows are deleted a day after their period's late usage window closes (36 days after period_ends_at), once none of the period's rows is unposted.
+type BillingUsageTotal struct {
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	PeriodStartsAt time.Time
+	PeriodEndsAt   time.Time
+	MeterKey       string
+	// The meter's matrix cell; empty for a meter without one (part of the key).
+	Cell  string
+	Print string
+	// The latest lapse at or before the usage occurred of a credit lot the customer held with units left, else the period's start: a posting before a lot's lapse takes the rows from before it.
+	LapseAt time.Time
+	// The lease whose syncs settled the usage, until a posting takes it; the nil UUID for what postings took.
+	LeaseID  uuid.UUID
+	Quantity int64
+	Stated   int64
+	Requests int64
+	// Pending: what the lease's settled usage costs at the provisional prices intake gave it, never below zero; zero once posted.
+	Amount    int64
+	UpdatedAt time.Time
 }
 
 // Merchant-global customer card-delete and soft-cancel rolling-hour/day rate reservations. No actor can obtain a separate budget. customer_id is an opaque identity and deliberately has no cascading customer FK. The canonical operation/card/subscription remains authoritative after pruning. Retention: rows are deleted 24 hours after reserved_at.

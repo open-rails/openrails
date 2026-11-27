@@ -35,6 +35,24 @@ psps:
     environment: devnet # mainnet | devnet | testnet
     treasury: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu # where every payment lands
 # guide:end
+# guide:trust-tiers
+billing_policies:
+  - name: starter
+    spend_windows: [{key: month, window_seconds: 2592000, limit: "100000000", currency: USD}] # $100 a month
+  - name: tier-1
+    spend_windows: [{key: month, window_seconds: 2592000, limit: "500000000", currency: USD}]
+  - name: tier-2
+    spend_windows: [{key: month, window_seconds: 2592000, limit: "5000000000", currency: USD}]
+billing_policy_bindings:
+  - {policy: starter} # every customer below tier-1
+  - {policy: tier-1, tier: tier-1}
+  - {policy: tier-2, tier: tier-2}
+trust_tiers: # lowest first; amounts in native units (USD micros)
+  - name: tier-1
+    requirements: [{currency: USD, net_paid_amount: "5000000"}] # $5 paid
+  - name: tier-2
+    requirements: [{currency: USD, net_paid_amount: "50000000", days_since_first_payment: 7}] # $50 and a week
+# guide:end
 # guide:messages
 messages:
   default_language: en

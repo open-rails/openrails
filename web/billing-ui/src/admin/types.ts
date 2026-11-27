@@ -52,6 +52,8 @@ export interface BillingAdminProps {
   settingsTabs?: BillingAdminSettingsTab[]
   customerPanels?: (customer: Customer) => ReactNode
   userHref?: (id: string) => string
+  /** The host's New merchant page, outside basePath: opened through
+   * navigation when one is given, else loaded. */
   newMerchantHref?: string
   emptyState?: ReactNode
   appearance?: BillingAppearance

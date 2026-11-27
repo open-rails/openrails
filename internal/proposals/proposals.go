@@ -118,7 +118,7 @@ func (e *Executor) ApproveSet(ctx context.Context, ids []uuid.UUID, actor, notes
 }
 
 // ofKinds are the proposals among ids whose change is of a kind kinds lists,
-// in ids' invoice.
+// in ids' order.
 func (e *Executor) ofKinds(ctx context.Context, mid uuid.UUID, ids []uuid.UUID, kinds []billing.ChangeKind) ([]uuid.UUID, error) {
 	if len(ids) == 0 {
 		return ids, nil

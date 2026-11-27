@@ -148,7 +148,7 @@ func GrantProductRec(customerID billing.CustomerID, productID billing.ProductID,
 	return Recommendation{Action: ActionGrantProduct, Params: params}
 }
 
-// CancelAndRefundRec recommends cancelling a subscription and/or refunding
+// CancelAndRefundRec recommends canceling a subscription and/or refunding
 // one payment. Either id may be empty (refund-only for one-off duplicates
 // without a subscription; cancel-only when no payment linkage exists) — the
 // executor treats both as optional but requires at least one.

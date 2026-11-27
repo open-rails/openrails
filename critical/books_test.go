@@ -724,6 +724,19 @@ products:
 		require.NoError(t, firsts[0])
 		require.NoError(t, firsts[1])
 
+		// A meter's rate card opens its currency's books too.
+		accounts := "SELECT count(*) FROM " + booksTable(w, "ledger_accounts") + " WHERE merchant_id=$1 AND book='general' AND currency='JPY' AND account_type IN ('usage_revenue', 'promotional_credit')"
+		var opened int
+		require.NoError(t, w.pool.QueryRow(t.Context(), accounts, mid).Scan(&opened))
+		require.Zero(t, opened)
+		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "books-usage", DisplayName: "Books usage"})
+		require.NoError(t, err)
+		_, err = w.alpha.SetMeter(t.Context(), "books-usage", billing.SetMeterParams{EventType: "books-usage", ValueProperty: "units", Aggregation: catalog.AggregationSum,
+			RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: product.ID, Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "JPY", PerUnit: &catalog.PerUnitPrice{UnitAmount: 100, DivideBy: 1}}})})
+		require.NoError(t, err)
+		require.NoError(t, w.pool.QueryRow(t.Context(), accounts, mid).Scan(&opened))
+		require.Equal(t, 2, opened)
+
 		// A posting that meets an account nothing opened still posts: it
 		// creates the account in its own transaction and raises
 		// books.account.opened_late, once per account.

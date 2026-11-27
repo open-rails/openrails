@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"testing"
 	"time"
@@ -11,6 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
@@ -128,4 +133,77 @@ func TestRenewalAgreements(t *testing.T) {
 		require.Equal(t, 2, *renewed.Quantity)
 		require.EqualValues(t, 2000, lastCharge(t, provider, 3))
 	})
+}
+
+func TestSubscriptionGrantRevocations(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		upgrade bool
+	}{
+		{"OR-J18-S08/upgrade-leaves-ended-paid-periods-unrevoked", true},
+		{"OR-J17-S16/admin-revoke-leaves-ended-paid-periods-unrevoked", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, _, sub := purchasedMembership(t)
+			fleet := startFleet(t, a.world)
+			for range 2 {
+				sub = renewedAt(t, a, fleet, sub.ID, *sub.CurrentPeriodEndsAt, *sub.CurrentPeriodEndsAt)
+			}
+			require.NoError(t, fleet.Stop(t.Context()))
+			if tc.upgrade {
+				a.clock.Advance(12 * time.Hour)
+				price := upgradePrice(t, a, sub)
+				status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/change", a.aliceToken, map[string]any{"price_id": price.ID}, map[string]string{"Idempotency-Key": "past-period-upgrade"})
+				require.Equal(t, http.StatusOK, status, string(raw))
+				var changed billing.SubscriptionChange
+				require.NoError(t, json.Unmarshal(raw, &changed))
+				require.Equal(t, "succeeded", changed.Status, changed.Message)
+			} else {
+				// The last ended period ends exactly at the revoke instant.
+				canceled, err := a.alpha.CancelSubscription(t.Context(), sub.ID, billing.CancelSubscriptionParams{Reason: "End membership access immediately", RevokeAccess: true})
+				require.NoError(t, err)
+				require.Equal(t, billing.SubscriptionCanceled, canceled.Status)
+			}
+			database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+			require.NoError(t, err)
+			ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+			q := database.Gen(ctx)
+			unretracted, err := q.ListUnretractedTerminations(ctx, gen.ListUnretractedTerminationsParams{MerchantID: a.alpha.MerchantID().UUID(), RowLimit: 100})
+			require.NoError(t, err)
+			require.Empty(t, unretracted, "ended paid windows need no retraction")
+			grants, err := q.ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{MerchantID: a.alpha.MerchantID().UUID(), CustomerID: sub.CustomerID.UUID()})
+			require.NoError(t, err)
+			ended, revoked := 0, 0
+			for _, g := range grants {
+				if g.SourceType != "subscription" || g.SourceID == nil || *g.SourceID != sub.ID.UUID().String() {
+					continue
+				}
+				require.NotNil(t, g.EndsAt)
+				terminated, err := q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: a.alpha.MerchantID().UUID(), GrantID: g.ID})
+				require.NoError(t, err)
+				window, err := q.GetProductAccessByGrant(ctx, gen.GetProductAccessByGrantParams{MerchantID: a.alpha.MerchantID().UUID(), GrantID: g.ID})
+				require.NoError(t, err)
+				if !g.EndsAt.After(a.clock.Now()) {
+					ended++
+					require.False(t, terminated)
+					require.Nil(t, window.RevokedAt)
+				} else {
+					revoked++
+					require.True(t, terminated)
+					require.NotNil(t, window.RevokedAt)
+					require.True(t, a.clock.Now().Equal(*window.RevokedAt))
+				}
+			}
+			require.Equal(t, 2, ended)
+			require.Equal(t, 1, revoked)
+			access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"membership:paid"}})
+			require.NoError(t, err)
+			require.False(t, access.Entitlements["membership:paid"])
+			_, err = converge.NewConvergeEngine(database, a.clock).Converge(ctx, converge.Scope{Merchant: a.alpha.MerchantID()})
+			require.NoError(t, err)
+			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "derive.grant_effect.excess"})
+			require.NoError(t, err)
+			require.Empty(t, findings.Items)
+		})
+	}
 }

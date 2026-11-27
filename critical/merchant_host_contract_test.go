@@ -262,18 +262,18 @@ func TestMerchantHost(t *testing.T) {
 		require.NoError(t, purge(&inventory))
 		// The store refuses the deletion from one of its tables.
 		store := "`" + a.schema + "`"
-		require.NoError(t, a.deps.ClickHouse.Exec(t.Context(), "RENAME TABLE "+store+".usage_minutes TO "+store+".usage_minutes_away"))
+		require.NoError(t, a.deps.ClickHouse.Exec(t.Context(), "RENAME TABLE "+store+".limit_usage TO "+store+".limit_usage_away"))
 		var purged billing.MerchantPurge
 		require.NoError(t, purge(&purged, "--inventory", inventory.ID.String(), "--confirm", inventory.ConfirmPhrase, "--expect-rows", strconv.Itoa(inventory.TotalRows)),
 			"the purge commits; the store's deletion is its job's")
 		require.NotZero(t, rows("usage_history"), "the store kept the merchant's usage")
-		require.NoError(t, a.deps.ClickHouse.Exec(t.Context(), "RENAME TABLE "+store+".usage_minutes_away TO "+store+".usage_minutes"))
+		require.NoError(t, a.deps.ClickHouse.Exec(t.Context(), "RENAME TABLE "+store+".limit_usage_away TO "+store+".limit_usage"))
 
 		fleet := hostFleet(t, a.world)
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
 		require.Eventually(t, func() bool {
-			return rows("usage_events", "limit_usage", "usage_quantities", "usage_minutes", "usage_history") == 0
+			return rows("usage_events", "limit_usage", "usage_history") == 0
 		}, 60*time.Second, 200*time.Millisecond, "the job queued with the purge deletes the merchant's usage from the store")
 	})
 	t.Run("OR-J32-S06/purge-removes-the-directory-copy-and-its-tokens", func(t *testing.T) {

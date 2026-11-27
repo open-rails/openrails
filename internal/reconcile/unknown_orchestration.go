@@ -524,7 +524,7 @@ func verificationSource() *string {
 func evidenceStaleAction(reason string) string {
 	return "the evidence for this terminal cancel (" + reason + ") predates this deployment's first pull of the merchant, or carries no date at all, " +
 		"so nothing we observed corroborates it — it arrived with the imported book. The subscription is parked as `unknown` with its access intact. " +
-		"Verify it against the provider (a per-subscription probe re-decides it on evidence THIS deployment observed) before cancelling anything"
+		"Verify it against the provider (a per-subscription probe re-decides it on evidence THIS deployment observed) before canceling anything"
 }
 
 // recordEvidenceStaleFinding persists the operator-facing record of a cancel

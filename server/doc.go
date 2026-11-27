@@ -16,11 +16,14 @@
 // and the workers, Serve only the handler; a product with its own router
 // mounts Routes and adds RiverJobs to its fleet before Start.
 //
-// No route registers a merchant, manages a team or mints a key: those are
-// these Go methods and the server's AuthKit (teams, invitations and API keys
-// live in the merchant's AuthKit group; a key acts at its merchant alone with
-// one role, never beyond its minter's). A hosted product authenticates with
-// AuthKit().Authenticator() and checks merchant permissions in MerchantScope.
+// No engine route registers a merchant, manages a team or mints a key: those
+// are these Go methods and the server's AuthKit (teams, invitations and API
+// keys live in the merchant's AuthKit group; a key acts at its merchant alone
+// with one role, never beyond its minter's). A hosted product authenticates
+// with AuthKit().Authenticator() and checks merchant permissions in
+// MerchantScope. The server's own console is such a product: its New merchant
+// (POST /admin/merchants) provisions for a root operator's session holding
+// billing.RootMerchantsCreate, who owns the merchant.
 //
 // A merchant's UUID is its identity; its name is a lookup key, unique among
 // live merchants. Naming governs renames: the former name stays an alias no

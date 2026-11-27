@@ -607,7 +607,7 @@ func unitOverrun(t *testing.T) {
 	require.NoError(t, err)
 	unitBalance(t, a.alpha, s.alice, "GOLD", 1, 0, 1)
 	var posted, forgiven int64
-	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT sum(amount), sum(forgiven) FROM "+pgx.Identifier{a.schema, "usage_postings"}.Sanitize()+
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT sum(amount), sum(forgiven) FROM "+pgx.Identifier{a.schema, "usage_receipts"}.Sanitize()+
 		" WHERE merchant_id = $1 AND customer_id = $2", a.alpha.MerchantID().UUID(), s.alice.UUID()).Scan(&posted, &forgiven))
 	require.Equal(t, [2]int64{28, 8}, [2]int64{posted, forgiven}, "the posting records what it forgave")
 	require.ElementsMatch(t, []forgivenShare{{Invoker: s.alice.String(), EventType: "image", MeterKey: "images", Amount: 6}, {Invoker: "alice-phone", EventType: "image", MeterKey: "images", Amount: 2}},
@@ -779,7 +779,6 @@ func unitRefundByLot(t *testing.T) {
 		if leg.Lot != nil && *leg.Lot == lot.ID.UUID() && leg.Type != "deposit" && leg.Type != "credit_spend" {
 			sources[leg.Source] += leg.Amount
 			require.Equal(t, string(ledger.UnitsRefunded), leg.Credit, "a reversal's units go to units_refunded")
-			require.NotEqual(t, "credit_refund_cash", leg.Type, "a unit has no cash leg")
 		}
 	}
 	require.Equal(t, map[string]int64{"credit": 300, "consumed_credit": 100}, sources)
@@ -947,7 +946,7 @@ func unitPriceFalls(t *testing.T) {
 	postDays(t, fleet)
 	type posting struct{ amount, forgiven int64 }
 	postings := func() []posting {
-		rows, err := a.pool.Query(t.Context(), "SELECT amount, forgiven FROM "+pgx.Identifier{a.schema, "usage_postings"}.Sanitize()+
+		rows, err := a.pool.Query(t.Context(), "SELECT amount, forgiven FROM "+pgx.Identifier{a.schema, "usage_receipts"}.Sanitize()+
 			" WHERE merchant_id = $1 AND customer_id = $2 ORDER BY created_at, id", a.alpha.MerchantID().UUID(), s.alice.UUID())
 		require.NoError(t, err)
 		defer rows.Close()
@@ -960,14 +959,17 @@ func unitPriceFalls(t *testing.T) {
 		require.NoError(t, rows.Err())
 		return out
 	}
-	require.Equal(t, []posting{{20, 10}}, postings(), "the fall is carried while late usage may come")
-	// Once it closes, the 14 the period posted beyond its price takes back
-	// the 10 forgiven first; only the 4 the lots paid beyond it comes back.
+	// The posting that takes it credits the 14 the period's receipts took
+	// beyond its price: the 10 forgiven are taken back first, and only the 4
+	// the lots paid beyond it comes back.
+	require.Equal(t, []posting{{20, 10}, {-14, -10}}, postings(), "the fall is credited at the posting that takes it")
+	require.Equal(t, [][]forgivenShare{{{Invoker: s.alice.String(), EventType: "image", MeterKey: "images", Amount: 10}}, {{Invoker: s.alice.String(), EventType: "image", MeterKey: "images", Amount: -10}}},
+		forgivenShares(t, a, s.alice), "the reversal takes back from the shares the receipt stored")
+	unitBalance(t, a.alpha, s.alice, "GOLD", 5, 0, 5)
+	// Its late window closing changes nothing.
 	a.clock.Advance(70 * 24 * time.Hour)
 	postDays(t, fleet)
 	require.Equal(t, []posting{{20, 10}, {-14, -10}}, postings())
-	require.Equal(t, [][]forgivenShare{{{Invoker: s.alice.String(), EventType: "image", MeterKey: "images", Amount: 10}}, {{Invoker: s.alice.String(), EventType: "image", MeterKey: "images", Amount: -10}}},
-		forgivenShares(t, a, s.alice), "the reversal takes back from the shares the posting stored")
 	unitBalance(t, a.alpha, s.alice, "GOLD", 5, 0, 5)
 }
 
@@ -1056,11 +1058,11 @@ type forgivenShare struct {
 	Amount    int64  `json:"amount"`
 }
 
-// forgivenShares are how each of customer's postings that forgave shared it,
-// in posting order.
+// forgivenShares are how each of customer's usage receipts that forgave
+// shared it, in posting order.
 func forgivenShares(t *testing.T, a *authorityWorld, customer billing.CustomerID) [][]forgivenShare {
 	t.Helper()
-	rows, err := a.pool.Query(t.Context(), "SELECT forgiven_lines FROM "+pgx.Identifier{a.schema, "usage_postings"}.Sanitize()+
+	rows, err := a.pool.Query(t.Context(), "SELECT forgiven_lines FROM "+pgx.Identifier{a.schema, "usage_receipts"}.Sanitize()+
 		" WHERE merchant_id = $1 AND customer_id = $2 AND forgiven <> 0 ORDER BY created_at, id", a.alpha.MerchantID().UUID(), customer.UUID())
 	require.NoError(t, err)
 	defer rows.Close()

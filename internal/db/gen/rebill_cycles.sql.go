@@ -510,7 +510,7 @@ SELECT c.subscription_id, d.declines, d.reason
 FROM unnest($1::uuid[], $2::timestamptz[]) AS k(subscription_id, due_at)
 JOIN billing.rebill_cycles c ON c.merchant_id = $3::uuid AND c.subscription_id = k.subscription_id AND c.due_at = k.due_at
 CROSS JOIN LATERAL (
-    SELECT count(*)::int AS declines,
+    SELECT count(*) FILTER (WHERE NOT (pa.owner = 'engine' AND pa.kind = 'customer_retry' AND pa.action = 'retry'))::int AS declines,
            (array_agg(pa.reason ORDER BY pa.attempted_at DESC, pa.id DESC))[1]::text AS reason
     FROM billing.payment_attempts pa
     WHERE pa.merchant_id = c.merchant_id AND pa.cycle_id = c.id AND pa.outcome <> 'approved'

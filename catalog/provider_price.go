@@ -12,8 +12,10 @@ import (
 
 // ApplyProviderPrice declares a price a provider owns and runs, linked to its
 // product for entitlements. OpenRails reads its terms and never writes it:
-// NMI plans and Stripe prices are read at apply, so only CCBill, which has no
-// read API, declares its amount and billing interval. AccessDurationHours and
+// NMI plans and Stripe prices are read at apply, and CCBill, which has no
+// read API, declares its amount and billing interval. An NMI plan may declare
+// them too: they stand in, unconfirmed, while NMI does not answer, and NMI's
+// own terms win once it does. AccessDurationHours and
 // OneOff default to the verified service-period end and recurring. Explicit
 // null access is indefinite, while explicit hours override the native boundary. A declaration states
 // the provider price whole; omitted Archived keeps its current value.

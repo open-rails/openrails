@@ -81,8 +81,8 @@ var catalogRoutes = []Route{
 		Request: billing.CreatePriceParams{}, Responses: []Reply{{201, billing.Price{}}}, Errors: codes(append([]billing.ErrorCode{"currency_unsupported"}, priceErrors...)...), Handler: h(handlers.CreatePrice)},
 	{Method: POST, Path: "/v1/catalog/provider-prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreateProviderPrice", Level: LevelUpdate,
 		Doc: "CreateProviderPrice links a price a provider owns and runs to a product (a legacy NMI plan, a Stripe " +
-			"price, a CCBill FlexForm). Its terms are read from the provider, declared for CCBill; nothing is " +
-			"written to the provider.",
+			"price, a CCBill FlexForm). Its terms are read from the provider, declared for CCBill, and for an " +
+			"NMI plan NMI does not answer for until it does; nothing is written to the provider.",
 		Request: billing.CreateProviderPriceParams{}, Responses: []Reply{{201, billing.Price{}}}, Errors: codes(append([]billing.ErrorCode{"provider_price_unreadable"}, priceErrors...)...), Handler: h(handlers.CreateProviderPrice)},
 	{Method: GET, Path: "/v1/catalog/prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListPrices", Level: LevelRead,
 		Cache: billing.ReadCatalog,

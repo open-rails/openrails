@@ -33,13 +33,13 @@ var ErrPaymentMethodSameVault = apperr.New(http.StatusConflict, billing.CodePaym
 // one per subscription.
 const ProviderCancelHeldFindingType = "life.provider_cancel.held"
 
-// NeedsProviderScheduleDelete reports whether cancelling sub must delete a
+// NeedsProviderScheduleDelete reports whether canceling sub must delete a
 // provider-owned NMI billing schedule.
 func NeedsProviderScheduleDelete(sub *models.Subscription) bool {
 	return sub != nil && sub.CollectionPolicy != models.CollectionPolicyEngine && rails.IsNMI(sub.Rail) && sub.RailSubscriptionID != ""
 }
 
-// needsArmedProviderStop reports whether cancelling sub queues a destructive
+// needsArmedProviderStop reports whether canceling sub queues a destructive
 // stop of a schedule the provider bills on its own (an NMI delete or a CCBill
 // cancel).
 func needsArmedProviderStop(sub *models.Subscription) bool {
@@ -50,8 +50,8 @@ func needsArmedProviderStop(sub *models.Subscription) bool {
 // needs a provider schedule stop while the merchant is disarmed raises the
 // held finding and is refused, unless accountDeletion: a deleted account is
 // canceled locally now and its stop waits for the operator's arming
-// (held=true). A customer's own cancel is not gated here: only its budget
-// (destructive.UserActionLimiter) refuses it.
+// (held=true). A customer's own cancel is not gated here and never spends
+// the customer card-removal budget.
 func RequireProviderCancelArmed(ctx context.Context, d *db.DB, sub *models.Subscription, accountDeletion bool) (held bool, err error) {
 	if !needsArmedProviderStop(sub) {
 		return false, nil

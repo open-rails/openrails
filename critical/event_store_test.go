@@ -150,9 +150,8 @@ func noStoreSettings(t *testing.T) {
 	window := []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: 1_000_000, Currency: "USD"}}
 	for _, settings := range []billing.MerchantSettings{
 		{DelegatedInvokerWastedSpendLimits: window},
-		{BillingPolicies: []billing.BillingPolicy{{Name: "capped", Kind: "window_spend_cap", SpendWindows: window}}},
-		{BillingPolicies: []billing.BillingPolicy{{Name: "grace", Kind: "outstanding_cap", BadSpendWindows: window}}},
-		{BillingPolicies: []billing.BillingPolicy{{Name: "rate", Kind: "accrual_rate_cap", AccrualRateCapPerHour: 10_000_000}}},
+		{BillingPolicies: []billing.BillingPolicy{{Name: "capped", SpendWindows: window}}},
+		{BillingPolicies: []billing.BillingPolicy{{Name: "grace", BadSpendWindows: window}}},
 	} {
 		_, err := a.alphaRemote.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{MerchantSettings: &settings})
 		requireNoStore(t, err)
@@ -247,7 +246,7 @@ func storeMigrationsAndIdentity(t *testing.T) {
 		return names
 	}
 	installed := []string{"limit_usage", "limit_usage_mv", "schema_migrations", "store", "usage_events", "usage_events_mv", "usage_history", "usage_history_charges_mv",
-		"usage_history_events_mv", "usage_intake", "usage_minutes", "usage_minutes_mv", "usage_quantities", "usage_quantities_mv"}
+		"usage_history_events_mv", "usage_intake"}
 	require.Equal(t, installed, tables())
 
 	// A restart and an explicit migration change nothing.
@@ -256,7 +255,7 @@ func storeMigrationsAndIdentity(t *testing.T) {
 	require.Equal(t, installed, tables())
 	var applied uint64
 	require.NoError(t, conn.QueryRow(ctx, "SELECT count() FROM `"+w.schema+"`.schema_migrations FINAL").Scan(&applied))
-	require.EqualValues(t, 4, applied)
+	require.EqualValues(t, 6, applied)
 
 	// An emptied ClickHouse is not the store this database's usage is in:
 	// once migrated it is another store.
@@ -318,7 +317,7 @@ func concurrentStoreMigrations(t *testing.T) {
 	}
 	var recorded, stores uint64
 	require.NoError(t, w.deps.ClickHouse.QueryRow(ctx, "SELECT count() FROM `"+fresh+"`.schema_migrations").Scan(&recorded))
-	require.EqualValues(t, 4, recorded, "each migration ran and was recorded once")
+	require.EqualValues(t, 6, recorded, "each migration ran and was recorded once")
 	require.NoError(t, w.deps.ClickHouse.QueryRow(ctx, "SELECT count() FROM `"+fresh+"`.store").Scan(&stores))
 	require.EqualValues(t, 1, stores, "one store identity")
 	first, err := declaredMerchant(engines[0], "alpha")

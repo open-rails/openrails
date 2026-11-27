@@ -159,7 +159,7 @@ func validateWidgetsAt(widgets []Widget, now time.Time) *metrics.ValidationError
 }
 
 // funnelShaped is a query a funnel draws: one measure that is not money, by
-// one dimension with a closed vocabulary, its invoice the funnel's.
+// one dimension with a closed vocabulary, its order the funnel's.
 func funnelShaped(plan *metrics.Plan) bool {
 	return !plan.HasTime && len(plan.Measures) == 1 && !plan.Measures[0].Money &&
 		len(plan.Dims) == 1 && len(plan.Measures[0].Values(plan.Dims[0])) > 1

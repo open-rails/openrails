@@ -217,27 +217,32 @@ SELECT id FROM billing.payments
 WHERE merchant_id = $1::uuid
   AND psp_id = $2::uuid
   AND deleted_at IS NULL
-  AND cardinality($3::text[]) > 0
-  AND transaction_id <> ALL($3::text[])
-  AND ($4::timestamptz IS NULL OR purchased_at >= $4::timestamptz)
-  AND ($5::timestamptz IS NULL OR purchased_at <= $5::timestamptz)
+  AND status <> 'pending'
+  AND (reversal_kind IS DISTINCT FROM 'chargeback' OR $3::boolean)
+  AND cardinality($4::text[]) > 0
+  AND transaction_id <> ALL($4::text[])
+  AND ($5::timestamptz IS NULL OR purchased_at >= $5::timestamptz)
+  AND ($6::timestamptz IS NULL OR purchased_at <= $6::timestamptz)
 `
 
 type ListExcessPaymentsForPSPParams struct {
-	MerchantID  uuid.UUID
-	PspID       uuid.UUID
-	PresentTxns []string
-	Since       *time.Time
-	Until       *time.Time
+	MerchantID        uuid.UUID
+	PspID             uuid.UUID
+	CoversChargebacks bool
+	PresentTxns       []string
+	Since             *time.Time
+	Until             *time.Time
 }
 
 // Windowed: only payments inside the pulled [since, until] window are eligible
 // (a snapshot only proves absence within the window it covered). Same empty-set
-// refusal as the subscription query.
+// refusal as the subscription query. Pending rows are local holds; chargebacks
+// are eligible only when the snapshot covers them.
 func (q *Queries) ListExcessPaymentsForPSP(ctx context.Context, arg ListExcessPaymentsForPSPParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listExcessPaymentsForPSP,
 		arg.MerchantID,
 		arg.PspID,
+		arg.CoversChargebacks,
 		arg.PresentTxns,
 		arg.Since,
 		arg.Until,

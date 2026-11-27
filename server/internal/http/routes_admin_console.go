@@ -11,8 +11,8 @@ import (
 )
 
 // The standalone product serves its enabled console at /admin. Its JSON
-// directory is authenticated separately; static assets and config.json
-// contain no credentials or private directory data.
+// directory and New merchant authenticate separately; static assets and
+// config.json contain no credentials or private directory data.
 func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	if s.consoleOff {
 		return nil
@@ -42,5 +42,6 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	})
 	s.handle(mux, http.MethodGet+" "+path, consoleTree)
 	s.handle(mux, http.MethodGet+" "+path+"/{asset...}", consoleTree)
+	s.handle(mux, http.MethodPost+" "+path+"/merchants", http.HandlerFunc(s.consoleCreateMerchant))
 	return nil
 }

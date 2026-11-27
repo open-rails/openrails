@@ -30,12 +30,13 @@ import (
 // reserves nothing and takes no lock. Usage is read only through
 // UsageReader.
 //
-// Views are read once the sync's transaction committed, in one read-only
-// snapshot taken before any event store read: they cover every item whose
-// receipt the sync answers (its events were inserted before the commit),
-// and an item another sync settles meanwhile is counted at worst twice
-// (its events and its in-flight line), never not at all. What other gates
-// settled since is what the gate measures as others' additions.
+// Views are read once the sync's transaction committed and its events were
+// inserted, in one read-only snapshot taken before any event store read:
+// they cover every item whose receipt the sync answers, unless the store
+// never took it. An item another sync settles meanwhile is counted at worst
+// twice (its events and its in-flight line), and not at all only between
+// that sync's commit and its insert. What other gates settled since is what
+// the gate measures as others' additions.
 
 type viewKey struct {
 	customer uuid.UUID
@@ -89,7 +90,7 @@ func (r *syncRun) views(ctx context.Context) error {
 			return err
 		}
 		d := r.DB.NewWithPgxTx(tx)
-		v := &viewing{run: r, ctx: ctx, q: gen.New(tx), money: r.Money.WithDatabase(d), admitter: r.Admitter.Bind(d, func() time.Time { return r.now }),
+		v := &viewing{run: r, ctx: ctx, q: gen.New(tx), money: r.Money.WithDatabase(d), admitter: r.Admitter.Bind(d),
 			builds: map[viewKey]*viewBuild{}}
 		v.usage = &storeUsage{v: v, store: r.DB.EventStore()}
 		if err := v.answer(); err != nil {
@@ -321,7 +322,8 @@ func (v *viewing) limitSet(b *viewBuild, vp billing.ViewParams, eventType string
 	if err != nil {
 		return nil, err
 	}
-	out := &billing.LimitSet{CustomerID: vp.CustomerID, Currency: catalog.Currency(b.key.currency), Limits: []string{catalog.BalanceLimit}, Capacities: []billing.LimitCapacity{}}
+	out := &billing.LimitSet{CustomerID: vp.CustomerID, Currency: catalog.Currency(b.key.currency), TrustLevel: set.Trust.TrustLevel, TrustLevelSource: set.Trust.Source,
+		Limits: []string{catalog.BalanceLimit}, Capacities: []billing.LimitCapacity{}}
 	if set.Refusal != nil {
 		out.Refusal = &billing.Refusal{DenyCode: set.Refusal.DenyCode}
 		if set.Refusal.RetryAfterSeconds > 0 {

@@ -48,6 +48,11 @@ type fakeViews struct {
 	// busyUntil answers every sync before it 503, as a server that could
 	// not take its locks in time.
 	busyUntil time.Time
+	// refuse answers the next sync with that status.
+	refuse int
+	// hold keeps the next request in flight until it closes; held closes
+	// once it is held (holdNext).
+	hold, held chan struct{}
 }
 
 type fakeLimit struct {
@@ -76,8 +81,17 @@ func newFakeViews(limits map[string]fakeLimit) *fakeViews {
 
 func (f *fakeViews) RoundTrip(r *http.Request) (*http.Response, error) {
 	f.mu.Lock()
-	down, slow := f.down, f.slow
+	down, slow, hold, held := f.down, f.slow, f.hold, f.held
+	f.hold, f.held = nil, nil
 	f.mu.Unlock()
+	if hold != nil {
+		close(held)
+		select {
+		case <-hold:
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		}
+	}
 	if down {
 		return nil, errors.New("fake: connection refused")
 	}
@@ -201,6 +215,11 @@ func (f *fakeViews) sync(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	if now.Before(f.busyUntil) {
 		writeFakeError(w, 503, billing.CodeServiceUnavailable, "the sync could not take its locks in time; retry it")
+		return
+	}
+	if status := f.refuse; status != 0 {
+		f.refuse = 0
+		writeFakeError(w, status, billing.CodeInvalidParam, "refused")
 		return
 	}
 	f.syncs = append(f.syncs, p)
@@ -354,6 +373,15 @@ func (f *fakeViews) set(fn func(f *fakeViews)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	fn(f)
+}
+
+// holdNext keeps the next request in flight until release closes: it fails
+// as unreachable if OpenRails was when it was sent. The returned channel
+// closes once it is held.
+func (f *fakeViews) holdNext(release chan struct{}) <-chan struct{} {
+	held := make(chan struct{})
+	f.set(func(f *fakeViews) { f.hold, f.held = release, held })
+	return held
 }
 
 func (f *fakeViews) settledOf(customer billing.CustomerID, limit string) int64 {
@@ -802,6 +830,8 @@ func TestGateRefusesARequestItCannotViewAlone(t *testing.T) {
 		ok, broken := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
 		f.set(func(f *fakeViews) { f.broken = map[billing.CustomerID]bool{broken: true} })
 		warm(t, g, ok)
+		// No sync warming started is counted below.
+		synctest.Wait()
 		// What no server would take is refused before anything is sent.
 		bad := work(ok, "btc", 1)
 		bad.Currency = "BTC"
@@ -831,6 +861,70 @@ func TestGateRefusesARequestItCannotViewAlone(t *testing.T) {
 		time.Sleep(30 * time.Second)
 		if n := syncCount(f) - quiet; n != 0 {
 			t.Fatalf("the gate synced %d more times for a refused view", n)
+		}
+	})
+}
+
+// A sync can answer a view between its request asking for it and waiting
+// for it: the answer, a refusal too, is the request's, and the sync puts
+// the views first.
+func TestGateKeepsAnAnswerThatComesBeforeItsRequestWaits(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 100}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		defer closeGate(t, g)
+		s := g.g
+		busy, broken, cold := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
+		f.set(func(f *fakeViews) { f.broken = map[billing.CustomerID]bool{broken: true} })
+		warm(t, g, busy)
+		synctest.Wait()
+		before := syncCount(f)
+		ask := func(p billing.AdmitParams) (billing.AdmitParams, *viewWait) {
+			if err := normalizeGateAdmit(&p); err != nil {
+				t.Fatal(err)
+			}
+			return p, s.serve(attrsKey(p), p)
+		}
+		pb, wb := ask(work(broken, "broken", 1))
+		pc, wc := ask(work(cold, "cold", 1))
+		// Queued usage starts the sync that answers both before either waits.
+		if err := mustAdmit(t, g, work(busy, "queued", 1)).Capture(t.Context(), capture(1)); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		answered := syncCount(f)
+		if err := s.await(t.Context(), attrsKey(pb), pb, wb); !hasCode(err, billing.CodeInternalError) {
+			t.Fatalf("a view refused before its request waited: %v", err)
+		}
+		if err := s.await(t.Context(), attrsKey(pc), pc, wc); err != nil {
+			t.Fatalf("a view answered before its request waited: %v", err)
+		}
+		synctest.Wait()
+		if n := syncCount(f) - answered; n != 0 {
+			t.Errorf("waiting for views a sync had answered took %d more syncs", n)
+		}
+		f.mu.Lock()
+		syncs := slices.Clone(f.syncs[before:answered])
+		f.mu.Unlock()
+		first := slices.IndexFunc(syncs, func(p billing.SyncLeasesParams) bool {
+			return slices.ContainsFunc(p.Views, func(v billing.ViewParams) bool { return v.CustomerID == broken })
+		})
+		if first < 0 {
+			t.Fatal("no sync asked for the refused view")
+		}
+		if n := len(syncs[first].Usage); n > 0 {
+			t.Errorf("the sync answering views requests were about to wait for carried %d usage items", n)
+		}
+		if got := f.settledOf(busy, "quota"); got != 2 {
+			t.Errorf("settled %d, want 2", got)
+		}
+		// The busy customer's wait was answered with no request on it.
+		s.mu.Lock()
+		left := len(s.waiters)
+		s.mu.Unlock()
+		if left != 0 {
+			t.Errorf("%d answered waits left", left)
 		}
 	})
 }
@@ -1062,6 +1156,86 @@ func TestGateCloseRidesOutTransientFailures(t *testing.T) {
 	})
 }
 
+// A sync sent while OpenRails was unreachable can fail after it is back and
+// a Flush has begun: that failure is not the Flush's.
+func TestGateFlushCountsOnlySyncsSentAfterItBegins(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 1000}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		warm(t, g, customer)
+		sent, next := make(chan struct{}), make(chan struct{})
+		f.set(func(f *fakeViews) { f.down = true })
+		held := f.holdNext(sent)
+		tk := mustAdmit(t, g, work(customer, "outage", 2))
+		if err := tk.Capture(t.Context(), capture(2)); err != nil {
+			t.Fatal(err)
+		}
+		<-held
+		f.set(func(f *fakeViews) { f.down = false })
+		flushed := make(chan error, 1)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			flushed <- g.Flush(ctx)
+		}()
+		synctest.Wait()
+		// The held sync fails while the next is in flight.
+		held = f.holdNext(next)
+		close(sent)
+		<-held
+		synctest.Wait()
+		close(next)
+		if err := <-flushed; err != nil {
+			t.Fatalf("Flush after OpenRails came back: %v", err)
+		}
+		if got := f.settledOf(customer, "quota"); got != 3 {
+			t.Fatalf("%d units settled, want 3", got)
+		}
+	})
+}
+
+// Close ends its lease past a refusal of a sync sent before it began.
+func TestGateCloseCountsOnlySyncsSentAfterItBegins(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 1000}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		customer := billing.CustomerID(uuid.New())
+		warm(t, g, customer)
+		sent, next := make(chan struct{}), make(chan struct{})
+		f.set(func(f *fakeViews) { f.refuse = http.StatusBadRequest })
+		held := f.holdNext(sent)
+		if err := mustAdmit(t, g, work(customer, "open", 1)).Release(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		<-held
+		closed := make(chan error, 1)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			closed <- g.Close(ctx)
+		}()
+		synctest.Wait()
+		// The held sync is refused while the next is in flight.
+		held = f.holdNext(next)
+		close(sent)
+		<-held
+		synctest.Wait()
+		close(next)
+		if err := <-closed; err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if !f.leases[g.g.lease].closed {
+			t.Fatal("Close returned with its lease open")
+		}
+	})
+}
+
 func TestGateRefusesUnpricedEvents(t *testing.T) {
 	f := newFakeViews(map[string]fakeLimit{})
 	f.money, f.balance = true, 1_000_000
@@ -1170,15 +1344,20 @@ func TestGateAnswersAFirstViewInASyncWithoutUsage(t *testing.T) {
 		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		warm(t, g, billing.CustomerID(uuid.New()))
-		// Usage waits to be sent when a new customer's first request comes.
+		// Usage waits to be sent when a new customer's first request comes:
+		// it is captured while a slow sync with nothing queued is out.
 		busy := billing.CustomerID(uuid.New())
 		warm(t, g, busy)
-		if err := mustAdmit(t, g, work(busy, "queued", 3)).Capture(t.Context(), capture(3)); err != nil {
-			t.Fatal(err)
-		}
+		queued := mustAdmit(t, g, work(busy, "queued", 3))
+		f.set(func(f *fakeViews) { f.slow = time.Second })
+		mustAdmit(t, g, work(busy, "probe", 1)).Release(t.Context())
+		synctest.Wait()
 		f.mu.Lock()
 		before := len(f.syncs)
 		f.mu.Unlock()
+		if err := queued.Capture(t.Context(), capture(3)); err != nil {
+			t.Fatal(err)
+		}
 		cold := billing.CustomerID(uuid.New())
 		mustAdmit(t, g, work(cold, "first", 1)).Release(t.Context())
 		flush(t, g)

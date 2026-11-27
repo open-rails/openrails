@@ -26,7 +26,7 @@ const (
 	CollectionSendInvoice         = "send_invoice"
 )
 
-// CustomerInvoiceProfile is a payer's enterprise invoicing profile: net-N
+// CustomerInvoiceProfile is a customer's enterprise invoicing profile: net-N
 // terms, collection method and the document fields snapshotted onto every
 // invoice at finalize. Absent = zero value (due immediately,
 // charge_automatically, no document fields).

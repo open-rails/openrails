@@ -20,7 +20,7 @@ func GetAccessTenure(r *httprequest.Request) {
 }
 
 func SelfAccessTenure(r *httprequest.Request) {
-	customer, ok := selfAccountPayer(r)
+	customer, ok := selfAccountCustomer(r)
 	if !ok {
 		return
 	}

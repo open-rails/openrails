@@ -328,6 +328,7 @@ var jsonRules = map[string]jsonRule{
 		"attempt":     integerValue, "failure_count": integerValue, "amount_minor": moneyStringValue, "order_reference": uuidValue, "order_id": uuidValue,
 	}),
 	"provider_intents.subscription_collection.result_evidence": nullable(object(map[string]jsonRule{
+		"cancel_revoked_access_at": textValue,
 		"stripe_recurring_decline": object(map[string]jsonRule{"decline_code": textValue, "advice_code": textValue, "network_advice_code": textValue, "network_decline_code": textValue, "binding": receiptBindingJSON, "failure_code": textValue, "payment_intent_id": textValue}),
 		"failure_code":             textValue, "stripe_payment_intent_id": textValue, "authentication_required": booleanValue,
 		"qualified_receipt": collectedReceiptJSON, "transaction_id": textValue, "rail": textValue, "verified_existing": booleanValue,
@@ -436,8 +437,8 @@ var jsonRules = map[string]jsonRule{
 	"invoice_lines.credit_grant":    nullable(object(map[string]jsonRule{"amount": moneyStringValue, "currency": textValue, "expires_after_days": integerValue})),
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
 	"grants.spec_snapshot":           nullable(object(map[string]jsonRule{"entitlements": array(textValue)})),
-	"usage_postings.lines":           array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "print": textValue, "requests": integerValue, "quantity": integerValue, "stated": integerValue, "amount": integerValue})),
-	"usage_postings.forgiven_lines":  nullable(array(object(map[string]jsonRule{"invoker": textValue, "event_type": textValue, "meter_key": textValue, "cell": textValue, "amount": integerValue}))),
+	"usage_receipts.lines":           array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "print": textValue, "requests": integerValue, "quantity": integerValue, "stated": integerValue, "amount": integerValue})),
+	"usage_receipts.forgiven_lines":  nullable(array(object(map[string]jsonRule{"invoker": textValue, "event_type": textValue, "meter_key": textValue, "cell": textValue, "amount": integerValue}))),
 	"usage_card_prints.card":         metadataJSON,
 	"event_store.usage_events.event": metadataJSON,
 	"invoice_attempts.metadata":      metadataJSON,

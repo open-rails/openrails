@@ -717,12 +717,22 @@ function PSPRow({
             <AdminMessage id={"draining ("} />
             {psp.open_obligations})
           </Badge>
-        ) : (
+        ) : psp.armed ? (
           <Badge
             variant="secondary"
             className="bg-settled-surface text-settled"
           >
             <AdminMessage id={"active"} />
+          </Badge>
+        ) : (
+          <Badge
+            variant="secondary"
+            className="bg-held-surface text-held"
+            title={adminText(
+              "No new payment uses it: its credentials are incomplete or do not resolve."
+            )}
+          >
+            <AdminMessage id={"not armed"} />
           </Badge>
         )}
       </TableCell>
@@ -1363,6 +1373,9 @@ function CustomerControlsTab() {
     currency: string
     creditLimit: string
     trustLevel: string
+    trustSource: "default" | "explicit" | "rule"
+    netPaid: string
+    firstPaidAt: string | null
   }>()
   const lookupControls = useMutation(adminMutations.lookupCustomerControls())
   const updateCreditLimit = useMutation(adminMutations.setCreditLimit())
@@ -1393,8 +1406,8 @@ function CustomerControlsTab() {
   })
   // A customer is found by name or email. Its credit limit and trust level
   // are per currency: those the merchant bills usage in, and those the
-  // customer already holds money or settings in; with neither yet, any
-  // registered currency, so a first limit can be set.
+  // customer already holds money, settings or a trust tier in; with neither
+  // yet, any registered currency, so a first limit can be set.
   const [customer, setCustomer] = React.useState<Customer>()
   const { data: configuration } = useQuery(adminQueries.merchantConfiguration())
   const known = [
@@ -1404,6 +1417,7 @@ function CustomerControlsTab() {
         ...(customer?.balances ?? []),
         ...(customer?.settings.credit_limits ?? []),
         ...(customer?.settings.trust_levels ?? []),
+        ...(customer?.trust_levels ?? []),
       ].map((c) => c.currency.toUpperCase())
     ),
   ].sort()
@@ -1546,7 +1560,23 @@ function CustomerControlsTab() {
           <dl className="grid gap-4">
             <SettingDetail
               label={adminText("Trust level")}
-              value={result.trustLevel || "Default"}
+              value={`${result.trustLevel || "Default"}${
+                result.trustSource === "rule"
+                  ? adminText(" (by the tier rules)")
+                  : result.trustSource === "explicit"
+                    ? adminText(" (set for this customer)")
+                    : ""
+              }`}
+            />
+            <SettingDetail
+              label={adminText("Net paid")}
+              value={formatNativeAmount(result.netPaid, result.currency)}
+            />
+            <SettingDetail
+              label={adminText("First payment")}
+              value={
+                result.firstPaidAt ? formatDate(result.firstPaidAt) : undefined
+              }
             />
             <SettingDetail
               label={adminText("Credit limit")}

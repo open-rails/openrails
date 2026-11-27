@@ -12,6 +12,9 @@ import type { AuthClient } from "@openrails/auth-ui/client"
 import { useIdentity } from "./lib/identity"
 import { useMerchantDirectory } from "./lib/directory"
 import { AccessPage } from "./pages/access"
+import { NewMerchantPage } from "./pages/new-merchant"
+import { TeamPage } from "./pages/team"
+import { useOwnAccounts } from "./lib/own-accounts"
 import { takeMerchantFromHash } from "./lib/merchant"
 import { Redirect, useRedirect } from "./lib/redirect"
 import type { BootstrapConfig } from "./config"
@@ -48,6 +51,11 @@ export function MerchantWorkspace({
     merchants: directory.data?.merchants ?? [],
     root: directory.data?.root ?? false,
     selectMerchant,
+    // A merchant just created: read the directory again and act on it.
+    merchantCreated(created: BillingAdminMerchant) {
+      selectMerchant(created.id)
+      directory.retry()
+    },
   }
   return (
     <>
@@ -77,6 +85,7 @@ interface WorkspaceProps {
   merchants: BillingAdminMerchant[]
   root: boolean
   selectMerchant(id: string): void
+  merchantCreated(merchant: BillingAdminMerchant): void
   billing: boolean
   loading?: boolean
 }
@@ -141,6 +150,7 @@ function Workspace({
   merchants,
   root,
   selectMerchant,
+  merchantCreated,
   billing,
   loading,
 }: WorkspaceProps) {
@@ -167,6 +177,9 @@ function Workspace({
     },
   }
   const hasAccess = !!access?.any
+  // Operators manage operators where the server runs its own accounts.
+  const ownAccounts = useOwnAccounts()
+  const team = root && ownAccounts.team
   const initial = billing ? "/billing" : hasAccess ? "/access" : "/account"
   return (
     <AuthUiProvider appearance={{ theme }}>
@@ -192,6 +205,7 @@ function Workspace({
                 </select>
               </label>
             )}
+            {root && <Link to="/merchants/new">New merchant</Link>}
             <button
               onClick={() =>
                 setTheme((value) => (value === "light" ? "dark" : "light"))
@@ -204,6 +218,7 @@ function Workspace({
           <nav className="console-tabs" aria-label="Console">
             {billing && <Link to="/billing">Billing</Link>}
             {hasAccess && <Link to="/access">Access</Link>}
+            {team && <Link to="/team">Team</Link>}
             <Link to="/account">Account</Link>
           </nav>
           <Routes>
@@ -222,7 +237,11 @@ function Workspace({
             <Route
               path="billing/*"
               element={
-                billing && merchant ? (
+                loading ? (
+                  <p role="status" className="console-empty">
+                    Loading billing…
+                  </p>
+                ) : billing && merchant ? (
                   <BillingAdmin
                     baseUrl={config.api_base_url}
                     auth={auth}
@@ -232,6 +251,7 @@ function Workspace({
                     basePath="/admin/billing"
                     navigation={navigation}
                     exchange={config.exchange ?? undefined}
+                    newMerchantHref={root ? "/admin/merchants/new" : undefined}
                     appearance={{ theme: "inherit" }}
                   />
                 ) : (
@@ -272,6 +292,59 @@ function Workspace({
                     />
                   )}
                 </>
+              }
+            />
+            <Route
+              path="team/*"
+              element={
+                team ? (
+                  <TeamPage
+                    auth={auth}
+                    baseUrl={config.auth_base_url}
+                    navigation={navigation}
+                  />
+                ) : (
+                  <p className="console-empty">No access to the team.</p>
+                )
+              }
+            />
+            <Route
+              path="merchants/new"
+              element={
+                loading ? (
+                  <p role="status" className="console-empty">
+                    Loading the merchant directory…
+                  </p>
+                ) : (
+                  <NewMerchantPage
+                    auth={auth}
+                    apiBaseURL={config.api_base_url}
+                    root={root}
+                    onCreated={merchantCreated}
+                  />
+                )
+              }
+            />
+            {/* The first run's second step, after the owner's setup: only
+                while the directory is empty. */}
+            <Route
+              path="setup/merchant"
+              element={
+                loading ? (
+                  <p role="status" className="console-empty">
+                    Loading the merchant directory…
+                  </p>
+                ) : root && merchants.length === 0 ? (
+                  <NewMerchantPage
+                    auth={auth}
+                    apiBaseURL={config.api_base_url}
+                    root={root}
+                    firstRun
+                    onCreated={merchantCreated}
+                  />
+                ) : (
+                  <Redirect to="/" />
+                )
               }
             />
             <Route

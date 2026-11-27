@@ -856,8 +856,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			providerPayment = recorded.Payment
 		}
 
-		if err := s.assertActiveTransitionAllowed(ctx, subscription, "renewal", params.AllowTerminalReactivation); err != nil {
-			return err
+		if !params.KeepCanceled {
+			if err := s.assertActiveTransitionAllowed(ctx, subscription, "renewal", params.AllowTerminalReactivation); err != nil {
+				return err
+			}
 		}
 
 		var price *models.Price
@@ -1074,7 +1076,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			PeriodStart: periodStartsAt, PeriodEnd: periodEndsAt,
 			Downgrade: applyingDowngrade, ProductName: productName,
 			FromProductID: fromProductID, FromProductName: fromProductName,
-			PreserveLifecycle: preserveLifecycle, Reinstate: params.AllowTerminalReactivation,
+			PreserveLifecycle: preserveLifecycle, Reinstate: params.AllowTerminalReactivation, KeepCanceled: params.KeepCanceled,
 			SeatsChanged: !SameQuantity(subscription.Quantity, fromQuantity),
 		})
 		if err != nil {
@@ -1337,7 +1339,8 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 
 // CancelMembershipTx applies cancellation using the caller's transaction. The
 // caller owns commit/rollback; the returned facts are already persisted and become visible only
-// after a successful commit.
+// after a successful commit. Engine callers that already lock the subscription
+// must lock its customer first.
 func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, txDB *db.DB, params *CancelMembershipParams) (*CancelMembershipTxResult, error) {
 	if txDB == nil {
 		return nil, errors.New("transaction DB is required")
@@ -1348,18 +1351,36 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	notificationRepo := NewNotificationService(txDB)
 	subService := NewSubscriptionService(txDB, priceService, productService, nil, s.Clock())
 
-	var subscription *models.Subscription
+	var observed *models.Subscription
 	var err error
 	if params.SubscriptionID != nil {
-		subscription, err = subService.subscriptionRepo.GetByIDForUpdate(ctx, *params.SubscriptionID)
+		observed, err = subService.subscriptionRepo.GetByID(ctx, *params.SubscriptionID)
 	} else if params.RailSubscriptionID != nil && params.Rail != nil {
-		subscription, err = subService.subscriptionRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(*params.Rail), *params.RailSubscriptionID)
+		observed, err = subService.subscriptionRepo.GetByPSPSubscriptionID(ctx, string(*params.Rail), *params.RailSubscriptionID)
 	} else {
 		return nil, fmt.Errorf("either subscription_id or rail details must be provided")
 	}
 	if err != nil {
 		s.Log.WarnContext(ctx, "Failed to locate subscription for cancellation", logx.Err(err))
 		return nil, fmt.Errorf("subscription not found: %w", err)
+	}
+
+	if observed.CollectionPolicy == models.CollectionPolicyEngine {
+		if _, err := txDB.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: observed.MerchantID, ID: observed.CustomerID}); err != nil {
+			return nil, err
+		}
+	}
+	var subscription *models.Subscription
+	if params.SubscriptionID != nil {
+		subscription, err = subService.subscriptionRepo.GetByIDForUpdate(ctx, *params.SubscriptionID)
+	} else {
+		subscription, err = subService.subscriptionRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(*params.Rail), *params.RailSubscriptionID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("subscription not found: %w", err)
+	}
+	if subscription.CustomerID != observed.CustomerID || subscription.CollectionPolicy != observed.CollectionPolicy {
+		return nil, errors.New("cancel membership: accepted customer or collection ownership changed")
 	}
 
 	result := &CancelMembershipTxResult{
@@ -1382,15 +1403,6 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	// cancellation. The locked current row is the lifecycle authority.
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCanceled && params.CancelType == models.CancelTypeUser {
 		return result, nil
-	}
-
-	// A cancel never races a renewal charge already sent: the charge could land
-	// and buy nothing. An admitted renewal not yet sent is released by its own
-	// fence, which takes this same lock and refuses a canceled membership.
-	if params.RefuseOwnedRenewal && subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status != models.StatusCanceled {
-		if err := refuseSubmittedRenewal(ctx, txDB, subscription); err != nil {
-			return nil, err
-		}
 	}
 
 	if params.RefuseOwnedRenewal && subscription.Rail == models.RailSolana && subscription.Status != models.StatusCanceled {
@@ -1444,6 +1456,22 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	}); err != nil {
 		s.Log.ErrorContext(ctx, "Failed to apply local cancellation", logx.Err(err), "subscription_id", subscription.ID)
 		return nil, err
+	}
+	// A late renewal charge after a revoke or a refund is refunded, not kept.
+	if (params.RevokeAccess || params.EndedReason == PremiumEndReasonRefund) && subscription.CollectionPolicy == models.CollectionPolicyEngine {
+		collection, err := txDB.Gen(ctx).GetUnresolvedSubscriptionCollection(ctx, gen.GetUnresolvedSubscriptionCollectionParams{MerchantID: subscription.MerchantID, SubscriptionID: subscription.ID})
+		if err != nil && !db.IsNotFound(err) {
+			return nil, err
+		}
+		if err == nil {
+			at, err := json.Marshal(now.UTC().Format(time.RFC3339Nano))
+			if err != nil {
+				return nil, err
+			}
+			if _, err := txDB.Gen(ctx).RecordProviderIntentProgressIfAbsent(ctx, gen.RecordProviderIntentProgressIfAbsentParams{MerchantID: subscription.MerchantID, ID: collection.ID, Key: "cancel_revoked_access_at", Value: at}); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if subscription.LifecycleRev == previousRevision {
 		return result, nil // the locked lifecycle already reflects this cancellation
@@ -1971,6 +1999,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		advice := subscription.RetryAdvisedAt
 		adviceDeferred := subscription.AdviceDeferred()
 		deferred := false
+		customerRetry := false
 		var event lifecycle.Event
 		// A decline opens the dunning case under the merchant's policy of the
 		// moment; the rest of the case runs under it.
@@ -1996,6 +2025,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		default:
 			// Bucket 1: keep the schedule, a function of the billing cycle.
+			customerRetry = params.CustomerAttempt && !params.Terminal
 			cycleHours := 0
 			if subscription.CollectionPolicy == models.CollectionPolicyEngine {
 				accepted := params.Prepared
@@ -2034,7 +2064,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 			// A processor try-again answer gets the short transient ladder first;
 			// those quick retries are not dunning failures.
-			if !params.Terminal && decline.Classify(string(subscription.Rail), normalize.FromPtr(params.FailureCode)).Transient {
+			if !params.Terminal && !customerRetry && decline.Classify(string(subscription.Rail), normalize.FromPtr(params.FailureCode)).Transient {
 				if next, ok := policy.NextTransientAttempt(subscription.TransientRetries, declined); ok {
 					subscription.TransientRetries++
 					subscription.LastRetryAt = &declined
@@ -2056,7 +2086,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				}
 			}
 			terminal := params.Terminal
-			if !terminal {
+			if !terminal && !customerRetry {
 				subscription.LastRetryAt = &declined
 				if subscription.RetryAttempts == nil {
 					attempts := 1
@@ -2084,10 +2114,19 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				event = lifecycle.DunningExhausted{At: now}
 				deferred = advice != nil && !params.Terminal
 			default:
-				event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}
-				nextRetry, ok, err := policy.NextAttemptAt(cycleHours, *subscription.RetryAttempts, declined)
-				if err != nil {
-					return err
+				var nextRetry time.Time
+				ok := true
+				if customerRetry {
+					if subscription.NextRetryAt == nil || params.RetryAfter <= 0 {
+						break
+					}
+					nextRetry = *subscription.NextRetryAt
+				} else {
+					event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}
+					nextRetry, ok, err = policy.NextAttemptAt(cycleHours, *subscription.RetryAttempts, declined)
+					if err != nil {
+						return err
+					}
 				}
 				// The network's earliest retry, from the decline, or an earlier
 				// decline's that still stands: the case's end moves with it
@@ -2096,6 +2135,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				earliest := declined.Add(params.RetryAfter)
 				if advice != nil && advice.After(earliest) {
 					earliest = *advice
+				}
+				if customerRetry && !earliest.After(nextRetry) {
+					break
 				}
 				subscription.NextRetryAt, subscription.RetryAdvisedAt = nil, nil
 				if ok && earliest.After(nextRetry) {
@@ -2122,6 +2164,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			if _, err := Transition(subscription, event, now); err != nil {
 				return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
 			}
+		}
+		if _, held := event.(lifecycle.TerminalHeld); held && subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusPastDue {
+			subscription.GraceEndsAt = &now
 		}
 		if subscription.Status == models.StatusAwaitingMethod && subscription.GraceEndsAt == nil {
 			deadline, err := awaitMethodDeadline(ctx, db, priceService, subscription)

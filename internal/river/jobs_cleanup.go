@@ -141,6 +141,7 @@ type CleanupResult struct {
 	LimitWindows               int64
 	Leases                     int64
 	LimitAdjustments           int64
+	UsageTotals                int64
 	WebhookHealthDays          int64
 	ListedRebills              int64
 	ReconciliationFindings     int64
@@ -202,22 +203,24 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 
 	dueWork := func(after *uuid.UUID, limit int32) ([]uuid.UUID, error) {
 		return directory.ListRetentionWorkMerchants(ctx, gen.ListRetentionWorkMerchantsParams{
-			WebhookCutoff:        now.Add(-config.WebhookEventRetention),
-			OutboxCutoff:         now.Add(-retention.EventLog),
-			AttemptCutoff:        now.Add(-config.PaymentAttemptRetention),
-			TransitionCutoff:     now.Add(-retention.SubscriptionTransitions),
-			InvoiceAttemptCutoff: now.Add(-retention.ExpiredInvoiceAttempts),
-			UnpaidInvoiceCutoff:  now.Add(-retention.UnpaidInvoices),
-			CounterCutoff:        now.Add(-retention.MetricCounters),
-			FindingCutoff:        now.Add(-retention.ResolvedFindings),
-			ProviderWriteCutoff:  now.Add(-retention.ProviderWrites),
-			ParkCutoff:           now.Add(-retention.ReleasedParks),
-			LimitWindowCutoff:    now.Add(-retention.LimitWindows),
-			ReplayCutoff:         now.Add(-retention.Leases),
-			MessageCutoff:        now.Add(-retention.CustomerMessages),
-			ListedRebillCutoff:   now.Add(-retention.ListedRebills),
-			After:                after,
-			MerchantLimit:        limit,
+			WebhookCutoff:            now.Add(-config.WebhookEventRetention),
+			OutboxCutoff:             now.Add(-retention.EventLog),
+			AttemptCutoff:            now.Add(-config.PaymentAttemptRetention),
+			TransitionCutoff:         now.Add(-retention.SubscriptionTransitions),
+			InvoiceAttemptCutoff:     now.Add(-retention.ExpiredInvoiceAttempts),
+			UnpaidInvoiceCutoff:      now.Add(-retention.UnpaidInvoices),
+			CounterCutoff:            now.Add(-retention.MetricCounters),
+			FindingCutoff:            now.Add(-retention.ResolvedFindings),
+			ProviderWriteCutoff:      now.Add(-retention.ProviderWrites),
+			ParkCutoff:               now.Add(-retention.ReleasedParks),
+			LimitWindowCutoff:        now.Add(-retention.LimitWindows),
+			ReachedLimitWindowCutoff: now.Add(-retention.ReachedLimitWindows),
+			ReplayCutoff:             now.Add(-retention.Leases),
+			MessageCutoff:            now.Add(-retention.CustomerMessages),
+			ListedRebillCutoff:       now.Add(-retention.ListedRebills),
+			UsageTotalsCutoff:        now.Add(-retention.UsageTotals),
+			After:                    after,
+			MerchantLimit:            limit,
 		})
 	}
 
@@ -242,7 +245,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 		}
 	}
 
-	opsmetric.Emit(ctx, w.Log, opsmetric.MetricRetentionSweep, []any{"worker", KindCleanupExpiredData, "merchants_with_work", len(merchantIDs), "merchants_budget_capped", result.MerchantsBudgetCapped, "continued", after != nil, "more_work_queued", next != nil, "duration_ms", clock.Now().Sub(started).Milliseconds(), "carts", result.Carts, "idempotency_keys", result.IdempotencyKeys, "solana_pay_references", result.SolanaPayReferences, "periodic_leases", result.PeriodicLeases, "notification_events", result.NotificationEvents, "event_log", result.EventLog, "webhook_events", result.WebhookEvents, "host_outbox", result.HostOutbox, "payment_attempts", result.PaymentAttempts, "rebill_cycles", result.RebillCycles, "nmi_history_months", result.NMIHistoryMonths, "subscription_transitions", result.SubscriptionTransitions, "subscription_billing_changes", result.SubscriptionBillingChanges, "invoice_attempts", result.InvoiceAttempts, "unpaid_invoices", result.UnpaidInvoices, "limit_windows", result.LimitWindows, "leases", result.Leases, "limit_adjustments", result.LimitAdjustments, "webhook_health_days", result.WebhookHealthDays, "provider_listed_rebills", result.ListedRebills, "reconciliation_findings", result.ReconciliationFindings, "provider_intents", result.ProviderIntents, "operation_log", result.OperationLog, "released_parks", result.ReleasedParks, "customer_messages", result.CustomerMessages})
+	opsmetric.Emit(ctx, w.Log, opsmetric.MetricRetentionSweep, []any{"worker", KindCleanupExpiredData, "merchants_with_work", len(merchantIDs), "merchants_budget_capped", result.MerchantsBudgetCapped, "continued", after != nil, "more_work_queued", next != nil, "duration_ms", clock.Now().Sub(started).Milliseconds(), "carts", result.Carts, "idempotency_keys", result.IdempotencyKeys, "solana_pay_references", result.SolanaPayReferences, "periodic_leases", result.PeriodicLeases, "notification_events", result.NotificationEvents, "event_log", result.EventLog, "webhook_events", result.WebhookEvents, "host_outbox", result.HostOutbox, "payment_attempts", result.PaymentAttempts, "rebill_cycles", result.RebillCycles, "nmi_history_months", result.NMIHistoryMonths, "subscription_transitions", result.SubscriptionTransitions, "subscription_billing_changes", result.SubscriptionBillingChanges, "invoice_attempts", result.InvoiceAttempts, "unpaid_invoices", result.UnpaidInvoices, "limit_windows", result.LimitWindows, "leases", result.Leases, "limit_adjustments", result.LimitAdjustments, "usage_totals", result.UsageTotals, "webhook_health_days", result.WebhookHealthDays, "provider_listed_rebills", result.ListedRebills, "reconciliation_findings", result.ReconciliationFindings, "provider_intents", result.ProviderIntents, "operation_log", result.OperationLog, "released_parks", result.ReleasedParks, "customer_messages", result.CustomerMessages})
 
 	if cleanupErr != nil {
 		return next, fmt.Errorf("cleanup expired data: %w", cleanupErr)
@@ -440,10 +443,10 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		})
 	})
 
-	// Limit windows past the replay horizon.
+	// Limit windows over: a day past their end, or 61 days once reached.
 	sweep("delete limit windows", &result.LimitWindows, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteLimitWindowsBefore(ctx, gen.DeleteLimitWindowsBeforeParams{
-			MerchantID: mid, Cutoff: now.Add(-retention.LimitWindows), RowLimit: limit,
+			MerchantID: mid, Cutoff: now.Add(-retention.LimitWindows), ReachedCutoff: now.Add(-retention.ReachedLimitWindows), RowLimit: limit,
 		})
 	})
 	// Leases (with their holds) and adjustment records past the replay horizon.
@@ -455,6 +458,12 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	sweep("delete limit adjustments", &result.LimitAdjustments, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteLimitAdjustmentsBefore(ctx, gen.DeleteLimitAdjustmentsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.LimitAdjustments), RowLimit: limit,
+		})
+	})
+	// A pricing period's running totals once no usage can enter it.
+	sweep("delete closed usage totals", &result.UsageTotals, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteClosedUsageTotals(ctx, gen.DeleteClosedUsageTotalsParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.UsageTotals), RowLimit: limit,
 		})
 	})
 

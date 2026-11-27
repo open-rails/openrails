@@ -86,7 +86,7 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		}
 	}
 	// "Exhaustive" is an absence proof: it sets the confirmed-absence gate and
-	// authorizes cancelling every local subscription missing from this list, so
+	// authorizes canceling every local subscription missing from this list, so
 	// it is decided from what came back. An empty 200 is indistinguishable from
 	// another account's complete roster (rotated or restricted key, incident),
 	// and a customer-filtered roster proves nothing about the book.

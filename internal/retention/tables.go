@@ -56,7 +56,7 @@ var Tables = map[string]Table{
 	"provider_cycle_receipts":       {Permanent, permanent},
 	"provider_charge_attributions":  {Permanent, permanent},
 	"owed_items":                    {Permanent, permanent},
-	"usage_postings":                {Permanent, permanent},
+	"usage_receipts":                {Permanent, permanent},
 	"usage_card_prints":             {Permanent, permanent},
 	"running_charges":               {Permanent, permanent},
 	"solana_pay_receipts":           {Permanent, "permanent for credited and review receipts; an ignored receipt goes with its settled reference."},
@@ -93,7 +93,8 @@ var Tables = map[string]Table{
 	"idempotency_keys":                {Rows, "rows are deleted at expires_at."},
 	"user_destructive_reservations":   {Rows, "rows are deleted 24 hours after reserved_at."},
 	"network_activity_daily":          {Class: State},
-	"limit_windows":                   {Rows, "rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does."},
+	"customer_paid_totals":            {Class: State},
+	"limit_windows":                   {Rows, "rows are deleted a day after window_ends_at, 61 days after it once reached_at is set; a row without an end stays while its customer does."},
 	"leases":                          {Rows, "rows are deleted 61 days after last_sync_at."},
 	"lease_in_flight":                 {Rows, "rows; each sync replaces its lease's rows, close clears them, and they go with the lease."},
 	"limit_adjustments":               {Rows, "rows are deleted 61 days after created_at."},
@@ -101,6 +102,7 @@ var Tables = map[string]Table{
 	"webhook_health_daily":            {Rows, "rows are deleted 13 months (397 days) after day_at."},
 	"customer_messages":               {Rows, "rows are deleted two years (731 days) after created_at."},
 	"provider_listed_rebills":         {Rows, "rows are deleted 90 days after listed_at."},
+	"usage_totals":                    {Rows, "rows are deleted a day after their period's late usage window closes (36 days after period_ends_at), once none of the period's rows is unposted."},
 
 	"merchants":                  {Class: State},
 	"merchant_slug_aliases":      {Class: State},
@@ -108,7 +110,6 @@ var Tables = map[string]Table{
 	"book_identity":              {Class: State},
 	"event_store":                {Class: State},
 	"usage_pending":              {Class: State},
-	"usage_pending_amounts":      {Class: State},
 	"periodic_leases":            {Class: State},
 	"merchant_leases":            {Class: State},
 	"solana_crankers":            {Class: State},
@@ -171,9 +172,7 @@ var Tables = map[string]Table{
 // EventStoreTTLs are how long the event store keeps each usage table, as its
 // migrations' TTLs state them.
 var EventStoreTTLs = map[string]string{
-	"usage_events":     "90 days after occurred_at",
-	"limit_usage":      "61 days after the window ends; a window without an end is kept",
-	"usage_quantities": "100 days after the pricing period starts",
-	"usage_minutes":    "2 days after the minute",
-	"usage_history":    "kept: no TTL; a merchant purge deletes its rows",
+	"usage_events":  "90 days after occurred_at",
+	"limit_usage":   "a day after the window ends; a window without an end is kept",
+	"usage_history": "kept: no TTL, by UTC quarter hour; a merchant purge deletes its rows",
 }

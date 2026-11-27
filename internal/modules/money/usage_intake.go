@@ -34,28 +34,25 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Usage is taken in, not settled: each item becomes one event in the event
-// store, carrying its priced meter cells (under the card print in force or
-// pinned, in its pricing period), a provisional amount (the marginal price at
-// the period position intake read: what limits and the per-minute rate
-// count) and the limit windows that count it, located when it was admitted.
-// Intake then adds the provisional prices to the customer's pending amount,
-// which its balance deducts until a posting takes the usage. A failed item is
-// not priced: what its grace leaves is charged at once, with its own ledger
-// legs.
+// Usage is taken in, not posted: intake adds each item's quantities and
+// provisional price (the marginal price at the period position PostgreSQL's
+// running totals hold: what limits count) to its lease's running totals
+// (usage_totals), which the balance deducts as pending until a posting takes
+// them, and makes it one event in the event store, carrying its priced meter
+// cells (under the card print in force, in its pricing period) and the limit
+// windows that count it, located when it was admitted. A failed item is not
+// priced: what its grace leaves is charged at once, with its own ledger legs.
 //
-// Intake is two steps in the caller's transaction: PrepareUsageTx validates,
-// prices and locates, writing nothing; then CommitUsageTx inserts the events
-// (skipping those an earlier attempt inserted), waits until they read back,
-// and writes the PostgreSQL side. It is append-only and takes no customer's
+// Intake is two steps per batch in the caller's transaction, gathered in its
+// UsageSettlement: PrepareUsageTx validates, prices and locates, writing
+// nothing; then CommitUsageTx writes the PostgreSQL side. The event store
+// takes the settlement's events only once the transaction committed, so a
+// resend inserts nothing again. It is append-only and takes no customer's
 // lock, except to change what that lock guards: to open a session or
 // first-use window (two first uses in different seconds would open two), or
 // to charge a failed item's grace (a balance movement). Concurrent intakes of
 // one customer may price from the same period position; postings price the
-// period's total, so only provisional amounts can differ. An event's identity
-// never depends on a clock read per attempt: a capture occurred when its
-// request was admitted, and an item an earlier attempt inserted keeps the
-// instants that attempt stamped.
+// period's total, so only provisional amounts can differ.
 
 // ErrUsageOutsideIngestWindow refuses usage dated before the ingest window or
 // ahead of the clock.
@@ -127,25 +124,22 @@ type UsageResult struct {
 	Forgiven int64
 	Charges  []billing.UsageCharge
 	Units    map[string]int64
-	// Resent is an item an earlier attempt inserted.
-	Resent bool
 }
 
 // UsageIntake is a prepared batch of usage, ready to commit.
 type UsageIntake struct {
-	store    *eventstore.Store
+	settled  *UsageSettlement
 	merchant uuid.UUID
 	items    []UsageItem
 	Results  []UsageResult
 	events   []*eventstore.UsageEvent
-	existing map[uuid.UUID]eventstore.Existing
+	priced   []pricedItem
 	prints   map[string]ratingCard
 	opens    map[uuid.UUID][]limitOpening
 	// opened are the customers whose items open a window.
-	opened  map[uuid.UUID]bool
-	failed  []failedCharge
-	changed []UsageAccount
-	now     time.Time
+	opened map[uuid.UUID]bool
+	failed []failedCharge
+	now    time.Time
 }
 
 // limitOpening is a session or first-use window a batch opens, or a granted
@@ -179,22 +173,23 @@ func settleRefusal(err error) error {
 	return apperr.Invalidf("%s", err.Error())
 }
 
-// PrepareUsageTx validates and prices a batch, locates its limit windows and
-// reads its failed items' grace. It locks only the customers whose items
-// open a window or charge a failure, in id order, and locates their items
-// again under the lock. It writes nothing. An item that cannot be priced is
-// refused alone.
-func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store *eventstore.Store, items []UsageItem) (*UsageIntake, error) {
+// PrepareUsageTx validates and prices a batch of the settlement's
+// transaction, locates its limit windows and reads its failed items' grace.
+// It locks only the customers whose items open a window or charge a failure,
+// in id order, and locates their items again under the lock. It writes
+// nothing. An item that cannot be priced is refused alone.
+func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, settled *UsageSettlement, items []UsageItem) (*UsageIntake, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if store == nil {
+	if settled == nil || settled.store == nil {
 		return nil, eventstore.Required("usage")
 	}
+	store := settled.store
 	merchantID := mid.UUID()
 	now := instant(s.now())
-	b := &UsageIntake{store: store, merchant: merchantID, items: items, Results: make([]UsageResult, len(items)),
+	b := &UsageIntake{settled: settled, merchant: merchantID, items: items, Results: make([]UsageResult, len(items)),
 		events: make([]*eventstore.UsageEvent, len(items)), prints: map[string]ratingCard{}, opens: map[uuid.UUID][]limitOpening{}, opened: map[uuid.UUID]bool{}, now: now}
 	from, to := now.Add(-retention.UsageIngestWindow), now.Add(retention.UsageClockSkew)
 	var eventTypes []string
@@ -247,12 +242,10 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 	// the mark its periods anchor on.
 	var accounts []account
 	seen := map[account]bool{}
-	var keys []eventstore.UsageKey
 	for i, it := range items {
 		if b.Results[i].Err != nil {
 			continue
 		}
-		keys = append(keys, eventstore.UsageKey{CustomerID: billing.CustomerID(it.Customer.UUID()), EventID: it.EventID})
 		a := account{it.Customer.UUID(), it.Currency}
 		if !seen[a] {
 			seen[a] = true
@@ -283,17 +276,9 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 	if err != nil {
 		return nil, err
 	}
-	// What an earlier attempt inserted is not inserted again, and keeps the
-	// instants it was taken in with: its pricing period and the session and
-	// first-use windows it opened.
-	if b.existing, err = store.ExistingUsage(ctx, keys); err != nil {
+	lapses, err := lotLapses(ctx, q, merchantID, accounts, to)
+	if err != nil {
 		return nil, err
-	}
-	for i := range items {
-		if prior, ok := b.existing[items[i].EventID]; ok && b.Results[i].Err == nil {
-			admitted := prior.AdmittedAt
-			items[i].OccurredAt, items[i].AdmittedAt = prior.OccurredAt, &admitted
-		}
 	}
 	defs, err := limits.Definitions(ctx, q, merchantID)
 	if err != nil {
@@ -320,10 +305,11 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 		}
 	}
 
-	priced, err := s.priceItems(ctx, q, b, defs, meters, granted, anchors)
+	priced, err := s.priceItems(ctx, q, b, defs, meters, granted, anchors, lapses)
 	if err != nil {
 		return nil, err
 	}
+	b.priced = priced
 	if err := s.locateItems(ctx, q, b, defs, priced, nil); err != nil {
 		return nil, err
 	}
@@ -342,10 +328,12 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 	return b, nil
 }
 
-// pricedItem is an item's pricing: its period, and what each named-unit
-// limit that reads it counts.
+// pricedItem is an item's pricing: its period and lapse segment, and what
+// each named-unit limit that reads it counts.
 type pricedItem struct {
 	period  time.Time
+	end     time.Time
+	lapse   time.Time
 	units   map[string]int64
 	charges []itemCharge
 	limits  []eventstore.UsageLimit
@@ -355,15 +343,17 @@ type itemCharge struct {
 	meter, cell, print string
 	model              catalog.Model
 	quantity, stated   int64
-	amount             int64
+	amount, discount   int64
 }
 
 // priceItems resolves each item's cards and quantities and prices them
 // provisionally: each group sharing a period, meter cell and print is
-// charged R(Q + Σq) - R(Q) at the period position Q intake read, never below
-// zero, shared out by quantity.
+// charged R(Q + Σq) - R(Q) at the period position Q the running totals hold,
+// never below zero, shared out by quantity. Where a volume tier's price
+// falls, the fall is the group's discount, shared the same way, for history:
+// amounts less discounts sum to the period's price.
 func (s *MoneyService) priceItems(ctx context.Context, q *gen.Queries, b *UsageIntake, defs []limits.Definition, meters map[string]limits.Meter,
-	granted map[uuid.UUID]map[string]bool, anchors map[account]periodAnchor) ([]pricedItem, error) {
+	granted map[uuid.UUID]map[string]bool, anchors map[account]periodAnchor, lapses map[account][]time.Time) ([]pricedItem, error) {
 	priced := make([]pricedItem, len(b.items))
 	type member struct {
 		item             int
@@ -381,16 +371,17 @@ func (s *MoneyService) priceItems(ctx context.Context, q *gen.Queries, b *UsageI
 	current := map[string][]ratingCard{}
 	cardErr := map[string]error{}
 	earliest := time.Time{}
-	var customers []billing.CustomerID
+	var customers []uuid.UUID
 	for i, it := range b.items {
 		if b.Results[i].Err != nil {
 			continue
 		}
-		period, _, err := anchors[account{it.Customer.UUID(), it.Currency}].period(it.OccurredAt)
+		a := account{it.Customer.UUID(), it.Currency}
+		period, end, err := anchors[a].period(it.OccurredAt)
 		if err != nil {
 			return nil, err
 		}
-		priced[i] = pricedItem{period: period, units: map[string]int64{}}
+		priced[i] = pricedItem{period: period, end: end, lapse: lapseSegment(lapses[a], period, it.OccurredAt), units: map[string]int64{}}
 		if it.Failed {
 			continue
 		}
@@ -459,25 +450,26 @@ func (s *MoneyService) priceItems(ctx context.Context, q *gen.Queries, b *UsageI
 			g.total += u.quantity
 		}
 		if b.Results[i].Err == nil && len(quantities) > 0 {
-			customers = append(customers, billing.CustomerID(it.Customer.UUID()))
+			customers = append(customers, it.Customer.UUID())
 			if earliest.IsZero() || period.Before(earliest) {
 				earliest = period
 			}
 		}
 	}
-	// The period positions, as the event store has them.
+	// The period positions: what the running totals hold, posted or not.
 	position := map[account]map[cellKey]int64{}
 	if len(customers) > 0 {
-		rows, err := b.store.PeriodQuantities(ctx, customers, "", earliest)
+		slices.SortFunc(customers, compareUUID)
+		rows, err := q.ListUsagePositions(ctx, gen.ListUsagePositionsParams{MerchantID: b.merchant, CustomerIds: slices.Compact(customers), PeriodStartsAt: earliest})
 		if err != nil {
 			return nil, err
 		}
 		for _, r := range rows {
-			a := account{r.CustomerID.UUID(), r.Currency}
+			a := account{r.CustomerID, r.Currency}
 			if position[a] == nil {
 				position[a] = map[cellKey]int64{}
 			}
-			k := cellKey{r.PeriodStartsAt, r.Meter, r.Cell}
+			k := cellKey{r.PeriodStartsAt.UTC(), r.MeterKey, r.Cell}
 			position[a][k] = addSat(position[a][k], r.Quantity)
 		}
 	}
@@ -505,16 +497,8 @@ func (s *MoneyService) priceItems(ctx context.Context, q *gen.Queries, b *UsageI
 		if position[g.account] == nil {
 			position[g.account] = map[cellKey]int64{}
 		}
-		// What an earlier attempt inserted is in the store's position, not
-		// yet settled: it is priced as if that attempt never ran.
 		before := position[g.account][g.key]
-		for _, m := range g.members {
-			if _, ok := b.existing[b.items[m.item].EventID]; ok {
-				before -= m.quantity
-			}
-		}
-		before = max(before, 0)
-		shares := make([]int64, len(g.members))
+		shares, discounts := make([]int64, len(g.members)), make([]int64, len(g.members))
 		if g.card.Price.Model == catalog.ModelDynamic {
 			for j, m := range g.members {
 				if m.quantity > 0 {
@@ -530,13 +514,13 @@ func (s *MoneyService) priceItems(ctx context.Context, q *gen.Queries, b *UsageI
 			for j, m := range g.members {
 				quantities[j] = m.quantity
 			}
-			shares = share(max(amount, 0), quantities)
+			shares, discounts = share(max(amount, 0), quantities), share(max(-amount, 0), quantities)
 		}
 		position[g.account][g.key] = addSat(before, g.total)
 		for j, m := range g.members {
 			p := &priced[m.item]
 			p.charges = append(p.charges, itemCharge{meter: g.key.meter, cell: g.key.cell, print: g.print, model: g.card.Price.Model,
-				quantity: m.quantity, stated: m.stated, amount: shares[j]})
+				quantity: m.quantity, stated: m.stated, amount: shares[j], discount: discounts[j]})
 		}
 	}
 	for i := range b.items {
@@ -634,6 +618,9 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 			}
 			for _, fp := range periods {
 				end := fp.end
+				if !end.After(b.now) {
+					continue
+				}
 				p.limits = append(p.limits, eventstore.UsageLimit{Key: failedLimitKey(it.Currency, fp.window.Key, it.Delegated, it.Invoker),
 					WindowStartsAt: fp.start, WindowEndsAt: &end, Units: *it.Amount})
 			}
@@ -642,8 +629,11 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 		}
 		amount := res.Amount
 		res.Units = map[string]int64{catalog.BalanceLimit: amount}
+		// A window that ended before the intake is over: usage counts toward
+		// it no more (a late resend's included) and opens nothing; its rows
+		// are deleted a day after its end (retention.LimitWindows).
 		add := func(key string, w limits.Window, units int64) {
-			if units == 0 {
+			if units == 0 || over(w, b.now) {
 				return
 			}
 			p.limits = append(p.limits, eventstore.UsageLimit{Key: key, WindowStartsAt: w.StartsAt.UTC(), WindowEndsAt: w.EndsAt, Units: units})
@@ -666,7 +656,7 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 			if b.now.Before(readAt) {
 				readAt = b.now
 			}
-			reader := limits.Customer{Q: q, Events: b.store, MerchantID: b.merchant, CustomerID: customer, Now: readAt,
+			reader := limits.Customer{Q: q, Events: b.settled.store, MerchantID: b.merchant, CustomerID: customer, Now: readAt,
 				Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
 					return s.PricingPeriod(ctx, q, b.merchant, customer, unit, at)
 				}}
@@ -687,6 +677,9 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 				units, counts = amount, true
 			}
 			if !counts || units == 0 {
+				continue
+			}
+			if c.Opens && over(limits.Opening(def.Reset, at), b.now) || !c.Opens && over(bucketed(def.Reset, c.Window, at), b.now) {
 				continue
 			}
 			w := c.Window
@@ -728,6 +721,11 @@ func (b *UsageIntake) keep(customer uuid.UUID, key string, c limits.Claim) {
 	b.opens[customer] = append(b.opens[customer], limitOpening{key: key, window: c.Window, capacity: c.Capacity})
 }
 
+// over reports a window that ended at or before now.
+func over(w limits.Window, now time.Time) bool {
+	return w.EndsAt != nil && !w.EndsAt.After(now)
+}
+
 // bucketed is where a limit counts an item in window w: a rolling or rate
 // limit's bucket of the item's instant.
 func bucketed(reset catalog.LimitReset, w limits.Window, at time.Time) limits.Window {
@@ -748,10 +746,10 @@ func failedLimitKey(currency, window string, delegated bool, invoker string) str
 }
 
 // chargeFailures charges each failed item what its grace does not forgive:
-// the grace its windows have left in the event store, less what earlier
-// items of the batch took. A delegated invoker's failure, or one with no
-// grace windows, is not charged; an item an earlier attempt inserted is
-// charged what it was.
+// the grace its windows have left in the event store, less what the
+// transaction's earlier batches and the batch's earlier items took (the
+// store takes none of the transaction's usage before it commits). A
+// delegated invoker's failure, or one with no grace windows, is not charged.
 func (b *UsageIntake) chargeFailures(ctx context.Context, now time.Time) error {
 	var customers []billing.CustomerID
 	for i, it := range b.items {
@@ -762,7 +760,7 @@ func (b *UsageIntake) chargeFailures(ctx context.Context, now time.Time) error {
 	if len(customers) == 0 {
 		return nil
 	}
-	rows, err := b.store.LimitUsage(ctx, customers, now.Add(-retention.UsageIngestWindow))
+	rows, err := b.settled.store.LimitUsage(ctx, customers, now.Add(-retention.UsageIngestWindow))
 	if err != nil {
 		return err
 	}
@@ -777,6 +775,13 @@ func (b *UsageIntake) chargeFailures(ctx context.Context, now time.Time) error {
 			used[window{r.CustomerID.UUID(), r.Key, r.WindowStartsAt}] += r.Units
 		}
 	}
+	for _, e := range b.settled.events {
+		for _, l := range e.Limits {
+			if strings.HasPrefix(l.Key, "failed:") {
+				used[window{e.CustomerID.UUID(), l.Key, l.WindowStartsAt}] += l.Units
+			}
+		}
+	}
 	for i, it := range b.items {
 		res := &b.Results[i]
 		if res.Err != nil || !it.Failed {
@@ -784,13 +789,6 @@ func (b *UsageIntake) chargeFailures(ctx context.Context, now time.Time) error {
 		}
 		stated := *it.Amount
 		res.Charges = []billing.UsageCharge{}
-		if prior, ok := b.existing[it.EventID]; ok {
-			res.Amount, res.Forgiven, res.Resent = prior.Charged, prior.Forgiven, true
-			if prior.Charged > 0 {
-				b.failed = append(b.failed, failedCharge{item: i, amount: prior.Charged})
-			}
-			continue
-		}
 		var charge int64
 		if !it.Delegated && len(it.FailedWindows) > 0 {
 			periods, err := failedUsagePeriods(it.FailedWindows, admittedAt(it, now))
@@ -833,49 +831,40 @@ func (b *UsageIntake) event(i int, it UsageItem, p pricedItem) *eventstore.Usage
 	res := b.Results[i]
 	outcome := eventstore.UsageSucceeded
 	charged, forgiven := int64(0), int64(0)
-	amount := res.Amount
 	if it.Failed {
-		outcome, charged, forgiven, amount = eventstore.UsageFailed, res.Amount, res.Forgiven, res.Amount
+		outcome, charged, forgiven = eventstore.UsageFailed, res.Amount, res.Forgiven
 	}
 	admitted := admittedAt(it, b.now)
 	invokerType := string(billing.InvokerTypeCustomer)
 	if it.Delegated {
 		invokerType = string(billing.InvokerTypeDelegated)
 	}
-	period := p.period
-	if prior, ok := b.existing[it.EventID]; ok {
-		period = prior.PeriodStartsAt
-	}
 	e := &eventstore.UsageEvent{EventID: it.EventID, CustomerID: billing.CustomerID(it.Customer.UUID()), Currency: it.Currency, EventType: it.EventType,
 		Invoker: it.Invoker, InvokerType: invokerType, Outcome: outcome, Source: it.Source, SourceID: it.SourceID, LeaseID: it.LeaseID,
-		N: uint64(max(it.N, 0)), OccurredAt: it.OccurredAt, AdmittedAt: admitted, IngestedAt: b.now, PeriodStartsAt: period,
-		Dimensions: it.Dimensions, Metadata: it.metadata, Amount: amount, Stated: it.Amount,
+		N: uint64(max(it.N, 0)), OccurredAt: it.OccurredAt, AdmittedAt: admitted, IngestedAt: b.now, PeriodStartsAt: p.period,
+		Dimensions: it.Dimensions, Metadata: it.metadata, Stated: it.Amount,
 		Charged: charged, Forgiven: forgiven, Limits: p.limits}
 	for _, c := range p.charges {
-		e.Charges = append(e.Charges, eventstore.UsageCharge{Meter: c.meter, Cell: c.cell, Print: c.print, Quantity: c.quantity, Stated: c.stated})
+		e.Charges = append(e.Charges, eventstore.UsageCharge{Meter: c.meter, Cell: c.cell, Print: c.print, Quantity: c.quantity, Stated: c.stated,
+			Amount: c.amount, Discount: c.discount})
 	}
 	return e
 }
 
 // CommitUsageTx, in the caller's transaction: queues the customers' usage for
-// posting and holds its queue rows, inserts the batch's events the store does
-// not hold and waits until they read back, adds their provisional prices to
-// the lease's pending amounts, records the card prints, opens the session and
-// first-use windows and posts what failed items charge. The caller settles
-// each lease number once, in this transaction, so each item's price is
-// pending once, whether or not the store held its event. Should the
-// transaction not commit, the events stay unsettled, which no posting takes,
-// and a resend finds them and redoes only this side. Changed names the
-// balances the usage moved, for the caller to watch (watchUsageTx,
-// WatchUsage).
+// posting and holds its queue rows, records the card prints, adds each item's
+// quantities and provisional price to its lease's running totals, opens the
+// session and first-use windows and posts what failed items charge. The
+// caller settles each lease number once, in this transaction, so each item is
+// in the totals once. The batch's events and the balances it moved join its
+// settlement, which the event store takes once the transaction commits.
 func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *UsageIntake) error {
 	if b == nil {
 		return nil
 	}
 	type mark struct {
-		since, due time.Time
-		amount     int64
-		pending    int64
+		due    time.Time
+		amount int64
 	}
 	marks := map[account]*mark{}
 	var accounts []account
@@ -900,46 +889,21 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 		}
 		// Priced usage is pending until a posting takes it; a failed item's
 		// charge posts below.
-		m.pending = addSat(m.pending, b.Results[i].Amount)
 		if zone == nil {
-			if zone, err = s.accountingZone(ctx); err != nil {
+			if zone, err = s.AccountingZone(ctx); err != nil {
 				return err
 			}
 		}
-		due := dayAfter(zone, e.OccurredAt)
-		if m.since.IsZero() || e.PeriodStartsAt.Before(m.since) {
-			m.since = e.PeriodStartsAt
-		}
-		if m.due.IsZero() || due.Before(m.due) {
+		if due := dayAfter(zone, e.OccurredAt); m.due.IsZero() || due.Before(m.due) {
 			m.due = due
 		}
 	}
 	slices.SortFunc(accounts, func(x, y account) int {
 		return cmp.Or(compareUUID(x.customer, y.customer), strings.Compare(x.currency, y.currency))
 	})
-	// Before the insert: a posting either waits for this transaction or
-	// finished before any of its usage was in the store.
-	if err := b.queueUsage(ctx, q, accounts, func(a account) (since, due time.Time) {
-		m := marks[a]
-		return m.since, m.due
-	}); err != nil {
-		return err
-	}
-	var fresh []eventstore.UsageEvent
-	for i, e := range b.events {
-		if e == nil {
-			continue
-		}
-		if _, ok := b.existing[e.EventID]; ok {
-			b.Results[i].Resent = true
-			continue
-		}
-		fresh = append(fresh, *e)
-	}
-	if err := b.store.InsertUsage(ctx, fresh); err != nil {
-		return err
-	}
-	if err := b.addPending(ctx, q, lease, accounts, func(a account) int64 { return marks[a].pending }); err != nil {
+	// Before the usage: a posting either waits for this transaction or
+	// finished before any of it was settled.
+	if err := b.queueUsage(ctx, q, accounts, func(a account) time.Time { return marks[a].due }); err != nil {
 		return err
 	}
 	prints := make([]string, 0, len(b.prints))
@@ -955,6 +919,9 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 		if err := q.InsertUsageCardPrint(ctx, gen.InsertUsageCardPrintParams{MerchantID: b.merchant, Print: p, Card: raw, Now: b.now}); err != nil {
 			return err
 		}
+	}
+	if err := b.addTotals(ctx, q, lease); err != nil {
+		return err
 	}
 	customers := make([]uuid.UUID, 0, len(b.opens))
 	for c := range b.opens {
@@ -979,35 +946,29 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 			return err
 		}
 	}
-	b.changed = b.changed[:0]
+	for _, e := range b.events {
+		if e != nil {
+			b.settled.events = append(b.settled.events, *e)
+		}
+	}
 	for _, a := range accounts {
-		if marks[a].amount > 0 {
-			b.changed = append(b.changed, UsageAccount{Customer: a.customer, Currency: a.currency})
+		if c := (UsageAccount{Customer: a.customer, Currency: a.currency}); marks[a].amount > 0 && !slices.Contains(b.settled.changed, c) {
+			b.settled.changed = append(b.settled.changed, c)
 		}
 	}
 	return nil
 }
 
-// Changed are the balances the committed usage took from: one that crosses
-// a line of its balance watch queues a look, and one that takes arrears to
-// the threshold asks for a usage invoice.
-func (b *UsageIntake) Changed() []UsageAccount {
-	if b == nil {
-		return nil
-	}
-	return b.changed
-}
-
-// queueUsage queues each account's usage for posting from its period (mark;
-// a zero since queues nothing). Most accounts already have a queue row that
-// covers it: those are only held, by key share, so a posting (which locks
-// the row for update) waits for this transaction, and intakes never wait on
-// each other. The rest are written.
-func (b *UsageIntake) queueUsage(ctx context.Context, q *gen.Queries, accounts []account, mark func(account) (since, due time.Time)) error {
+// queueUsage queues each account's usage for posting, due when due says (a
+// zero due queues nothing). Most accounts already have a queue row due no
+// later: those are only held, by key share, so a posting (which locks the
+// row for update) waits for this transaction, and intakes never wait on each
+// other. The rest are written.
+func (b *UsageIntake) queueUsage(ctx context.Context, q *gen.Queries, accounts []account, due func(account) time.Time) error {
 	byCurrency := map[string][]uuid.UUID{}
 	var currencies []string
 	for _, a := range accounts {
-		if since, _ := mark(a); since.IsZero() {
+		if due(a).IsZero() {
 			continue
 		}
 		if _, ok := byCurrency[a.currency]; !ok {
@@ -1021,18 +982,17 @@ func (b *UsageIntake) queueUsage(ctx context.Context, q *gen.Queries, accounts [
 		if err != nil {
 			return err
 		}
-		have := make(map[uuid.UUID]gen.ShareUsagePendingRow, len(held))
+		have := make(map[uuid.UUID]time.Time, len(held))
 		for _, h := range held {
-			have[h.CustomerID] = h
+			have[h.CustomerID] = h.DueAt
 		}
 		write := gen.UpsertUsagePendingParams{MerchantID: b.merchant, Currency: currency, Now: b.now}
 		for _, c := range byCurrency[currency] {
-			since, due := mark(account{c, currency})
-			due = later(due, since.Add(time.Microsecond))
-			if h, ok := have[c]; ok && !since.Before(h.SinceAt) && !due.Before(h.DueAt) {
+			d := due(account{c, currency})
+			if h, ok := have[c]; ok && !d.Before(h) {
 				continue
 			}
-			write.CustomerIds, write.SinceAts, write.DueAts = append(write.CustomerIds, c), append(write.SinceAts, since), append(write.DueAts, due)
+			write.CustomerIds, write.DueAts = append(write.CustomerIds, c), append(write.DueAts, d)
 		}
 		if len(write.CustomerIds) == 0 {
 			continue
@@ -1044,31 +1004,95 @@ func (b *UsageIntake) queueUsage(ctx context.Context, q *gen.Queries, accounts [
 	return nil
 }
 
-// addPending adds what each account's usage costs at its provisional prices
-// to the lease's pending amounts. Only the lease's syncs, which serialize on
-// it, write its rows.
-func (b *UsageIntake) addPending(ctx context.Context, q *gen.Queries, lease uuid.UUID, accounts []account, amount func(account) int64) error {
-	byCurrency := map[string]*gen.AddUsagePendingAmountsParams{}
-	var currencies []string
-	for _, a := range accounts {
-		if amount(a) <= 0 {
+// totalKey is a lease's running total: a customer's meter cell under one
+// card print in a pricing period's lapse segment.
+type totalKey struct {
+	account
+	period, end, lapse time.Time
+	meter, cell, print string
+}
+
+// addTotals adds each item's quantities and provisional price to the lease's
+// running totals, one row per key. Only the lease's syncs, which serialize
+// on it, write its rows.
+func (b *UsageIntake) addTotals(ctx context.Context, q *gen.Queries, lease uuid.UUID) error {
+	type total struct{ quantity, stated, requests, amount int64 }
+	sums := map[totalKey]*total{}
+	var keys []totalKey
+	for i, e := range b.events {
+		if e == nil || b.items[i].Failed {
 			continue
 		}
-		p := byCurrency[a.currency]
-		if p == nil {
-			p = &gen.AddUsagePendingAmountsParams{MerchantID: b.merchant, Currency: a.currency, LeaseID: lease, Now: b.now}
-			byCurrency[a.currency] = p
+		p := b.priced[i]
+		for _, c := range p.charges {
+			k := totalKey{account: account{e.CustomerID.UUID(), e.Currency}, period: p.period, end: p.end, lapse: p.lapse, meter: c.meter, cell: c.cell, print: c.print}
+			t := sums[k]
+			if t == nil {
+				t = &total{}
+				sums[k] = t
+				keys = append(keys, k)
+			}
+			t.quantity, t.stated = addSat(t.quantity, c.quantity), addSat(t.stated, c.stated)
+			t.requests, t.amount = t.requests+1, addSat(t.amount, c.amount)
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	slices.SortFunc(keys, func(x, y totalKey) int {
+		return cmp.Or(compareUUID(x.customer, y.customer), strings.Compare(x.currency, y.currency), x.period.Compare(y.period),
+			strings.Compare(x.meter, y.meter), strings.Compare(x.cell, y.cell), strings.Compare(x.print, y.print), x.lapse.Compare(y.lapse))
+	})
+	arg := gen.AddUsageTotalsParams{MerchantID: b.merchant, LeaseID: lease, Now: b.now}
+	for _, k := range keys {
+		t := sums[k]
+		arg.CustomerIds, arg.Currencies = append(arg.CustomerIds, k.customer), append(arg.Currencies, k.currency)
+		arg.PeriodStartsAts, arg.PeriodEndsAts = append(arg.PeriodStartsAts, k.period), append(arg.PeriodEndsAts, k.end)
+		arg.MeterKeys, arg.Cells, arg.Prints = append(arg.MeterKeys, k.meter), append(arg.Cells, k.cell), append(arg.Prints, k.print)
+		arg.LapseAts = append(arg.LapseAts, k.lapse)
+		arg.Quantities, arg.Stateds = append(arg.Quantities, t.quantity), append(arg.Stateds, t.stated)
+		arg.Requests, arg.Amounts = append(arg.Requests, t.requests), append(arg.Amounts, t.amount)
+	}
+	return q.AddUsageTotals(ctx, arg)
+}
+
+// lotLapses are when each account's credit lots that hold units lapse, by
+// through: where intake segments its usage.
+func lotLapses(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, accounts []account, through time.Time) (map[account][]time.Time, error) {
+	byCurrency := map[string][]uuid.UUID{}
+	var currencies []string
+	for _, a := range accounts {
+		if _, ok := byCurrency[a.currency]; !ok {
 			currencies = append(currencies, a.currency)
 		}
-		p.CustomerIds, p.Amounts = append(p.CustomerIds, a.customer), append(p.Amounts, amount(a))
+		byCurrency[a.currency] = append(byCurrency[a.currency], a.customer)
 	}
 	slices.Sort(currencies)
+	out := map[account][]time.Time{}
 	for _, currency := range currencies {
-		if err := q.AddUsagePendingAmounts(ctx, *byCurrency[currency]); err != nil {
-			return err
+		rows, err := q.ListLotLapses(ctx, gen.ListLotLapsesParams{MerchantID: merchantID, Currency: currency, CustomerIds: byCurrency[currency], Through: through})
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			a := account{r.CustomerID, currency}
+			out[a] = append(out[a], r.ExpiresAt.UTC())
 		}
 	}
-	return nil
+	return out, nil
+}
+
+// lapseSegment is where usage at occurred counts in its period: the latest
+// lapse at or before it, else the period's start. A posting before a lot's
+// lapse takes the segments before it, exactly the usage that occurred before.
+func lapseSegment(lapses []time.Time, period, occurred time.Time) time.Time {
+	at := period
+	for _, l := range lapses {
+		if !l.After(occurred) && l.After(at) {
+			at = l
+		}
+	}
+	return at
 }
 
 // share splits amount across weights exactly: each takes its cumulative

@@ -62,6 +62,7 @@ var excludedTables = map[string]string{
 
 	"price_keys":                    "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
 	"network_activity_daily":        "derived: the payments, disputes and fraud_reports triggers rebuild it as they are restored",
+	"customer_paid_totals":          "derived: the payments trigger rebuilds it as they are restored",
 	"balance_watches":               "derived: when a watched balance is next looked at; restore watches every prepaid balance and running charge again",
 	"psp_imports":                   "import working state: the destination pulls its PSPs again",
 	"psp_import_records":            "import working state: copies of provider objects, pulled again",
@@ -121,6 +122,7 @@ var excludedColumns = map[string]string{
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
 
 	"price_keys":              "merchant_id product_id key revision created_at updated_at",
+	"customer_paid_totals":    "merchant_id customer_id currency net_paid_amount first_paid_at",
 	"network_activity_daily":  "merchant_id psp_id rail network currency day_at sales sales_amount refunds refund_amount chargebacks chargeback_amount fraud_chargebacks fraud_chargeback_amount fraud_reports fraud_report_amount",
 	"balance_watches":         "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
 	"ledger_type_totals":      "merchant_id book currency account_type psp_id credits_posted debits_posted",
@@ -151,8 +153,8 @@ var omittedColumns = map[string]string{
 	"price_migrations": "destructive_action_id",
 	// Derived from the lines: a restored open invoice is not found by it.
 	"invoices": "lines_digest",
-	// When time alone next changes a payer's delinquency: restore schedules
-	// every payer again.
+	// When time alone next changes a customer's delinquency: restore schedules
+	// every customer again.
 	"customer_delinquency": "next_evaluation_at",
 	// When a usage account is next checked: restore schedules it again.
 	"money_settings": "usage_due_at",
@@ -331,7 +333,7 @@ var registryCurrencies = func() string {
 }()
 
 // referenceChecks: the ledger intentionally has no control-plane FKs. Archive
-// restoration still refuses missing/cross-payer retained business references.
+// restoration still refuses missing/cross-customer retained business references.
 var referenceChecks = []rowCheck{
 	// Current available prices obey the same product/price contract as ordinary
 	// catalog writes; incompatible archived history remains portable.
@@ -408,7 +410,7 @@ var referenceChecks = []rowCheck{
    WHERE g.merchant_id=$1 AND g.id=ledger_transfers.credit_grant_id AND (
      g.customer_id=ledger_transfers.customer_id OR (
        ledger_transfers.customer_id IS NULL AND g.paid_amount IS NOT NULL
-       AND ledger_transfers.transfer_type IN ('credit_purchase_revenue','credit_refund_cash','credit_refund_cash_restore','credit_refund_funding')
+       AND ledger_transfers.transfer_type='credit_refund_funding'
        AND NOT EXISTS(SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id=$1
          AND a.id IN (ledger_transfers.debit_account_id,ledger_transfers.credit_account_id) AND a.customer_id IS NOT NULL)))))
 	 OR (invoice_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.invoices o WHERE o.merchant_id=$1 AND o.id=ledger_transfers.invoice_id AND o.customer_id=ledger_transfers.customer_id
@@ -432,8 +434,9 @@ var referenceChecks = []rowCheck{
 	 AND (status IN ('active','pending','past_due','unknown') OR COALESCE(current_period_ends_at,ended_at)>now())
 	 AND EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=subscriptions.product_id AND p.tier_group IS DISTINCT FROM subscriptions.tier_group)`},
 	{"usage_pending", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=usage_pending.customer_id)`},
-	{"usage_pending_amounts", `NOT EXISTS(SELECT 1 FROM billing.usage_pending u WHERE u.merchant_id=$1 AND u.customer_id=usage_pending_amounts.customer_id AND u.currency=usage_pending_amounts.currency)`},
-	{"usage_postings", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=usage_postings.customer_id)`},
+	{"usage_totals", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=usage_totals.customer_id)
+	 OR NOT EXISTS(SELECT 1 FROM billing.usage_card_prints p WHERE p.merchant_id=$1 AND p.print=usage_totals.print)`},
+	{"usage_receipts", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=usage_receipts.customer_id)`},
 	{"ledger_transfers", `source_id LIKE 'order_collection:%' AND
 	 (source<>'invoice_charge' OR operation<>'invoice_payment' OR transfer_type<>'owed_payment' OR
 	 NOT EXISTS(SELECT 1 FROM billing.payments a WHERE a.merchant_id=$1

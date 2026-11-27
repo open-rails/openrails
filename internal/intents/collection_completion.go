@@ -16,7 +16,7 @@ import (
 var errCollectionNonexecutionUnproven = errors.New("fenced collection has no qualified nonexecution proof")
 
 // CompleteInvoiceCollection is called at the end of the domain transaction,
-// after its payer/invoice/attempt locks. It is deliberately collection-specific:
+// after its customer/invoice/attempt locks. It is deliberately collection-specific:
 // a successful state requires retained, validated provider receipt custody.
 func (s *Store) CompleteInvoiceCollection(ctx context.Context, in gen.BillingProviderIntent, outcome Outcome, now time.Time) error {
 	if in.IntentType != TypeInvoiceCollection {
@@ -79,6 +79,7 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.BillingProv
 			return errors.New("qualified payment contradicts qualified nonexecution")
 		}
 	}
+	operatorNotExecuted := current.IntentType == subscriptions.TypeSubscriptionCollection && current.Rail == "nmi" && OperatorResolutionRecord(ctx)["not_executed"] == true
 	status := StatusFailedTerminal
 	evidence := map[string]any{}
 	reason := outcome.Reason
@@ -107,7 +108,7 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.BillingProv
 				}
 			}
 			_, fenced := canonical["submitted_at"]
-			if fenced && !hasNonexecution {
+			if fenced && !hasNonexecution && !operatorNotExecuted {
 				return errCollectionNonexecutionUnproven
 			}
 			if hasNonexecution {
@@ -152,13 +153,13 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.BillingProv
 				if outcome.Evidence["declined"] != true || outcome.Evidence["response_code"] != refusal.ResponseCode {
 					return errors.New("rebill terminal result contradicts retained refusal")
 				}
-			} else if (EvidenceString(current, rebillSubmittedAt) != "" && !hasNonexecution) || outcome.Evidence["not_executed"] != true {
+			} else if (EvidenceString(current, rebillSubmittedAt) != "" && !hasNonexecution && !operatorNotExecuted) || outcome.Evidence["not_executed"] != true {
 				return errors.New("submitted rebill cannot be released without a definitive refusal")
 			}
 		}
 	}
 	if current.IntentType == subscriptions.TypeSubscriptionCollection {
-		for _, key := range []string{"submitted_at", qualifiedCollectionNonexecutionKey, collectionCandidateKey} {
+		for _, key := range []string{"submitted_at", "cancel_revoked_access_at", qualifiedCollectionNonexecutionKey, collectionCandidateKey} {
 			if value, ok := existing[key]; ok {
 				evidence[key] = value
 			}

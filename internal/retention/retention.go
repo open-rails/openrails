@@ -47,14 +47,24 @@ const (
 	// OrphanState keeps the deployment-global lease of a periodic kind no
 	// fleet has scheduled for 30 days.
 	OrphanState = 30 * Day
-	// LimitWindows keeps a closed limit window 61 days past its end: the
-	// replay horizon, within which late usage and replays still resolve.
-	LimitWindows = 61 * Day
+	// LimitWindows keeps a closed limit window a day past its end: nothing
+	// reads a window once it is over (late usage counts toward no window that
+	// ended), and the day covers clock skew between OpenRails and the event
+	// store and the syncs in flight at the end. Its counter (the event store's
+	// limit_usage) expires as long after the end.
+	LimitWindows = Day
+	// ReachedLimitWindows keeps a closed window that reached its capacity 61
+	// days past its end: the limits_reached metric counts it.
+	ReachedLimitWindows = 61 * Day
 	// Leases keeps a gate's lease 61 days past its last sync, so its late
 	// reports and replays still resolve.
 	Leases = 61 * Day
 	// LimitAdjustments keeps a limit adjustment's replay record 61 days.
 	LimitAdjustments = 61 * Day
+	// UsageTotals keeps a pricing period's running totals a day past its late
+	// usage window: no usage enters the period after the window, and the day
+	// covers the syncs in flight at its close.
+	UsageTotals = UsageIngestWindow + Day
 	// Carts keeps a cart 30 days past its last change.
 	Carts = 30 * Day
 	// ResolvedFindings keeps a resolved reconciliation finding 12 months past

@@ -287,7 +287,7 @@ func Restore(ctx context.Context, database *db.DB, clock clockwork.Clock, id bil
 		if err := q.RebuildBalanceWatches(ctx, gen.RebuildBalanceWatchesParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err
 		}
-		// Every payer with an open usage invoice, in grace or delinquent, is
+		// Every customer with an open usage invoice, in grace or delinquent, is
 		// evaluated again at once.
 		if err := q.RebuildDelinquencyDue(ctx, gen.RebuildDelinquencyDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err

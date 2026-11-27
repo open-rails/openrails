@@ -6,7 +6,7 @@ import { AuthProvider } from "@openrails/auth-ui/react"
 import { BillingProvider } from "@openrails/billing-ui"
 
 import { auth, billing } from "./clients"
-import { CourseBuyPage, CoursePage, StorePage } from "./pages"
+import { CourseBuyPage, CoursePage, SetupPage, StorePage } from "./pages"
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -18,6 +18,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/" element={<StorePage />} />
               <Route path="/courses/:course" element={<CoursePage />} />
               <Route path="/courses/:course/buy" element={<CourseBuyPage />} />
+              <Route path="/setup" element={<SetupPage />} />
             </Routes>
           </BrowserRouter>
         </BillingProvider>

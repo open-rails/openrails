@@ -138,9 +138,10 @@ func StartRenewalAttempt(ctx context.Context, q *gen.Queries, invoice gen.Billin
 // RenewalPaid completes the renewal invoice its collection paid, in the
 // collection's completion transaction: numbered, linked to the payment the
 // renewal recorded, with invoice.completed. A renewal whose subscription ended
-// meanwhile is void instead, the payment (refunded) on it; payment is nil
-// when a reversal recorded none.
-func RenewalPaid(ctx context.Context, d *db.DB, merchantID, invoiceID, attemptID uuid.UUID, payment *uuid.UUID, transactionID string, now time.Time, clock clockwork.Clock) error {
+// without receiving this paid period is void instead, with the refunded payment.
+// keepCanceled means the lifecycle granted the period without resuming renewal.
+// payment is nil when a reversal recorded none.
+func RenewalPaid(ctx context.Context, d *db.DB, merchantID, invoiceID, attemptID uuid.UUID, payment *uuid.UUID, transactionID string, now time.Time, clock clockwork.Clock, keepCanceled bool) error {
 	q := d.Gen(ctx)
 	invoice, err := q.LockInvoice(ctx, gen.LockInvoiceParams{MerchantID: merchantID, ID: invoiceID})
 	if err != nil {
@@ -165,7 +166,7 @@ func RenewalPaid(ctx context.Context, d *db.DB, merchantID, invoiceID, attemptID
 	if err != nil {
 		return err
 	}
-	if ended {
+	if ended && !keepCanceled {
 		return voidRenewal(ctx, d, &invoice, payment, now)
 	}
 	if payment == nil {

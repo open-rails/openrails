@@ -2,7 +2,6 @@ package admission
 
 import (
 	"context"
-	"math"
 	"strings"
 	"time"
 
@@ -14,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
-// SpendgatePolicyLoader resolves the payer's policy windows inside the
+// SpendgatePolicyLoader resolves the customer's policy windows inside the
 // admission transaction. FX conversion expresses each limit in the request unit.
 type SpendgatePolicyLoader struct {
 	policies *BillingPolicyStore
@@ -27,51 +26,22 @@ func NewSpendgatePolicyLoader(policies *BillingPolicyStore, fxp *fx.Rates) *Spen
 }
 
 // ResolvePolicy reads the current binding and policy together from PostgreSQL.
-func (l *SpendgatePolicyLoader) ResolvePolicy(ctx context.Context, payer identity.CustomerID, trustLevel string) (ResolvedPolicy, error) {
-	return l.policies.Resolve(ctx, payer, trustLevel)
+func (l *SpendgatePolicyLoader) ResolvePolicy(ctx context.Context, customer identity.CustomerID, trustLevel string) (ResolvedPolicy, error) {
+	return l.policies.Resolve(ctx, customer, trustLevel)
 }
 
-// Load turns an already-resolved policy into the payer-scope windows the SQL
-// gate enforces, in requestCurrency. Only window_spend_cap declares NEW-spend
-// windows; an outstanding_cap policy caps debt, not velocity. A window that
-// names no currency is in the policy's policy_currency, else the request's.
+// Load turns an already-resolved policy into the customer-scope windows the SQL
+// gate enforces, in requestCurrency. A window that names no currency is in
+// the policy's policy_currency, else the request's.
 func (l *SpendgatePolicyLoader) Load(ctx context.Context, requestCurrency string, resolved ResolvedPolicy) (spendgate.Policy, error) {
-	pw, err := l.convert(ctx, spendgate.ScopePayer, resolved.SpendWindows, resolved.PolicyCurrency, requestCurrency)
+	pw, err := l.convert(ctx, spendgate.ScopeCustomer, resolved.SpendWindows, resolved.PolicyCurrency, requestCurrency)
 	if err != nil {
 		return spendgate.Policy{}, err
 	}
 	if len(pw) == 0 {
 		return spendgate.Policy{}, nil
 	}
-	return spendgate.Policy{Scopes: []spendgate.ScopedWindows{{Scope: spendgate.ScopePayer, Windows: pw}}}, nil
-}
-
-// InCurrency is resolved as it binds a request in requestCurrency. Its
-// outstanding cap, like its collection threshold in usage billing, binds only
-// money in its policy_currency: another currency keeps the account's own
-// limit. Its accrual-rate cap, a velocity like its windows, is converted. A
-// blank policy_currency is the request's.
-func (l *SpendgatePolicyLoader) InCurrency(ctx context.Context, resolved ResolvedPolicy, requestCurrency string) (ResolvedPolicy, error) {
-	from := strings.TrimSpace(resolved.PolicyCurrency)
-	to := money.NormalizeCurrency(requestCurrency)
-	// No rate converts money into a merchant's unit, and a cap naming no
-	// currency is money: a policy's caps bind no unit.
-	if currency.IsUnitCode(to) && money.NormalizeCurrency(from) != to {
-		resolved.OutstandingCapAmount, resolved.AccrualRateCapPerHour = 0, 0
-		return resolved, nil
-	}
-	if from == "" || money.NormalizeCurrency(from) == to {
-		return resolved, nil
-	}
-	resolved.OutstandingCapAmount = 0
-	if resolved.AccrualRateCapPerHour > 0 {
-		conv, _, err := fx.ConvertAmount(ctx, l.fx, money.NormalizeCurrency(from), to, resolved.AccrualRateCapPerHour)
-		if err != nil {
-			return ResolvedPolicy{}, err
-		}
-		resolved.AccrualRateCapPerHour = conv
-	}
-	return resolved, nil
+	return spendgate.Policy{Scopes: []spendgate.ScopedWindows{{Scope: spendgate.ScopeCustomer, Windows: pw}}}, nil
 }
 
 // convert maps budgets.BudgetWindow → spendgate.Window, FX-converting the limit to
@@ -109,72 +79,24 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 	return out, nil
 }
 
-// payerCapacity is the affordability snapshot the spendgate is evaluated
-// against: spendable balance (ledger customer_units counters, O(1)) plus the
-// arrears credit line still available, used as the gate's negative floor.
-// Pending usage and running-charge accrual are deducted from the balance.
-//
-// The bound policy's KIND decides whether prior debt reduces the line, and that
-// single branch is the whole distinction between or#897's two seed businesses:
-//
-//   - outstanding_cap (and the no-binding default): the line is a ceiling on
-//     DEBT, so outstanding owed is SUBTRACTED. $155 unpaid against a $200 line
-//     leaves $45. Before or#878/or#897 the raw limit was passed and — because
-//     arrears debt lives on the arrears account rather than as a negative
-//     customer_units — the cap never bit at all.
-//   - window_spend_cap: the line is untouched by prior debt. The cloud business
-//     caps NEW spend per window; an unpaid invoice feeds delinquency (the TIME
-//     axis, or#878) and the merchant's own shutoff, not admission.
-//
-// The policy's declared OutstandingCapAmount wins when set; zero defers to the
-// payer's own arrears credit limit, which stays the per-account lever.
-// Available is what the customer may spend before any credit line: its
-// balance less pending usage and accrual, less what it owes when it prepays.
-func Available(capacity money.AdmissionCapacity) int64 {
-	available, _, _ := payerCapacity(capacity, ResolvedPolicy{})
-	return available
-}
-
-func payerCapacity(capacity money.AdmissionCapacity, policy ResolvedPolicy) (available, creditLine, outstanding int64) {
+// customerCapacity is the affordability snapshot the spendgate is evaluated
+// against: spendable balance (ledger customer_units counters, O(1)) less
+// pending usage and running-charge accrual, plus, in arrears, the credit line
+// still available: the customer's credit limit (its own, else its policy's
+// cap, else the merchant's usage terms') less what it owes, floored at zero.
+// Prepaid, what it owes is not available to new work.
+func customerCapacity(capacity money.AdmissionCapacity) (available, creditLine, outstanding int64) {
 	available = capacity.Balance - capacity.Unposted()
 	outstanding = capacity.OutstandingOwed
 	if capacity.BillingMode != money.BillingModeArrears {
-		// Prepaid: money already owed is not available to new work.
 		return available - outstanding, 0, outstanding
 	}
-	limit := creditLimitForPolicy(capacity, policy)
-	if limit <= 0 {
-		return available, 0, outstanding
-	}
-	creditLine = limit
-	if capacity.HardCreditLimit || policy.GatesOnOutstandingOwed() {
-		creditLine = limit - outstanding
-		if creditLine < 0 {
-			creditLine = 0
-		}
-	}
-	return available, creditLine, outstanding
+	return available, max(capacity.CreditLimit-outstanding, 0), outstanding
 }
 
-func creditLimitForPolicy(capacity money.AdmissionCapacity, policy ResolvedPolicy) int64 {
-	limit := capacity.CreditLimit
-	if policy.OutstandingCapAmount > 0 && (!capacity.HardCreditLimit || policy.OutstandingCapAmount < limit) {
-		limit = policy.OutstandingCapAmount
-	}
-	return max(limit, 0)
-}
-
-// Debt settlement frees the credit line, but not pending usage. Do not
-// collect early for a request that still could not fit after payment.
-func canFitAfterDebtSettlement(capacity money.AdmissionCapacity, policy ResolvedPolicy, cost int64) bool {
-	unposted := capacity.Unposted()
-	if unposted > 0 && capacity.Balance < math.MinInt64+unposted {
-		return false
-	}
-	available := capacity.Balance - unposted
-	limit := creditLimitForPolicy(capacity, policy)
-	if available > math.MaxInt64-limit {
-		return true
-	}
-	return cost <= available+limit
+// Available is what the customer may spend before any credit line: its
+// balance less pending usage and accrual, less what it owes when it prepays.
+func Available(capacity money.AdmissionCapacity) int64 {
+	available, _, _ := customerCapacity(capacity)
+	return available
 }

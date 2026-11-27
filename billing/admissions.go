@@ -18,7 +18,7 @@ const (
 )
 
 // AdmitParams is one request a Gate decides against a customer's money
-// (payer capacity, spend windows and failed-usage cutoffs) and the usage
+// (customer capacity, spend windows and failed-usage cutoffs) and the usage
 // limits its usage counts toward, on the gate's view: nothing is held on
 // the server.
 type AdmitParams struct {
@@ -27,7 +27,8 @@ type AdmitParams struct {
 	CustomerID  CustomerID  `json:"customer_id"`
 	Invoker     string      `json:"invoker"`
 	InvokerType InvokerType `json:"invoker_type"`
-	// TrustLevel selects money policy; empty uses the customer's stored level.
+	// TrustLevel picks the request's spend windows; empty uses the customer's
+	// effective trust level (explicit, else by the merchant's trust_tiers).
 	TrustLevel string `json:"trust_level,omitempty"`
 	// Resource is attribution only.
 	Resource string           `json:"resource,omitempty"`

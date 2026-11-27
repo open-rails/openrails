@@ -6,13 +6,11 @@
   "billing_policies": [
     {
       "name": "credit_line",
-      "kind": "outstanding_cap",
       "outstanding_cap_amount": "9223372036854775807",
       "collection_threshold_amount": "-9223372036854775808"
     },
     {
       "name": "monthly",
-      "kind": "window_spend_cap",
       "spend_windows": [
         {
           "key": "month",

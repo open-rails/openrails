@@ -39,11 +39,11 @@ func fixedOffsetMs(prefix string, durMs int64) int64 {
 	return offset
 }
 
-func windowPeriod(mid, payer uuid.UUID, currency string, w resolvedWindow, now time.Time) (string, time.Time, time.Time, error) {
+func windowPeriod(mid, customer uuid.UUID, currency string, w resolvedWindow, now time.Time) (string, time.Time, time.Time, error) {
 	if w.Duration < time.Millisecond || w.Duration > retention.MaxSpendWindow || w.Limit < 0 {
 		return "", time.Time{}, time.Time{}, fmt.Errorf("invalid spend window")
 	}
-	key := w.identity(fmt.Sprintf("%s/%s/%s", mid, payer, currency))
+	key := w.identity(fmt.Sprintf("%s/%s/%s", mid, customer, currency))
 	duration := w.Duration.Milliseconds()
 	offset := fixedOffsetMs(key, duration)
 	bucket := (now.UnixMilli() - offset) / duration

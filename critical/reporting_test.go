@@ -30,6 +30,26 @@ func TestReporting(t *testing.T) {
 	t.Run("OR-J53-S03/money-never-sums-across-currencies", moneyPerCurrency)
 	t.Run("OR-J53-S04/a-sale-at-2330-in-the-accounting-timezone-counts-on-that-local-day", accountingDays)
 	t.Run("OR-J53-S05/a-day-chart-across-a-midnight-clock-change-has-one-row-per-local-day", midnightTransition)
+	t.Run("OR-J53-S08/a-sort-term-the-query-cannot-order-by-is-refused-on-its-order-param", orderRefusals)
+}
+
+// Each order term the query cannot sort by is refused on its own order[i]
+// param: one naming both a measure and a dimension, a direction other than
+// asc or desc, a measure the query does not ask for and a dimension it does
+// not group by.
+func orderRefusals(t *testing.T) {
+	w := newWorld(t)
+	_, err := w.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"rebills"}, By: []string{"outcome"},
+		Range: &billing.MetricsRange{Last: "30d"}, Order: []billing.MetricsOrder{
+			{Measure: "rebills", Dimension: "outcome"}, {Measure: "rebills", Dir: "up"}, {Measure: "purchases"}, {Dimension: "currency"},
+		}})
+	refusals := metricRefusals(t, err)
+	for _, param := range []string{"order[0]", "order[1].dir", "order[2].measure", "order[3].dimension"} {
+		require.Contains(t, refusals, param, "%v", refusals)
+		require.Equal(t, "invalid_order", refusals[param]["code"])
+	}
+	require.Len(t, refusals, 4, "%v", refusals)
+	require.Equal(t, `each order term needs exactly one of "measure" or "dimension"`, refusals["order[0]"]["message"])
 }
 
 // Santiago moved its clocks from midnight to 01:00 on 2026-09-06: that day

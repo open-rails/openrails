@@ -117,7 +117,8 @@ type ProductListParams struct {
 // the billing, without synchronizing provider catalog objects. A provider
 // price is owned and run by its provider (a legacy NMI plan, a Stripe price,
 // a CCBill FlexForm); its terms are read from the provider, or declared for
-// CCBill, and OpenRails never writes it.
+// CCBill and for an NMI plan NMI has not answered for, and OpenRails never
+// writes it.
 type Price struct {
 	CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
 	// Quantity makes a recurring price per seat: UnitAmount is one seat's, and
@@ -273,7 +274,9 @@ type CreatePriceProduct struct {
 // PSP key and names the provider's object: PlanID (an NMI recurring plan),
 // PriceID (a Stripe price), or FlexID and RecurringBillingOptionID (a CCBill
 // FlexForm). NMI and Stripe terms are read from the provider; CCBill, which
-// has no read API, declares UnitAmount, Currency and BillingIntervalHours.
+// has no read API, declares UnitAmount, Currency and BillingIntervalHours. An
+// NMI plan may declare them too, standing in, unconfirmed, while NMI does not
+// answer; NMI's own terms win once it does.
 // AccessDurationHours defaults to the verified provider service-period end;
 // explicit hours override it, and explicit null grants indefinite access. OneOff is a price
 // that does not renew. Nothing is created or edited at the provider.

@@ -18,7 +18,7 @@ ORDER BY currency;
 -- (missing = prepaid, no credit line) and outstanding owed.
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
-    COALESCE((SELECT SUM(p.amount) FROM billing.usage_pending_amounts p
+    COALESCE((SELECT SUM(p.amount) FROM billing.usage_totals p
               WHERE p.merchant_id = a.merchant_id AND p.customer_id = a.customer_id AND p.currency = a.currency), 0)::bigint AS pending,
     COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, sqlc.arg(as_of)::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc
@@ -52,7 +52,7 @@ LIMIT 1;
 SELECT
     c.id::uuid AS customer_id,
     COALESCE(a.credits_posted - a.debits_posted, 0)::bigint AS balance,
-    COALESCE((SELECT SUM(p.amount) FROM billing.usage_pending_amounts p
+    COALESCE((SELECT SUM(p.amount) FROM billing.usage_totals p
               WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.customer_id = c.id AND p.currency = sqlc.arg(currency)::text), 0)::bigint AS pending,
     COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, sqlc.arg(as_of)::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc
@@ -192,7 +192,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(c
 -- posting. A posting through an instant reads the accrual as of it
 -- (accrued_as_of); every other read, as of as_of.
 SELECT
-    COALESCE((SELECT SUM(p.amount) FROM billing.usage_pending_amounts p
+    COALESCE((SELECT SUM(p.amount) FROM billing.usage_totals p
               WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.customer_id = sqlc.arg(customer_id)::uuid AND p.currency = sqlc.arg(currency)::text), 0)::bigint AS pending,
     COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, COALESCE(sqlc.narg(accrued_as_of)::timestamptz, sqlc.arg(as_of)::timestamptz)) - rc.posted_amount, 0))
               FROM billing.running_charges rc

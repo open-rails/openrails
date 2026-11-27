@@ -75,6 +75,7 @@ export {
   PaymentHistory,
   type PaymentHistoryProps,
 } from "./account/payment-history"
+export { UsagePanel, type UsagePanelProps } from "./account/usage-panel"
 export {
   BillingStatusBadge,
   type BillingStatusBadgeProps,

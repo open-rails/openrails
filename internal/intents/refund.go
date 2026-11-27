@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -35,8 +36,9 @@ import (
 // (so the async drain repairs a producer that died mid-call) or releases it
 // (status=failed) on a terminal refusal.
 const (
-	TypeNMIRefund    = "nmi_refund"
-	TypeStripeRefund = "stripe_refund"
+	TypeNMIRefund           = "nmi_refund"
+	TypeStripeRefund        = "stripe_refund"
+	RefundUnresolvedFinding = "life.refund.unresolved"
 )
 
 // RefundPayload is the stored payload for refund intents.
@@ -143,6 +145,9 @@ func (r refundReservations) finalize(ctx context.Context, intent gen.BillingProv
 	}
 	return r.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txDB := r.DB.NewWithPgxTx(tx)
+		if _, err := txDB.Gen(ctx).ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: intent.MerchantID, FindingType: RefundUnresolvedFinding, SubjectKey: intent.ID.String()}); err != nil {
+			return err
+		}
 		svc := payments.NewPaymentService(txDB, r.Clock)
 		reservation, err := svc.GetByID(ctx, p.ReservationID)
 		if err != nil {
@@ -190,49 +195,8 @@ func (r refundReservations) finalize(ctx context.Context, intent gen.BillingProv
 		if !p.RevokeAccess {
 			return nil
 		}
-		return endRefundedMembership(ctx, txDB, r.Clock, original, p.Reason)
+		return subscriptions.EndRefundedMembership(ctx, txDB, r.Clock, original, p.Reason)
 	})
-}
-
-// endRefundedMembership stops the renewal of the membership a payment paid
-// for once a refund that revoked its access has returned all of it. It ends
-// now when the payment bought the latest period, else when the period ends,
-// so a newer paid period stays. Only a membership OpenRails renews: a
-// provider's schedule is canceled as its own action. Access a review keeps
-// (a combined seat or plan change) keeps its renewal too. A renewal already
-// sent is not waited for: one that lands on the canceled membership is
-// refunded as a charge after cancel.
-func endRefundedMembership(ctx context.Context, d *db.DB, clock clockwork.Clock, payment *models.Payment, reason string) error {
-	if payment.SubscriptionID == nil || payment.Metadata["refund_access_revoked"] != true {
-		return nil
-	}
-	sub, err := subscriptions.NewSubscriptionRepo(d).GetByID(ctx, *payment.SubscriptionID)
-	if err != nil || sub.CollectionPolicy != models.CollectionPolicyEngine {
-		return err
-	}
-	refunded, err := payments.NewPaymentService(d, clock).RefundTotals(ctx, []uuid.UUID{payment.ID})
-	if err != nil || refunded[payment.ID] < payment.Amount {
-		return err
-	}
-	latest, err := d.Gen(ctx).GetLatestPaidPaymentIDForSubscription(ctx, gen.GetLatestPaidPaymentIDForSubscriptionParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
-	if err != nil && !db.IsNotFound(err) {
-		return err
-	}
-	endNow := latest == payment.ID
-	switch {
-	case sub.Status == models.StatusActive, sub.Status == models.StatusPastDue, sub.Status == models.StatusAwaitingMethod:
-	case endNow && sub.Status == models.StatusCanceled: // canceled at period end: it ends now
-	default:
-		return nil
-	}
-	if reason == "" {
-		reason = "refunded"
-	}
-	_, err = subscriptions.NewSubscriptionLifecycleService(d, nil, nil, nil, nil, nil, clock).CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{
-		SubscriptionID: &sub.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: endNow,
-		EndedReason: subscriptions.PremiumEndReasonRefund, Requested: true,
-	})
-	return err
 }
 
 func (r refundReservations) recordReceipt(ctx context.Context, p RefundPayload, providerRefundID string) error {
@@ -256,7 +220,25 @@ func (r refundReservations) recoverReceipt(ctx context.Context, intent gen.Billi
 		return Ambiguous("load refund receipt: " + err.Error())
 	}
 	if ref == "" {
-		return Ambiguous("refund response has no exact operation receipt; operator must review provider records, and unavailable evidence keeps the refund unresolved")
+		reason := "refund response has no exact operation receipt; operator must review provider records, and unavailable evidence keeps the refund unresolved"
+		if intent.LastFailureReason != nil && *intent.LastFailureReason != "" {
+			reason = *intent.LastFailureReason
+		}
+		evidence := struct {
+			OperationID string          `json:"operation_id"`
+			PaymentID   string          `json:"payment_id"`
+			Amount      moneyutil.Cents `json:"amount"`
+			Currency    string          `json:"currency"`
+			Reason      string          `json:"reason"`
+		}{intent.ID.String(), billing.PaymentID(p.OriginalPaymentID).String(), p.AmountCents, p.Currency, reason}
+		raw, _ := json.Marshal(evidence)
+		action := fmt.Sprintf("NMI cannot confirm the refund of %s on payment %s (%s). Nothing is resent, and the amount stays held so it cannot be refunded twice. Find this sale's refunds at NMI: if this refund went through, run `openrails intents resolve --intent %s --receipt <refund transaction id>`; if NMI shows no refund of the sale that OpenRails has not recorded, run `openrails intents resolve --intent %s --not-executed` with --actor and --reason.", moneyutil.FormatRailMinor(p.AmountCents, p.Currency), evidence.PaymentID, reason, intent.ID, intent.ID)
+		wctx, cancel := LedgerWriteContext(ctx)
+		defer cancel()
+		if _, err := r.DB.Gen(wctx).UpsertReconciliationFinding(wctx, gen.UpsertReconciliationFindingParams{MerchantID: intent.MerchantID, FindingType: RefundUnresolvedFinding, SubjectKey: intent.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: raw}); err != nil {
+			r.DB.Log.ErrorContext(ctx, "nmi refund: could not record the unresolved-refund finding", logx.Err(err), "operation_id", intent.ID)
+		}
+		return Ambiguous(reason)
 	}
 	return r.settle(ctx, intent, p, ref, map[string]any{"recovered_receipt": true})
 }
@@ -285,16 +267,18 @@ func (r refundReservations) knownReceipt(ctx context.Context, intent gen.Billing
 	return EvidenceString(intent, "provider_refund_id"), nil
 }
 
-// release cancels the reservation after a terminal provider refusal.
-func (r refundReservations) release(ctx context.Context, p RefundPayload) error {
-	return r.payments().MarkFailed(ctx, p.ReservationID)
-}
-
 // terminally releases the reservation and reports the terminal outcome; a
 // failed release keeps the outcome ambiguous so the lease/verifier retries
 // the release rather than stranding an open reservation on a dead intent.
-func (r refundReservations) terminally(ctx context.Context, p RefundPayload, reason string, evidence map[string]any) Outcome {
-	if err := r.release(ctx, p); err != nil {
+func (r refundReservations) terminally(ctx context.Context, intent gen.BillingProviderIntent, p RefundPayload, reason string, evidence map[string]any) Outcome {
+	if err := r.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txDB := r.DB.NewWithPgxTx(tx)
+		if err := payments.NewPaymentService(txDB, r.Clock).MarkFailed(ctx, p.ReservationID); err != nil {
+			return err
+		}
+		_, err := txDB.Gen(ctx).ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: intent.MerchantID, FindingType: RefundUnresolvedFinding, SubjectKey: intent.ID.String()})
+		return err
+	}); err != nil {
 		return Ambiguous(reason + " (and reservation release failed: " + err.Error() + ")")
 	}
 	if evidence == nil {
@@ -370,6 +354,17 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingProvid
 			// The posture gate refused before any bytes were sent.
 			return parkedBeforeEffect("nmi refund held by sandbox posture gate: " + err.Error())
 		}
+		var refusal *nmi.V5Error
+		if errors.As(err, &refusal) && refusal.Code != "" && refusal.Status >= 400 && refusal.Status < 500 {
+			if refusal.Status == 429 {
+				return h.terminally(ctx, intent, p, "nmi refund refused: NMI rate limited the refund and nothing was refunded, so it can be requested again", map[string]any{"status_code": refusal.Status})
+			}
+			return h.terminally(ctx, intent, p, "nmi refund refused: "+err.Error(), map[string]any{"status_code": refusal.Status})
+		}
+		var rejection *nmi.CustomerVaultError
+		if errors.Is(err, nmi.ErrSaleRefused) && errors.As(err, &rejection) {
+			return h.terminally(ctx, intent, p, fmt.Sprintf("nmi refund refused by the gateway without processing it (response code %d)", rejection.ResponseCode), map[string]any{"response_code": rejection.ResponseCode})
+		}
 		if nmi.RequiresVerification(err) {
 			// Processor communication/duplicate responses do not prove the
 			// refund did not land; releasing the reservation could refund twice.
@@ -379,7 +374,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingProvid
 		if errors.As(err, &pmErr) {
 			// The gateway answered with a decline: the refund definitively did
 			// not happen and re-sending the identical request cannot succeed.
-			return h.terminally(ctx, p, "nmi refund declined: "+pmErr.Message, map[string]any{
+			return h.terminally(ctx, intent, p, "nmi refund declined: "+pmErr.Message, map[string]any{
 				"response_code": pmErr.ResponseCode,
 			})
 		}
@@ -401,10 +396,9 @@ func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.BillingProvide
 	return h.recoverReceipt(ctx, intent, p)
 }
 
-// Resolve accepts an exact refund transaction the provider confirms is an
-// approved refund of the reserved amount and currency on the original sale's
-// vault. NMI read absence cannot establish nonexecution of a submitted refund,
-// so that resolution is refused. It never re-sends the refund.
+// Resolve accepts a confirmed receipt of the refund on the original sale, or
+// an operator-attested release when NMI shows no unrecorded refunds of that sale.
+// It never re-sends the refund.
 func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.BillingProviderIntent, resolution Resolution) (Outcome, error) {
 	p, err := DecodeRefundPayload(intent)
 	if err != nil {
@@ -420,12 +414,35 @@ func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.BillingProvid
 	if ref != "" {
 		return Outcome{}, RejectResolution("operation already holds refund receipt %s; its verifier completes it", ref)
 	}
-	if resolution.NotExecuted {
-		return Outcome{}, RejectResolution("NMI does not provide definitive nonexecution proof for a possibly submitted refund; the reservation must remain held")
-	}
 	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
 	if err != nil || !ok || client == nil {
 		return Outcome{}, fmt.Errorf("nmi rail is not armed for provider %q: %v", intent.Rail, err)
+	}
+	if resolution.NotExecuted {
+		reservation, err := h.payments().GetByID(ctx, p.ReservationID)
+		if err != nil {
+			return Outcome{}, RejectResolution("load refund reservation: %v", err)
+		}
+		original, err := h.payments().GetByID(ctx, p.OriginalPaymentID)
+		if err != nil {
+			return Outcome{}, RejectResolution("load original payment: %v", err)
+		}
+		ids, err := client.ReadRefundTransactions(ctx, p.ProviderTarget, reservation.CreatedAt.Add(-time.Hour).Truncate(time.Second))
+		if err != nil {
+			return Outcome{}, RejectResolution("read NMI refunds: %v", err)
+		}
+		lookup := ctx
+		if original.PspID != nil {
+			lookup = db.WithPSPID(ctx, *original.PspID)
+		}
+		for _, id := range ids {
+			if _, err := h.payments().GetByPSPTransactionID(lookup, original.Rail, id); db.IsNotFound(err) {
+				return Outcome{}, RejectResolution("NMI shows refund %s of this sale that OpenRails has not recorded; if it is this refund, resolve with --receipt %s", id, id)
+			} else if err != nil {
+				return Outcome{}, RejectResolution("look up NMI refund %s: %v", id, err)
+			}
+		}
+		return h.terminally(ctx, intent, p, "operator attested release; NMI shows no unrecorded refund of the sale", map[string]any{"operator_resolution": OperatorResolutionRecord(ctx)}), nil
 	}
 	if err := client.ConfirmRefund(ctx, p.ProviderTarget, resolution.ProviderReference, p.AmountCents, p.Currency); err != nil {
 		return Outcome{}, RejectResolution("%v", err)
@@ -509,7 +526,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.BillingPro
 				return Ambiguous("stripe server error: " + apiErr.Message)
 			default:
 				// 4xx: a clean refusal (already refunded, charge disputed...).
-				return h.terminally(ctx, p, "stripe refund refused: "+apiErr.Message, map[string]any{
+				return h.terminally(ctx, intent, p, "stripe refund refused: "+apiErr.Message, map[string]any{
 					"status_code": apiErr.StatusCode,
 				})
 			}
@@ -518,7 +535,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.BillingPro
 	}
 
 	if strings.EqualFold(result.Status, "failed") || strings.EqualFold(result.Status, "canceled") {
-		return h.terminally(ctx, p, "stripe refund failed: "+result.FailureReason, map[string]any{
+		return h.terminally(ctx, intent, p, "stripe refund failed: "+result.FailureReason, map[string]any{
 			"provider_refund_id": result.ID,
 			"failure_reason":     result.FailureReason,
 		})
@@ -549,7 +566,7 @@ func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.BillingProv
 		return Retryable("refund not visible; retry through provider-enforced idempotency key")
 	}
 	if strings.EqualFold(result.Status, "failed") || strings.EqualFold(result.Status, "canceled") {
-		return h.terminally(ctx, p, "stripe refund failed post-create: "+result.FailureReason, map[string]any{
+		return h.terminally(ctx, intent, p, "stripe refund failed post-create: "+result.FailureReason, map[string]any{
 			"provider_refund_id": result.ID,
 			"failure_reason":     result.FailureReason,
 		})

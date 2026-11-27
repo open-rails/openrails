@@ -18,11 +18,17 @@
 // unknown attempt. A known pre-submission refusal parks without consuming an
 // attempt; a parsed definitive decline ends the attempt. Provider-idempotent
 // calls may replay their key (Stripe, within its 23-hour retention). A
-// receipt is inserted once against the frozen terms (account, invoice, vault,
+// receipt is inserted once against the frozen terms (account, order, vault,
 // amount, currency, instrument); one that contradicts them settles nothing
 // and is kept as provider_contradiction. An instrument changed before
 // submission is provable non-execution (instrument_changed). Nothing triggers
 // a compensating cancel or refund automatically.
+//
+// Verification starts after VerifyDelay. Inconclusive reads wait the greater
+// of the handler's attempt backoff and half the operation's age since submitted_at
+// (created_at before submission), with the age delay capped at DefaultBackoff.Cap
+// (2h). Verification never increments attempts; parked verification keeps
+// ParkRetryInterval.
 //
 // An invoice collection freezes its instrument, owns its invoice while
 // unresolved and charges NMI only under the currency's active unscheduled
@@ -38,8 +44,10 @@
 // with `openrails intents resolve` (Resolution): --receipt reads the named
 // provider object back and must match the frozen operation; --not-executed
 // needs the type's own non-execution proof (for NMI, a definitive decline as
-// the one transaction under the invoice; refused for submitted collections,
-// rebills and prorations) or an operation that never crossed its fence. Each
+// the one transaction under the invoice) or an operation that never crossed its
+// fence. NMI subscription_collection also accepts an operator-attested empty
+// order, admitting a new attempt under the same obligation order. Submitted
+// invoice collections, manual rebills and prorations refuse release. Each
 // resolution records its actor and reason. Unresolved outcomes raise
 // life.submission.unresolved or life.sale.unresolved.
 package intents

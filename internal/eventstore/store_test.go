@@ -13,8 +13,10 @@ func TestMigrationsSplitIntoDatabaseQualifiedStatements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 4 || migrations[0].Name != "0001_usage.sql" || migrations[1].Name != "0002_usage_intake.sql" ||
-		migrations[2].Name != "0003_usage_history_hours.sql" || migrations[3].Version != 4 || migrations[3].Name != "0004_usage_history_order.sql" {
+	if len(migrations) != 6 || migrations[0].Name != "0001_usage.sql" || migrations[1].Name != "0002_usage_intake.sql" ||
+		migrations[2].Name != "0003_usage_history_hours.sql" || migrations[3].Name != "0004_usage_history_order.sql" ||
+		migrations[4].Version != 5 || migrations[4].Name != "0005_usage_history_quarter_hours.sql" ||
+		migrations[5].Version != 6 || migrations[5].Name != "0006_drop_usage_quantities.sql" {
 		t.Fatalf("migrations = %+v", migrations)
 	}
 	s := &Store{database: "critical_x"}
@@ -34,7 +36,7 @@ func TestMigrationsSplitIntoDatabaseQualifiedStatements(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"{database}.usage_intake", "{database}.usage_events", "{database}.limit_usage", "{database}.usage_quantities", "{database}.usage_minutes", "{database}.usage_history"} {
+	for _, name := range []string{"{database}.usage_intake", "{database}.usage_events", "{database}.limit_usage", "{database}.usage_history"} {
 		if !created[name] {
 			t.Errorf("no CREATE TABLE %s in %v", name, created)
 		}

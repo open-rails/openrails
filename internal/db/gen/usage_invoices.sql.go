@@ -1251,7 +1251,7 @@ type ResumeStoppedUsageCollectionParams struct {
 	Currency   string
 }
 
-// A payer designating a collection card did what a stopped or parked
+// A customer designating a collection card did what a stopped or parked
 // collection waited for: its usage invoices are due again at once.
 // Uncollectible ones need the merchant, and live collections belong to their
 // verifier.

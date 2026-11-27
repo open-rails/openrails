@@ -15,7 +15,7 @@ import { Label } from "#orck/admin/components/ui/label"
 import { DIALOG_CONFIRM } from "#orck/admin/lib/dialog-width"
 
 // TypedConfirmDialog requires typing a confirmation phrase before a
-// destructive action (e.g. cancelling a subscription) can proceed.
+// destructive action (e.g. canceling a subscription) can proceed.
 export function TypedConfirmDialog({
   open,
   onOpenChange,

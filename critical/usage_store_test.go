@@ -101,6 +101,51 @@ func (c *downConn) PrepareBatch(ctx context.Context, query string, opts ...drive
 	return c.Conn.PrepareBatch(ctx, query, opts...)
 }
 
+func (c *downConn) Ping(ctx context.Context) error {
+	if c.down.Load() {
+		return errStoreDown
+	}
+	return c.Conn.Ping(ctx)
+}
+
+// refusingInserts is the world's ClickHouse refusing its next refuse usage
+// inserts, while it answers everything else.
+type refusingInserts struct {
+	driver.Conn
+	refuse atomic.Int64
+}
+
+func (c *refusingInserts) PrepareBatch(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
+	if strings.Contains(query, ".usage_intake") {
+		for n := c.refuse.Load(); n > 0; n = c.refuse.Load() {
+			if c.refuse.CompareAndSwap(n, n-1) {
+				return nil, errStoreDown
+			}
+		}
+	}
+	return c.Conn.PrepareBatch(ctx, query, opts...)
+}
+
+// meteredPolicy binds every customer of alpha to a policy with an hourly
+// spend window and an hourly grace of 100 for failed usage.
+func meteredPolicy(w *world) {
+	m := cfgMerchant(w.cfg, "alpha")
+	m.BillingPolicies = []billing.BillingPolicy{{Name: "metered",
+		SpendWindows:    []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 1_000_000, Currency: "USD"}},
+		BadSpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 100, Currency: "USD"}}}}
+	m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "metered"}}
+	setCfgMerchant(&w.cfg, "alpha", m)
+}
+
+// storeCounts are what the store counts of alpha's usage: raw events,
+// history's requests and the spend windows' units.
+func storeCounts(t *testing.T, w *world) [3]uint64 {
+	t.Helper()
+	return [3]uint64{storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"),
+		storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"),
+		storeCount(t, w, "SELECT toUInt64(sum(units)) FROM {db}.limit_usage WHERE merchant_id = {m} AND startsWith(limit_key, 'spend:')")}
+}
+
 type downRow struct{}
 
 func (downRow) Err() error           { return errStoreDown }
@@ -114,32 +159,67 @@ func requireUnavailable(t *testing.T, err error) {
 }
 
 func TestUsageStore(t *testing.T) {
-	t.Run("OR-J24-S47/a-resend-after-a-lost-commit-inserts-nothing-twice", func(t *testing.T) {
-		w := newWorld(t)
+	t.Run("OR-J24-S47/a-sync-that-fails-between-its-commit-and-its-insert-is-charged-once-and-its-resend-inserts-nothing", func(t *testing.T) {
+		w := newWorld(t, meteredPolicy)
 		customer, _ := fundedCustomer(t, w)
-		usageMeter(t, w.alpha, 100)
+		usageMeter(t, w.alpha, 1)
 		lease := newLease()
-		items := numbered(1, usageInput(customer, "a", 1), usageInput(customer, "b", 1), usageInput(customer, "c", 1))
-		settleUsage(t, w.alpha, lease, items...)
-		balance(t, w.alpha, customer, 700, 300, 1000)
-		// Fixture: the sync's events reached the store, its transaction never
-		// committed.
-		leases, pending := pgx.Identifier{w.schema, "leases"}.Sanitize(), pgx.Identifier{w.schema, "usage_pending"}.Sanitize()
-		_, err := w.pool.Exec(t.Context(), "UPDATE "+leases+" SET settled_through_n = 0, receipts = '[]'::jsonb WHERE merchant_id = $1 AND id = $2",
-			w.alpha.MerchantID().UUID(), lease.UUID())
-		require.NoError(t, err)
-		_, err = w.pool.Exec(t.Context(), "DELETE FROM "+pending+" WHERE merchant_id = $1", w.alpha.MerchantID().UUID())
-		require.NoError(t, err)
-		balance(t, w.alpha, customer, 1000, 0, 1000)
+		items := unitItems(customer, 1, 3)
+		// The sync commits and stops before its insert, as a crash would: its
+		// usage is charged, and the store took none of it.
+		failAfterCommit(t, lease)
+		_, err := w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: items})
+		require.Error(t, err)
+		balance(t, w.alpha, customer, 997, 3, 1000)
+		require.Equal(t, [3]uint64{0, 0, 0}, storeCounts(t, w))
 
-		// The resend finds them and redoes only PostgreSQL's side, its pending
-		// amount included.
-		settleUsage(t, w.alpha, lease, items...)
-		balance(t, w.alpha, customer, 700, 300, 1000)
-		require.EqualValues(t, 3, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"), "raw holds each item once")
-		require.EqualValues(t, 3, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"))
-		require.EqualValues(t, 3, storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_quantities WHERE merchant_id = {m}"), "the rollups agree")
-		require.EqualValues(t, 3, storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"))
+		// The resend answers its receipts: nothing settles or is inserted again.
+		out := settleUsage(t, w.alpha, lease, items...)
+		require.EqualValues(t, 3, out.Usage.ThroughN)
+		balance(t, w.alpha, customer, 997, 3, 1000)
+		require.Equal(t, [3]uint64{0, 0, 0}, storeCounts(t, w), "a settled item is never inserted again")
+
+		// The next item counts once in raw usage, history and its spend window.
+		settleUsage(t, w.alpha, lease, numbered(4, usageInput(customer, "next", 1))...)
+		require.Equal(t, [3]uint64{1, 1, 1}, storeCounts(t, w))
+		fleet := startFleet(t, w)
+		nextDay(w)
+		postDays(t, fleet)
+		balance(t, w.alpha, customer, 996, 0, 996)
+		deductions := usageDeductions(t, w.alpha, customer)
+		require.Len(t, deductions, 1)
+		require.EqualValues(t, -4, deductions[0].Amount, "charged once")
+	})
+
+	t.Run("OR-J24-S86/a-store-that-refuses-the-insert-after-the-commit-is-tried-again-and-one-that-refuses-for-good-loses-only-the-counts", func(t *testing.T) {
+		var conn *refusingInserts
+		w := newWorld(t, meteredPolicy, func(w *world) {
+			conn = &refusingInserts{Conn: w.deps.ClickHouse}
+			w.deps.ClickHouse = conn
+		})
+		customer, _ := fundedCustomer(t, w)
+		usageMeter(t, w.alpha, 1)
+		lease := newLease()
+		// The store refuses the first insert after the commit: the sync tries
+		// again, and each item counts once.
+		conn.refuse.Store(1)
+		settleUsage(t, w.alpha, lease, unitItems(customer, 1, 3)...)
+		require.Zero(t, conn.refuse.Load(), "the store refused the first insert")
+		balance(t, w.alpha, customer, 997, 3, 1000)
+		require.Equal(t, [3]uint64{3, 3, 3}, storeCounts(t, w))
+
+		// It refuses every try: the sync still answers its receipts and each
+		// item is charged once, the store counts none of them, and a resend
+		// inserts nothing.
+		conn.refuse.Store(1 << 20)
+		lost := unitItems(customer, 4, 2)
+		settleUsage(t, w.alpha, lease, lost...)
+		conn.refuse.Store(0)
+		balance(t, w.alpha, customer, 995, 5, 1000)
+		require.Equal(t, [3]uint64{3, 3, 3}, storeCounts(t, w))
+		settleUsage(t, w.alpha, lease, lost...)
+		balance(t, w.alpha, customer, 995, 5, 1000)
+		require.Equal(t, [3]uint64{3, 3, 3}, storeCounts(t, w))
 	})
 
 	t.Run("OR-J24-S48/while-clickhouse-is-out-of-reach-usage-settles-nothing-and-balances-read-and-move", func(t *testing.T) {
@@ -200,7 +280,7 @@ func TestUsageStore(t *testing.T) {
 			require.EqualValues(t, -50, deductions[0].Amount, "12 units cost 110; the first posting took 60")
 			require.EqualValues(t, -60, deductions[1].Amount)
 		})
-		t.Run("a-volume-crossing-is-carried-and-credited-at-period-close", func(t *testing.T) {
+		t.Run("a-volume-crossing-is-credited-at-the-posting-that-takes-it", func(t *testing.T) {
 			w := newWorld(t, earlyInMonth)
 			pricedMeter(t, w.alpha, tiers(catalog.TierModeVolume, 10, 5, 10))
 			customer, _ := fundedCustomer(t, w)
@@ -213,21 +293,23 @@ func TestUsageStore(t *testing.T) {
 			postDays(t, fleet)
 			balance(t, w.alpha, customer, 920, 0, 920)
 			// 12 units cost 60 at the cheaper band: 20 less than posted. Their
-			// marginal price is never below zero.
+			// marginal price is never below zero, so nothing is pending.
 			second := usageInput(customer, "second", 4)
 			second.OccurredAt = day.Add(time.Hour)
 			settleUsage(t, w.alpha, lease, numbered(2, second)...)
 			balance(t, w.alpha, customer, 920, 0, 920)
 			nextDay(w)
 			postDays(t, fleet)
-			require.Len(t, usageDeductions(t, w.alpha, customer), 1, "the remainder is carried while late usage may come")
-			w.clock.Advance(70 * 24 * time.Hour)
-			postDays(t, fleet)
 			balance(t, w.alpha, customer, 940, 0, 940)
 			deductions := usageDeductions(t, w.alpha, customer)
 			require.Len(t, deductions, 2)
-			require.EqualValues(t, 20, deductions[0].Amount, "the period's close credits it back")
+			require.EqualValues(t, 20, deductions[0].Amount, "the posting that takes the crossing credits it")
 			require.EqualValues(t, -20, deductions[0].Usage.Amount)
+			// Its late window closing changes nothing.
+			w.clock.Advance(70 * 24 * time.Hour)
+			postDays(t, fleet)
+			balance(t, w.alpha, customer, 940, 0, 940)
+			require.Len(t, usageDeductions(t, w.alpha, customer), 2)
 		})
 		t.Run("a-card-revision-mid-period-is-priced-card-by-card", func(t *testing.T) {
 			w := newWorld(t, earlyInMonth)
@@ -247,6 +329,42 @@ func TestUsageStore(t *testing.T) {
 			require.EqualValues(t, -500, deductions[0].Amount)
 			require.Equal(t, []billing.UsageDeductionLine{{MeterKey: "compute", Requests: 2, Quantity: 3, Amount: 500}}, deductions[0].Usage.Lines)
 		})
+	})
+
+	t.Run("OR-J24-S84/a-posting-takes-exactly-what-is-pending-priced-on-the-periods-total", func(t *testing.T) {
+		w := newWorld(t, earlyInMonth)
+		pricedMeter(t, w.alpha, tiers(catalog.TierModeGraduated, 10, 5, 10))
+		customer, _ := fundedCustomer(t, w)
+		// Two gates, one after the other: the second prices from where the
+		// first left the period, 4 units at 10 and 2 at 5.
+		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "first-gate", 6))...)
+		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "second-gate", 6))...)
+		balance(t, w.alpha, customer, 890, 110, 1000)
+		totals := pgx.Identifier{w.schema, "usage_totals"}.Sanitize()
+		rows := func() (unposted, posted, quantity int64) {
+			t.Helper()
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FILTER (WHERE lease_id <> $2), count(*) FILTER (WHERE lease_id = $2), "+
+				"coalesce(sum(quantity) FILTER (WHERE lease_id = $2), 0)::bigint FROM "+totals+" WHERE merchant_id = $1",
+				w.alpha.MerchantID().UUID(), uuid.Nil).Scan(&unposted, &posted, &quantity))
+			return unposted, posted, quantity
+		}
+		unposted, posted, _ := rows()
+		require.Equal(t, [2]int64{2, 0}, [2]int64{unposted, posted}, "each gate's usage is its lease's running total")
+
+		fleet := startFleet(t, w)
+		nextDay(w)
+		postDays(t, fleet)
+		balance(t, w.alpha, customer, 890, 0, 890)
+		deductions := usageDeductions(t, w.alpha, customer)
+		require.Len(t, deductions, 1)
+		require.EqualValues(t, -110, deductions[0].Amount, "the posting took what was pending")
+		require.Equal(t, []billing.UsageDeductionLine{{MeterKey: "compute", Requests: 2, Quantity: 12, Amount: 110}}, deductions[0].Usage.Lines)
+		unposted, posted, quantity := rows()
+		require.Equal(t, [3]int64{0, 1, 12}, [3]int64{unposted, posted, quantity}, "it folded the gates' totals into the period's posted row")
+		var queued int
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "usage_pending"}.Sanitize()+" WHERE merchant_id = $1",
+			w.alpha.MerchantID().UUID()).Scan(&queued))
+		require.Zero(t, queued, "nothing is left to post")
 	})
 
 	t.Run("OR-J24-S56/a-day-posts-once-it-ends-in-the-merchants-accounting-zone", func(t *testing.T) {
@@ -383,10 +501,10 @@ products:
 		require.Zero(t, customerLimit(t, w.alpha, customer, "rolling").Used, "the rolling window passed")
 	})
 
-	t.Run("OR-J24-S52/a-database-with-pending-usage-starts-without-its-store-and-opens-a-finding", func(t *testing.T) {
+	t.Run("OR-J24-S52/a-database-with-pending-usage-starts-without-its-store-and-posts-it", func(t *testing.T) {
 		w := newWorld(t)
 		usageMeter(t, w.alpha, 100)
-		customer, _ := fundedCustomer(t, w)
+		customer, lot := fundedCustomer(t, w)
 		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "pending", 2))...)
 		other := billing.CustomerID(uuid.New())
 		fund(t, w.alpha, other, "funded", 500)
@@ -394,48 +512,46 @@ products:
 		require.NoError(t, w.engine.Close(context.Background()))
 		w.engine = nil
 
-		// Without its store the deployment starts: the merchant's usage is
-		// refused and named in a finding, the customer whose usage waits for
-		// the store reads its balance (PostgreSQL's), pending usage and all,
-		// and every other customer bills as before.
+		// Without its store the deployment starts: new usage is refused, and
+		// the pending usage is PostgreSQL's: it reads and posts as before.
 		without := w.deps
 		without.ClickHouse = nil
 		degraded, err := openrails.New(ctx, w.cfg, without)
 		require.NoError(t, err)
 		client, err := declaredMerchant(degraded, "alpha")
 		require.NoError(t, err)
-		findings, err := client.ListFindings(ctx, billing.FindingListParams{Type: "consistency.pending_usage"})
-		require.NoError(t, err)
-		require.Len(t, findings.Items, 1, "the merchant's pending usage is a finding")
 		_, err = client.SyncLeases(ctx, billing.SyncLeasesParams{LeaseID: newLease(), Usage: numbered(1, usageInput(other, "metered", 1))})
 		requireNoStore(t, err)
 		balance(t, client, customer, 800, 200, 1000)
 		balance(t, client, other, 500, 0, 500)
 		_, err = client.StartRunningCharge(ctx, billing.StartRunningChargeParams{Reference: "without-the-store", CustomerID: other, Currency: "USD", RatePerHour: 3600})
 		require.NoError(t, err, "running charges need only PostgreSQL")
+		// A revocation posts the usage first, from the lot it revokes.
+		_, err = client.RevokeCreditGrant(ctx, "", lot.ID, billing.RevokeCreditGrantParams{Reason: "drill"})
+		require.NoError(t, err, "a posting needs no store")
+		balance(t, client, customer, 0, 0, 0)
+		deductions := usageDeductions(t, client, customer)
+		require.Len(t, deductions, 1)
+		require.EqualValues(t, -200, deductions[0].Amount)
 		require.NoError(t, degraded.Close(context.Background()))
 
-		// A lost store: an empty one is refused, and attaching it discards the
-		// pending usage only when told to, on the record.
+		// A lost store: an empty one is refused until usage attach records it.
 		emptied := w.cfg
 		emptied.ClickHouse.Database = w.schema + "_replacement"
 		require.ErrorContains(t, openrailsNewErr(ctx, emptied, w.deps), "empty or different ClickHouse")
 		attach := map[string]any{"clickhouse": map[string]string{"url": "clickhouse://" + os.Getenv("OPENRAILS_CRITICAL_CLICKHOUSE_ADDR") + "/" + emptied.ClickHouse.Database}}
-		out, err := hostCLICommand(t, w, attach, "usage", "attach", "--actor", "critical", "--reason", "drill").CombinedOutput()
-		require.Error(t, err)
-		require.Contains(t, string(out), "--discard-pending")
-		out, err = hostCLICommand(t, w, attach, "usage", "attach", "--actor", "critical", "--reason", "drill", "--discard-pending").CombinedOutput()
-		require.NoError(t, err, string(out))
-		require.Contains(t, string(out), w.alpha.MerchantID().String())
 		t.Cleanup(func() {
 			_ = w.deps.ClickHouse.Exec(context.Background(), "DROP DATABASE IF EXISTS `"+emptied.ClickHouse.Database+"` SYNC")
 		})
+		out, err := hostCLICommand(t, w, attach, "usage", "attach").CombinedOutput()
+		require.NoError(t, err, string(out))
 		engine, err := openrails.New(ctx, emptied, w.deps)
 		require.NoError(t, err)
 		w.engine = engine
 		client, err = declaredMerchant(engine, "alpha")
 		require.NoError(t, err)
-		balance(t, client, customer, 1000, 0, 1000)
+		settleUsage(t, client, newLease(), numbered(1, usageInput(other, "after-the-attach", 1))...)
+		balance(t, client, other, 400, 100, 500)
 	})
 
 	t.Run("OR-J24-S53/erasure-clears-invoker-and-metadata-and-keeps-quantities-and-money", func(t *testing.T) {
@@ -460,8 +576,8 @@ products:
 		require.Equal(t, http.StatusNoContent, status, string(raw))
 		require.Equal(t, river.EventKindJobCompleted, awaitErasure(t, events))
 		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m} AND (invoker != '' OR metadata != '')"))
-		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND invoker != ''"))
 		require.EqualValues(t, 2, storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_history WHERE merchant_id = {m}"), "quantities stay")
+		require.EqualValues(t, 200, storeCount(t, w, "SELECT toUInt64(sum(amount)) FROM {db}.usage_history WHERE merchant_id = {m}"), "and what it cost")
 		balance(t, a.alpha, customer, 800, 200, 1000)
 	})
 
@@ -495,13 +611,15 @@ products:
 		for _, q := range []string{
 			"SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE meter = '' AND merchant_id = ",
 			"SELECT toUInt64(sum(quantity)) FROM {db}.usage_history WHERE merchant_id = ",
-			"SELECT toUInt64(sum(quantity)) FROM {db}.usage_quantities WHERE merchant_id = ",
-			"SELECT toUInt64(sum(amount)) FROM {db}.usage_minutes WHERE merchant_id = ",
+			"SELECT toUInt64(sum(amount)) FROM {db}.usage_history WHERE merchant_id = ",
 			"SELECT toUInt64(sum(units)) FROM {db}.limit_usage WHERE merchant_id = ",
 		} {
 			require.Equal(t, storeCount(t, source, q+merchant), storeCount(t, target, q+merchant), q)
 		}
-		require.EqualValues(t, 3, storeCount(t, target, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_quantities WHERE merchant_id = "+merchant))
+		var settled int64
+		require.NoError(t, target.pool.QueryRow(t.Context(), "SELECT sum(quantity)::bigint FROM "+pgx.Identifier{target.schema, "usage_totals"}.Sanitize()+" WHERE merchant_id = $1",
+			source.alpha.MerchantID().UUID()).Scan(&settled))
+		require.EqualValues(t, 3, settled, "the running totals arrive with PostgreSQL's tables")
 	})
 
 	t.Run("OR-J24-S55/equal-lease-ids-and-numbers-under-two-merchants-stay-apart", func(t *testing.T) {
@@ -521,7 +639,7 @@ products:
 		require.EqualValues(t, 2, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL"), "each merchant's item is its own event")
 	})
 
-	t.Run("OR-J24-S67/history-is-utc-hours-grouped-into-the-zones-days-as-read-a-25-hour-day-a-zone-change-and-burn-included", func(t *testing.T) {
+	t.Run("OR-J24-S67/history-is-utc-quarter-hours-grouped-into-the-zones-days-as-read-a-25-hour-day-a-zone-change-and-burn-included", func(t *testing.T) {
 		newYork, err := time.LoadLocation("America/New_York")
 		require.NoError(t, err)
 		// The next New York day of 25 hours, when its clocks fall back.
@@ -553,8 +671,8 @@ products:
 		// A lease minted now by the world's clock, a year ahead of the real one.
 		settleUsage(t, a.alpha, leaseMintedAt(a.clock.Now()), numbered(1, items...)...)
 		w := a.world
-		require.EqualValues(t, 4, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"), "one row an hour")
-		require.Zero(t, storeCount(t, w, "SELECT countIf(toMinute(bucket_at) != 0) FROM {db}.usage_history WHERE merchant_id = {m}"), "buckets are whole UTC hours")
+		require.EqualValues(t, 4, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"), "one row a quarter hour")
+		require.Zero(t, storeCount(t, w, "SELECT countIf(toMinute(bucket_at) % 15 != 0 OR toSecond(bucket_at) != 0) FROM {db}.usage_history WHERE merchant_id = {m}"), "buckets are whole UTC quarter hours")
 
 		// Read by day, an hour counts on the day of the zone it starts in.
 		days := func(in *time.Location) map[string]int64 {
@@ -574,7 +692,7 @@ products:
 		want := func(in *time.Location) map[string]int64 {
 			out := map[string]int64{}
 			for i := range at {
-				key := calendarDayStart(at[i].Truncate(time.Hour), in).UTC().Format(time.RFC3339)
+				key := calendarDayStart(at[i].Truncate(15*time.Minute), in).UTC().Format(time.RFC3339)
 				out[key+" usage_units"]++
 				out[key+" usage_charged"] += units[i] * 100
 			}

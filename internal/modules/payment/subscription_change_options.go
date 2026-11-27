@@ -26,7 +26,7 @@ func (s *PurchaseService) SubscriptionChangeOptions(ctx context.Context, subscri
 		return nil, errors.New("subscription change services unavailable")
 	}
 	sub, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
-	if payer := identity.CustomerIDFromString(user.ID); err != nil || payer.IsZero() || sub.CustomerID != payer.UUID() {
+	if customer := identity.CustomerIDFromString(user.ID); err != nil || customer.IsZero() || sub.CustomerID != customer.UUID() {
 		return nil, &TierChangeError{Code: billing.CodeSubscriptionNotFound, Message: "subscription not found"}
 	}
 	if err := validateTierChangeSubscriptionStatus(sub); err != nil {

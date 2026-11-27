@@ -383,7 +383,8 @@ const CardVaultPlatform = "platform"
 // collection thresholds and delinquency floors; BillingPeriodBoundary and
 // ArrearsGraceDays govern when usage arrears are billed and become
 // delinquent. BillingPolicies are named spend policies and
-// BillingPolicyBindings decide which customers get which.
+// BillingPolicyBindings decide which customers get which; TrustTiers raise
+// a customer's tier by what it paid.
 // RepriceNoticeWindowDays is the notice before a price migration takes
 // effect. PSPRouting chooses the PSP for a new charge.
 type MerchantSettings struct {
@@ -431,10 +432,12 @@ type MerchantSettings struct {
 	// that can, the CardVault PSP alone when it is a PSP. OpenRails-run
 	// renewals stay on the PSP their subscription was sold through.
 	ChargePSPs []string `json:"charge_psps,omitempty"`
-	// BillingPolicies are named spend limits: an outstanding cap, a window spend cap or an accrual rate cap.
+	// BillingPolicies are named spend limits: a cap on what is owed, spend windows, or both.
 	BillingPolicies []BillingPolicy `json:"billing_policies,omitempty"`
 	// BillingPolicyBindings choose the merchant default policy and each trust tier's.
 	BillingPolicyBindings []BillingPolicyBinding `json:"billing_policy_bindings,omitempty"`
+	// TrustTiers are the tiers customers graduate to by what they paid, lowest first.
+	TrustTiers []TrustTier `json:"trust_tiers,omitempty"`
 	// DelegatedInvokerWastedSpendLimits bound the wasted spend a delegated invoker is forgiven per window.
 	DelegatedInvokerWastedSpendLimits []BudgetWindow `json:"delegated_invoker_wasted_spend_limits,omitempty"`
 	// Currencies are the merchant's own units (MerchantCurrency), at most 32.
@@ -447,58 +450,70 @@ type MerchantSettings struct {
 // AccountingSettings date a merchant's books.
 type AccountingSettings struct {
 	// Timezone is the IANA zone (Europe/Berlin) whose days and months the
-	// metrics, MRR reports and usage history group in, and at whose month
-	// ends usage posts; empty is UTC. Rollups are kept in UTC quarter hours,
-	// and usage history in UTC hours, so a change regroups every day and
-	// month, past ones too; a zone whose offset is not whole hours has its
-	// usage days cut at the hour. Posted books keep their effective instants
-	// and never change.
+	// metrics, MRR reports and usage history group in, and where usage posts
+	// at the end of each day; empty is UTC. Rollups and usage history are
+	// kept in UTC quarter hours, so a change regroups every day and month,
+	// past ones too. Posted books keep their effective instants and never
+	// change.
 	Timezone string `json:"timezone,omitempty"`
 }
 
-// BillingPolicy declares one named billing policy (or#897). The policy says
-// WHICH quantity is capped; the binding says who it applies to.
+// BillingPolicy declares one named billing policy (or#897): the caps it sets,
+// any of them; the binding says who it applies to.
 type BillingPolicy struct {
 	// Name is the policy's, which bindings name.
 	Name string `json:"name"`
-	// Kind is "outstanding_cap" (cap LEDGER-measured unpaid arrears — a credit
-	// line on debt, refused with outstanding_cap_reached), "window_spend_cap"
-	// (cap NEW spend per rolling window; prior debt drives delinquency, not
-	// admission), or "accrual_rate_cap" (cap the measured accrual RATE in
-	// micros/hour — the cloud quota, refused with accrual_rate_cap_reached).
-	Kind string `json:"kind"`
-	// OutstandingCapAmount (micros) is the credit line for kind=outstanding_cap.
-	// Zero defers to the payer's own arrears credit limit.
+	// OutstandingCapAmount (micros) is the credit line on unpaid arrears of a
+	// bound customer without its own credit limit; what it owes is taken from
+	// it, and a request past it is refused with outstanding_cap_reached. Zero
+	// defers to the merchant's usage terms.
 	OutstandingCapAmount int64 `json:"outstanding_cap_amount,omitempty,string"`
-	// SpendWindows are the rolling NEW-spend ceilings for kind=window_spend_cap.
+	// SpendWindows are the rolling NEW-spend ceilings, refused with
+	// budget_exceeded.
 	SpendWindows []BudgetWindow `json:"spend_windows,omitempty"`
-	// AccrualRateCapPerHour (kind=accrual_rate_cap) caps the measured accrual
-	// rate in micros PER HOUR — the cloud quota. AccrualRateWindowSeconds is the
-	// measurement lookback (default 3600).
-	AccrualRateCapPerHour int64 `json:"accrual_rate_cap_per_hour,omitempty,string"`
-	// AccrualRateWindowSeconds is the accrual rate's measurement lookback (default 3600).
-	AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
 	// CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor
-	// override the merchant-wide invoice policy for payers bound here; nil defers
-	// to it. All three ride on any kind. DelinquencyAmountFloor is in
+	// override the merchant-wide invoice policy for customers bound here; nil defers
+	// to it. DelinquencyAmountFloor is in
 	// PolicyCurrency, which it requires, and applies to debt in it.
 	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty,string"`
 	DelinquencyGraceDays      *int   `json:"delinquency_grace_days,omitempty"`
 	DelinquencyAmountFloor    *int64 `json:"delinquency_amount_floor,omitempty,string"`
 	// CollectionCycleBoundary is declarable and REFUSED: statement periods must
-	// tile a payer's lifetime, and rebinding is a live lever, so the boundary
+	// tile a customer's lifetime, and rebinding is a live lever, so the boundary
 	// stays merchant-wide. Declaring it here fails with that reason.
 	CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
-	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
+	// BadSpendWindows are the #497 per-CUSTOMER direct-credential wasted-spend grace
 	// windows: at most Limit of host-reported wasted spend is forgiven per window;
-	// direct-payer overage is charged. Allowed on either kind.
+	// direct-customer overage is charged.
 	BadSpendWindows []BudgetWindow `json:"bad_spend_windows,omitempty"`
 	// PolicyCurrency is the currency of the policy's amounts and of a spend or
 	// bad-spend window that names none; absent, the request's. The outstanding
 	// cap and collection threshold bind only money in it, in admission and
-	// usage billing; windows and the accrual-rate cap are converted to the
-	// request's currency.
+	// usage billing; windows are converted to the request's currency.
 	PolicyCurrency catalog.Currency `json:"policy_currency,omitempty"`
+}
+
+// TrustTier is a tier a customer graduates to in a currency by meeting its
+// requirement there. Tiers are listed lowest first; a requirement never asks
+// less than the one below it in its currency, and asks more of one criterion.
+// Each tier has a billing policy binding, and none is the default tier, free.
+type TrustTier struct {
+	// Name is the tier, as bindings and trust levels name it.
+	Name string `json:"name"`
+	// Requirements are what the tier asks, at most one per currency; a
+	// currency they do not name never reaches the tier.
+	Requirements []TrustTierRequirement `json:"requirements"`
+}
+
+// TrustTierRequirement is what a trust tier asks in one currency: at least
+// one criterion, a zero one asking nothing.
+type TrustTierRequirement struct {
+	// Currency is the requirement's.
+	Currency catalog.Currency `json:"currency"`
+	// NetPaidAmount is the least the customer has paid in it, settled payments less refunds and chargebacks, in whole minor units of its native units.
+	NetPaidAmount int64 `json:"net_paid_amount,omitempty,string"`
+	// DaysSinceFirstPayment is the least time since its first settled payment in it, in 24-hour days.
+	DaysSinceFirstPayment int `json:"days_since_first_payment,omitempty"`
 }
 
 // BillingPolicyBinding declares a merchant-default or per-tier policy.
@@ -568,7 +583,9 @@ type DunningPolicy struct {
 	// AccessWhileRenewalHeld is DunningAccessKeep (default: a renewal with no
 	// outcome because collection is stopped keeps access until it is
 	// attempted) or DunningAccessSuspend (access ends at the renewal
-	// allowance, min(24h, max(2h, period/10)) past the paid period).
+	// allowance, min(24h, max(2h, period/10)) past the paid period, while
+	// nothing is sent). An NMI charge sent but unresolved keeps access
+	// under either policy; proven nonexecution restores this held-renewal rule.
 	AccessWhileRenewalHeld DunningAccess `json:"access_while_renewal_held,omitempty"`
 }
 

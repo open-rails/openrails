@@ -21,9 +21,9 @@ const (
 	InvokerTypeCustomer  = billing.InvokerTypeCustomer
 )
 
-// IsDirectPayerInvoker reports whether t is InvokerTypeCustomer. Anything else
+// IsCustomerInvoker reports whether t is InvokerTypeCustomer. Anything else
 // is delegated: the stricter abuse cutoff.
-func IsDirectPayerInvoker[T ~string](t T) bool {
+func IsCustomerInvoker[T ~string](t T) bool {
 	return strings.TrimSpace(string(t)) == string(InvokerTypeCustomer)
 }
 

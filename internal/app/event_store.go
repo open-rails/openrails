@@ -65,7 +65,6 @@ func (r *Runtime) ReportDormantUsage(ctx context.Context) {
 	if r == nil || r.DB == nil {
 		return
 	}
-	r.reportPendingUsage(ctx)
 	rows, err := r.DB.GenDirectory().ListUsageCatalogObjects(ctx)
 	if err != nil {
 		r.Log.WarnContext(ctx, "event store: cannot list the usage catalog objects without a store", logx.Err(err))
@@ -128,27 +127,12 @@ func recordDormantUsage(ctx context.Context, q *gen.Queries, mid billing.Merchan
 	return err
 }
 
-// UsageDiscard is what attaching another event store discarded of one
-// merchant: its customers' pending usage, recorded as a usage_discard
-// maintenance run.
-type UsageDiscard struct {
-	MerchantID uuid.UUID `json:"merchant_id"`
-	RunID      uuid.UUID `json:"run_id"`
-	Customers  int       `json:"customers"`
-}
-
 // AttachEventStore records store as the database's event store in place of
-// the one it recorded: an empty or different ClickHouse. Usage the ledger has
-// not taken is only in the old store, so with any, it refuses unless
-// discard; then each merchant's pending usage is deleted and recorded, with
-// actor and reason, in the same transaction as the new identity.
-func AttachEventStore(ctx context.Context, database *db.DB, store *eventstore.Store, actor, reason string, discard bool) ([]UsageDiscard, error) {
-	actor, reason = strings.TrimSpace(actor), strings.TrimSpace(reason)
-	if actor == "" || reason == "" {
-		return nil, errors.New("attaching an event store names its actor and reason")
-	}
-	var out []UsageDiscard
-	err := database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+// the one it recorded: an empty or different ClickHouse. Postings read only
+// PostgreSQL, so usage the ledger has not taken stays and posts; the new
+// store has none of the old one's history or limit counts.
+func AttachEventStore(ctx context.Context, database *db.DB, store *eventstore.Store) error {
+	return database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := database.NewWithPgxTx(tx).Gen(ctx)
 		recorded, err := q.LockEventStore(ctx)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -158,73 +142,6 @@ func AttachEventStore(ctx context.Context, database *db.DB, store *eventstore.St
 		if err != nil || recorded == store.ID() {
 			return err
 		}
-		merchants, err := q.CountUsagePendingByMerchant(ctx)
-		if err != nil {
-			return err
-		}
-		if len(merchants) > 0 && !discard {
-			return fmt.Errorf("%w: %d merchants have usage the ledger has not taken in event store %s; attaching %s discards it (--discard-pending)",
-				billing.ErrEventStoreRequired, len(merchants), recorded, store.ID())
-		}
-		now := time.Now().UTC()
-		for _, m := range merchants {
-			rows, err := q.DiscardUsagePending(ctx, m.MerchantID)
-			if err != nil {
-				return err
-			}
-			affected, err := json.Marshal(map[string]any{"previous_store": recorded, "store": store.ID(), "pending": rows})
-			if err != nil {
-				return err
-			}
-			run, err := q.RecordUsageDiscard(ctx, gen.RecordUsageDiscardParams{MerchantID: m.MerchantID, Actor: actor, Now: now, Affected: affected,
-				Note: "attached event store " + store.ID().String() + ": " + reason})
-			if err != nil {
-				return err
-			}
-			out = append(out, UsageDiscard{MerchantID: m.MerchantID, RunID: run, Customers: len(rows)})
-		}
-		return q.ReattachEventStore(ctx, gen.ReattachEventStoreParams{StoreID: store.ID(), Now: now})
+		return q.ReattachEventStore(ctx, gen.ReattachEventStoreParams{StoreID: store.ID(), Now: time.Now().UTC()})
 	})
-	return out, err
-}
-
-// reportPendingUsage opens, on a deployment without an event store, a
-// finding for each merchant whose customers have usage the ledger has not
-// taken: only the store can post it, so those customers' credit lots cannot
-// expire, be revoked or refunded, and their usage cannot be billed, while
-// every other customer bills as before. An attached store resolves them.
-func (r *Runtime) reportPendingUsage(ctx context.Context) {
-	rows, err := r.DB.GenDirectory().CountUsagePendingByMerchant(ctx)
-	if err != nil {
-		r.Log.WarnContext(ctx, "event store: cannot read pending usage", logx.Err(err))
-		return
-	}
-	for _, row := range rows {
-		mid := billing.MerchantID(row.MerchantID)
-		if r.EventStore == nil {
-			r.Log.WarnContext(ctx, "no event store (Deps.ClickHouse): usage the ledger has not taken waits for one; these customers' credit lots cannot move and their usage cannot be billed",
-				"merchant_id", mid.String(), "customers", row.Customers)
-		}
-		err := r.DB.RunInMerchantScope(ctx, mid, "pending usage finding", func(ctx context.Context) error {
-			return r.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-				q := gen.New(tx)
-				if r.EventStore != nil {
-					_, err := q.ResolveConfigFinding(ctx, gen.ResolveConfigFindingParams{MerchantID: mid.UUID(), FindingType: eventstore.PendingFindingType, SubjectKey: eventstore.PendingFindingSubject})
-					return err
-				}
-				action := fmt.Sprintf("%d customers have usage the ledger has not taken, and the deployment has no event store (Deps.ClickHouse): their credit lots cannot "+
-					"expire, be revoked or refunded, their usage cannot be billed, and new usage is refused (event_store_required). Attach the store, or discard the usage with openrails usage attach --discard-pending.", row.Customers)
-				evidence, err := json.Marshal(map[string]int64{"customers": row.Customers})
-				if err != nil {
-					return err
-				}
-				_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), FindingType: eventstore.PendingFindingType,
-					SubjectKey: eventstore.PendingFindingSubject, Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
-				return err
-			})
-		})
-		if err != nil {
-			r.Log.WarnContext(ctx, "event store: cannot record the pending usage finding", logx.Err(err), "merchant_id", mid.String())
-		}
-	}
 }

@@ -268,7 +268,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		}
 		return fmt.Errorf("load subscription: %w", err)
 	}
-	if payer := identity.CustomerIDFromString(userID); payer.IsZero() || subscription.CustomerID != payer.UUID() {
+	if customer := identity.CustomerIDFromString(userID); customer.IsZero() || subscription.CustomerID != customer.UUID() {
 		return ErrSubscriptionNotFound
 	}
 	if !providerCancellable(subscription.Status) {
@@ -291,9 +291,9 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	case rails.IsNMI(subscription.Rail):
 		// The NMI delete always rides the durable nmi_delete_subscription
 		// intent, committed with the cancellation, and is verified before it
-		// executes; the customer budget admitted it, so destructive arming
-		// does not hold it. With an undo window it is due at period_end -
-		// margin, keeping the schedule for a resume; otherwise now.
+		// executes; destructive arming and the card-removal budget never
+		// hold a customer's own cancel. With an undo window it is due at
+		// period_end - margin, keeping the schedule for a resume; otherwise now.
 		if subscription.RailSubscriptionID != "" {
 			if s.providerCancel == nil {
 				return fmt.Errorf("nmi remote-delete scheduler unavailable")

@@ -14,7 +14,7 @@ type MerchantConfiguration struct {
 	// Missing values use money service defaults.
 	BillingPeriodBoundary string `json:"billing_period_boundary,omitempty"`
 
-	// ArrearsGraceDays is how many days past a usage invoice's due_at a payer keeps
+	// ArrearsGraceDays is how many days past a usage invoice's due_at a customer keeps
 	// before its debt is delinquent. Nil ⇒ delinquency.DefaultGraceDays; zero
 	// is a valid choice.
 	ArrearsGraceDays *int `json:"arrears_grace_days,omitempty"`

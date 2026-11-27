@@ -12,7 +12,7 @@ inputs:
     description: Cache family; jobs that build the same way share one.
     required: true
   save:
-    description: "'true' saves (end of job, pushes only; the job needs actions: write); otherwise restores (after setup-go)."
+    description: "'true' saves (end of job, pushes only; the job needs actions: write); otherwise restores (after setup-go, before any other go command)."
     default: "false"
 runs:
   using: composite
@@ -27,12 +27,10 @@ runs:
       run: |
         modules="$(go env GOMODCACHE)"
         sum="$(cat go.sum server/go.sum examples/go.sum | sha256sum | cut -c1-16)"
-        # setup-go installs go.mod's go line, and its own go env downloads the
-        # toolchain line's release into the module cache. The cache holds that
-        # release too, and tar cannot write over its read-only files, so it goes
-        # first: the restore brings it back, or the next go command downloads it.
-        if [[ "$SAVE" != true ]]; then
-          for toolchain in "$modules"/golang.org/toolchain@*; do
+        # setup-go installs go.mod's toolchain line, so no go command downloads
+        # one into the module cache; one an older entry brought is not saved.
+        if [[ "$SAVE" == true ]]; then
+          for toolchain in "$modules"/golang.org/toolchain@* "$modules"/cache/download/golang.org/toolchain; do
             if [[ -e "$toolchain" ]]; then chmod -R u+w "$toolchain"; rm -rf "$toolchain"; fi
           done
         fi

@@ -222,7 +222,7 @@ dunning_policy:
   customer_retries: 0
   # AccessDuringDunning is DunningAccessKeep (default: members keep access until a confirmed outcome ends it) or DunningAccessSuspend (access ends with the paid period while a declined renewal is retried).
   access_during_dunning: ""
-  # AccessWhileRenewalHeld is DunningAccessKeep (default: a renewal with no outcome because collection is stopped keeps access until it is attempted) or DunningAccessSuspend (access ends at the renewal allowance, min(24h, max(2h, period/10)) past the paid period).
+  # AccessWhileRenewalHeld is DunningAccessKeep (default: a renewal with no outcome because collection is stopped keeps access until it is attempted) or DunningAccessSuspend (access ends at the renewal allowance, min(24h, max(2h, period/10)) past the paid period, while nothing is sent).
   access_while_renewal_held: ""
 # Checkout is the checkout's settings (embed origins, billing fields); a patch replaces it whole.
 checkout:
@@ -246,21 +246,19 @@ balance_notices:
       amount: "0"
 # Accounting is how the merchant's books are dated; a patch replaces it whole.
 accounting:
-  # Timezone is the IANA zone (Europe/Berlin) whose days and months the metrics, MRR reports and usage history group in, and at whose month ends usage posts; empty is UTC.
+  # Timezone is the IANA zone (Europe/Berlin) whose days and months the metrics, MRR reports and usage history group in, and where usage posts at the end of each day; empty is UTC.
   timezone: ""
 # CardVault is where new cards are saved: a card PSP's key, whose own vault (or the custodian it names) holds them, or CardVaultPlatform.
 card_vault: ""
 # ChargePSPs are the card PSPs, in order, that new card charges go to: each must charge cards from CardVault.
 charge_psps: []
-# BillingPolicies are named spend limits: an outstanding cap, a window spend cap or an accrual rate cap.
+# BillingPolicies are named spend limits: a cap on what is owed, spend windows, or both.
 billing_policies:
     # Name is the policy's, which bindings name.
   - name: ""
-    # Kind is "outstanding_cap" (cap LEDGER-measured unpaid arrears — a credit line on debt, refused with outstanding_cap_reached), "window_spend_cap" (cap NEW spend per rolling window; prior debt drives delinquency, not admission), or "accrual_rate_cap" (cap the measured accrual RATE in micros/hour — the cloud quota, refused with accrual_rate_cap_reached).
-    kind: ""
-    # OutstandingCapAmount (micros) is the credit line for kind=outstanding_cap.
+    # OutstandingCapAmount (micros) is the credit line on unpaid arrears of a bound customer without its own credit limit; what it owes is taken from it, and a request past it is refused with outstanding_cap_reached.
     outstanding_cap_amount: "0"
-    # SpendWindows are the rolling NEW-spend ceilings for kind=window_spend_cap.
+    # SpendWindows are the rolling NEW-spend ceilings, refused with budget_exceeded.
     spend_windows:
         # Key names the window.
       - key: ""
@@ -270,19 +268,15 @@ billing_policies:
         limit: "0"
         # Currency is the window's; empty is the request's.
         currency: ""
-    # AccrualRateCapPerHour (kind=accrual_rate_cap) caps the measured accrual rate in micros PER HOUR — the cloud quota.
-    accrual_rate_cap_per_hour: "0"
-    # AccrualRateWindowSeconds is the accrual rate's measurement lookback (default 3600).
-    accrual_rate_window_seconds: 0
-    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for payers bound here; nil defers to it.
+    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for customers bound here; nil defers to it.
     collection_threshold_amount: "0"
-    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for payers bound here; nil defers to it.
+    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for customers bound here; nil defers to it.
     delinquency_grace_days: 0
-    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for payers bound here; nil defers to it.
+    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for customers bound here; nil defers to it.
     delinquency_amount_floor: "0"
-    # CollectionCycleBoundary is declarable and REFUSED: statement periods must tile a payer's lifetime, and rebinding is a live lever, so the boundary stays merchant-wide.
+    # CollectionCycleBoundary is declarable and REFUSED: statement periods must tile a customer's lifetime, and rebinding is a live lever, so the boundary stays merchant-wide.
     collection_cycle_boundary: ""
-    # BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace windows: at most Limit of host-reported wasted spend is forgiven per window; direct-payer overage is charged.
+    # BadSpendWindows are the #497 per-CUSTOMER direct-credential wasted-spend grace windows: at most Limit of host-reported wasted spend is forgiven per window; direct-customer overage is charged.
     bad_spend_windows:
         # Key names the window.
       - key: ""
@@ -300,6 +294,18 @@ billing_policy_bindings:
   - policy: ""
     # Tier is the trust tier it applies to; empty makes it the merchant default.
     tier: ""
+# TrustTiers are the tiers customers graduate to by what they paid, lowest first.
+trust_tiers:
+    # Name is the tier, as bindings and trust levels name it.
+  - name: ""
+    # Requirements are what the tier asks, at most one per currency; a currency they do not name never reaches the tier.
+    requirements:
+        # Currency is the requirement's.
+      - currency: ""
+        # NetPaidAmount is the least the customer has paid in it, settled payments less refunds and chargebacks, in whole minor units of its native units.
+        net_paid_amount: "0"
+        # DaysSinceFirstPayment is the least time since its first settled payment in it, in 24-hour days.
+        days_since_first_payment: 0
 # DelegatedInvokerWastedSpendLimits bound the wasted spend a delegated invoker is forgiven per window.
 delegated_invoker_wasted_spend_limits:
     # Key names the window.

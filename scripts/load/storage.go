@@ -61,11 +61,10 @@ type ColumnStorage struct {
 }
 
 // HistoryRows are usage history's rows as stored, and as many as one row a
-// UTC day would be, with and without the invoker in the key.
+// UTC day would be.
 type HistoryRows struct {
-	Rows             uint64 `json:"rows"`
-	DayRows          uint64 `json:"day_rows"`
-	DayRowsNoInvoker uint64 `json:"day_rows_without_invoker"`
+	Rows    uint64 `json:"rows"`
+	DayRows uint64 `json:"day_rows"`
 }
 
 func (e *env) runStorage(ctx context.Context) *StorageResult {
@@ -89,7 +88,7 @@ func (e *env) storageWorld(ctx context.Context, name string, from, to time.Time)
 	}
 	clock := clockwork.NewFakeClockAt(from)
 	cfg := embeddedConfig(schema, schema, []string{"store"})
-	cfg.Merchants[0].BillingPolicies = []billing.BillingPolicy{{Name: "daily", Kind: "window_spend_cap",
+	cfg.Merchants[0].BillingPolicies = []billing.BillingPolicy{{Name: "daily",
 		SpendWindows: []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: 1_000_000_000_000_000, Currency: "USD"}}}}
 	cfg.Merchants[0].BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "daily"}}
 	eng, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: e.pool, ClickHouse: e.ch, Clock: clock, FXTransport: fxWire{}, Logger: quietLogger(os.Stderr)})
@@ -194,8 +193,7 @@ func (e *env) storageWorld(ctx context.Context, name string, from, to time.Time)
 		w.fail("columns: %v", err)
 	}
 	h := &HistoryRows{}
-	if err := e.ch.QueryRow(ctx, "SELECT count(), uniqExact(customer_id, toDate(bucket_at), currency, event_type, meter, cell, print, period_starts_at, invoker, outcome), "+
-		"uniqExact(customer_id, toDate(bucket_at), currency, event_type, meter, cell, print, period_starts_at, outcome) FROM `"+schema+"`.usage_history").Scan(&h.Rows, &h.DayRows, &h.DayRowsNoInvoker); err != nil {
+	if err := e.ch.QueryRow(ctx, "SELECT count(), uniqExact(customer_id, toDate(bucket_at), currency, event_type, meter, cell) FROM `"+schema+"`.usage_history").Scan(&h.Rows, &h.DayRows); err != nil {
 		w.fail("history rows: %v", err)
 	} else {
 		w.History = h

@@ -15,20 +15,15 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/limits"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
 // Bind is the admitter on a transaction's database, as Admit runs it.
-func (a *Admitter) Bind(d *db.DB, now func() time.Time) *Admitter {
+func (a *Admitter) Bind(d *db.DB) *Admitter {
 	bound := *a
 	bound.money = a.money.WithDatabase(d)
 	bound.loader = NewSpendgatePolicyLoader(NewBillingPolicyStore(d), a.loader.fx)
-	if a.rates != nil {
-		rates := *a.rates
-		rates.db = d
-		rates.now = now
-		bound.rates = &rates
-	}
 	return &bound
 }
 
@@ -37,13 +32,14 @@ func (a *Admitter) Bind(d *db.DB, now func() time.Time) *Admitter {
 // costs, or the spend windows and declared limits a request claims (costing
 // nothing here), what the customer may spend and its policy's credit line.
 type Set struct {
+	// Trust is the trust level the request's policy was resolved at.
+	Trust   billing.EffectiveTrustLevel
 	Refusal *AdmitDecision
 	Spend   []limits.Claim
 	Limits  []limits.Claim
 	// Available is what the customer may spend after every live hold, and
 	// CreditLine the overdraft the policy allows on it.
 	Available, CreditLine, Outstanding int64
-	resolved                           ResolvedPolicy
 }
 
 // ResolveSet makes the checks Admit makes before it weighs any cost, for
@@ -59,28 +55,28 @@ func (a *Admitter) ResolveSet(ctx context.Context, q *gen.Queries, req AdmitRequ
 		return Set{}, err
 	}
 	if refused != nil {
-		return Set{Refusal: refused}, nil
+		return Set{Trust: g.trust, Refusal: refused}, nil
 	}
-	out := Set{resolved: g.resolved}
+	out := Set{Trust: g.trust}
 	if out.Limits, err = a.limitClaimsFor(ctx, q, tid.UUID(), req, eventType); err != nil {
 		return Set{}, err
 	}
 	if out.Spend, err = spendgate.SpendClaims(tid.UUID(), req.CustomerID.UUID(), strings.TrimSpace(req.Currency), g.policy, g.request, 0, now); err != nil {
 		return Set{}, err
 	}
-	out.Available, out.CreditLine, out.Outstanding = payerCapacity(capacity, g.resolved)
+	out.Available, out.CreditLine, out.Outstanding = customerCapacity(capacity)
 	return out, nil
 }
 
 // BalanceRefusal is the deny code a request that does not fit the balance
 // gets, as Admit answers it: insufficient_balance, insufficient_credit with a
-// credit line, or outstanding_cap_reached when the policy gates on debt.
+// credit line, or outstanding_cap_reached when what it owes took the line.
 func (s Set) BalanceRefusal() billing.DenyCode {
 	code := billing.DenyInsufficientBalance
 	if s.CreditLine > 0 {
 		code = billing.DenyInsufficientCredit
 	}
-	if s.resolved.GatesOnOutstandingOwed() && s.CreditLine == 0 && s.Available <= 0 && s.Outstanding > 0 {
+	if s.CreditLine == 0 && s.Available <= 0 && s.Outstanding > 0 {
 		code = billing.DenyOutstandingCapReached
 	}
 	return code
@@ -106,34 +102,34 @@ func (a *Admitter) SpendPolicies(ctx context.Context, reqs []AdmitRequest) ([]*S
 	if err != nil {
 		return nil, nil, err
 	}
-	var payers []uuid.UUID
+	var customers []uuid.UUID
 	for _, req := range reqs {
-		if identity.IsDirectPayerInvoker(req.InvokerType) {
-			payers = append(payers, req.CustomerID.UUID())
+		if identity.IsCustomerInvoker(req.InvokerType) {
+			customers = append(customers, req.CustomerID.UUID())
 		}
 	}
-	if len(payers) == 0 {
+	if len(customers) == 0 {
 		return policies, errs, nil
 	}
-	r, rerr := a.loader.policies.resolver(ctx, payers)
+	r, rerr := a.loader.policies.resolver(ctx, customers)
 	// Trust levels matter only where a policy is declared.
-	tiers := map[string]map[uuid.UUID]string{}
+	tiers := map[string]map[uuid.UUID]billing.EffectiveTrustLevel{}
 	if rerr == nil && r.declares() {
 		byCurrency := map[string][]uuid.UUID{}
 		for _, req := range reqs {
-			if identity.IsDirectPayerInvoker(req.InvokerType) && req.TrustLevel == "" {
+			if identity.IsCustomerInvoker(req.InvokerType) && req.TrustLevel == "" {
 				cur := money.NormalizeCurrency(req.Currency)
 				byCurrency[cur] = append(byCurrency[cur], req.CustomerID.UUID())
 			}
 		}
 		for cur, customers := range byCurrency {
-			if tiers[cur], err = a.money.TrustLevels(ctx, customers, cur); err != nil {
+			if tiers[cur], err = a.money.TrustLevelsIn(ctx, customers, cur); err != nil {
 				return nil, nil, err
 			}
 		}
 	}
 	for i, req := range reqs {
-		if !identity.IsDirectPayerInvoker(req.InvokerType) {
+		if !identity.IsCustomerInvoker(req.InvokerType) {
 			continue
 		}
 		if rerr != nil {
@@ -142,14 +138,9 @@ func (a *Admitter) SpendPolicies(ctx context.Context, reqs []AdmitRequest) ([]*S
 		}
 		trustLevel := req.TrustLevel
 		if trustLevel == "" {
-			trustLevel = cmp.Or(tiers[money.NormalizeCurrency(req.Currency)][req.CustomerID.UUID()], DefaultTrustLevel)
+			trustLevel = cmp.Or(tiers[money.NormalizeCurrency(req.Currency)][req.CustomerID.UUID()].TrustLevel, merchantconfig.DefaultTrustLevel)
 		}
-		resolved, err := a.loader.InCurrency(ctx, r.resolve(req.CustomerID.UUID(), trustLevel), req.Currency)
-		if err != nil {
-			errs[i] = err
-			continue
-		}
-		policy, err := a.loader.Load(ctx, req.Currency, resolved)
+		policy, err := a.loader.Load(ctx, req.Currency, r.resolve(req.CustomerID.UUID(), trustLevel))
 		if err != nil {
 			errs[i] = err
 			continue

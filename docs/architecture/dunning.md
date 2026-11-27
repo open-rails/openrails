@@ -14,8 +14,9 @@ Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limit
   resolved into a `collection.Policy`.
 - **Case:** a `past_due` or `awaiting_method` membership, run under the policy
   it recorded at its first decline.
-- **Window:** `Policy.Window`, the last offset plus min(24 h, cycle/2). Nothing
-  older is charged.
+- **Window:** `Policy.Window`, the last offset plus min(24 h, cycle/2). A case
+  ends there unless a retry ran late (`subscriptions.CaseEnd`), and never runs
+  past the next renewal.
 - **Certainty leg:** what a terminal outcome needs (`collection.Certainty*`).
 - **Delinquency:** `current`, `grace` or `delinquent` per (merchant, customer,
   currency).
@@ -69,12 +70,15 @@ CCBill-owned subscriptions retry at the provider; OpenRails mirrors `past_due`.)
   for standing advice. Advice is a card's: a new card, or the old one an
   account updater replaced, drops it and the deferral it set (`ReplaceMethod`,
   or `ForgetAdvice` when staff choose the card). A spent schedule is
-  `lifecycle.DunningExhausted`.
+  `lifecycle.DunningExhausted`. A customer's own retryable engine decline spends
+  no scheduled retry and keeps the case's count, next retry and end; network
+  advice can still delay that retry.
 - `FixPaymentMethod` moves the case to `awaiting_method`, sends
   `payment_method_update_required` (`payment_method_failed` when it queues a
   refresh of a possibly reissued card) and sets `grace_ends_at` to the window's end;
   an expired card may queue a refresh ([payment methods](payment-methods.md)).
 - `NonRecoverable` or a spent schedule cancels, ends access and queues the provider cancel, given a certainty leg and an open `destructive.Gate`. Otherwise `lifecycle.TerminalHeld` keeps engine members `past_due`, makes NMI-schedule members `unverified`, and raises `life.terminal_outcome.held`, which alerts the merchant's operator once per case; its recommended action names what lets the outcome apply (the merchant's destructive arming, a billing import's cancellation cap, a re-import, or a provider check).
+  A held engine case's `grace_ends_at` is the held instant; `EndHeldOutcome` ends it on the next due pass once the merchant is armed. Its held finding closes when the case ends by any route.
 - Access while dunning is a grace grant (`dunningAccess`), unless
   `access_during_dunning` is `suspend`.
 
@@ -95,8 +99,8 @@ gets `due_recheck_at` from `deferDue`.
 schedules) and paying an engine renewal invoice with the subscription's card pass
 `intents.AdmitCustomerRetry` before any provider call. From
 `GetCycleCardStanding` it refuses (`ErrRetryNeedsNewMethod`) once the customer's
-declines on the card reach `customer_retries`, after a non-recoverable decline
-or forbidding issuer code, and while `awaiting_method` unless
+declines on the card reach `customer_retries` (default 3, per card), after a
+non-recoverable decline or forbidding issuer code, and while `awaiting_method` unless
 `decline.HolderCanClear`. Another card is always admitted.
 
 **Usage invoices.** An `order_collection` operation charges a due invoice. On a decline, `InvoiceCollectionHandler` applies `collection.FailureAction` to the answer and its advice (Stripe's and the network's) under the merchant's current `dunning_policy`, with the invoice's period as the cycle (at least 4 days); `usage.DeclineCollection` sets `next_collection_attempt_at`, marks it `uncollectible`, or stops collecting. Its transient answers count as failures; there is no transient ladder.
@@ -149,7 +153,7 @@ Checks:
 - OR-J26-S55: a refused collection keeps its nonexecution proof.
 
 ### 2. Agreement with providers
-`lifecycle.RenewalDeclined` ignores a decline for a canceled row or another period. The completion handlers also require an unchanged failure count. A provider-run subscription is mirrored, not retried. Converge, the pull, the unknown cohort and NMI verification judge a provider-declared failure against the subscription's own window (`Policy.Window` of its cycle): its case policy's where OpenRails duns it, the built-in one where the provider retries. A row past its window is never charged: an NMI row parks `unverified`, a provider-billed row is asked by id, and an engine renewal whose period elapsed is refused (`life.due_pass.refused`).
+`lifecycle.RenewalDeclined` ignores a decline for a canceled row or another period. The completion handlers also require an unchanged failure count. A provider-run subscription is mirrored, not retried. Converge, the pull, the unknown cohort and NMI verification judge a provider-declared failure against the subscription's own window (`Policy.Window` of its cycle): its case policy's where OpenRails duns it, the built-in one where the provider retries. A row past its case end (`subscriptions.CaseEnd`) is not charged again: an NMI row parks `unverified`, a provider-billed row is asked by id, and an engine renewal whose period elapsed is refused (`life.due_pass.refused`). A delayed case still makes every attempt its policy allows: an engine retry admitted inside its case but sent late (its read before sending failed) is still sent until the period it pays for ends, and its remaining retries follow it, so a charge can land after the window.
 
 Checks:
 - `internal/intents/manual_rebill_completion.go` and `internal/modules/money/subscription_collection_intent.go` check the period end and `FailureCount`. Scenarios: OR-J16-S04, S30, S70 and S71.
@@ -168,7 +172,7 @@ Checks:
 Staff reads need `merchant:customer:read`, write-offs
 `merchant:customer:manage`, policy settings `merchant:config:manage`
 (`Route.Needs`). `retry-now` needs the customer acting in person
-(`customerActionPayer`) and finds only that customer's subscription
+(`actionCustomer`) and finds only that customer's subscription
 (`GetUserSubscriptionByID`).
 
 Checks:
@@ -219,7 +223,7 @@ Checks:
 - OR-J16-S51 and S52: the retry caps hold the networks' reattempt limits.
 
 ### 9. Destructive-action safeguards
-A terminal outcome needs a certainty leg and an open `destructive.Gate`. Under `limited`, the due pass holds the end of an `awaiting_method` case. A held outcome keeps access and raises `life.terminal_outcome.held`, alerting the operator once (OR-J06-S70). Waiving and marking uncollectible run through `destructive.RunLocal` (`waive_order`, `mark_uncollectible`).
+A terminal outcome needs a certainty leg and an open `destructive.Gate`. Under `limited`, the due pass holds terminal cancellations. A held engine case ends as a spent schedule on the first due pass after the merchant is armed (`EndHeldOutcome`); its finding closes when the case ends by any route. A held outcome keeps access and raises `life.terminal_outcome.held`, alerting the operator once (OR-J06-S70). Waiving and marking uncollectible run through `destructive.RunLocal` (`waive_order`, `mark_uncollectible`).
 `subscription_status_transitions` records the actor of each status change.
 
 Checks:

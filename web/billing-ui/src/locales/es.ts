@@ -252,6 +252,23 @@ export const es: BillingUiMessageBundle = {
       stripe: "Tarjeta",
     },
   },
+  usage: {
+    title: "Uso",
+    description: "Lo que ha costado tu uso a lo largo del tiempo.",
+    intervalLabel: "Intervalo",
+    interval: {
+      hour: "Por hora",
+      day: "Diario",
+      week: "Semanal",
+      month: "Mensual",
+    },
+    timezone: "Zona horaria",
+    total: "Total",
+    requests: "Solicitudes",
+    discount: "Descuento por volumen",
+    empty: "Sin uso en este periodo",
+    emptyDescription: "El uso aparece aquí a medida que se registra.",
+  },
   errors: {
     generic: "Algo salió mal. Inténtalo de nuevo.",
     network_error:

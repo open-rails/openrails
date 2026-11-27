@@ -32,6 +32,7 @@ func (p UpdateMerchantConfigurationParams) MarshalJSON() ([]byte, error) {
 	for name, present := range map[string]bool{
 		"billing_policies":                      p.BillingPolicies != nil,
 		"billing_policy_bindings":               p.BillingPolicyBindings != nil,
+		"trust_tiers":                           p.TrustTiers != nil,
 		"delegated_invoker_wasted_spend_limits": p.DelegatedInvokerWastedSpendLimits != nil,
 		"currencies":                            p.Currencies != nil,
 	} {

@@ -185,7 +185,7 @@ type ListDerivedEntitlementHoldersRow struct {
 // The reverse lookup: customers holding a key at at_time, with the most seats
 // a live window gives (0: none per seat), keyset by customer id after
 // after_id. Key-first: the products granting it, then each product's first
-// row_limit holders in customer invoice. The cursor bounds (product, customer)
+// row_limit holders in customer order. The cursor bounds (product, customer)
 // rows, so only the per-product index serves the probe.
 func (q *Queries) ListDerivedEntitlementHolders(ctx context.Context, arg ListDerivedEntitlementHoldersParams) ([]ListDerivedEntitlementHoldersRow, error) {
 	rows, err := q.db.Query(ctx, listDerivedEntitlementHolders,

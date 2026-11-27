@@ -2525,7 +2525,7 @@
           "catalog"
         ],
         "operationId": "CreateProviderPrice",
-        "description": "CreateProviderPrice links a price a provider owns and runs to a product (a legacy NMI plan, a Stripe price, a CCBill FlexForm). Its terms are read from the provider, declared for CCBill; nothing is written to the provider.",
+        "description": "CreateProviderPrice links a price a provider owns and runs to a product (a legacy NMI plan, a Stripe price, a CCBill FlexForm). Its terms are read from the provider, declared for CCBill, and for an NMI plan NMI does not answer for until it does; nothing is written to the provider.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -5651,7 +5651,7 @@
           "admin"
         ],
         "operationId": "GetCustomer",
-        "description": "GetCustomer reads one customer: its contact, its settings, and per currency its balance and the card that pays its invoices.",
+        "description": "GetCustomer reads one customer: its contact, its settings, and per currency its balance, the card that pays its invoices and its effective trust tier.",
         "parameters": [
           {
             "name": "customer_id",
@@ -6589,6 +6589,13 @@
             }
           },
           {
+            "name": "timezone",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "to",
             "in": "query",
             "schema": {
@@ -6625,6 +6632,342 @@
         ],
         "x-openrails-error-sets": [
           "tier:customer",
+          "request",
+          "event_store"
+        ]
+      }
+    },
+    "/v1/me/usage/series": {
+      "get": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "group_by",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "event_type",
+                "invoker",
+                "meter"
+              ]
+            }
+          },
+          {
+            "name": "interval",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "hour",
+                "month",
+                "week"
+              ]
+            }
+          },
+          {
+            "name": "timezone",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSeries"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-event-store": true,
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "too_many_buckets"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer",
+          "request",
+          "event_store"
+        ]
+      }
+    },
+    "/v1/admin/customers/{customer_id}/usage": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "GetUsage",
+        "description": "GetUsage reads a page of a customer's usage report in params.Currency: its groups over the days of params.Timezone (the merchant's accounting zone when empty) overlapping [From, To), as the customer reads it.",
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "group_by",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "event_type",
+                "invoker",
+                "meter"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "timezone",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Usage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:customer:read",
+          "root": "root:customer:read"
+        },
+        "x-openrails-event-store": true,
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "invalid_cursor",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request",
+          "event_store"
+        ]
+      }
+    },
+    "/v1/admin/customers/{customer_id}/usage/series": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "GetUsageSeries",
+        "description": "GetUsageSeries reads a customer's usage over time in params.Currency, as the customer reads it: one bucket per params.Interval on params.Timezone's calendar overlapping [From, To). More than billing.MaxUsageBuckets buckets is refused (billing.CodeTooManyBuckets).",
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "group_by",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "event_type",
+                "invoker",
+                "meter"
+              ]
+            }
+          },
+          {
+            "name": "interval",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "hour",
+                "month",
+                "week"
+              ]
+            }
+          },
+          {
+            "name": "timezone",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSeries"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:customer:read",
+          "root": "root:customer:read"
+        },
+        "x-openrails-event-store": true,
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied",
+          "too_many_buckets"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
           "request",
           "event_store"
         ]
@@ -7297,7 +7640,7 @@
           "app"
         ],
         "operationId": "SyncLeases",
-        "description": "SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate). A sync carries the lease's usage, numbered within the lease, what its gate has had in flight across a sync and the customers whose views it asks for; it settles all the usage it carries and answers how far the usage settled (a resend is matched by lease and number), each view (where the customer stands on its limits, reserving nothing), the limit set of each invoker's attributes, the pricing a gate costs requests with, and how many of the merchant's leases are live. The first sync under a new LeaseID creates the lease; a lease answers resends for 61 days after its last sync. Settled usage posts to the ledger at each month's end in the merchant's accounting zone and before any other movement of the customer's balance.",
+        "description": "SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate). A sync carries the lease's usage, numbered within the lease, what its gate has had in flight across a sync and the customers whose views it asks for; it settles all the usage it carries and answers how far the usage settled (a resend is matched by lease and number), each view (where the customer stands on its limits, reserving nothing), the limit set of each invoker's attributes, the pricing a gate costs requests with, and how many of the merchant's leases are live. The first sync under a new LeaseID creates the lease; a lease answers resends for 61 days after its last sync. Settled usage posts to the ledger daily, once its day ends in the merchant's accounting zone, and before any other movement of the customer's balance.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -9524,7 +9867,6 @@
         "x-openrails-errors": [
           "cancel_unsupported_on_rail",
           "invalid_param",
-          "payment_in_progress",
           "resource_not_found",
           "service_unavailable",
           "subscription_not_active"
@@ -13621,6 +13963,7 @@
                 "root:entitlements:read",
                 "root:events:read",
                 "root:invoices:manage",
+                "root:merchants:create",
                 "root:merchants:delete",
                 "root:merchants:read",
                 "root:merchants:restore",
@@ -14881,9 +15224,6 @@
           "name": {
             "type": "string"
           },
-          "kind": {
-            "type": "string"
-          },
           "outstanding_cap_amount": {
             "type": "string",
             "description": "A number as a decimal string."
@@ -14893,13 +15233,6 @@
             "items": {
               "$ref": "#/components/schemas/BudgetWindow"
             }
-          },
-          "accrual_rate_cap_per_hour": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "accrual_rate_window_seconds": {
-            "type": "integer"
           },
           "collection_threshold_amount": {
             "type": "string",
@@ -14926,8 +15259,7 @@
           }
         },
         "required": [
-          "name",
-          "kind"
+          "name"
         ]
       },
       "BillingPolicyBinding": {
@@ -16519,6 +16851,12 @@
             "items": {
               "$ref": "#/components/schemas/DefaultPaymentMethod"
             }
+          },
+          "trust_levels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EffectiveTrustLevel"
+            }
           }
         },
         "required": [
@@ -16528,7 +16866,8 @@
           "last_seen_at",
           "settings",
           "balances",
-          "default_payment_methods"
+          "default_payment_methods",
+          "trust_levels"
         ]
       },
       "CustomerAccount": {
@@ -18180,6 +18519,47 @@
           "source"
         ]
       },
+      "EffectiveTrustLevel": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "trust_level": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "default",
+              "explicit",
+              "rule"
+            ]
+          },
+          "net_paid_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "first_paid_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "currency",
+          "trust_level",
+          "source",
+          "net_paid_amount",
+          "first_paid_at"
+        ]
+      },
       "EntitlementChange": {
         "type": "object",
         "properties": {
@@ -18512,9 +18892,11 @@
               "subscription_not_found",
               "subscription_paid_through",
               "subscription_resumable",
+              "too_many_buckets",
               "trial_unsupported_on_rail",
               "unknown_field",
               "unsupported_media_type",
+              "usage_events_expired",
               "usage_meter_invalid",
               "usage_meter_not_found",
               "usage_not_priced",
@@ -20598,6 +20980,17 @@
           "currency": {
             "type": "string"
           },
+          "trust_level": {
+            "type": "string"
+          },
+          "trust_level_source": {
+            "type": "string",
+            "enum": [
+              "default",
+              "explicit",
+              "rule"
+            ]
+          },
           "limits": {
             "type": "array",
             "items": {
@@ -20617,7 +21010,6 @@
           "balance_deny_code": {
             "type": "string",
             "enum": [
-              "accrual_rate_cap_reached",
               "budget_exceeded",
               "delegated_spend_not_allowed",
               "delinquent_unpaid_invoice",
@@ -20642,6 +21034,8 @@
         "required": [
           "customer_id",
           "currency",
+          "trust_level",
+          "trust_level_source",
           "limits",
           "capacities",
           "credit_line",
@@ -21156,6 +21550,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BillingPolicyBinding"
+            }
+          },
+          "trust_tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrustTier"
             }
           },
           "delegated_invoker_wasted_spend_limits": {
@@ -21871,6 +22271,9 @@
           "open_obligations": {
             "type": "integer"
           },
+          "armed": {
+            "type": "boolean"
+          },
           "gateway_id": {
             "type": "string"
           },
@@ -21937,6 +22340,7 @@
           "environment",
           "archived",
           "open_obligations",
+          "armed",
           "credentials",
           "revision",
           "created_at",
@@ -24771,9 +25175,11 @@
               "subscription_not_found",
               "subscription_paid_through",
               "subscription_resumable",
+              "too_many_buckets",
               "trial_unsupported_on_rail",
               "unknown_field",
               "unsupported_media_type",
+              "usage_events_expired",
               "usage_meter_invalid",
               "usage_meter_not_found",
               "usage_not_priced",
@@ -25495,7 +25901,6 @@
           "deny_code": {
             "type": "string",
             "enum": [
-              "accrual_rate_cap_reached",
               "budget_exceeded",
               "delegated_spend_not_allowed",
               "delinquent_unpaid_invoice",
@@ -27372,6 +27777,42 @@
           "trust_level"
         ]
       },
+      "TrustTier": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrustTierRequirement"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "requirements"
+        ]
+      },
+      "TrustTierRequirement": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "net_paid_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "days_since_first_payment": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "currency"
+        ]
+      },
       "UpdateAlertWebhookParams": {
         "type": "object",
         "properties": {
@@ -27563,6 +28004,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BillingPolicyBinding"
+            }
+          },
+          "trust_tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrustTier"
             }
           },
           "delegated_invoker_wasted_spend_limits": {
@@ -27792,6 +28239,9 @@
           "currency": {
             "type": "string"
           },
+          "timezone": {
+            "type": "string"
+          },
           "from": {
             "type": "string",
             "format": "date-time"
@@ -27814,6 +28264,10 @@
               "$ref": "#/components/schemas/UsageRow"
             }
           },
+          "discount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "next_cursor": {
             "oneOf": [
               {
@@ -27828,10 +28282,12 @@
         "required": [
           "customer_id",
           "currency",
+          "timezone",
           "from",
           "to",
           "group_by",
           "rows",
+          "discount",
           "next_cursor"
         ]
       },
@@ -27974,6 +28430,30 @@
           "currencies"
         ]
       },
+      "UsageBucket": {
+        "type": "object",
+        "properties": {
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageRow"
+            }
+          },
+          "discount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "starts_at",
+          "rows",
+          "discount"
+        ]
+      },
       "UsageDeduction": {
         "type": "object",
         "properties": {
@@ -28083,6 +28563,61 @@
           "event_count",
           "amount",
           "quantity"
+        ]
+      },
+      "UsageSeries": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "interval": {
+            "type": "string",
+            "enum": [
+              "day",
+              "hour",
+              "month",
+              "week"
+            ]
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "group_by": {
+            "type": "string",
+            "enum": [
+              "event_type",
+              "invoker",
+              "meter"
+            ]
+          },
+          "buckets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageBucket"
+            }
+          }
+        },
+        "required": [
+          "customer_id",
+          "currency",
+          "interval",
+          "timezone",
+          "from",
+          "to",
+          "group_by",
+          "buckets"
         ]
       },
       "View": {
@@ -28973,7 +29508,7 @@
     "event_store_required": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off."
+      "meaning": "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows and usage history are off."
     },
     "finding_action_failed": {
       "status": 502,
@@ -29393,7 +29928,7 @@
     "provider_cancel_held": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "Cancelling needs a destructive provider action that is not armed for this merchant."
+      "meaning": "Canceling needs a destructive provider action that is not armed for this merchant."
     },
     "provider_outcome_unknown": {
       "status": 409,
@@ -29665,6 +30200,11 @@
       "type": "invalid_request_error",
       "meaning": "A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again."
     },
+    "too_many_buckets": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The window at the interval holds more buckets than a series answers (a usage series: 1,000); shorten the window or widen the interval. param is interval."
+    },
     "trial_unsupported_on_rail": {
       "status": 400,
       "type": "invalid_request_error",
@@ -29679,6 +30219,11 @@
       "status": 415,
       "type": "invalid_request_error",
       "meaning": "The request body is not application/json."
+    },
+    "usage_events_expired": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "Usage by invoker reads raw usage events, kept 90 days; the window starts before them. History by event type and meter reaches back further. param is the window's start."
     },
     "usage_meter_invalid": {
       "status": 400,

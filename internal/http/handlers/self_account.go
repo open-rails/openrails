@@ -13,9 +13,9 @@ import (
 // The customer is the route gate's scope, and every query is scoped to the
 // request merchant.
 
-// selfAccountPayer is the customer route's verified customer, or writes the
+// selfAccountCustomer is the customer route's verified customer, or writes the
 // 401 and returns false.
-func selfAccountPayer(r *httprequest.Request) (identity.CustomerID, bool) {
+func selfAccountCustomer(r *httprequest.Request) (identity.CustomerID, bool) {
 	scope, ok := r.CustomerScope()
 	if !ok {
 		r.ErrorCode(billing.CodeAuthenticationRequired, "")
@@ -27,7 +27,7 @@ func selfAccountPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 // GetMe answers the customer's own summary: money per currency, the card
 // that pays each currency, and the low-balance line of each balance.
 func GetMe(r *httprequest.Request) {
-	payer, ok := selfAccountPayer(r)
+	customer, ok := selfAccountCustomer(r)
 	if !ok {
 		return
 	}
@@ -35,7 +35,7 @@ func GetMe(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.GetCustomerAccount(r.Request.Context(), payer)
+	out, err := svc.GetCustomerAccount(r.Request.Context(), customer)
 	if err != nil {
 		r.InternalError("account read failed", err)
 		return
@@ -45,7 +45,7 @@ func GetMe(r *httprequest.Request) {
 
 // ListMyBalanceTransactions lists the customer's own ledger in one currency.
 func ListMyBalanceTransactions(r *httprequest.Request) {
-	payer, ok := selfAccountPayer(r)
+	customer, ok := selfAccountCustomer(r)
 	if !ok {
 		return
 	}
@@ -53,13 +53,13 @@ func ListMyBalanceTransactions(r *httprequest.Request) {
 	if !bindList(r, &query, &query.PageRequest) {
 		return
 	}
-	listBalanceTransactions(r, payer, billing.BalanceTransactionListParams{PageRequest: query.PageRequest, Currency: catalog.Currency(query.Currency)})
+	listBalanceTransactions(r, customer, billing.BalanceTransactionListParams{PageRequest: query.PageRequest, Currency: catalog.Currency(query.Currency)})
 }
 
 // SetMyLowBalanceLine sets the customer's own low-balance line in one
 // currency and answers the line its balance is judged at.
 func SetMyLowBalanceLine(r *httprequest.Request) {
-	payer, ok := selfAccountPayer(r)
+	customer, ok := selfAccountCustomer(r)
 	if !ok {
 		return
 	}
@@ -75,7 +75,7 @@ func SetMyLowBalanceLine(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.SetLowBalanceLine(r.Request.Context(), payer, currency, params)
+	out, err := svc.SetLowBalanceLine(r.Request.Context(), customer, currency, params)
 	if err != nil {
 		writeRefusal(r, err, "low-balance line update failed")
 		return

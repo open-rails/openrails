@@ -103,6 +103,7 @@ FROM (
        FROM billing.limit_windows lw
       WHERE (sqlc.narg(after)::uuid IS NULL OR lw.merchant_id > sqlc.narg(after)::uuid)
         AND lw.window_ends_at < sqlc.arg(limit_window_cutoff)::timestamptz
+        AND (lw.reached_at IS NULL OR lw.window_ends_at < sqlc.arg(reached_limit_window_cutoff)::timestamptz)
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
     (SELECT DISTINCT le.merchant_id AS mid
@@ -127,6 +128,13 @@ FROM (
        FROM billing.provider_listed_rebills lr
       WHERE (sqlc.narg(after)::uuid IS NULL OR lr.merchant_id > sqlc.narg(after)::uuid)
         AND lr.listed_at < sqlc.arg(listed_rebill_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT ut.merchant_id AS mid
+       FROM billing.usage_totals ut
+      WHERE (sqlc.narg(after)::uuid IS NULL OR ut.merchant_id > sqlc.narg(after)::uuid)
+        AND ut.lease_id = '00000000-0000-0000-0000-000000000000'::uuid
+        AND ut.period_ends_at < sqlc.arg(usage_totals_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
 ) q
 ORDER BY q.mid
@@ -254,14 +262,16 @@ WHERE ctid IN (
     LIMIT sqlc.arg(row_limit)::int
 );
 
--- A closed limit window past the replay horizon; a row another writer
--- holds waits for a later pass.
+-- A closed limit window past its retention: one that reached its capacity
+-- after reached_cutoff, any other after cutoff; a row another writer holds
+-- waits for a later pass.
 -- name: DeleteLimitWindowsBefore :execrows
 DELETE FROM billing.limit_windows w
 WHERE (w.merchant_id, w.customer_id, w.limit_key, w.window_starts_at) IN (
     SELECT e.merchant_id, e.customer_id, e.limit_key, e.window_starts_at
     FROM billing.limit_windows e
     WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.window_ends_at < sqlc.arg(cutoff)::timestamptz
+      AND (e.reached_at IS NULL OR e.window_ends_at < sqlc.arg(reached_cutoff)::timestamptz)
     ORDER BY e.window_ends_at
     LIMIT sqlc.arg(row_limit)::int
     FOR UPDATE SKIP LOCKED
@@ -275,6 +285,23 @@ WHERE (l.merchant_id, l.id) IN (
     FROM billing.leases e
     WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.last_sync_at < sqlc.arg(cutoff)::timestamptz
     ORDER BY e.last_sync_at
+    LIMIT sqlc.arg(row_limit)::int
+    FOR UPDATE SKIP LOCKED
+);
+
+-- A period's running totals once its late usage window closed: its posted
+-- rows, unless a row of it is still unposted (its posting waits).
+-- name: DeleteClosedUsageTotals :execrows
+DELETE FROM billing.usage_totals t
+WHERE (t.merchant_id, t.customer_id, t.currency, t.period_starts_at, t.meter_key, t.cell, t.print, t.lapse_at, t.lease_id) IN (
+    SELECT e.merchant_id, e.customer_id, e.currency, e.period_starts_at, e.meter_key, e.cell, e.print, e.lapse_at, e.lease_id
+    FROM billing.usage_totals e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.lease_id = '00000000-0000-0000-0000-000000000000'::uuid
+      AND e.period_ends_at < sqlc.arg(cutoff)::timestamptz
+      AND NOT EXISTS (SELECT 1 FROM billing.usage_totals u
+          WHERE u.merchant_id = e.merchant_id AND u.customer_id = e.customer_id AND u.currency = e.currency
+            AND u.period_starts_at = e.period_starts_at AND u.lease_id <> '00000000-0000-0000-0000-000000000000'::uuid)
+    ORDER BY e.period_ends_at
     LIMIT sqlc.arg(row_limit)::int
     FOR UPDATE SKIP LOCKED
 );

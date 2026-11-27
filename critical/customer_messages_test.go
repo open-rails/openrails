@@ -519,6 +519,10 @@ func TestCustomerMessages(t *testing.T) {
 		require.Equal(t, billing.CodeMessageTemplateInvalid, refusal.Code)
 		require.Equal(t, "template", deref(refusal.Param))
 		require.Contains(t, refusal.Message, "can't evaluate field Total")
+		_, err = a.alphaRemote.PreviewMessage(t.Context(), billing.PreviewMessageParams{EventType: receiptEvent, Template: &billing.MessageTemplate{Subject: "Receipt", Text: "{{if lt .Event.AccessEnded true}}ended{{end}}"}})
+		require.ErrorAs(t, err, &refusal)
+		require.Equal(t, billing.CodeMessageTemplateInvalid, refusal.Code)
+		require.Contains(t, refusal.Message, "lt cannot order a bool", "a comparison it cannot make is named as one")
 		_, err = a.alpha.PreviewMessage(t.Context(), billing.PreviewMessageParams{EventType: "invoice.completed"})
 		require.ErrorAs(t, err, &refusal)
 		require.Equal(t, billing.CodeInvalidParam, refusal.Code)
@@ -596,21 +600,34 @@ func TestCustomerMessages(t *testing.T) {
 				return err == nil && len(log) == 1 && log[0].Status == billing.MessageQueued && log[0].Attempts >= 1 &&
 					lastError(log[0]) == billing.MessageSendFailed
 			}, 30*time.Second, 20*time.Millisecond, "a refused sender is retried")
-			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.customer.messages_sender_refused"})
-			require.NoError(t, err)
-			require.Len(t, findings.Items, 1)
-			require.Equal(t, "deployment_sender", findings.Items[0].SubjectKey)
-			require.Equal(t, "AUTH", findings.Items[0].Evidence["step"])
-			require.EqualValues(t, 535, findings.Items[0].Evidence["reply_code"])
+			// Each finding change follows the attempt's settle, in a
+			// transaction of its own.
+			senderFindings := func() ([]billing.Finding, bool) {
+				page, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.customer.messages_sender_refused"})
+				if err != nil {
+					return nil, false
+				}
+				return page.Items, true
+			}
+			var findings []billing.Finding
+			require.Eventually(t, func() bool {
+				found, ok := senderFindings()
+				findings = found
+				return ok && len(found) == 1
+			}, 30*time.Second, 20*time.Millisecond, "a refused sender raises a finding")
+			require.Equal(t, "deployment_sender", findings[0].SubjectKey)
+			require.Equal(t, "AUTH", findings[0].Evidence["step"])
+			require.EqualValues(t, 535, findings[0].Evidence["reply_code"])
 			require.Empty(t, server.Messages())
 			// Its credentials fixed, the sender takes a retry, which resolves
 			// the finding.
 			sender.set(smtpSender(t, server, "the-right-one"))
 			require.Equal(t, billing.MessageSent, settledMessages(t, a.world, alice, 1)[0].Status)
 			require.Len(t, server.Messages(), 1)
-			findings, err = a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.customer.messages_sender_refused"})
-			require.NoError(t, err)
-			require.Empty(t, findings.Items, "the next send resolves it")
+			require.Eventually(t, func() bool {
+				found, ok := senderFindings()
+				return ok && len(found) == 0
+			}, 30*time.Second, 20*time.Millisecond, "the next send resolves it")
 		})
 	})
 	t.Run("OR-J39-S20/a-last-attempt-whose-job-ends-mid-send-settles-failed", func(t *testing.T) {

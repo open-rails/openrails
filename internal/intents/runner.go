@@ -31,7 +31,8 @@ const (
 	// blocker lifts or relevance ends; they never escalate backoff.
 	ParkRetryInterval = 5 * time.Minute
 	// VerifyDelay schedules the verifier's first look at a fresh ambiguous
-	// outcome.
+	// outcome. Inconclusive reads then use the greater of the handler's backoff
+	// and half the operation's age, with the age delay capped at DefaultBackoff.Cap.
 	VerifyDelay = time.Minute
 	// ledgerWriteTimeout bounds one detached ledger transition (LedgerWriteContext).
 	ledgerWriteTimeout = 10 * time.Second
@@ -155,9 +156,9 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	}
 
 	// The maintenance kill switch gates convergence/operator destruction. A
-	// canonical authenticated payer delete is their own stored-card decision,
+	// canonical authenticated customer delete is their own stored-card decision,
 	// and a customer's accepted cancel their own billing decision; both still
-	// pass provider mode and were admitted by the customer budget.
+	// pass provider mode. Only card removals spend the customer budget.
 	if IsDestructiveIntentType(intent.IntentType) && !requestedPaymentMethodDelete(ctx, intent) && !isAcceptedCustomerCancel(intent) {
 		if allowed, reason := r.Destructive.AllowDestructive(ctx, intent.MerchantID); !allowed {
 			r.park(withHistoryHold(ctx, "destructive_guard"), logEntry, stats, intent.ID, now, Parked(reason))
@@ -361,7 +362,7 @@ type terminalCommitter interface{ CommitsTerminalOutcome() bool }
 
 // apply writes one classified outcome to the ledger, detached from the
 // caller's cancellation. verifying selects how OutcomeAmbiguous is read: still
-// inconclusive (back off the next verify) or fresh (first verify soon).
+// inconclusive (back off by attempts and operation age) or fresh (first verify soon).
 func (r *Runner) apply(ctx context.Context, logEntry *slog.Logger, stats *Stats, handler Handler, intent gen.BillingProviderIntent, outcome Outcome, verifying bool) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
@@ -410,7 +411,12 @@ func (r *Runner) apply(ctx context.Context, logEntry *slog.Logger, stats *Stats,
 	case OutcomeAmbiguous:
 		delay := VerifyDelay
 		if verifying {
-			delay = handler.Backoff(intent.Attempts)
+			// Verification age starts at submission, or creation before submission.
+			started := intent.CreatedAt
+			if submitted, err := time.Parse(time.RFC3339Nano, EvidenceString(intent, "submitted_at")); err == nil {
+				started = submitted
+			}
+			delay = max(handler.Backoff(intent.Attempts), min(now.Sub(started)/2, DefaultBackoff.Cap))
 		}
 		err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(delay), outcome.Reason, outcome.Evidence)
 	case OutcomeTerminal:

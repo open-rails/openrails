@@ -96,6 +96,7 @@ func (e *ErrPruneCountMismatch) Error() string {
 //     reverses the pass.
 //   - An empty remote set refuses, in the SQL and here, rather than matching
 //     everything.
+//   - Pending payments and chargebacks the snapshot cannot list are excluded.
 //   - Applying requires a typed expected row count that must match.
 //   - A subscription that fed the grant ledger is skipped (removing it would
 //     orphan an append-only grant; convergence revokes instead), as is a
@@ -184,6 +185,7 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 			}
 		} else if excessPays, err = q.ListExcessPaymentsForPSP(ctx, gen.ListExcessPaymentsForPSPParams{
 			MerchantID: mid, PspID: binding.ID, PresentTxns: presentTxns, Since: since, Until: until,
+			CoversChargebacks: fetcher.Capabilities().Chargebacks,
 		}); err != nil {
 			return res, fmt.Errorf("list excess payments: %w", err)
 		}

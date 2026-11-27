@@ -15,7 +15,7 @@ import (
 const getAdmissionCapacity = `-- name: GetAdmissionCapacity :one
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
-    COALESCE((SELECT SUM(p.amount) FROM billing.usage_pending_amounts p
+    COALESCE((SELECT SUM(p.amount) FROM billing.usage_totals p
               WHERE p.merchant_id = a.merchant_id AND p.customer_id = a.customer_id AND p.currency = a.currency), 0)::bigint AS pending,
     COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, $1::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc
@@ -126,7 +126,7 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 
 const getUnpostedAmounts = `-- name: GetUnpostedAmounts :one
 SELECT
-    COALESCE((SELECT SUM(p.amount) FROM billing.usage_pending_amounts p
+    COALESCE((SELECT SUM(p.amount) FROM billing.usage_totals p
               WHERE p.merchant_id = $1::uuid AND p.customer_id = $2::uuid AND p.currency = $3::text), 0)::bigint AS pending,
     COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, COALESCE($4::timestamptz, $5::timestamptz)) - rc.posted_amount, 0))
               FROM billing.running_charges rc
@@ -490,7 +490,7 @@ const listViewCapacities = `-- name: ListViewCapacities :many
 SELECT
     c.id::uuid AS customer_id,
     COALESCE(a.credits_posted - a.debits_posted, 0)::bigint AS balance,
-    COALESCE((SELECT SUM(p.amount) FROM billing.usage_pending_amounts p
+    COALESCE((SELECT SUM(p.amount) FROM billing.usage_totals p
               WHERE p.merchant_id = $1::uuid AND p.customer_id = c.id AND p.currency = $2::text), 0)::bigint AS pending,
     COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, $3::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc

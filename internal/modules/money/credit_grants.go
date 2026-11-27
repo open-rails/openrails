@@ -131,7 +131,7 @@ func (s *MoneyService) GetCreditGrant(ctx context.Context, grantID uuid.UUID) (*
 	return &grant, nil
 }
 
-// RevokeCreditGrant removes the unspent remainder under the payer money lock,
+// RevokeCreditGrant removes the unspent remainder under the customer money lock,
 // respecting the same durable reservation total as admission and spending.
 // idempotencyKey, when set, is the caller's key for this revocation: a retry
 // under it replays, even after the grant was reinstated. actor is the staff
@@ -189,14 +189,14 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 	if err != nil {
 		return nil, err
 	}
-	payer := addressed.CustomerID
+	customer := addressed.CustomerID
 	var result *billing.CreditGrant
 	err = destructive.RunLocal(ctx, s.db, s.destructiveAdmissions, command, func(ctx context.Context, _ pgx.Tx, txDB *db.DB) (bool, error) {
 		changed := false
 		err := func() error {
 
 			q := txDB.Gen(ctx)
-			if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: payer}); err != nil {
+			if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: customer}); err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
 					return ErrCreditGrantNotFound
 				}
@@ -221,7 +221,7 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 			}
 			// The customer's usage and running charges are spend the lots
 			// funded: they post before the remainder is read.
-			if err := s.settleRunningCharges(ctx, q, mid.UUID(), payer, row.Unit); err != nil {
+			if err := s.settleRunningCharges(ctx, q, mid.UUID(), customer, row.Unit); err != nil {
 				return err
 			}
 			if row, err = q.GetCreditGrant(ctx, args); err != nil {
@@ -238,7 +238,7 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 			if lot.UnitsRefunding > 0 {
 				return ErrCreditGrantHeld
 			}
-			bal, err := s.deriveBalance(ctx, q, mid.UUID(), payer, row.Unit)
+			bal, err := s.deriveBalance(ctx, q, mid.UUID(), customer, row.Unit)
 			if err != nil {
 				return err
 			}
@@ -262,7 +262,7 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 	return result, err
 }
 
-// ReinstateCreditGrant reverses a grant's revocation under the payer's money
+// ReinstateCreditGrant reverses a grant's revocation under the customer's money
 // lock: the units the revocation froze return to its balance and their money
 // to deferral. Reinstating a live grant returns it with Replayed set, as does
 // a retry under idempotencyKey, even after a later revocation. actor is the

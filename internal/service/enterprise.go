@@ -44,6 +44,9 @@ func (s *Service) SetUsageMeter(ctx context.Context, spec catalogrules.Meter, ca
 	}{spec, card, removeCard}, "", meterEditPlan(spec, card, removeCard, expectedRevision), func(ctx context.Context, s *Service) (struct{}, error) {
 		return struct{}{}, s.setUsageMeterCommand(ctx, spec, card, removeCard, expectedRevision)
 	})
+	if err == nil {
+		s.prepareBooks(ctx)
+	}
 	return err
 }
 

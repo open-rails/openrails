@@ -126,9 +126,9 @@ func (s *MoneyService) postRunningChargeOnce(ctx context.Context, q *gen.Queries
 	if c.Resource != nil {
 		posting.posting.resource = *c.Resource
 	}
-	payer := identity.CustomerID(c.CustomerID)
+	customer := identity.CustomerID(c.CustomerID)
 	key := MustIdempotencyKey(OpCapture, runningChargeSource, c.ID.String()+"/"+through.UTC().Format(runningChargeInstantLayout))
-	_, _, applied, err := posting.spendBalanceThenOwedTx(ctx, q, payer, payer.UUID().String(), c.Currency, key, amount, true)
+	_, _, applied, err := posting.spendBalanceThenOwedTx(ctx, q, customer, customer.UUID().String(), c.Currency, key, amount, true)
 	if err != nil {
 		return row, err
 	}
@@ -152,8 +152,8 @@ func postRunningChargesThrough(ctx context.Context, q *gen.Queries, merchantID, 
 		ctx = merchant.WithID(ctx, billing.MerchantID(merchantID))
 	}
 	svc := &MoneyService{db: db.TxOf(q), clock: clockwork.NewFakeClockAt(now)}
-	payer := identity.CustomerID(customer)
-	if _, err := svc.lockBalance(ctx, q, payer, customer.String(), currency); err != nil {
+	customerID := identity.CustomerID(customer)
+	if _, err := svc.lockBalance(ctx, q, customerID, customer.String(), currency); err != nil {
 		return false, err
 	}
 	if charges, err = q.ListRunningChargesByCustomer(ctx, args); err != nil {

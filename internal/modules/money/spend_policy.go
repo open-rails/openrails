@@ -21,15 +21,15 @@ const (
 	BillingModeArrears = "arrears"
 )
 
-// GetAccountSettings returns the stored settings for (payer, currency), or the
+// GetAccountSettings returns the stored settings for (customer, currency), or the
 // implicit prepaid policy when none exists (never nil, never an error for a
 // missing row).
-func (s *MoneyService) GetAccountSettings(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
-	return s.getAccountSettings(ctx, payer, currency)
+func (s *MoneyService) GetAccountSettings(ctx context.Context, customer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
+	return s.getAccountSettings(ctx, customer, currency)
 }
 
 // getAccountSettings is the currency-aware form.
-func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
+func (s *MoneyService) getAccountSettings(ctx context.Context, customer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -42,14 +42,14 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Cu
 	// A merchant's unit is prepaid, with no credit line: its settings are
 	// the defaults.
 	if IsMerchantUnit(cur) {
-		return &models.MoneyAccount{MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur, BillingMode: BillingModePrepaid}, nil
+		return &models.MoneyAccount{MerchantID: tenantID, CustomerID: customer.UUID(), Currency: cur, BillingMode: BillingModePrepaid}, nil
 	}
 	// Account settings require a registered billing currency.
 	if err := RequireBillingCurrency(cur); err != nil {
 		return nil, err
 	}
 	row, err := s.db.Gen(ctx).GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{
-		MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
+		MerchantID: tenantID, CustomerID: customer.UUID(), Currency: cur,
 	})
 	if err == nil {
 		row, err = s.usagePolicySettings(ctx, row)
@@ -59,7 +59,7 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Cu
 		return settingsFromGen(row), nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
-		row, err := s.usagePolicySettings(ctx, gen.BillingMoneySetting{MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur, BillingMode: BillingModePrepaid})
+		row, err := s.usagePolicySettings(ctx, gen.BillingMoneySetting{MerchantID: tenantID, CustomerID: customer.UUID(), Currency: cur, BillingMode: BillingModePrepaid})
 		if err != nil {
 			return nil, err
 		}
@@ -68,15 +68,15 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Cu
 	return nil, err
 }
 
-// AccountSettingsInput is the upsert payload for an payer's spend policy. Only
+// AccountSettingsInput is the upsert payload for a customer's spend policy. Only
 // non-nil fields are written; nil fields keep their default / existing value.
 type AccountSettingsInput struct {
 	BillingMode *string
 }
 
-// UpsertAccountSettings creates or updates the spend policy for (payer,
+// UpsertAccountSettings creates or updates the spend policy for (customer,
 // currency). Validates the billing mode.
-func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity.CustomerID, currency string, in AccountSettingsInput) (*models.MoneyAccount, error) {
+func (s *MoneyService) UpsertAccountSettings(ctx context.Context, customer identity.CustomerID, currency string, in AccountSettingsInput) (*models.MoneyAccount, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -87,20 +87,20 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 	var out *models.MoneyAccount
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		if err := ensureCustomer(ctx, q, tid.UUID(), payer.UUID()); err != nil {
+		if err := ensureCustomer(ctx, q, tid.UUID(), customer.UUID()); err != nil {
 			return err
 		}
-		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{ID: payer.UUID(), MerchantID: tid.UUID()}); err != nil {
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{ID: customer.UUID(), MerchantID: tid.UUID()}); err != nil {
 			return err
 		}
 		var err error
-		out, err = s.WithDatabase(s.db.NewWithPgxTx(tx)).upsertAccountSettingsTx(ctx, payer, currency, in)
+		out, err = s.WithDatabase(s.db.NewWithPgxTx(tx)).upsertAccountSettingsTx(ctx, customer, currency, in)
 		return err
 	})
 	return out, err
 }
 
-func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identity.CustomerID, currency string, in AccountSettingsInput) (*models.MoneyAccount, error) {
+func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, customer identity.CustomerID, currency string, in AccountSettingsInput) (*models.MoneyAccount, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -110,7 +110,7 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 	}
 	// Materialize the payable customers row before the subject's first settings
 	// write.
-	if err := ensureCustomer(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID()); err != nil {
+	if err := ensureCustomer(ctx, s.db.Gen(ctx), tid.UUID(), customer.UUID()); err != nil {
 		return nil, err
 	}
 	if in.BillingMode != nil {
@@ -123,7 +123,7 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 	tenantID := tid.UUID()
 	now := s.now()
 
-	cur, err := s.GetAccountSettings(ctx, payer, currency)
+	cur, err := s.GetAccountSettings(ctx, customer, currency)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +133,7 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 	}
 
 	cur.MerchantID = tenantID
-	cur.CustomerID = payer.UUID()
+	cur.CustomerID = customer.UUID()
 	cur.Currency = normalizeCurrency(currency)
 	// Settings require a registered billing currency.
 	if err := RequireBillingCurrency(cur.Currency); err != nil {
@@ -160,5 +160,5 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 	}); err != nil {
 		return nil, err
 	}
-	return s.GetAccountSettings(ctx, payer, currency)
+	return s.GetAccountSettings(ctx, customer, currency)
 }

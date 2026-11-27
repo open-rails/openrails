@@ -14,7 +14,6 @@ import (
 
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -23,15 +22,14 @@ import (
 // by card, in the order the cards' prints were first written, each card
 // pricing its own quantity on top of the earlier cards' (R_p(Q_<p + q_p) -
 // R_p(Q_<p)); a dynamic card charges what was stated. Within one card the
-// invoice usage arrived in changes nothing, so late usage and concurrent gates
+// order usage arrived in changes nothing, so late usage and concurrent gates
 // price exactly and per-unit rounding happens once per total. A posting takes
-// the price less what earlier postings took, and history shares it across
-// days the same way, so the days sum to what posts.
+// the price less what the period's earlier usage receipts took.
 
 // printCard is a card print's terms and when it was first written.
 type printCard struct {
-	card    ratingCard
-	invoice time.Time
+	card  ratingCard
+	order time.Time
 }
 
 // usagePrints are the merchant's card prints, by print.
@@ -74,7 +72,7 @@ func loadPrints(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, print
 		if err := json.Unmarshal(r.Card, &card); err != nil {
 			return nil, fmt.Errorf("decode card print %s: %w", r.Print, err)
 		}
-		out[r.Print] = printCard{card: card, invoice: r.CreatedAt}
+		out[r.Print] = printCard{card: card, order: r.CreatedAt}
 	}
 	return out, nil
 }
@@ -91,7 +89,7 @@ type printQuantity struct {
 // A print with no card is an error.
 func (p usagePrints) cellPrice(cell string, qs []printQuantity) ([]int64, error) {
 	slices.SortFunc(qs, func(a, b printQuantity) int {
-		return cmp.Or(p[a.print].invoice.Compare(p[b.print].invoice), strings.Compare(a.print, b.print))
+		return cmp.Or(p[a.print].order.Compare(p[b.print].order), strings.Compare(a.print, b.print))
 	})
 	out := make([]int64, len(qs))
 	var before int64
@@ -131,13 +129,21 @@ type lineKey struct {
 // periodLines are each period's priced lines, by meter cell and print.
 type periodLines map[time.Time]map[lineKey]*PostingLine
 
+// periodQuantity is a customer's settled usage of one meter cell under one
+// card print in a pricing period.
+type periodQuantity struct {
+	period                     time.Time
+	meter, cell, print         string
+	quantity, stated, requests int64
+}
+
 // priceQuantities prices a customer's period quantities: the price of each
 // period's total, line by line.
-func (p usagePrints) priceQuantities(rows []eventstore.PeriodQuantity) (periodLines, error) {
+func (p usagePrints) priceQuantities(rows []periodQuantity) (periodLines, error) {
 	cells := map[cellKey][]printQuantity{}
 	for _, r := range rows {
-		k := cellKey{r.PeriodStartsAt.UTC(), r.Meter, r.Cell}
-		cells[k] = append(cells[k], printQuantity{print: r.Print, quantity: r.Quantity, stated: r.Stated, requests: r.Requests})
+		k := cellKey{r.period, r.meter, r.cell}
+		cells[k] = append(cells[k], printQuantity{print: r.print, quantity: r.quantity, stated: r.stated, requests: r.requests})
 	}
 	out := periodLines{}
 	for k, qs := range cells {
@@ -156,12 +162,6 @@ func (p usagePrints) priceQuantities(rows []eventstore.PeriodQuantity) (periodLi
 		}
 	}
 	return out, nil
-}
-
-// known keeps the quantities whose prints are recorded: an unlocked read may
-// see usage whose prints its intake has not committed yet.
-func (p usagePrints) known(rows []eventstore.PeriodQuantity) []eventstore.PeriodQuantity {
-	return slices.DeleteFunc(rows, func(r eventstore.PeriodQuantity) bool { _, ok := p[r.Print]; return !ok })
 }
 
 // PostingLine is what a posting added for one meter cell under one card
@@ -185,58 +185,4 @@ func decodePostingLines(raw []byte) ([]PostingLine, error) {
 		return nil, fmt.Errorf("decode posting lines: %w", err)
 	}
 	return lines, nil
-}
-
-// bucketQuantity is a history bucket's quantity of a meter cell under one
-// print.
-type bucketQuantity struct {
-	bucket time.Time
-	printQuantity
-}
-
-// bucketPrices shares the price of one meter cell's period across the
-// buckets its usage occurred in: a bucket's amount is the price of the period
-// through the bucket less the price through the bucket before, from the
-// quantities before the first bucket (prior). The buckets therefore sum to
-// the period's price, and so do any days they fold into.
-func (p usagePrints) bucketPrices(cell string, prior []printQuantity, buckets []bucketQuantity) (map[time.Time]int64, error) {
-	cumulative := map[string]printQuantity{}
-	for _, q := range prior {
-		c := cumulative[q.print]
-		c.print, c.quantity, c.stated = q.print, addSat(c.quantity, q.quantity), addSat(c.stated, q.stated)
-		cumulative[q.print] = c
-	}
-	price := func() (int64, error) {
-		qs := make([]printQuantity, 0, len(cumulative))
-		for _, q := range cumulative {
-			qs = append(qs, q)
-		}
-		amounts, err := p.cellPrice(cell, qs)
-		var total int64
-		for _, a := range amounts {
-			total = addSat(total, a)
-		}
-		return total, err
-	}
-	before, err := price()
-	if err != nil {
-		return nil, err
-	}
-	slices.SortFunc(buckets, func(a, b bucketQuantity) int { return a.bucket.Compare(b.bucket) })
-	out := map[time.Time]int64{}
-	for i := 0; i < len(buckets); {
-		bucket := buckets[i].bucket
-		for ; i < len(buckets) && buckets[i].bucket.Equal(bucket); i++ {
-			c := cumulative[buckets[i].print]
-			c.print, c.quantity, c.stated = buckets[i].print, addSat(c.quantity, buckets[i].quantity), addSat(c.stated, buckets[i].stated)
-			cumulative[buckets[i].print] = c
-		}
-		through, err := price()
-		if err != nil {
-			return nil, err
-		}
-		out[bucket] = through - before
-		before = through
-	}
-	return out, nil
 }

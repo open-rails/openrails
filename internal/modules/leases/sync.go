@@ -1,14 +1,15 @@
 // Package leases syncs gates' leases: in one transaction per sync it settles
 // their usage in order, as far as its time allows, and keeps their in-flight
-// reports; once it committed it answers views of the customers they serve.
+// reports; once it committed it inserts the usage into the event store and
+// answers views of the customers they serve.
 //
 // A sync takes no customer's lock. Its transaction locks its own lease row
-// and shares the merchant's catalog fence; its intake is append-only (events
-// into the event store, then the lease's numbering and receipts and pending
-// amounts, the posting queue row held by key share), and its in-flight report
-// writes only its own rows. Only a window that must open or a failed item's charge takes
-// that customer's lock (money.PrepareUsageTx). Views are read after the
-// commit, in batches, in one snapshot (views.go).
+// and shares the merchant's catalog fence; its intake is append-only (the
+// lease's numbering and receipts and running totals, the posting queue row
+// held by key share), and its in-flight report writes only its own rows. Only
+// a window that must open or a failed item's charge takes that customer's
+// lock (money.PrepareUsageTx). The events follow the commit, then views are
+// read in batches, in one snapshot (views.go).
 package leases
 
 import (
@@ -67,6 +68,13 @@ const (
 	// lockBudget is how long a sync's statement may wait for a lock: a
 	// posting holding a customer's queue row, or a customer whose window opens.
 	lockBudget = workBudget - 500*time.Millisecond
+	// probeBudget bounds the event store's ping before the commit.
+	probeBudget = time.Second
+	// The committed usage's insert: at most insertAttempts tries, insertRetry
+	// apart and doubling, within insertBudget.
+	insertAttempts = 3
+	insertRetry    = 100 * time.Millisecond
+	insertBudget   = limits.SyncTimeout
 )
 
 // A sync settles its new usage in chunks of at most UsageChunkItems items
@@ -79,7 +87,8 @@ const (
 	UsageChunkCustomers = 100
 )
 
-// FailpointKind names a lease sync at failpoint.AfterChunk.
+// FailpointKind names a lease sync at failpoint.AfterChunk and, between its
+// commit and its insert, failpoint.Committed.
 const FailpointKind = "lease-sync"
 
 // Syncer syncs leases of the context's merchant.
@@ -215,12 +224,15 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 		}
 		now := s.Now().UTC().Truncate(time.Microsecond)
 		d := s.DB.NewWithPgxTx(tx)
-		run = &syncRun{Syncer: s, ctx: ctx, q: q, merchant: mid.UUID(), now: now, p: p, began: began,
-			money: s.Money.WithDatabase(d), admitter: s.Admitter.Bind(d, func() time.Time { return now }), failed: func(u billing.LeaseUsage) []money.FailedUsageWindow {
+		run = &syncRun{Syncer: s, ctx: ctx, q: q, merchant: mid.UUID(), now: now, p: p, began: began, settled: money.NewUsageSettlement(s.DB.EventStore()),
+			money: s.Money.WithDatabase(d), admitter: s.Admitter.Bind(d), failed: func(u billing.LeaseUsage) []money.FailedUsageWindow {
 				return failed[windowKey{u.CustomerID, cmp.Or(u.InvokerType, billing.InvokerTypeCustomer), money.NormalizeCurrency(string(u.Currency))}]
 			}}
 		var err error
 		if out, err = run.sync(); err != nil {
+			return err
+		}
+		if err := run.probe(); err != nil {
 			return err
 		}
 		return run.withinTimeout()
@@ -231,9 +243,13 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 	if err != nil {
 		return nil, err
 	}
+	if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.Committed, Kind: FailpointKind, Operation: run.lease.ID}); err != nil {
+		return nil, err
+	}
+	run.insert(ctx)
 	// The balances its usage moved are watched, outside the transaction: a
 	// watch it misses (a crash between) looks at its own next instant.
-	if err := s.Money.WatchUsage(ctx, s.DB, run.changed); err != nil && s.DB.Log != nil {
+	if err := s.Money.WatchUsage(ctx, s.DB, run.settled.Changed()); err != nil && s.DB.Log != nil {
 		s.DB.Log.WarnContext(ctx, "lease sync: watching the balances its usage moved failed; each looks at its next instant", logx.Err(err))
 	}
 	// A failure here leaves the sync committed: its answer is lost, and the
@@ -259,6 +275,44 @@ func lockTimedOut(err error) bool {
 func setLockTimeout(ctx context.Context, q *gen.Queries, d time.Duration) error {
 	_, err := q.SetConfig(ctx, gen.SetConfigParams{Setting: "lock_timeout", Value: strconv.FormatInt(max(d.Milliseconds(), 1), 10), IsLocal: true})
 	return err
+}
+
+// probe refuses to commit usage the event store cannot take now: while it is
+// out of reach a sync settles nothing, so the store loses only what fails
+// between a commit and its insert.
+func (r *syncRun) probe() error {
+	ctx, cancel := context.WithTimeout(r.ctx, probeBudget)
+	defer cancel()
+	return r.settled.Ping(ctx)
+}
+
+// insert takes the committed usage into the event store, retried within the
+// request on a context of its own: the gate may stop waiting, the usage is
+// settled either way. What the store never takes is charged and missing from
+// its history and limit usage for good; a resend inserts nothing again.
+func (r *syncRun) insert(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), insertBudget)
+	defer cancel()
+	err := r.settled.Insert(ctx)
+	for attempt, wait := 1, insertRetry; err != nil && attempt < insertAttempts && pause(ctx, wait); attempt, wait = attempt+1, 2*wait {
+		err = r.settled.Insert(ctx)
+	}
+	if err != nil && r.DB.Log != nil {
+		r.DB.Log.ErrorContext(ctx, "lease sync: the event store did not take settled usage; it is charged and missing from history and limit usage",
+			"lease_id", r.lease.ID, "from_n", r.lease.SettledThroughN+1, "through_n", r.result.Usage.ThroughN, "events", r.settled.Events(), logx.Err(err))
+	}
+}
+
+// pause waits d, or reports false once ctx is done.
+func pause(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
 }
 
 // withinTimeout is a sync's last statement: one that ran past its timeout
@@ -293,8 +347,8 @@ type syncRun struct {
 	prefix prefix
 	// spend caches the billing policy of each item's attributes.
 	spend map[string]*admission.SpendPolicy
-	// changed are the balances its usage moved.
-	changed []money.UsageAccount
+	// settled is the usage it settled, inserted once it committed.
+	settled *money.UsageSettlement
 	// viewable are the currencies and units the views may be asked in.
 	viewable map[string]bool
 }

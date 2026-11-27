@@ -127,7 +127,7 @@ func TestBackgroundJobs(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		host, err := fleet.Insert(t.Context(), hostChore{}, &river.InsertOpts{Queue: "host"})
 		require.NoError(t, err)
-		short, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.usage_orders"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		short, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.usage_invoices"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		long, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.cleanup_expired_data"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
@@ -181,7 +181,7 @@ func TestBackgroundJobs(t *testing.T) {
 			_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET attempt=1, "+set+" WHERE id=$1", job.Job.ID)
 			require.NoError(t, err)
 		}
-		insert("openrails.usage_orders", "state='running', attempted_at=now()-interval '11 minutes', attempted_by=ARRAY['stuck']")
+		insert("openrails.usage_invoices", "state='running', attempted_at=now()-interval '11 minutes', attempted_by=ARRAY['stuck']")
 		insert("openrails.balance_look", "state='discarded', attempted_at=now()-interval '2 minutes', finalized_at=now()-interval '1 minute', "+
 			"errors=ARRAY[jsonb_build_object('at', now(), 'attempt', 1, 'error', 'critical: the look failed', 'trace', '')]")
 		insert("openrails.billing_pass", "state='completed', attempted_at=now()-interval '2 minutes', finalized_at=now()-interval '1 minute'")
@@ -192,8 +192,8 @@ func TestBackgroundJobs(t *testing.T) {
 		for _, k := range kinds {
 			health[k.Kind] = k
 		}
-		require.EqualValues(t, 1, health["openrails.usage_orders"].Overrunning)
-		require.EqualValues(t, 600, health["openrails.usage_orders"].TimeoutSeconds)
+		require.EqualValues(t, 1, health["openrails.usage_invoices"].Overrunning)
+		require.EqualValues(t, 600, health["openrails.usage_invoices"].TimeoutSeconds)
 		require.EqualValues(t, 1, health["openrails.balance_look"].Discarded)
 		require.NotNil(t, health["openrails.balance_look"].LastError)
 		require.Equal(t, "critical: the look failed", *health["openrails.balance_look"].LastError)
@@ -204,7 +204,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NotNil(t, health["openrails.nmi_history"].PeriodSeconds)
 		require.EqualValues(t, 3600, *health["openrails.nmi_history"].PeriodSeconds)
 		require.EqualValues(t, 3600, health["openrails.nmi_history"].TimeoutSeconds)
-		for _, scan := range []string{"openrails.usage_posting", "openrails.dunning", "openrails.balance_watch", "openrails.delinquency", "openrails.order_expiry",
+		for _, scan := range []string{"openrails.usage_posting", "openrails.dunning", "openrails.balance_watch", "openrails.delinquency", "openrails.invoice_expiry",
 			"openrails.revenue_recognition", "openrails.rebill_watch", "openrails.config_realerts", "openrails.stored_card_refresh_due"} {
 			require.NotContains(t, health, scan, "a scan runs in the billing pass; it is no job kind")
 		}
@@ -217,9 +217,9 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, fleet.Start(t.Context()))
 		require.Eventually(t, func() bool {
 			err := progress(t.Context())
-			return err != nil && strings.Contains(err.Error(), "openrails.usage_orders: 1 running past its 10m0s timeout")
+			return err != nil && strings.Contains(err.Error(), "openrails.usage_invoices: 1 running past its 10m0s timeout")
 		}, 20*time.Second, 50*time.Millisecond, "the probe names the job running past its timeout")
-		_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET state='completed', finalized_at=now() WHERE kind='openrails.usage_orders'")
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET state='completed', finalized_at=now() WHERE kind='openrails.usage_invoices'")
 		require.NoError(t, err)
 		require.NoError(t, progress(t.Context()), "a fresh leader and no overrunning job")
 	})

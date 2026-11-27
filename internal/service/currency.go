@@ -36,6 +36,9 @@ func requireCurrency(currency string) (string, error) {
 // registryCurrency is requireCurrency for an operation of the merchant in
 // ctx that takes money, naming param when it refuses (currencyRefusal).
 func (s *Service) registryCurrency(ctx context.Context, param, code string) (string, error) {
+	if strings.TrimSpace(code) == "" {
+		return "", apperr.Invalidf("currency required").WithParam(param)
+	}
 	normalized, err := requireCurrency(code)
 	if errors.Is(err, ErrCurrencyUnsupported) {
 		return "", s.currencyRefusal(ctx, param, moneyutil.NormalizeCurrency(code))
