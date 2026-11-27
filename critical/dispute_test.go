@@ -1311,4 +1311,14 @@ func disputeUnbookableOnce(t *testing.T) {
 	require.Contains(t, advice, "so OpenRails books no second reversal")
 	require.Contains(t, advice, "Contest the dispute in Stripe and cite the refund")
 	require.NotContains(t, advice, "needs a manual repair")
+
+	d["status"] = "lost"
+	m.notice(t, "evt_unbookable_lost", "charge.dispute.closed", d)
+	findings, err = m.a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.ledger.unbooked"})
+	require.NoError(t, err)
+	require.Len(t, findings.Items, 1, "the lost case is the same loss")
+	advice = *findings.Items[0].RecommendedAction
+	require.Contains(t, advice, "was lost")
+	require.Contains(t, advice, "book nothing for it")
+	require.NotContains(t, advice, "Contest")
 }

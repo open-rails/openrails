@@ -945,10 +945,16 @@ func (s *NMIWebhookService) applyNMIChargeback(ctx context.Context, rail string,
 		if errors.Is(entryLedgerErr, payments.ErrRefundExceedsPayment) {
 			action = fmt.Sprintf("NMI chargeback %s is on charge %s (transaction %s), whose refunds leave less than the charged amount to reverse, so OpenRails books no second reversal. Contest the chargeback with your processor and cite the refund; if a refund of it is still unresolved, resolve that first. If you lose the chargeback, the loss is outside OpenRails' books.", cb.ID.Trimmed(), billing.PaymentID(match.PaymentID).String(), match.PaymentTransactionID)
 		}
+		key := ""
+		if psp, err := db.RequirePSPID(ctx); err == nil {
+			// A batch and an operator's attach of one chargeback are one loss.
+			key = "nmi:chargeback_reversal:" + cb.ID.Trimmed() + ":" + psp.String()
+		}
 		if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
 			Action:            action,
 			Provider:          rail,
 			Operation:         "chargeback_reversal",
+			IdempotencyKey:    key,
 			TransactionID:     alertTransactionID,
 			CustomerID:        match.UserID,
 			OriginalPaymentID: &paymentID,

@@ -34,6 +34,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -991,6 +992,12 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 			return err
 		}
 	}
+	if reversal != nil {
+		// A later notice booked what an earlier one could not.
+		if err := (&reconcile.PGStore{DB: s.DB}).ResolveRaisedFinding(ctx, alerting.FindingLedgerUnbooked, stripeDisputeRepairKey(disputeID)); err != nil {
+			return fmt.Errorf("resolve stripe dispute ledger repair: %w", err)
+		}
+	}
 	cause := fmt.Sprintf("STRIPE DISPUTE %s: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
 	if err := s.endDisputedCharge(ctx, original, func(sub *models.Subscription) string {
 		// A membership already canceled is not this dispute's cancellation to undo.
@@ -1004,7 +1011,9 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 	if ledgerErr != nil {
 		originalID := original.ID
 		action := ""
-		if errors.Is(ledgerErr, payments.ErrRefundExceedsPayment) {
+		if errors.Is(ledgerErr, payments.ErrRefundExceedsPayment) && strings.TrimSpace(dispute.Status) == "lost" {
+			action = fmt.Sprintf("Stripe dispute %s on charge %s (transaction %s) was lost, and its refunds leave less than the charged amount to reverse, so OpenRails books no second reversal. The loss is outside OpenRails' books; book nothing for it.", disputeID, billing.PaymentID(original.ID).String(), original.TransactionID)
+		} else if errors.Is(ledgerErr, payments.ErrRefundExceedsPayment) {
 			action = fmt.Sprintf("Stripe dispute %s is on charge %s (transaction %s), whose refunds leave less than the charged amount to reverse, so OpenRails books no second reversal. Contest the dispute in Stripe and cite the refund; if a refund of it is still unresolved, resolve that first. If you lose the dispute, the loss is outside OpenRails' books.", disputeID, billing.PaymentID(original.ID).String(), original.TransactionID)
 		}
 		// Every notice of one dispute is the same loss: one finding, refreshed.
@@ -1012,7 +1021,7 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 			Action:            action,
 			Provider:          "stripe",
 			Operation:         "dispute_reversal",
-			IdempotencyKey:    "stripe:dispute_reversal:" + disputeID,
+			IdempotencyKey:    stripeDisputeRepairKey(disputeID),
 			TransactionID:     disputeID,
 			CustomerID:        original.CustomerID.String(),
 			OriginalPaymentID: &originalID,
@@ -1028,6 +1037,12 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		}
 	}
 	return nil
+}
+
+// stripeDisputeRepairKey names the one ledger repair finding of a dispute,
+// whichever of its notices raised it.
+func stripeDisputeRepairKey(disputeID string) string {
+	return "stripe:dispute_reversal:" + disputeID
 }
 
 // rdrRefundLead is how long before its dispute object Stripe may make an RDR
