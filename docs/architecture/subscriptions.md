@@ -69,6 +69,10 @@ The due pass moves a provider-billed renewal still unpaid 48 hours
   changes. One unresolved change owns a subscription: its `Idempotency-Key`
   replays it; an unresolved provider outcome answers 202 `processing`, and one
   awaiting the customer `requires_action` (`next_action`), which `/confirm` finishes.
+- The unused credit counts only what the customer kept: refunds and
+  chargebacks of the period's charges (payments whose `period_start` names the
+  current period) shrink it by their share. Engine, NMI schedule and Solana
+  upgrades apply it; Stripe and CCBill work out their own proration.
 
 ## Interfaces
 

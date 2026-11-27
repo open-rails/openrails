@@ -1444,6 +1444,9 @@
     "OR-J18-S08": [
       "TestSubscriptionChangeContracts/OR-J18-S08/a-partial-refund-that-keeps-access-shrinks-the-upgrade-credit"
     ],
+    "OR-J18-S09": [
+      "TestSubscriptionChangeContracts/OR-J18-S09/a-partial-refund-of-an-nmi-run-renewal-shrinks-the-legacy-upgrade-credit"
+    ],
     "OR-J19-S07": [
       "TestPriceMigrationContracts/OR-J19-S07/stripe-push-keeps-the-seats-and-replays-a-lost-schedule-create"
     ],

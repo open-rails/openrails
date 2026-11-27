@@ -413,4 +413,35 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		}
 		require.Equal(t, []int64{1000, 1800}, charges)
 	})
+	t.Run("OR-J18-S09/a-partial-refund-of-an-nmi-run-renewal-shrinks-the-legacy-upgrade-credit", func(t *testing.T) {
+		a, p, sub := nmiMembership(t)
+		due := *sub.CurrentPeriodEndsAt
+		p.core.RenewSchedule(*sub.RailSubscriptionID, true)
+		require.NoError(t, p.persist(t.Context()))
+		fleet := quietFleet(t, a.world)
+		// The rebill watch reads NMI's renewal a day on.
+		advanceTo(a.world, nextHour(due.Add(24*time.Hour+20*time.Minute)))
+		runPass(t, fleet)
+		nmiRenewalReadback(t, a, p, sub)
+		paid, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
+		require.NoError(t, err)
+		require.Len(t, paid.Items, 2)
+		_, err = a.alpha.RefundPayment(t.Context(), "renewal-goodwill-part", paid.Items[0].ID, billing.RefundPaymentParams{Amount: 6_000_000, Reason: "Goodwill"})
+		require.NoError(t, err)
+		_, err = a.alpha.UpdateProduct(t.Context(), sub.ProductID, billing.UpdateProductParams{TierGroup: catalog.Value("nmi-level"), TierRank: catalog.Value(1)})
+		require.NoError(t, err)
+		p.core.AddPlan(nmimock.Plan{ID: "weekly-plus", Name: "Weekly plus", Amount: "20.00", Days: 7})
+		plus, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-plus", DisplayName: "NMI plus", TierGroup: ptr("nmi-level"), TierRank: 2, Entitlements: []string{"nmi:plus"}})
+		require.NoError(t, err)
+		price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: plus.ID, Key: "nmi-weekly-plus", PSP: "nmi", PlanID: "weekly-plus", Currency: "USD"})
+		require.NoError(t, err)
+		advanceTo(a.world, due.Add(84*time.Hour))
+		// Half the week is left: half the $20 plan less half the $4 kept.
+		status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/change/preview", a.aliceToken, map[string]any{"price_id": price.ID})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var preview billing.SubscriptionChangePreview
+		require.NoError(t, json.Unmarshal(raw, &preview))
+		require.Equal(t, "now", preview.Effective)
+		require.EqualValues(t, 8_000_000, preview.AmountDueNow)
+	})
 }

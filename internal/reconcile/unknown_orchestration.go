@@ -398,7 +398,7 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 			if t.Success {
 				bill.Payment = &models.Payment{CustomerID: sub.CustomerID, SubscriptionID: &sub.ID, PspID: &sub.PspID, Rail: sub.Rail,
 					TransactionID: t.TransactionID, Amount: amount, ListAmount: amount, Currency: currency, Status: payments.PaymentStatusSucceededValue,
-					MoneyMovement: models.MoneyMovementRail, PurchasedAt: t.OccurredAt, CreatedAt: now, Metadata: t.PaymentMetadata}
+					MoneyMovement: models.MoneyMovementRail, PurchasedAt: t.OccurredAt, CreatedAt: now, Metadata: subscriptions.WithPaidPeriod(t.PaymentMetadata, bill.PeriodStart)}
 				// The sale names its vault: the customer's one card in it is
 				// the card charged.
 				if t.CustomerRef != "" {
