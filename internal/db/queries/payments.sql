@@ -202,6 +202,26 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND p.refunded_payment_id IS NULL AND p.reversal_kind IS NULL
   AND p.deleted_at IS NULL;
 
+-- name: GetPeriodChargedAndKept :one
+-- What a subscription's charges for one paid period took, and what they keep
+-- after their refunds, chargebacks and won disputes. A pending refund counts
+-- as given back.
+WITH charges AS (
+    SELECT p.id, p.amount FROM billing.payments p
+    WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND p.subscription_id = sqlc.arg(subscription_id)::uuid
+      AND p.currency = sqlc.arg(currency)::text
+      AND p.metadata ->> 'period_start' = sqlc.arg(period_start)::text
+      AND p.status IN ('succeeded', 'refunded') AND p.amount > 0
+      AND p.refunded_payment_id IS NULL AND p.reversal_kind IS NULL
+      AND p.deleted_at IS NULL
+)
+SELECT COALESCE((SELECT sum(c.amount) FROM charges c), 0)::bigint AS charged,
+       GREATEST(COALESCE((SELECT sum(c.amount) FROM charges c), 0)
+         + COALESCE((SELECT sum(r.amount) FROM billing.payments r JOIN charges c ON r.refunded_payment_id = c.id
+                     WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid
+                       AND r.status IN ('succeeded', 'pending') AND r.deleted_at IS NULL), 0), 0)::bigint AS kept;
+
 -- name: MarkPaymentFailed :exec
 UPDATE billing.payments SET status = 'failed' WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;

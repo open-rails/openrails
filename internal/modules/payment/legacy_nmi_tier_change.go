@@ -153,7 +153,13 @@ func (s *PurchaseService) previewProviderNMITierChange(ctx context.Context, resp
 		resp.Message = fmt.Sprintf("No charge now. The plan changes to %s on %s, then renews at %s.", product.DisplayName, end.UTC().Format("January 2, 2006"), formatMinorAmount(target.Amount, target.Currency))
 		return resp, nil
 	}
-	quote, err := QuoteKeepBoundaryUpgrade(providerUpgradeOf(sub, current, target), now)
+	paid, err := periodKept(ctx, s.SubscriptionService.Database(), sub, current.Currency)
+	if err != nil {
+		return nil, err
+	}
+	upgrade := providerUpgradeOf(sub, current, target)
+	upgrade.Paid = paid
+	quote, err := QuoteKeepBoundaryUpgrade(upgrade, now)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +226,13 @@ func (s *PurchaseService) processProviderNMITierChange(ctx context.Context, req 
 	}
 	amount := int64(0)
 	if !downgrade {
-		quote, err := QuoteKeepBoundaryUpgrade(providerUpgradeOf(sub, current, newPrice), now)
+		paid, err := periodKept(ctx, s.SubscriptionService.Database(), sub, current.Currency)
+		if err != nil {
+			return nil, err
+		}
+		upgrade := providerUpgradeOf(sub, current, newPrice)
+		upgrade.Paid = paid
+		quote, err := QuoteKeepBoundaryUpgrade(upgrade, now)
 		if err != nil {
 			return nil, err
 		}

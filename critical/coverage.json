@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 896,
+  "scenario_count": 898,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2692,6 +2692,16 @@
       "id": "OR-J18-S08",
       "journey": "J18",
       "name": "An upgrade leaves ended paid periods unrevoked without excess grant effects"
+    },
+    {
+      "id": "OR-J18-S09",
+      "journey": "J18",
+      "name": "A partial refund that keeps access shrinks the upgrade credit to the share the customer kept"
+    },
+    {
+      "id": "OR-J18-S10",
+      "journey": "J18",
+      "name": "A partial refund of an NMI-run renewal shrinks the legacy NMI upgrade credit to the share the customer kept"
     },
     {
       "id": "OR-J19-S07",
