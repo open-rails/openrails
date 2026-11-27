@@ -60,25 +60,25 @@ func (s *MoneyService) history(ctx context.Context, events bool, f eventstore.Hi
 	return store.UsageHistory(ctx, f)
 }
 
-// UsageForgiveness is what postings cut in (from, to] forgave of usage in a
-// merchant's unit, as rows of the cut's bucket, from the split each posting
-// stored (usage_postings.forgiven_lines): Forgiven, and the same taken out of
-// Amount, what was charged. A reversal that takes forgiveness back is
-// negative.
+// UsageForgiveness is what usage receipts cut in (from, to] forgave of usage
+// in a merchant's unit, as rows of the cut's bucket, from the split each
+// receipt stored (usage_receipts.forgiven_lines): Forgiven, and the same
+// taken out of Amount, what was charged. A reversal that takes forgiveness
+// back is negative.
 func (s *MoneyService) UsageForgiveness(ctx context.Context, from, to time.Time) ([]eventstore.UsageBucket, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	postings, err := s.db.Gen(ctx).ListForgivenUsagePostings(ctx, gen.ListForgivenUsagePostingsParams{MerchantID: mid.UUID(), CutAfter: from, CutThrough: to})
+	receipts, err := s.db.Gen(ctx).ListForgivenUsageReceipts(ctx, gen.ListForgivenUsageReceiptsParams{MerchantID: mid.UUID(), CutAfter: from, CutThrough: to})
 	if err != nil {
 		return nil, err
 	}
 	var out []eventstore.UsageBucket
-	for _, p := range postings {
+	for _, p := range receipts {
 		lines, err := decodeForgivenLines(p.ForgivenLines)
 		if err != nil {
-			return nil, fmt.Errorf("usage posting %s: %w", p.ID, err)
+			return nil, fmt.Errorf("usage receipt %s: %w", p.ID, err)
 		}
 		bucket := p.CutAt.Add(-time.Microsecond).UTC().Truncate(eventstore.HistoryBucket)
 		for _, l := range lines {
@@ -89,7 +89,7 @@ func (s *MoneyService) UsageForgiveness(ctx context.Context, from, to time.Time)
 	return out, nil
 }
 
-// ForgivenLine is one share of a posting's forgiveness: the invoker, event
+// ForgivenLine is one share of a receipt's forgiveness: the invoker, event
 // type and meter cell it was charged to.
 type ForgivenLine struct {
 	Invoker   string `json:"invoker"`
@@ -136,7 +136,8 @@ func shareForgiven(amount int64, keys []forgivenKey, weights []int64) []Forgiven
 // forgivenLines shares what a posting forgives across what its period charged
 // before the cut, per invoker, event type and meter cell, from the store's
 // raw events at intake's prices, as it posts: the split is stored with the
-// posting.
+// receipt. It is the posting's one read of the event store, for attribution
+// only.
 func (s *MoneyService) forgivenLines(ctx context.Context, q *gen.Queries, customer uuid.UUID, currency string, period, cut time.Time, amount int64) ([]ForgivenLine, error) {
 	store := s.eventStore(q)
 	if store == nil {

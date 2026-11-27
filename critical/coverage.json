@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 874,
+  "scenario_count": 872,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -901,7 +901,7 @@
     {
       "id": "OR-J24-S47",
       "journey": "J24",
-      "name": "A resend after a sync whose events reached the store but whose transaction never committed inserts nothing twice: raw usage, FINAL and the rollups agree"
+      "name": "A sync that inserted its events and failed in PostgreSQL, then its resend: each item is charged once and FINAL raw usage holds it once, while history counts the failed attempt's copy too"
     },
     {
       "id": "OR-J24-S48",
@@ -911,7 +911,7 @@
     {
       "id": "OR-J24-S49",
       "journey": "J24",
-      "name": "A period posts the price of its total: graduated across two postings, a volume crossing carried and credited once its late window closed, a card revision priced card by card"
+      "name": "A period posts the price of its total: graduated across two postings, a volume crossing credited at the posting that takes it, a card revision priced card by card"
     },
     {
       "id": "OR-J24-S50",
@@ -926,7 +926,7 @@
     {
       "id": "OR-J24-S52",
       "journey": "J24",
-      "name": "A database with pending usage starts without its store: the merchant's usage is refused and named in a finding, balances read from PostgreSQL, and other customers and running charges bill; an empty store is refused, and usage attach discards the pending usage only with --discard-pending, on the record"
+      "name": "A database with pending usage starts without its store: new usage is refused, its pending usage reads and posts from PostgreSQL, and other customers and running charges bill; an empty store is refused until usage attach records it"
     },
     {
       "id": "OR-J24-S53",
@@ -954,21 +954,6 @@
       "name": "Usage history folds into the days of the merchant's accounting zone (23:30 in Kolkata is that day), a zone change regroups the past, and the days sum to what posts"
     },
     {
-      "id": "OR-J24-S58",
-      "journey": "J24",
-      "name": "A lease item that names no occurred_at resent after a commit that was lost finds the event the first attempt inserted and charges once"
-    },
-    {
-      "id": "OR-J24-S59",
-      "journey": "J24",
-      "name": "An item resent after a commit that was lost counts in the session window its first attempt opened, not one opened at the resend"
-    },
-    {
-      "id": "OR-J24-S60",
-      "journey": "J24",
-      "name": "A sync whose caller gives up while its insert is sent still finishes the insert before it lets go of its locks: the resend inserts nothing and the rollups count each item once"
-    },
-    {
       "id": "OR-J24-S61",
       "journey": "J24",
       "name": "A lot lapsing mid-month funds exactly the usage and running charges before its lapse, however much usage came after it; only that usage is owed"
@@ -982,11 +967,6 @@
       "id": "OR-J24-S63",
       "journey": "J24",
       "name": "A usage erasure that stopped at its events' update, run again, clears them and leaves the history as it was: each event in it once"
-    },
-    {
-      "id": "OR-J24-S64",
-      "journey": "J24",
-      "name": "Usage priced under a card print whose intake never committed holds up no posting: a print a card in force names is recorded again, and one nothing names is left out"
     },
     {
       "id": "OR-J24-S65",
@@ -3176,7 +3156,7 @@
     {
       "id": "OR-J48-S10",
       "journey": "J48",
-      "name": "A period in a unit whose volume price falls below what posted is credited once its late window closes, taking back what the period forgave, from the shares its posting stored, before crediting what the lots paid beyond its price"
+      "name": "A period in a unit whose volume price falls below what its receipts took is credited at the posting that takes the usage, taking back what the period forgave, from the shares its receipt stored, before crediting what the lots paid beyond its price"
     },
     {
       "id": "OR-J48-S11",
@@ -4292,6 +4272,16 @@
       "id": "OR-J24-S83",
       "journey": "J24",
       "name": "An item settled days after its admission, its limit window over, settles without error and counts toward no window: no limit_usage row and no window row; usage admitted now counts in its live window"
+    },
+    {
+      "id": "OR-J24-S84",
+      "journey": "J24",
+      "name": "A posting takes exactly what is pending, priced on the period's total: two gates' usage across a graduated band posts the price their running totals held, folded into the period's posted row, and leaves nothing queued"
+    },
+    {
+      "id": "OR-J24-S85",
+      "journey": "J24",
+      "name": "Usage reported after a credit lot lapsed, from either side of the lapse, is split at it in the running totals: the posting before the lapse draws the lot for the usage before it only, and the rest is owed"
     },
     {
       "id": "OR-J25-S44",
