@@ -380,4 +380,37 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		require.Equal(t, billing.SubscriptionCanceled, prior.Status)
 		require.True(t, prior.CurrentPeriodStartsAt.Before(*prior.CurrentPeriodEndsAt), "the superseded period ends after it starts")
 	})
+	t.Run("OR-J18-S08/a-partial-refund-that-keeps-access-shrinks-the-upgrade-credit", func(t *testing.T) {
+		a, p, sub := purchasedMembership(t)
+		price := upgradePrice(t, a, sub)
+		paid, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
+		require.NoError(t, err)
+		require.Len(t, paid.Items, 1)
+		_, err = a.alpha.RefundPayment(t.Context(), "goodwill-part", paid.Items[0].ID, billing.RefundPaymentParams{Amount: 6_000_000, Reason: "Goodwill"})
+		require.NoError(t, err)
+		kept, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionActive, kept.Status, "the refund keeps access")
+		a.clock.Advance(12 * time.Hour)
+		// Half the day is left of the $4 kept: $2 credit, not half the $10 list price.
+		path := "/v1/me/subscriptions/" + sub.ID.String()
+		body := map[string]any{"price_id": price.ID}
+		status, raw := a.request(t, http.MethodPost, path+"/change/preview", a.aliceToken, body)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var preview billing.SubscriptionChangePreview
+		require.NoError(t, json.Unmarshal(raw, &preview))
+		require.EqualValues(t, 18_000_000, preview.AmountDueNow)
+		status, raw = a.request(t, http.MethodPost, path+"/change", a.aliceToken, body, map[string]string{"Idempotency-Key": "upgrade-after-refund"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var changed billing.SubscriptionChange
+		require.NoError(t, json.Unmarshal(raw, &changed))
+		require.Equal(t, "succeeded", changed.Status, string(raw))
+		var charges []int64
+		for _, effect := range p.effects(t) {
+			if effect.Kind == "charge" {
+				charges = append(charges, effect.Amount)
+			}
+		}
+		require.Equal(t, []int64{1000, 1800}, charges)
+	})
 }
