@@ -120,7 +120,12 @@ An operation that never crossed its submission fence is released on that alone.
 
 --step selects the step of a multi-step operation (nmi_upgrade: successor or
 proration; stripe_tier_change: update, schedule or phases). --actor and
---reason are recorded on the operation and in the mutation log.`,
+--reason are recorded on the operation and in the mutation log.
+
+An NMI refund accepts --not-executed when NMI's transaction report shows no
+refund of the original sale since the refund was requested that OpenRails has
+not recorded, with --actor and --reason attesting release. A refund NMI refused
+outright is released automatically.`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			id, err := uuid.Parse(strings.TrimSpace(intentID))
@@ -136,7 +141,7 @@ proration; stripe_tier_change: update, schedule or phases). --actor and
 	cmd.Flags().StringVar(&intentID, "intent", "", "Unknown operation id (required)")
 	cmd.Flags().StringVar(&step, "step", "", "Provider step of a multi-step operation (nmi_upgrade: successor or proration; stripe_tier_change: update, schedule or phases)")
 	cmd.Flags().StringVar(&reference, "receipt", "", "Exact provider object id: transaction, subscription, schedule or refund id")
-	cmd.Flags().BoolVar(&notExecuted, "not-executed", false, "Record non-execution or attest release of an empty NMI sale order")
+	cmd.Flags().BoolVar(&notExecuted, "not-executed", false, "Record non-execution or attest release of an empty NMI sale order or a refund with no unrecorded NMI refunds")
 	cmd.Flags().StringVar(&actor, "actor", cliActor(), "Operator recorded with the resolution")
 	cmd.Flags().StringVar(&reason, "reason", "", "Evidence source, e.g. provider ticket or dashboard record (required)")
 	return cmd

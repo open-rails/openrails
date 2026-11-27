@@ -25,6 +25,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
+// EndRefundedMembership is wired by subscriptions to end engine memberships in the refund transaction.
+var EndRefundedMembership func(context.Context, *db.DB, clockwork.Clock, *models.Payment, string) error
+
 type PaymentService struct {
 	db    *db.DB
 	clock clockwork.Clock
@@ -641,17 +644,31 @@ func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {
 // reconciled and notified refunds. Explicit OpenRails refunds retain their
 // caller's access choice and do not use this provider policy.
 func (s *PaymentService) ApplyRefundAccessPolicy(ctx context.Context, paymentID uuid.UUID) error {
-	original, err := s.GetByID(ctx, paymentID)
-	if err != nil {
-		return err
-	}
-	total, err := s.GetRefundTotalByPaymentID(ctx, paymentID)
-	if err != nil {
-		return err
-	}
-	revoke, err := merchantconfig.ProviderRefundRevokes(ctx, s.db, total, original.Amount)
-	if err != nil || !revoke {
-		return err
-	}
-	return entitlements.NewEntitlementService(s.db, s.clock).RevokeRefundedPaymentAccess(ctx, paymentID, "")
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txDB := s.db.NewWithPgxTx(tx)
+		scoped := NewPaymentService(txDB, s.clock)
+		original, err := scoped.GetByID(ctx, paymentID)
+		if err != nil {
+			return err
+		}
+		total, err := scoped.GetRefundTotalByPaymentID(ctx, paymentID)
+		if err != nil {
+			return err
+		}
+		revoke, err := merchantconfig.ProviderRefundRevokes(ctx, txDB, total, original.Amount)
+		if err != nil || !revoke {
+			return err
+		}
+		if EndRefundedMembership == nil {
+			return errors.New("refund membership handler is not registered")
+		}
+		if err := entitlements.NewEntitlementService(txDB, s.clock).RevokeRefundedPaymentAccess(ctx, paymentID, ""); err != nil {
+			return err
+		}
+		original, err = scoped.GetByID(ctx, paymentID)
+		if err != nil {
+			return err
+		}
+		return EndRefundedMembership(ctx, txDB, s.clock, original, "refunded")
+	})
 }

@@ -456,6 +456,11 @@
     "OR-J20-S04": [
       "TestRefundBoundaryContract/OR-J20-S04/foreign-account-and-off-rail-refunds-have-no-effect"
     ],
+    "OR-J20-S09": [
+      "TestRefundRecovery/OR-J20-S09/a-full-dashboard-refund-ends-the-nmi-engine-membership",
+      "TestRefundRecovery/OR-J20-S09/a-full-dashboard-refund-ends-the-nmi-engine-membership/full-refund",
+      "TestRefundRecovery/OR-J20-S09/a-full-dashboard-refund-ends-the-nmi-engine-membership/partial-refund"
+    ],
     "OR-J20-S05": [
       "TestCCBillRefunds/OR-J20-S05/each-partial-refund-of-a-sale-is-booked-once"
     ],
@@ -1523,6 +1528,20 @@
     "OR-J20-S06": [
       "TestRefunds/OR-J20-S06/a-won-dispute-gives-back-what-its-chargeback-took"
     ],
+    "OR-J20-S07": [
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held",
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/already-refunded",
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/gateway-refusal",
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/duplicate",
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/unparsed-4xx",
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/redirect",
+      "TestRefundRecovery/OR-J20-S07/an-nmi-refund-nmi-refuses-is-released-not-held/rate-limited"
+    ],
+    "OR-J20-S08": [
+      "TestRefundRecovery/OR-J20-S08/an-unresolved-nmi-refund-is-named-and-closed-by-the-operator",
+      "TestRefundRecovery/OR-J20-S08/an-unresolved-nmi-refund-is-named-and-closed-by-the-operator/lost-response",
+      "TestRefundRecovery/OR-J20-S08/an-unresolved-nmi-refund-is-named-and-closed-by-the-operator/lost-request"
+    ],
     "OR-J04-S71": [
       "TestBillingPass/OR-J04-S71/a-failed-nmi-history-read-fails-its-own-job-and-the-next-hours-reads-it"
     ],
@@ -1652,6 +1671,9 @@
     ],
     "OR-J15-S74": [
       "TestProviderTime/OR-J15-S74/an-nmi-refresh-backlog-is-read-a-link-at-a-time-by-last-change"
+    ],
+    "OR-J15-S75": [
+      "TestProviderTime/OR-J15-S75/prune-keeps-a-pending-refund-and-a-booked-nmi-chargeback"
     ],
     "OR-J28-S13": [
       "TestProviderTime/OR-J28-S13/a-ccbill-account-archived-or-in-the-other-money-class-is-declarable-by-another-merchant"
@@ -1869,6 +1891,14 @@
     ],
     "OR-J46-S16": [
       "TestDisputes/OR-J46-S16/a-report-on-an-unknown-charge-is-answered"
+    ],
+    "OR-J46-S17": [
+      "TestDisputes/OR-J46-S17/an-unmatched-nmi-chargeback-is-attached-by-the-operator"
+    ],
+    "OR-J46-S18": [
+      "TestDisputes/OR-J46-S18/a-chargeback-of-a-refunded-charge-says-to-contest-it",
+      "TestDisputes/OR-J46-S18/a-chargeback-of-a-refunded-charge-says-to-contest-it/already-refunded",
+      "TestDisputes/OR-J46-S18/a-chargeback-of-a-refunded-charge-says-to-contest-it/not-refunded"
     ],
     "OR-J46-S12": [
       "TestDisputes/OR-J46-S12/the-dispute-metrics-equal-the-records"

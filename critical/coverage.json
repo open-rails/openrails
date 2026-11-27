@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 866,
+  "scenario_count": 872,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -647,6 +647,21 @@
       "id": "OR-J20-S06",
       "journey": "J20",
       "name": "A won dispute gives back what its chargeback took: the charge reads refunded only by its net reversals, in its detail and in the merchant's list"
+    },
+    {
+      "id": "OR-J20-S07",
+      "journey": "J20",
+      "name": "An NMI refund NMI refuses is released, while duplicate refusals stay unresolved"
+    },
+    {
+      "id": "OR-J20-S08",
+      "journey": "J20",
+      "name": "An unresolved NMI refund names the operator command and closes on an exact receipt or attested release with no unrecorded refund of the sale"
+    },
+    {
+      "id": "OR-J20-S09",
+      "journey": "J20",
+      "name": "A full NMI dashboard refund ends the engine membership and prevents renewal, redelivery changes nothing, and a partial refund keeps access and renewal"
     },
     {
       "id": "OR-J21-S01",
@@ -2959,6 +2974,11 @@
       "name": "An NMI refresh backlog is read a link a run by last change, each ending at its end and advancing the applied watermark, the last through now; a sale settled in it is read in the link of its last change and booked once"
     },
     {
+      "id": "OR-J15-S75",
+      "journey": "J15",
+      "name": "Prune keeps a pending refund and a booked NMI chargeback"
+    },
+    {
       "id": "OR-J28-S13",
       "journey": "J28",
       "name": "A CCBill account another merchant archived, or holds only in the other money class, is declarable: only a current PSP of an unretired merchant in the same class holds it"
@@ -3352,6 +3372,16 @@
       "id": "OR-J46-S07",
       "journey": "J46",
       "name": "An actionable early fraud warning is a fraud report Visa counts once; without waiting for the merchant's destructive arming it refunds the charge in full once (fraud_warning, fraudulent at Stripe), ends what it paid for and blocks the card whatever events repeat it; one an event calls unactionable is not acted on; a charge in dispute is not refunded; a charge with nothing left to refund is still ended; recording reports only refunds nothing; below a full posture the response waits with one alerting finding and runs when the posture is raised"
+    },
+    {
+      "id": "OR-J46-S17",
+      "journey": "J46",
+      "name": "An unmatched NMI chargeback is attached by the operator"
+    },
+    {
+      "id": "OR-J46-S18",
+      "journey": "J46",
+      "name": "A chargeback of a refunded charge says to contest it"
     },
     {
       "id": "OR-J43-S08",

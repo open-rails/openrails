@@ -357,3 +357,30 @@ func flagSet(v string) bool {
 	}
 	return false
 }
+
+// ReadRefundTransactions lists successful refunds of the original sale since since.
+func (c *NMIClient) ReadRefundTransactions(ctx context.Context, originalTransactionID string, since time.Time) ([]string, error) {
+	c = c.scoped()
+	var ids []string
+	seen := map[string]bool{}
+	filter := QueryFilter{ActionType: "refund", StartDate: since.UTC().Truncate(time.Second).Format(QueryTimeFormat)}
+	err := c.PageTransactions(ctx, filter, time.Now(), func(page []QueryTransaction) error {
+		for _, txn := range page {
+			if txn.OriginalTransactionID != originalTransactionID || seen[txn.TransactionID] {
+				continue
+			}
+			for _, action := range txn.Actions {
+				if action.Is("refund") && action.Succeeded() {
+					ids = append(ids, txn.TransactionID)
+					seen[txn.TransactionID] = true
+					break
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
