@@ -88,15 +88,15 @@ func (q *Queries) DeleteUsagePending(ctx context.Context, arg DeleteUsagePending
 const foldUsageTotals = `-- name: FoldUsageTotals :exec
 WITH taken AS (
     DELETE FROM billing.usage_totals
-    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND currency = $3::text
+    WHERE merchant_id = $2::uuid AND customer_id = $3::uuid AND currency = $4::text
       AND lease_id <> '00000000-0000-0000-0000-000000000000'::uuid
-      AND ($4::timestamptz IS NULL OR lapse_at < $4::timestamptz AND period_starts_at < $4::timestamptz)
+      AND ($5::timestamptz IS NULL OR lapse_at < $5::timestamptz AND period_starts_at < $5::timestamptz)
     RETURNING merchant_id, customer_id, currency, period_starts_at, period_ends_at, meter_key, cell, print, quantity, stated, requests
 )
 INSERT INTO billing.usage_totals AS t (merchant_id, customer_id, currency, period_starts_at, period_ends_at, meter_key, cell, print, lapse_at, lease_id,
     quantity, stated, requests, amount, updated_at)
 SELECT merchant_id, customer_id, currency, period_starts_at, max(period_ends_at), meter_key, cell, print, period_starts_at,
-       '00000000-0000-0000-0000-000000000000'::uuid, sum(quantity)::bigint, sum(stated)::bigint, sum(requests)::bigint, 0, $5::timestamptz
+       '00000000-0000-0000-0000-000000000000'::uuid, sum(quantity)::bigint, sum(stated)::bigint, sum(requests)::bigint, 0, $1::timestamptz
 FROM taken
 GROUP BY merchant_id, customer_id, currency, period_starts_at, meter_key, cell, print
 ORDER BY period_starts_at, meter_key, cell, print
@@ -106,11 +106,11 @@ ON CONFLICT (merchant_id, customer_id, currency, period_starts_at, meter_key, ce
 `
 
 type FoldUsageTotalsParams struct {
+	Now        time.Time
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
 	Cut        *time.Time
-	Now        time.Time
 }
 
 // A posting folds the unposted rows it took (all, or those of the lapse
@@ -118,11 +118,11 @@ type FoldUsageTotalsParams struct {
 // caller holds the customer's queue row, so no intake writes meanwhile.
 func (q *Queries) FoldUsageTotals(ctx context.Context, arg FoldUsageTotalsParams) error {
 	_, err := q.db.Exec(ctx, foldUsageTotals,
+		arg.Now,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
 		arg.Cut,
-		arg.Now,
 	)
 	return err
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/modules/leases"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -117,10 +118,12 @@ func TestUsageStore(t *testing.T) {
 	t.Run("OR-J24-S47/a-resend-after-a-failed-sync-charges-once-and-history-counts-both-copies", func(t *testing.T) {
 		w := newWorld(t)
 		customer, _ := fundedCustomer(t, w)
-		usageMeter(t, w.alpha, 100)
+		usageMeter(t, w.alpha, 1)
 		lease := newLease()
-		items := numbered(1, usageInput(customer, "a", 1), usageInput(customer, "b", 1), usageInput(customer, "c", 1))
-		// The sync inserts its events and fails in PostgreSQL: nothing settled.
+		chunk := int64(leases.UsageChunkItems)
+		items := unitItems(customer, 1, leases.UsageChunkItems+1)
+		// The sync inserts its first chunk's events and fails in PostgreSQL:
+		// nothing settled.
 		failAfterFirstChunk(t, lease)
 		_, err := w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: items})
 		require.Error(t, err)
@@ -129,17 +132,17 @@ func TestUsageStore(t *testing.T) {
 		// The resend inserts them again and settles each once: the money is
 		// PostgreSQL's. Raw usage collapses the copies; the rollups count both.
 		settleUsage(t, w.alpha, lease, items...)
-		balance(t, w.alpha, customer, 700, 300, 1000)
-		require.EqualValues(t, 3, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"), "raw usage holds each item once")
-		require.EqualValues(t, 6, storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"),
+		balance(t, w.alpha, customer, 1000-chunk-1, chunk+1, 1000)
+		require.EqualValues(t, chunk+1, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"), "raw usage holds each item once")
+		require.EqualValues(t, 2*chunk+1, storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"),
 			"history counts the failed attempt's copy too")
 		fleet := startFleet(t, w)
 		nextDay(w)
 		postDays(t, fleet)
-		balance(t, w.alpha, customer, 700, 0, 700)
+		balance(t, w.alpha, customer, 1000-chunk-1, 0, 1000-chunk-1)
 		deductions := usageDeductions(t, w.alpha, customer)
 		require.Len(t, deductions, 1)
-		require.EqualValues(t, -300, deductions[0].Amount, "charged once")
+		require.EqualValues(t, -(chunk + 1), deductions[0].Amount, "charged once")
 	})
 
 	t.Run("OR-J24-S48/while-clickhouse-is-out-of-reach-usage-settles-nothing-and-balances-read-and-move", func(t *testing.T) {

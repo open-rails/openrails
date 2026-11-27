@@ -143,6 +143,13 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 	} else if err != nil {
 		return false, err
 	}
+	// The merchant's configuration is read before the ledger moves: a first
+	// read loads it on its own connection, which opens the general ledger's
+	// accounts and must not wait for this transaction's.
+	zone, err := s.AccountingZone(ctx)
+	if err != nil {
+		return false, err
+	}
 	now := instant(s.now())
 	everything := cut.IsZero()
 	if horizon := now.Add(retention.UsageClockSkew); everything || cut.After(horizon) {
@@ -227,10 +234,6 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 		return moved, q.DeleteUsagePending(ctx, gen.DeleteUsagePendingParams(key))
 	}
 	// What is left occurred at or after the cut.
-	zone, err := s.AccountingZone(ctx)
-	if err != nil {
-		return moved, err
-	}
 	return moved, q.SetUsagePendingDue(ctx, gen.SetUsagePendingDueParams{DueAt: dayAfter(zone, liveAt), Now: now,
 		MerchantID: merchantID, CustomerID: customer, Currency: currency})
 }

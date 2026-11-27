@@ -255,7 +255,7 @@ func storeMigrationsAndIdentity(t *testing.T) {
 	require.Equal(t, installed, tables())
 	var applied uint64
 	require.NoError(t, conn.QueryRow(ctx, "SELECT count() FROM `"+w.schema+"`.schema_migrations FINAL").Scan(&applied))
-	require.EqualValues(t, 5, applied)
+	require.EqualValues(t, 6, applied)
 
 	// An emptied ClickHouse is not the store this database's usage is in:
 	// once migrated it is another store.
@@ -317,7 +317,7 @@ func concurrentStoreMigrations(t *testing.T) {
 	}
 	var recorded, stores uint64
 	require.NoError(t, w.deps.ClickHouse.QueryRow(ctx, "SELECT count() FROM `"+fresh+"`.schema_migrations").Scan(&recorded))
-	require.EqualValues(t, 5, recorded, "each migration ran and was recorded once")
+	require.EqualValues(t, 6, recorded, "each migration ran and was recorded once")
 	require.NoError(t, w.deps.ClickHouse.QueryRow(ctx, "SELECT count() FROM `"+fresh+"`.store").Scan(&stores))
 	require.EqualValues(t, 1, stores, "one store identity")
 	first, err := declaredMerchant(engines[0], "alpha")

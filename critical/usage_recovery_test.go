@@ -138,19 +138,24 @@ func TestUsageRecovery(t *testing.T) {
 		after := usageInput(customer, "after", 25)
 		after.OccurredAt = lapse.Add(10 * time.Minute)
 		settleUsage(t, w.alpha, newLease(), numbered(1, before, after)...)
-		segments := map[time.Time]int64{}
+		type segment struct {
+			at       time.Time
+			quantity int64
+		}
+		var segments []segment
 		rows, err := w.pool.Query(t.Context(), "SELECT lapse_at, sum(quantity)::bigint FROM "+pgx.Identifier{w.schema, "usage_totals"}.Sanitize()+
-			" WHERE merchant_id = $1 AND customer_id = $2 GROUP BY lapse_at", w.alpha.MerchantID().UUID(), customer.UUID())
+			" WHERE merchant_id = $1 AND customer_id = $2 GROUP BY lapse_at ORDER BY lapse_at", w.alpha.MerchantID().UUID(), customer.UUID())
 		require.NoError(t, err)
 		for rows.Next() {
-			var at time.Time
-			var quantity int64
-			require.NoError(t, rows.Scan(&at, &quantity))
-			segments[at.UTC()] = quantity
+			var s segment
+			require.NoError(t, rows.Scan(&s.at, &s.quantity))
+			segments = append(segments, s)
 		}
 		require.NoError(t, rows.Err())
 		require.Len(t, segments, 2, "the running totals split at the lapse")
-		require.EqualValues(t, 25, segments[lapse], "what came after the lapse is its own segment")
+		require.EqualValues(t, 60, segments[0].quantity)
+		require.True(t, segments[1].at.Equal(lapse), "what came after the lapse is its own segment: %s", segments[1].at)
+		require.EqualValues(t, 25, segments[1].quantity)
 
 		fleet := quietFleet(t, w)
 		require.False(t, runPass(t, fleet))
