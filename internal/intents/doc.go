@@ -18,7 +18,7 @@
 // unknown attempt. A known pre-submission refusal parks without consuming an
 // attempt; a parsed definitive decline ends the attempt. Provider-idempotent
 // calls may replay their key (Stripe, within its 23-hour retention). A
-// receipt is inserted once against the frozen terms (account, invoice, vault,
+// receipt is inserted once against the frozen terms (account, order, vault,
 // amount, currency, instrument); one that contradicts them settles nothing
 // and is kept as provider_contradiction. An instrument changed before
 // submission is provable non-execution (instrument_changed). Nothing triggers

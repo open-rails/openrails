@@ -412,7 +412,7 @@ func (c *checker) compared(fn *parse.IdentifierNode, args []reflect.Type) error 
 		k0, k0b := comparison(first)
 		switch {
 		case ordered && (!kb || k == reflect.Bool || k == reflect.Complex128):
-			return c.errorf(fn, "%s cannot invoice a %s", fn.Ident, t)
+			return c.errorf(fn, "%s cannot order a %s", fn.Ident, t)
 		case kb && k0b && k != k0, kb != k0b, !kb && (t != first || !t.Comparable()):
 			return c.errorf(fn, "incompatible types for comparison: %s and %s", first, t)
 		}

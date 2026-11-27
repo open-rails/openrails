@@ -145,12 +145,12 @@ func (s *InvoiceAttemptService) Route(ctx context.Context, in RoutingInput) (*Ro
 		return decision, nil
 	}
 
-	invoice, policy, rule, err := s.routingOrder(ctx, in)
+	order, policy, rule, err := s.routingOrder(ctx, in)
 	if err != nil {
 		return nil, err
 	}
-	decision := &RoutingDecision{Policy: policy, Rule: rule, Candidates: make([]RoutingCandidate, 0, len(invoice))}
-	for _, selector := range invoice {
+	decision := &RoutingDecision{Policy: policy, Rule: rule, Candidates: make([]RoutingCandidate, 0, len(order))}
+	for _, selector := range order {
 		target, skip := s.evaluateCandidate(ctx, targets, in, selector)
 		candidate := RoutingCandidate{Selector: selector, Rail: target.Rail, PSPID: targetPSPID(target), Skip: skip}
 		if skip == "" {
@@ -226,7 +226,7 @@ func unresolvedRailTarget(selector string) railTarget {
 	return railTarget{PSP: name, Rail: name}
 }
 
-// routingOrder resolves the candidate invoice for these inputs: a provider
+// routingOrder resolves the candidate order for these inputs: a provider
 // price's own PSP, the first matching merchant rule, else the default: the
 // merchant's charge PSPs, then the other rails.
 func (s *InvoiceAttemptService) routingOrder(ctx context.Context, in RoutingInput) ([]string, string, *int, error) {

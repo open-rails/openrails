@@ -168,7 +168,7 @@ func (w *RebillWatchWorker) watch(ctx context.Context, sub *models.Subscription,
 // probeNMI fetches NMI's record of the cycle and converges on it. A charge
 // found is recorded (observed by pull) and decides the cycle. Any other
 // transaction NMI holds for the cycle (a voided or refunded sale, a charge off
-// the schedule's date or invoice) is a miss OpenRails never collects. Only when
+// the schedule's date or order) is a miss OpenRails never collects. Only when
 // NMI holds nothing is the miss named by what its schedule shows.
 func (w *RebillWatchWorker) probeNMI(ctx context.Context, sub *models.Subscription, now time.Time) (string, []nmi.CycleTransaction, bool, error) {
 	if w.NMIResolver == nil || w.Lifecycle == nil {

@@ -21,7 +21,7 @@ type CreatePlanParams struct {
 	MetadataURI  string                // <= 128 bytes
 }
 
-// BuildCreatePlan builds the create_plan instruction. Accounts (IDL invoice):
+// BuildCreatePlan builds the create_plan instruction. Accounts (IDL order):
 // merchant(s,w), planPda(w), tokenMint, systemProgram, tokenProgram.
 func BuildCreatePlan(p CreatePlanParams) (solanago.Instruction, error) {
 	data, err := encodeCreatePlan(p)
@@ -215,7 +215,7 @@ type CreateIdempotentATAParams struct {
 // BuildCreateIdempotentATA builds the SPL Associated-Token-Account program's
 // CreateIdempotent instruction for (Owner, Mint). It creates the receiving ATA
 // if absent and is a no-op if it already exists, so it is safe to repeat.
-// Accounts (ATA-program invoice): payer(s,w), ata(w), owner, mint, systemProgram,
+// Accounts (ATA-program order): payer(s,w), ata(w), owner, mint, systemProgram,
 // tokenProgram. Data: [1] (CreateIdempotent selector).
 func BuildCreateIdempotentATA(p CreateIdempotentATAParams) solanago.Instruction {
 	accounts := solanago.AccountMetaSlice{
