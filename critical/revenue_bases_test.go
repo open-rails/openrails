@@ -378,7 +378,7 @@ func booksMeasuresFromRollups(t *testing.T) {
 	// the same once July's boundary and a later sale have posted.
 	a.clock.Advance(10*24*time.Hour + time.Hour)
 	require.False(t, runPass(t, fleet))
-	june := billing.QueryMetricsParams{Measures: []string{"recognized_revenue", "credits_sold", "cash"}, By: []string{"account"}, Range: &billing.MetricsRange{From: "2026-06-01", To: "2026-06-25"}}
+	june := billing.QueryMetricsParams{Measures: []string{"recognized_revenue", "credits_sold", "cash"}, Range: &billing.MetricsRange{From: "2026-06-01", To: "2026-06-25"}}
 	held := billing.QueryMetricsParams{Measures: []string{"balance"}, By: []string{"account"}, Range: &billing.MetricsRange{From: "2026-06-01", To: "2026-06-25"}}
 	read := func(q billing.QueryMetricsParams) []map[string]any { return metricTable(t, a.alpha, q) }
 	before, heldBefore := read(june), read(held)
