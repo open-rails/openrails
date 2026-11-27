@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 882,
+  "scenario_count": 883,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2052,6 +2052,11 @@
       "id": "OR-J34-S43",
       "journey": "J34",
       "name": "A restore waits a day, by the deployment's clock, after a prune that can still be undone"
+    },
+    {
+      "id": "OR-J34-S44",
+      "journey": "J34",
+      "name": "A declared canceled row whose NMI schedule is owed a stop, for a customer already holding the product, is blocked as a lifecycle conflict with no stop scheduled; the rest of the book lands"
     },
     {
       "id": "OR-J34-S34",

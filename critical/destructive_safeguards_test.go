@@ -431,6 +431,29 @@ func TestDestructiveSafeguards(t *testing.T) {
 		require.True(t, replay.AlreadyImported)
 	})
 
+	t.Run("OR-J34-S44/an-owed-provider-stop-of-a-customer-holding-the-product-blocks-its-row-not-the-book", func(t *testing.T) {
+		b := newNMIBook(t)
+		asOf := b.started.Add(10 * 24 * time.Hour)
+		// The customer holds the product on a live schedule.
+		holder := billing.CustomerID(uuid.New())
+		b.land(b.a.alpha, billing.DeclaredBilling{AsOf: b.started, DefaultPSP: billing.PSPRef{Key: "nmi"},
+			Customers: []billing.DeclaredCustomer{{Customer: holder}}, Subscriptions: []billing.DeclaredSubscription{b.live(holder, "holder-live")}})
+
+		// A later book declares the customer's earlier schedule canceled and
+		// still live at NMI, beside another customer's.
+		book := b.owed(asOf, 1, "owed")
+		book.Customers = append(book.Customers, billing.DeclaredCustomer{Customer: holder})
+		book.Subscriptions = append(book.Subscriptions, billing.DeclaredSubscription{SourceID: "holder-earlier", Customer: holder, Price: b.price, Rail: "nmi",
+			RailSubscriptionID: "holder-earlier", StartedAt: b.started, Cancel: billing.CancelEvidence{Kind: "user_canceled", At: asOf.Add(-time.Hour), ScheduleLive: true}})
+		res, err := b.a.alpha.ImportBilling(t.Context(), book)
+		require.NoError(t, err, "one held product fails no book")
+		require.Equal(t, []string{"owed-00"}, res.Imported)
+		require.Equal(t, []string{"holder-earlier"}, res.Blocked)
+		require.Equal(t, "lifecycle conflict: subscriptions_customer_id_product_id_key", res.Reasons["holder-earlier"])
+		require.Len(t, b.stops(t), 1, "only the landed row's stop is scheduled")
+		require.Equal(t, billing.SubscriptionActive, b.status(holder), "the held product is untouched")
+	})
+
 	t.Run("OR-J34-S34/a-staff-card-removal-spends-no-customer-action-budget", func(t *testing.T) {
 		a, journal := newNMIWorld(t)
 		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
