@@ -80,12 +80,10 @@ func TestInvoiceExpiryClock(t *testing.T) {
 		price, err := s.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "USD", SellVia: []catalog.SellVia{catalog.SellViaSolana}})
 		require.NoError(t, err)
 		customer := billing.CustomerID(uuid.MustParse(s.alice.ID))
-		expires := s.clock.Now().Add(time.Hour)
-		created, err := s.alpha.CreateInvoice(t.Context(), "solana-expiring", billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
-		require.NoError(t, err)
-		// Quoted ten minutes before the invoice expires: the quote and its late
-		// window outlive the invoice.
-		s.clock.Advance(50 * time.Minute)
+		created := openPurchase(t, s.authorityWorld, price.ID, 1)
+		// Quoted ten minutes before the purchase expires: the quote and its late
+		// window outlive it.
+		s.clock.Advance(created.ExpiresAt.Sub(s.clock.Now()) - 10*time.Minute)
 		pay := billing.PayInvoiceParams{ExpectedTotal: 10_000_000, Payment: billing.InvoicePaymentParams{TokenSymbol: "USDC"}}
 		status, raw := s.request(t, http.MethodPost, "/v1/me/invoices/"+created.ID.String()+"/pay", s.aliceToken, pay, map[string]string{"Idempotency-Key": "solana-expiring-pay"})
 		require.Equal(t, http.StatusOK, status, string(raw))
@@ -272,8 +270,7 @@ func TestInvoiceExpiryClock(t *testing.T) {
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var mine billing.ListPage[billing.Invoice]
 		require.NoError(t, json.Unmarshal(raw, &mine))
-		require.Len(t, mine.Items, 1)
-		require.Equal(t, created.ID, mine.Items[0].ID)
+		require.Empty(t, mine.Items, "a purchase that expired unpaid leaves the customer's own list")
 		// The expiry closed it first: it is not canceled.
 		status, raw = a.request(t, http.MethodPost, "/v1/me/invoices/"+created.ID.String()+"/cancel", a.aliceToken, nil)
 		require.Equal(t, http.StatusConflict, status, string(raw))

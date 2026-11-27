@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
-	"math/bits"
 	"time"
 
 	"github.com/open-rails/openrails/catalog"
@@ -23,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -38,41 +35,23 @@ import (
 // through a running charge's accrual and a credit lot's lapse, and a look
 // schedules both: the lapse is expired at the look its ends_at wakes.
 
-const (
-	// defaultRunwayHours is the built-in runway line: it scales with the
-	// customer's spend and stays silent for an idle account.
-	defaultRunwayHours = 24
-	// usageRateTimeConstant is the usage rate's time constant.
-	usageRateTimeConstant = time.Hour
-)
-
-// lowBalanceLine is the line a balance is judged at, each part resolved
-// customer, merchant, built in.
+// lowBalanceLine is the amount a balance is low at or under: the customer's
+// own, else the merchant's, else none (0).
 type lowBalanceLine struct {
-	amount      int64
-	runwayHours int
-	source      billing.LowBalanceLineSource
+	amount int64
+	source billing.LowBalanceLineSource
 }
 
-// resolveLowBalanceLine resolves each part: the customer's own (own, nil with
-// none), the merchant's, built in.
+// resolveLowBalanceLine resolves the line: the customer's own (own, nil with
+// none), else the merchant's.
 func resolveLowBalanceLine(cfg models.BalanceNoticeConfiguration, own *gen.BillingCustomerLowBalanceLine, currency string) lowBalanceLine {
-	line := lowBalanceLine{runwayHours: defaultRunwayHours, source: billing.LowBalanceLineDefault}
-	if amount, ok := cfg.LowAmounts[currency]; ok {
-		line.amount, line.source = amount, billing.LowBalanceLineMerchant
-	}
-	if cfg.RunwayHours != nil {
-		line.runwayHours, line.source = *cfg.RunwayHours, billing.LowBalanceLineMerchant
-	}
 	if own != nil {
-		if own.Amount != nil {
-			line.amount, line.source = *own.Amount, billing.LowBalanceLineCustomer
-		}
-		if own.RunwayHours != nil {
-			line.runwayHours, line.source = int(*own.RunwayHours), billing.LowBalanceLineCustomer
-		}
+		return lowBalanceLine{amount: own.Amount, source: billing.LowBalanceLineCustomer}
 	}
-	return line
+	if amount, ok := cfg.LowAmounts[currency]; ok {
+		return lowBalanceLine{amount: amount, source: billing.LowBalanceLineMerchant}
+	}
+	return lowBalanceLine{source: billing.LowBalanceLineNone}
 }
 
 // customerLine is the customer's own line in a currency; nil with none.
@@ -100,26 +79,8 @@ func effectiveLine(ctx context.Context, d *db.DB, q *gen.Queries, merchantID, cu
 	return resolveLowBalanceLine(cfg, own, currency), nil
 }
 
-// at is the effective line at a burn rate: the larger of the amount line and
-// the rate times the runway.
-func (l lowBalanceLine) at(burnPerHour int64) int64 {
-	return max(l.amount, satMul(burnPerHour, int64(l.runwayHours)))
-}
-
 func (l lowBalanceLine) effective(currency string) billing.EffectiveLowBalanceLine {
-	return billing.EffectiveLowBalanceLine{Currency: catalog.Currency(currency), Amount: l.amount, RunwayHours: l.runwayHours, Source: l.source}
-}
-
-// satMul multiplies two nonnegative amounts, saturating.
-func satMul(a, b int64) int64 {
-	if a <= 0 || b <= 0 {
-		return 0
-	}
-	hi, lo := bits.Mul64(uint64(a), uint64(b)) // #nosec G115 -- both are positive
-	if hi != 0 || lo > math.MaxInt64 {
-		return math.MaxInt64
-	}
-	return int64(lo) // #nosec G115 -- checked above
+	return billing.EffectiveLowBalanceLine{Currency: catalog.Currency(currency), Amount: l.amount, Source: l.source}
 }
 
 // balanceNotices is the merchant's default lines; a deployment with no
@@ -220,15 +181,11 @@ type balanceProjection struct {
 	// and the lots' lapses, exact; nil when neither moves it there.
 	depletesAt *time.Time
 	depleted   bool
-	// line is the effective low line at the burn rate; 0 is none. lowAt is
-	// the exact instant the balance goes under it, nil when nothing exact
-	// moves it there.
+	// line is the low line; 0 is none. lowAt is the exact instant the
+	// balance reaches it, nil when nothing exact moves it there.
 	line  int64
 	lowAt *time.Time
 	low   bool
-	// runwayEndsAt is when capacity reaches zero at the burn rate; nil at
-	// rate zero.
-	runwayEndsAt *time.Time
 }
 
 // exactAt is the first instant the balance is at or under target as the
@@ -241,19 +198,13 @@ func (v balanceView) exactAt(target int64) *time.Time {
 	return &at
 }
 
-func (v balanceView) project(line lowBalanceLine, usageRate int64) balanceProjection {
+func (v balanceView) project(line lowBalanceLine) balanceProjection {
 	var p balanceProjection
 	p.depletesAt = v.exactAt(v.floor)
 	p.depleted = p.depletesAt != nil && !p.depletesAt.After(v.asOf)
-	burn := satAdd(v.accrualRate, usageRate)
-	if p.line = line.at(burn); p.line > 0 {
-		// Under the line: at or under one unit less than it.
-		p.lowAt = v.exactAt(satAdd(v.spendFloor, p.line-1))
+	if p.line = line.amount; p.line > 0 {
+		p.lowAt = v.exactAt(satAdd(v.spendFloor, p.line))
 		p.low = p.lowAt != nil && !p.lowAt.After(v.asOf)
-	}
-	if burn > 0 {
-		at := firstInstantAtOrUnder(v.asOf, v.available, v.lots, burn, v.floor)
-		p.runwayEndsAt = &at
 	}
 	return p
 }
@@ -300,73 +251,11 @@ func (v balanceView) watched() bool {
 	return false
 }
 
-// sampleUsageRate adds the usage dated since the last sample to the decayed
-// rate, by the usage history's quarter hours at what they cost: each is read
-// by one look once it has ended; quarter hours before the last sample's, or
-// more than one time constant ago, are left out: the rate is an estimate.
-func (s *MoneyService) sampleUsageRate(ctx context.Context, q *gen.Queries, watch gen.BillingBalanceWatch, now time.Time) (rate int64, sampledAt time.Time, err error) {
-	since := now.Add(-usageRateTimeConstant)
-	if prev := watch.RateSampledAt; prev != nil {
-		if !prev.Before(now) {
-			return watch.UsageRatePerHour, *prev, nil
-		}
-		since = later(since, *prev)
-		rate = decayRate(watch.UsageRatePerHour, now.Sub(*prev))
-	}
-	// Only a customer with pending usage reads the event store: one without
-	// any looks while it is out of reach.
-	var spent int64
-	if store := s.eventStore(q); store != nil {
-		_, err := q.GetUsagePending(ctx, gen.GetUsagePendingParams{MerchantID: watch.MerchantID, CustomerID: watch.CustomerID, Currency: watch.Currency})
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-		case err != nil:
-			return 0, now, err
-		default:
-			if spent, err = historySpend(ctx, store, watch, since, now); err != nil {
-				return 0, now, err
-			}
-		}
-	}
-	// Spent within one time constant of an hour is that much per hour.
-	return satAdd(rate, satMul(spent, int64(time.Hour/usageRateTimeConstant))), now, nil
-}
-
-// historySpend is what the customer's usage cost in the history buckets
-// that ended in [since's bucket, until).
-func historySpend(ctx context.Context, store *eventstore.Store, watch gen.BillingBalanceWatch, since, until time.Time) (int64, error) {
-	from, to := since.UTC().Truncate(eventstore.HistoryBucket), until.UTC().Truncate(eventstore.HistoryBucket)
-	if !from.Before(to) {
-		return 0, nil
-	}
-	rows, err := store.UsageHistory(ctx, eventstore.HistoryFilter{CustomerID: billing.CustomerID(watch.CustomerID), Currency: watch.Currency, From: from, To: to})
-	if err != nil {
-		return 0, err
-	}
-	var spent int64
-	for _, r := range rows {
-		spent = satAdd(spent, r.Cost())
-	}
-	return spent, nil
-}
-
-// decayRate is a rate decayed exponentially over elapsed, rounded to the unit.
-func decayRate(ratePerHour int64, elapsed time.Duration) int64 {
-	return int64(math.Round(float64(ratePerHour) * math.Exp(-float64(elapsed)/float64(usageRateTimeConstant))))
-}
-
-func later(a, b time.Time) time.Time {
-	if b.After(a) {
-		return b
-	}
-	return a
-}
-
 // WatchBalanceInTx looks at one customer's balance under its lock: it expires
-// lapsed credit lots, samples the usage rate, tells the host and the customer
-// of a low or depleted balance once per crossing, and writes when to look
-// next. A customer with no watch, or one not due, is left alone; an arrears
-// one with no running charge and no lot that lapses loses its watch.
+// lapsed credit lots, tells the host and the customer of a low or depleted
+// balance once per crossing, and writes when to look next. A customer with no
+// watch, or one not due, is left alone; an arrears one with no running charge
+// and no lot that lapses loses its watch.
 func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, customer identity.CustomerID, currency string) error {
 	if s == nil || txDB == nil {
 		return fmt.Errorf("balance watch requires a bound transaction")
@@ -412,19 +301,15 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 	if !view.watched() {
 		return q.DeleteBalanceWatch(ctx, gen.DeleteBalanceWatchParams{MerchantID: key.MerchantID, CustomerID: key.CustomerID, Currency: currency})
 	}
-	usageRate, sampledAt, err := txSvc.sampleUsageRate(ctx, q, watch, bal.AsOf)
-	if err != nil {
-		return err
-	}
 	line, err := effectiveLine(ctx, txDB, q, key.MerchantID, key.CustomerID, currency)
 	if err != nil {
 		return err
 	}
-	out := view.project(line, usageRate)
+	out := view.project(line)
 
 	// Each notice is sent once per crossing. Only a funding re-arms it: a
-	// released hold or a falling rate does not, so a customer hovering at
-	// the line is told once.
+	// released hold does not, so a customer hovering at the line is told
+	// once.
 	lowNotifiedAt, depletedAt, fundedAt := watch.LowNotifiedAt, watch.DepletedAt, watch.FundedAt
 	if fundedAt != nil {
 		if !out.low {
@@ -436,8 +321,8 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 	}
 	event := billing.BalanceHostEvent{
 		CustomerID: billing.CustomerID(customer), Currency: catalog.Currency(currency), AvailableAmount: bal.Available(),
-		OwedAmount: view.owed, AccrualRatePerHour: view.accrualRate, UsageRatePerHour: usageRate, LowBalanceAmount: out.line,
-		AsOf: bal.AsOf, DepletesAt: out.depletesAt, RunwayEndsAt: out.runwayEndsAt,
+		OwedAmount: view.owed, AccrualRatePerHour: view.accrualRate, LowBalanceAmount: out.line,
+		AsOf: bal.AsOf, DepletesAt: out.depletesAt,
 	}
 	var notice models.NotificationEventType
 	if out.low && lowNotifiedAt == nil {
@@ -464,8 +349,7 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 	if err := q.SetBalanceWatch(ctx, gen.SetBalanceWatchParams{
 		MerchantID: key.MerchantID, CustomerID: key.CustomerID, Currency: key.Currency,
 		NextCheckAt: next, DepletesAt: out.depletesAt,
-		LowNotifiedAt: lowNotifiedAt, DepletedAt: depletedAt, FundedAt: fundedAt,
-		UsageRatePerHour: usageRate, RateSampledAt: &sampledAt, Now: bal.AsOf,
+		LowNotifiedAt: lowNotifiedAt, DepletedAt: depletedAt, FundedAt: fundedAt, Now: bal.AsOf,
 		LowLineAmount: low, FloorAmount: floor, LookEachChange: view.moving(),
 	}); err != nil {
 		return err
@@ -478,7 +362,7 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 // and the one at which it is depleted.
 func (v balanceView) lines(p balanceProjection) (low, floor *int64) {
 	if p.line > 0 {
-		at := satAdd(v.spendFloor, p.line-1)
+		at := satAdd(v.spendFloor, p.line)
 		low = &at
 	}
 	return low, &v.floor
@@ -533,12 +417,11 @@ func (s *MoneyService) watchBalance(ctx context.Context, q *gen.Queries, merchan
 	if !view.watched() {
 		return q.DeleteBalanceWatch(ctx, gen.DeleteBalanceWatchParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
 	}
-	var usageRate int64
 	lowArmed, depletedArmed := true, true
 	watch, err := q.GetBalanceWatch(ctx, gen.GetBalanceWatchParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
 	switch {
 	case err == nil:
-		usageRate, lowArmed, depletedArmed = watch.UsageRatePerHour, watch.LowNotifiedAt == nil, watch.DepletedAt == nil
+		lowArmed, depletedArmed = watch.LowNotifiedAt == nil, watch.DepletedAt == nil
 	case !errors.Is(err, pgx.ErrNoRows):
 		return err
 	}
@@ -546,7 +429,7 @@ func (s *MoneyService) watchBalance(ctx context.Context, q *gen.Queries, merchan
 	if err != nil {
 		return err
 	}
-	out := view.project(line, usageRate)
+	out := view.project(line)
 	next := view.next(out, lowArmed, depletedArmed)
 	// A funding may be waiting to re-arm a notice.
 	if watch.FundedAt != nil && (!lowArmed || !depletedArmed) {
@@ -599,33 +482,27 @@ func (s *MoneyService) LowBalanceLines(ctx context.Context, customer identity.Cu
 }
 
 // SetLowBalanceLineTx writes a customer's own low-balance line in a currency
-// (nil parts inherit the merchant's) in the caller's transaction, under the
-// customer lock. It decides no billing mode. A changed line re-arms the low
-// notice and the watch is looked at on the next pass; the same line again
-// writes nothing.
+// (a nil amount inherits the merchant's) in the caller's transaction, under
+// the customer lock. It decides no billing mode. A changed line re-arms the
+// low notice and the watch is looked at on the next pass; the same line
+// again writes nothing.
 func SetLowBalanceLineTx(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, line billing.LowBalanceLine, now time.Time) error {
 	current, err := customerLine(ctx, q, merchantID, customer, string(line.Currency))
 	if err != nil {
 		return err
 	}
-	var hours *int32
-	if line.RunwayHours != nil {
-		h := int32(*line.RunwayHours) // #nosec G115 -- validated to MaxLowBalanceRunwayHours
-		hours = &h
-	}
 	var curAmount *int64
-	var curHours *int32
 	if current != nil {
-		curAmount, curHours = current.Amount, current.RunwayHours
+		curAmount = &current.Amount
 	}
-	if equalPtr(curAmount, line.Amount) && equalPtr(curHours, hours) {
+	if equalPtr(curAmount, line.Amount) {
 		return nil
 	}
-	if line.Amount == nil && hours == nil {
+	if line.Amount == nil {
 		err = q.DeleteCustomerLowBalanceLine(ctx, gen.DeleteCustomerLowBalanceLineParams{MerchantID: merchantID, CustomerID: customer, Currency: string(line.Currency)})
 	} else {
 		err = q.UpsertCustomerLowBalanceLine(ctx, gen.UpsertCustomerLowBalanceLineParams{
-			MerchantID: merchantID, CustomerID: customer, Currency: string(line.Currency), Amount: line.Amount, RunwayHours: hours, Now: now,
+			MerchantID: merchantID, CustomerID: customer, Currency: string(line.Currency), Amount: *line.Amount, Now: now,
 		})
 	}
 	if err != nil {
@@ -638,14 +515,11 @@ func equalPtr[T comparable](a, b *T) bool {
 	return (a == nil) == (b == nil) && (a == nil || *a == *b)
 }
 
-// ValidateLowBalanceLine refuses a negative part or a runway over a year;
-// param prefixes the refused field's name.
+// ValidateLowBalanceLine refuses a negative amount; param prefixes the
+// refused field's name.
 func ValidateLowBalanceLine(line billing.LowBalanceLine, param string) error {
 	if line.Amount != nil && *line.Amount < 0 {
 		return apperr.Invalidf("amount must be nonnegative").WithParam(param + "amount")
-	}
-	if h := line.RunwayHours; h != nil && (*h < 0 || *h > billing.MaxLowBalanceRunwayHours) {
-		return apperr.Invalidf("runway_hours must be 0 to %d", billing.MaxLowBalanceRunwayHours).WithParam(param + "runway_hours")
 	}
 	return nil
 }
@@ -671,7 +545,7 @@ func enqueueBalanceEvent(ctx context.Context, q *gen.Queries, merchantID uuid.UU
 func notifyBalance(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, kind models.NotificationEventType, event billing.BalanceHostEvent) error {
 	available, owed, line := event.AvailableAmount, event.OwedAmount, event.LowBalanceAmount
 	data, err := json.Marshal(billing.NotificationData{
-		Currency: event.Currency, AvailableAmount: &available, OwedAmount: &owed, LowBalanceAmount: &line, RunwayEndsAt: event.RunwayEndsAt,
+		Currency: event.Currency, AvailableAmount: &available, OwedAmount: &owed, LowBalanceAmount: &line,
 	})
 	if err != nil {
 		return err

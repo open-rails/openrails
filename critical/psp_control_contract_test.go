@@ -674,7 +674,7 @@ func TestStripeWebhookDueWork(t *testing.T) {
 			"the pass that ran on the old key queues the next at once, not at the daily backstop")
 		require.Len(t, p.provider.core.WebhookEndpoints("acct_e2e"), 1)
 	})
-	t.Run("OR-J06-S62/an-unresolved-undeclared-account-alerts-again-once-a-day", func(t *testing.T) {
+	t.Run("OR-J06-S87/an-unresolved-undeclared-account-alerts-once-and-stays-open", func(t *testing.T) {
 		mail := &alertMailbox{}
 		w := undeclaredAccountWorld(t, mail)
 		fleet := hostFleet(t, w)
@@ -683,13 +683,16 @@ func TestStripeWebhookDueWork(t *testing.T) {
 		require.NoError(t, fleet.Start(t.Context()))
 		require.Eventually(t, func() bool { return mail.count("undeclared_account") == 1 }, 20*time.Second, 20*time.Millisecond,
 			"the configuration load that finds the account alerts its operator")
-		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		alertsSettled(t, fleet)
-		require.Equal(t, 1, mail.count("undeclared_account"), "not again within a day")
-		w.clock.Advance(24*time.Hour + time.Minute)
-		runRegistered(t, fleet, "openrails.billing_pass", 2)
-		alertsSettled(t, fleet)
-		require.Equal(t, 2, mail.count("undeclared_account"), "a day later it alerts again, once however many passes run")
+		for range 3 {
+			w.clock.Advance(24*time.Hour + time.Minute)
+			runRegistered(t, fleet, "openrails.billing_pass", 2)
+			alertsSettled(t, fleet)
+		}
+		require.Equal(t, 1, mail.count("undeclared_account"), "days of passes alert it no more")
+		var open int
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "reconciliation_findings"}.Sanitize()+
+			" WHERE finding_type = 'consistency.merchant_config.undeclared_account' AND status = 'requires_review' AND resolved_at IS NULL").Scan(&open))
+		require.Equal(t, 1, open, "the finding stays open in the review queue")
 	})
 	t.Run("OR-J06-S64/a-finding-alert-whose-delivery-fails-is-delivered-on-retry-once", func(t *testing.T) {
 		mail := &alertMailbox{refuse: 1}

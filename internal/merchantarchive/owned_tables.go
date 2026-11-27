@@ -8,7 +8,7 @@ var ownedTables = []string{
 	"eventlog_streams",
 	"eventlog_pending",
 	"eventlog_migrations",
-	"user_destructive_reservations",
+	"customer_destructive_reservations",
 	"balance_watches",
 	"book_identity",
 	"event_store",

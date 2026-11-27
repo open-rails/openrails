@@ -151,7 +151,7 @@ Checks:
 
 `/v1/me/subscriptions` writes share the `subscribe` bucket (20 per minute, 64
 KiB, captcha when configured; [limits](../standalone.md#abuse-limits)). Customer cancels spend
-the merchant-wide budget (`destructive.NewUserActionLimiter`). `retry-now` passes
+the merchant-wide budget (`destructive.NewCustomerActionLimiter`). `retry-now` passes
 the card-testing ledger; `AdminOperationOffChannel` caps staff changes.
 
 Checks:

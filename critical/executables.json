@@ -1233,9 +1233,6 @@
     "OR-J06-S61": [
       "TestStripeWebhookDueWork/OR-J06-S61/a-superseded-endpoint-is-retired-by-the-pass-scheduled-at-its-deadline"
     ],
-    "OR-J06-S62": [
-      "TestStripeWebhookDueWork/OR-J06-S62/an-unresolved-undeclared-account-alerts-again-once-a-day"
-    ],
     "OR-J06-S63": [
       "TestStripeWebhookDueWork/OR-J06-S63/a-psp-change-while-its-pass-runs-reaches-stripe-without-the-backstop"
     ],
@@ -2814,9 +2811,6 @@
     "OR-J24-S87": [
       "TestUsageRecovery/OR-J24-S87/a-failed-items-grace-counts-each-failure-once"
     ],
-    "OR-J25-S44": [
-      "TestBalanceLooks/OR-J25-S44/the-burn-rate-reads-each-ended-quarter-hour-of-usage-history-once"
-    ],
     "OR-J14-S08": [
       "TestNMIEngineRenewalRecovery/OR-J14-S08/gateway-refusals-settle-through-dunning"
     ],
@@ -2890,6 +2884,27 @@
     ],
     "OR-J24-S91": [
       "TestReceiptMigration/OR-J24-S91/an-old-receipts-forgiveness-is-shared-over-its-lines-by-their-amounts"
+    ],
+    "OR-J25-S47": [
+      "TestLowBalanceAmounts/OR-J25-S47/usage-that-leaves-the-amount-is-low"
+    ],
+    "OR-J25-S48": [
+      "TestLowBalanceAmounts/OR-J25-S48/a-running-charge-is-low-at-the-amount-at-its-exact-instant-not-a-runway-ahead"
+    ],
+    "OR-J25-S49": [
+      "TestLowBalanceAmounts/OR-J25-S49/with-no-amount-set-a-running-charge-is-told-only-when-depleted-at-its-exact-instant"
+    ],
+    "OR-J06-S87": [
+      "TestStripeWebhookDueWork/OR-J06-S87/an-unresolved-undeclared-account-alerts-once-and-stays-open"
+    ],
+    "OR-J08-S72": [
+      "TestMerchantInvoicesStayOpen/OR-J08-S72/a-merchant-invoice-is-open-and-payable-well-past-30-days"
+    ],
+    "OR-J08-S73": [
+      "TestMerchantInvoicesStayOpen/OR-J08-S73/a-merchant-cancels-its-invoice-well-past-30-days"
+    ],
+    "OR-J08-S74": [
+      "TestMerchantInvoicesStayOpen/OR-J08-S74/the-customer-list-omits-an-expired-purchase-the-merchant-list-keeps-it"
     ]
   }
 }

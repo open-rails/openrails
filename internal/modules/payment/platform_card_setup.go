@@ -24,7 +24,7 @@ import (
 
 // SaveBasisTheoryCard verifies a collected card without taking money and saves it
 // for this customer. It neither selects a default nor changes any subscription.
-func (s *PurchaseService) SaveBasisTheoryCard(ctx context.Context, req billing.CreatePaymentMethodParams, user *UserIdentity) (SavedCard, error) {
+func (s *PurchaseService) SaveBasisTheoryCard(ctx context.Context, req billing.CreatePaymentMethodParams, user *CustomerIdentity) (SavedCard, error) {
 	token := strings.TrimSpace(req.Token)
 	collectedID, err := uuid.Parse(token)
 	if err != nil || collectedID == uuid.Nil || req.Card != nil || req.PSPID.IsZero() {

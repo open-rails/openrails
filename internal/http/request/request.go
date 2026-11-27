@@ -318,13 +318,13 @@ func (r *Request) SetHeader(key, value string) { r.w.Header().Set(key, value) }
 // GetUser is a customer route's admitted customer, as the purchase services
 // take it: from the route gate only, never the request's path, query or body.
 // Nil anywhere else.
-func (r *Request) GetUser() *payment.UserIdentity {
+func (r *Request) GetUser() *payment.CustomerIdentity {
 	scope, ok := r.CustomerScope()
 	if !ok {
 		return nil
 	}
 	c, _ := billingauth.IdentityFromContext(r.Request.Context())
-	user := &payment.UserIdentity{ID: scope.Customer().String(), Username: c.Username, ClientIP: r.ClientIP()}
+	user := &payment.CustomerIdentity{ID: scope.Customer().String(), Username: c.Username, ClientIP: r.ClientIP()}
 	if c.EmailVerified && c.Email != "" {
 		email := c.Email
 		user.Email = &email

@@ -979,7 +979,7 @@ Periods are constants, the same for every merchant. Each table's comment states 
 | `webhook_events` | 90 days after completion |
 | `customer_messages` | two years (731 days) after created |
 | `idempotency_keys`, `solana_pay_references` | at expiry, after the 7-day watch |
-| `user_destructive_reservations` | 24 hours |
+| `customer_destructive_reservations` | 24 hours |
 | `limit_windows` | a day after `window_ends_at`, 61 days once it reached capacity; a lifetime or rate limit's row stays |
 | `leases` (with their in-flight reports), `limit_adjustments` | 61 days after the last sync, or after the adjustment |
 | `webhook_health_daily` | 13 months |

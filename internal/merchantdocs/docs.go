@@ -148,7 +148,7 @@ const RefusedDocumentFindingType = "consistency.merchant_config.not_served"
 
 // UndeclaredAccountFindingType is the finding an account no document
 // declares opens while it still holds cards in its vault or subscriptions
-// renewing on it. It alerts again daily while unresolved.
+// renewing on it. It alerts once per episode.
 const UndeclaredAccountFindingType = "consistency.merchant_config.undeclared_account"
 
 // UndeclaredAccount names an undeclared account within a merchant's set.

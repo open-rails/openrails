@@ -28,7 +28,7 @@ func writeRefusal(r *httprequest.Request, err error, internalMessage string) {
 // setRetryAfter names when a refused destructive command may be tried again:
 // a customer action limit's rolling window, or a hold's next look.
 func setRetryAfter(r *httprequest.Request, err error) {
-	var limited *destructive.UserActionRateError
+	var limited *destructive.CustomerActionRateError
 	var budget *destructive.BudgetError
 	switch {
 	case errors.As(err, &limited):
@@ -43,7 +43,7 @@ func setRetryAfter(r *httprequest.Request, err error) {
 // refusalOf is the answer to a typed refusal, nil for any other error. A
 // write posture refusal is retryable, never an internal failure.
 func refusalOf(err error) *api.APIError {
-	var limited *destructive.UserActionRateError
+	var limited *destructive.CustomerActionRateError
 	if errors.As(err, &limited) {
 		return api.Coded(billing.CodeRateLimitExceeded, limited.Error()).WithMetadata(map[string]any{"retry_after_seconds": limited.RetryAfterSeconds})
 	}

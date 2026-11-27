@@ -212,11 +212,16 @@ func TestCheckoutFunnel(t *testing.T) {
 			billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{Token: token}, ExpectedTotal: invoice.Total}, map[string]string{"Idempotency-Key": "funnel-page-declined"})
 		require.Equal(t, http.StatusPaymentRequired, status, string(raw))
 
-		a.clock.Advance(invoice.ExpiresAt.Sub(a.clock.Now()) + time.Minute)
+		// Its pay URL expires; the bill stays open until the merchant cancels it.
+		a.clock.Advance(invoice.PayURLExpiresAt.Sub(a.clock.Now()) + time.Minute)
 		for _, id := range []billing.InvoiceID{unopened.ID, invoice.ID} {
-			closed, err := a.alpha.GetInvoice(t.Context(), id)
+			open, err := a.alpha.GetInvoice(t.Context(), id)
 			require.NoError(t, err)
-			require.Equal(t, billing.InvoiceExpired, closed.Status)
+			require.Equal(t, billing.InvoiceOpen, open.Status)
+			require.Nil(t, open.ExpiresAt)
+			closed, err := a.alpha.CancelInvoice(t.Context(), id)
+			require.NoError(t, err)
+			require.Equal(t, billing.InvoiceCanceled, closed.Status)
 		}
 		left := checkoutOf(t, a, unopened.ID)
 		require.Nil(t, left.OpenedAt, "abandoned at created: the link was never opened")
@@ -267,11 +272,13 @@ func TestCheckoutFunnel(t *testing.T) {
 		status, _ = payCheckout(t, a, tried, billing.InvoicePaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "0002", Decline: "insufficient_funds"})}, "measures-tried", nil)
 		require.Equal(t, http.StatusPaymentRequired, status)
 		as(a.aliceToken, http.MethodPost, "/v1/me/invoices/"+tried.ID.String()+"/cancel", nil)
-		// A link the merchant sent her expires unopened.
-		_, err := a.alphaRemote.CreateInvoice(t.Context(), "measures-unopened", billing.CreateInvoiceParams{CustomerID: customer,
-			Lines: []billing.InvoiceLineParams{{PriceID: sale("measures-unopened")}}, ExpiresAt: ptr(a.clock.Now().Add(time.Hour))})
+		// A bill the merchant sent her is canceled unopened.
+		unopened, err := a.alphaRemote.CreateInvoice(t.Context(), "measures-unopened", billing.CreateInvoiceParams{CustomerID: customer,
+			Lines: []billing.InvoiceLineParams{{PriceID: sale("measures-unopened")}}})
 		require.NoError(t, err)
 		a.clock.Advance(2 * time.Hour)
+		_, err = a.alphaRemote.CancelInvoice(t.Context(), unopened.ID)
+		require.NoError(t, err)
 		// One is open, its form loaded.
 		pending := openCheckout(t, a, sale("measures-open"), nil, nil)
 		as(a.aliceToken, http.MethodGet, "/v1/me/invoices/"+pending.ID.String(), nil)

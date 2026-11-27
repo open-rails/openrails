@@ -61,7 +61,6 @@ test("OR-UI-01: exact cart, invoice ownership, account and customer policy", asy
     const low = await c.setLowBalanceLine({
       currency: "usd",
       amount: "25000000",
-      runwayHours: 4,
     })
     const changed = await c.getAccount()
     const usage = await c.getUsage({
@@ -105,7 +104,6 @@ test("OR-UI-01: exact cart, invoice ownership, account and customer policy", asy
   expect(facts.low).toMatchObject({
     currency: "USD",
     amount: "25000000",
-    runway_hours: 4,
     source: "customer",
   })
   expect(facts.changed.low_balance_lines).toContainEqual(facts.low)

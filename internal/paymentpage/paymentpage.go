@@ -59,22 +59,16 @@ func (p PayURL) Show(o *billing.Invoice, url *string) {
 }
 
 // Plan resolves a merchant's pay URL request for a new invoice: its expiry
-// (invoiceExpiry, when the invoice has its own, bounds it) and return URLs, on
-// the merchant's return origins (allowed), with the invoice id filled in. A
-// request that cannot be honoured is invalid_param naming its field.
-func Plan(p billing.InvoicePayURLParams, invoice billing.InvoiceID, now time.Time, invoiceExpiry *time.Time, allowed []string) (PayURL, error) {
+// and return URLs, on the merchant's return origins (allowed), with the
+// invoice id filled in. A request that cannot be honoured is invalid_param
+// naming its field.
+func Plan(p billing.InvoicePayURLParams, invoice billing.InvoiceID, now time.Time, allowed []string) (PayURL, error) {
 	expires := now.Add(DefaultLifetime)
 	if p.ExpiresAt != nil {
 		expires = p.ExpiresAt.UTC()
 	}
-	if invoiceExpiry != nil && p.ExpiresAt == nil && invoiceExpiry.Before(expires) {
-		expires = *invoiceExpiry
-	}
-	switch life := expires.Sub(now); {
-	case life < MinLifetime || life > MaxLifetime:
+	if life := expires.Sub(now); life < MinLifetime || life > MaxLifetime {
 		return PayURL{}, apperr.Invalidf("pay_url.expires_at must be %s to %s away", MinLifetime, MaxLifetime).WithParam("pay_url.expires_at")
-	case invoiceExpiry != nil && expires.After(*invoiceExpiry):
-		return PayURL{}, apperr.Invalidf("pay_url.expires_at is after the invoice's expires_at").WithParam("pay_url.expires_at")
 	}
 	success, err := returnURL("pay_url.success_url", p.SuccessURL, invoice, allowed)
 	if err != nil {

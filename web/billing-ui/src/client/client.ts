@@ -659,7 +659,8 @@ export function createBillingClient(options: BillingClientOptions = {}) {
 
     /**
      * The customer's invoices, newest first: `origin: "usage"` their usage
-     * invoices, `overdue` those still owed past their due date.
+     * invoices, `overdue` those still owed past their due date. A page leaves
+     * out purchases that expired unpaid; `ids` answers each as it is.
      */
     listInvoices(
       opts: CursorOptions & {
@@ -839,13 +840,12 @@ export function createBillingClient(options: BillingClientOptions = {}) {
 
     /**
      * Sets the customer's own low-balance line in one currency and answers
-     * the line its balance is judged at. `null` inherits the merchant's; 0
-     * turns that part off.
+     * the line its balance is judged at. `null` inherits the merchant's; "0"
+     * turns it off.
      */
     setLowBalanceLine(input: {
       currency: string
       amount: string | null
-      runwayHours: number | null
     }): Promise<LowBalanceLine> {
       return json(
         lowBalanceLineSchema,
@@ -854,7 +854,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           method: "PUT",
           body: {
             amount: input.amount,
-            runway_hours: input.runwayHours,
           } satisfies wire.SetLowBalanceLineParams,
         }
       )

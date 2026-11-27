@@ -205,8 +205,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	balances := &riverjobs.BalanceWatchWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
 	delinquency := &riverjobs.DelinquencyWorker{DB: r.DB, Clock: clock, Log: r.Log}
 	expiry := &riverjobs.InvoiceExpiryWorker{DB: r.DB, Invoices: r.Invoices, Clock: clock}
-	// Undeclared accounts alert their operator again while unresolved.
-	realerts := &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}
 	storedCards := &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture(), Log: r.Log}
 	posting := &riverjobs.UsagePostingWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
 	// Deferred revenue recognised at each month boundary in the merchant's
@@ -224,7 +222,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}
 	scans = append(scans,
 		riverjobs.Scan{Kind: money.KindUsageInvoices, Run: usage.Pass, DueBy: usage.DueBy},
-		riverjobs.Scan{Kind: riverjobs.KindConfigRealerts, Run: realerts.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindStoredCardRefreshDue, Run: storedCards.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindOperationWakes, Run: (&riverjobs.OperationWakes{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
 		// Cancellations at period end leave MRR at their end.
@@ -401,7 +398,7 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 	if r.SubscriptionService == nil {
 		return fmt.Errorf("billing worker runtime subscription service is required")
 	}
-	if r.UserSubscriptionService == nil {
+	if r.CustomerSubscriptionService == nil {
 		return fmt.Errorf("billing worker runtime user subscription service is required")
 	}
 	if r.SubscriptionLifecycleService == nil {

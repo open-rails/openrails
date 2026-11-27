@@ -636,15 +636,14 @@ export const balanceSchema = z.object({
 export type Balance = z.infer<typeof balanceSchema>
 
 /**
- * The low-balance line a balance is judged at: the customer is told when what
- * it may spend is under the larger of `amount` and its burn rate times
- * `runway_hours`. `source` is `customer`, `merchant` or `default`.
+ * The low-balance line a balance is judged at: the customer is told once what
+ * it may spend is at or under `amount` ("0" is none). `source` is `customer`,
+ * `merchant` or `none`.
  */
 export const lowBalanceLineSchema = z.object({
   currency: z.string(),
   amount: amount,
-  runway_hours: z.number().int(),
-  source: z.enum(["customer", "merchant", "default"]),
+  source: z.enum(["customer", "merchant", "none"]),
 })
 export type LowBalanceLine = z.infer<typeof lowBalanceLineSchema>
 

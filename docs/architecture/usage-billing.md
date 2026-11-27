@@ -139,7 +139,7 @@ Checks:
 
 Critical journeys, over real PostgreSQL, Redis and Vault:
 - **J24**, intake and posting: OR-J24-S01, S02, S04 to S11, S21, S22, S36, S47 to S57, S61 to S63, S71 to S75, S84 to S88 (replay, pricing on totals, a posting equal to pending, daily posting, owed past the balance, owed dating, lots and their lapses, the store out of reach, a start without the store, erasure, archive, tenancy, recovery from failed syncs, a store that refuses inserts or lost usage, grace counted once, a receipt holding a fall). Its lease scenarios are in [entitlements and limits](entitlements.md).
-- **J25**, running charges and balance looks: OR-J25-S01 to S05, S37, S40 to S42, S45 (a charge posting at the accounting zone's midnight with the day's usage), S46 (a stop posts nothing until the daily posting).
+- **J25**, running charges and balance looks: OR-J25-S01 to S05, S37, S40 to S42, S45 (a charge posting at the accounting zone's midnight with the day's usage), S46 (a stop posts nothing until the daily posting), S47 to S49 (low amounts, exact crossings).
 - **J48**, merchant units: OR-J48-S20 (a posting forgives with the event store out of reach).
 - **J26**, usage billing and delinquency: OR-J26-S01 to S04, S30, S40, S50 to S58, S65.
 - **J40**, the usage receivable: OR-J40-S20 to S22, S27 to S29.

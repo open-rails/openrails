@@ -150,7 +150,7 @@ func NewPurchaseService(logger *slog.Logger,
 // Returns a FlexForm URL for the upgrade that the client can redirect to
 func (s *PurchaseService) processCCBillUpgrade(
 	ctx context.Context,
-	user *UserIdentity,
+	user *CustomerIdentity,
 	newPrice *models.Price,
 	existingSub *models.Subscription,
 ) (*PurchaseResponse, error) {
@@ -213,7 +213,7 @@ func (s *PurchaseService) processCCBillUpgrade(
 // on the account that minted it, so another account's mapping is never read.
 // "" (no error) only when the dependencies are unavailable; the caller then
 // falls back to customer_email.
-func resolveStripeCustomerWith(ctx context.Context, store *payments.RailCustomerService, client *subscriptions.StripeService, user *UserIdentity) (string, error) {
+func resolveStripeCustomerWith(ctx context.Context, store *payments.RailCustomerService, client *subscriptions.StripeService, user *CustomerIdentity) (string, error) {
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		return "", nil
 	}
@@ -271,7 +271,7 @@ func resolveStripeCustomerWith(ctx context.Context, store *payments.RailCustomer
 // userEmail returns the caller's email when present, so Stripe Checkout can
 // prefill it on the hosted page and route the receipt. Empty when unknown —
 // Stripe collects it on the page in that case.
-func userEmail(user *UserIdentity) string {
+func userEmail(user *CustomerIdentity) string {
 	if user == nil || user.Email == nil {
 		return ""
 	}
@@ -416,7 +416,7 @@ func (s *PurchaseService) validateTierChangePreviewTarget(
 	ctx context.Context,
 	existingSub *models.Subscription,
 	currentPrice, newPrice *models.Price,
-	user *UserIdentity,
+	user *CustomerIdentity,
 	action string,
 ) error {
 	switch {
@@ -480,7 +480,7 @@ func formatMinorAmount(micros int64, currency string) string {
 func (s *PurchaseService) processTierChangeStripe(
 	ctx context.Context,
 	req *SubscriptionChangeRequest,
-	user *UserIdentity,
+	user *CustomerIdentity,
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,
@@ -576,7 +576,7 @@ func (s *PurchaseService) processTierChangeStripe(
 func (s *PurchaseService) processTierChangeSolana(
 	ctx context.Context,
 	req *SubscriptionChangeRequest,
-	user *UserIdentity,
+	user *CustomerIdentity,
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,
@@ -600,7 +600,7 @@ func (s *PurchaseService) processTierChangeSolana(
 func (s *PurchaseService) processTierChangeCCBill(
 	ctx context.Context,
 	req *SubscriptionChangeRequest,
-	user *UserIdentity,
+	user *CustomerIdentity,
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,

@@ -126,7 +126,7 @@ func TestUnarmedCancels(t *testing.T) {
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+
 			" WHERE merchant_id = $1 AND subscription_id = $2 AND origin = 'user'", a.alpha.MerchantID().UUID(), sub.UUID()).Scan(&operations))
 		require.Equal(t, 1, operations, "the sixth cancel queues its provider stop")
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "user_destructive_reservations"}.Sanitize()+
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "customer_destructive_reservations"}.Sanitize()+
 			" WHERE merchant_id = $1", a.alpha.MerchantID().UUID()).Scan(&reservations))
 		require.Zero(t, reservations, "customer cancellations spend no card-removal budget")
 		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.customer_action_rate.exceeded"})

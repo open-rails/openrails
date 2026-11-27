@@ -476,13 +476,13 @@ func TestDestructiveSafeguards(t *testing.T) {
 		method := save()
 		status, raw := a.request(t, http.MethodDelete, "/v1/admin/customers/"+method.CustomerID.String()+"/payment-methods/"+method.ID.String(), a.alphaKey.Secret, nil)
 		require.Equal(t, http.StatusNoContent, status, string(raw))
-		require.Zero(t, count("user_destructive_reservations", "true"), "a staff removal is no customer action")
+		require.Zero(t, count("customer_destructive_reservations", "true"), "a staff removal is no customer action")
 		require.Equal(t, 1, count("destructive_actions", "kind = 'delete_payment_method'"), "it is the staff member's admitted action")
 
 		own := save()
 		status, raw = a.request(t, http.MethodDelete, "/v1/me/payment-methods/"+own.ID.String(), a.aliceToken, nil)
 		require.Equal(t, http.StatusNoContent, status, string(raw))
-		require.Equal(t, 1, count("user_destructive_reservations", "kind = 'delete_payment_method'"), "the customer's own removal spends the customer budget")
+		require.Equal(t, 1, count("customer_destructive_reservations", "kind = 'delete_payment_method'"), "the customer's own removal spends the customer budget")
 		require.Equal(t, 1, count("destructive_actions", "kind = 'delete_payment_method'"))
 	})
 }

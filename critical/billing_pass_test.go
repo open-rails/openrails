@@ -4,7 +4,6 @@ package critical_test
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"slices"
 	"sync"
@@ -338,10 +337,8 @@ func TestBillingPass(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		fleet := quietFleet(t, a.world)
 		_, price := publicSale(t, a, "tidied-invoice", 9_990_000, nil)
-		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		expires := a.clock.Now().Add(time.Hour + 10*time.Minute)
-		invoice, err := a.alphaRemote.CreateInvoice(t.Context(), "tidied", billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
-		require.NoError(t, err)
+		invoice := openPurchase(t, a, price.ID, 1)
+		expires := *invoice.ExpiresAt
 		advanceTo(a.world, expires.Add(time.Minute))
 		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices/"+invoice.ID.String()+"/pay", a.aliceToken, billing.PayInvoiceParams{ExpectedTotal: 9_990_000, Payment: billing.InvoicePaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}, map[string]string{"Idempotency-Key": "past-expiry"})
 		require.Equal(t, http.StatusConflict, status, string(raw))
@@ -354,15 +351,15 @@ func TestBillingPass(t *testing.T) {
 		require.Empty(t, p.effects(t))
 	})
 	t.Run("OR-J04-S37/an-invoice-expiry-backlog-past-one-batch-drains-in-one-pass", func(t *testing.T) {
-		a, p := newPaymentWorld(t)
+		// One customer makes the backlog: its purchases are not rate limited.
+		a, p := newPaymentWorld(t, func(w *world) { w.cfg.RateLimits.Purchase = &billing.RateLimit{} })
 		fleet := quietFleet(t, a.world)
 		_, price := publicSale(t, a, "backlog-invoice", 9_990_000, nil)
-		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		expires := a.clock.Now().Add(time.Hour)
-		// More than one batch of the expiry's reads.
+		// More than one batch of the expiry's reads: purchases of distinct
+		// quantities, each its own checkout.
+		var expires time.Time
 		for i := range 201 {
-			_, err := a.alpha.CreateInvoice(t.Context(), fmt.Sprintf("backlog-%d", i), billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
-			require.NoError(t, err)
+			expires = *openPurchase(t, a, price.ID, i+1).ExpiresAt
 		}
 		advanceTo(a.world, nextHour(expires))
 		require.False(t, runPass(t, fleet))
@@ -373,11 +370,8 @@ func TestBillingPass(t *testing.T) {
 		a, _ := newPaymentWorld(t)
 		fleet := quietFleet(t, a.world)
 		_, price := publicSale(t, a, "overlapped-invoice", 9_990_000, nil)
-		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		expires := a.clock.Now().Add(time.Hour)
-		invoice, err := a.alpha.CreateInvoice(t.Context(), "overlapped", billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
-		require.NoError(t, err)
-		advanceTo(a.world, nextHour(expires))
+		invoice := openPurchase(t, a, price.ID, 1)
+		advanceTo(a.world, nextHour(*invoice.ExpiresAt))
 		// The first pass reaches the invoice and waits on it.
 		conn, err := a.pool.Acquire(t.Context())
 		require.NoError(t, err)
@@ -416,11 +410,8 @@ func TestBillingPass(t *testing.T) {
 		a, _ := newPaymentWorld(t, withTaggedSessions)
 		fleet := quietFleet(t, a.world)
 		_, price := publicSale(t, a, "raced-invoice", 9_990_000, nil)
-		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		expires := a.clock.Now().Add(time.Hour)
-		invoice, err := a.alpha.CreateInvoice(t.Context(), "raced", billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
-		require.NoError(t, err)
-		advanceTo(a.world, nextHour(expires))
+		invoice := openPurchase(t, a, price.ID, 1)
+		advanceTo(a.world, nextHour(*invoice.ExpiresAt))
 		holder, unlock := holdInvoice(t, a.world, invoice.ID)
 		defer unlock()
 		events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
@@ -448,11 +439,8 @@ func TestBillingPass(t *testing.T) {
 		a, _ := newPaymentWorld(t)
 		fleet := quietFleet(t, a.world)
 		_, price := publicSale(t, a, "after-a-crash", 9_990_000, nil)
-		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		expires := a.clock.Now().Add(time.Hour)
-		_, err := a.alpha.CreateInvoice(t.Context(), "after-a-crash", billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
-		require.NoError(t, err)
-		advanceTo(a.world, nextHour(expires))
+		purchase := openPurchase(t, a, price.ID, 1)
+		advanceTo(a.world, nextHour(*purchase.ExpiresAt))
 		// A pass whose process dies stops renewing its lease and never frees it.
 		alive, die := context.WithCancel(t.Context())
 		dead, err := worldDB(t, a.world).TryPassLease(alive, "openrails.billing_pass", 5*time.Second)
@@ -474,9 +462,9 @@ func TestBillingPass(t *testing.T) {
 		lots, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "lapses-before-the-renewal", ExpiresAt: &lapse}})
 		require.NoError(t, err)
 		_, price := publicSale(t, a, "expires-before-the-renewal", 9_990_000, nil)
-		expires := due.Add(-20 * time.Minute)
-		invoice, err := a.alphaRemote.CreateInvoice(t.Context(), "tidied-after-a-failed-scan", billing.CreateInvoiceParams{CustomerID: sub.CustomerID, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
-		require.NoError(t, err)
+		require.Equal(t, billing.CustomerID(uuid.MustParse(a.alice.ID)), sub.CustomerID)
+		invoice := openPurchase(t, a, price.ID, 1)
+		require.True(t, invoice.ExpiresAt.Before(nextHour(due)), "it expires by the pass after the renewal")
 		fleet := quietFleet(t, a.world)
 		// The pass at the hour fails partway: the balance watch cannot post.
 		restore := storageFault(t, a.world, a.schema, "ledger_transfers", "NEW.transfer_type = 'credit_expire'")

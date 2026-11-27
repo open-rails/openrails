@@ -31,12 +31,9 @@ import (
 )
 
 const (
-	// CustomerTTL is how long a customer's own invoice takes payment.
+	// CustomerTTL is how long a customer's own purchase takes payment
+	// (Stripe Checkout's session); no other invoice expires.
 	CustomerTTL = 24 * time.Hour
-	// MerchantTTL is a merchant invoice's default lifetime, MaxMerchantTTL its
-	// longest (Stripe's invoice ceiling).
-	MerchantTTL    = 30 * 24 * time.Hour
-	MaxMerchantTTL = 120 * 24 * time.Hour
 	// MaxQuantity bounds one line.
 	MaxQuantity = 10_000
 )

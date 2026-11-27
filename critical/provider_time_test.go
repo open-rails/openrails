@@ -335,7 +335,7 @@ func TestProviderTime(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, payments.Items, 1)
 		absent := payments.Items[0]
-		invoice := nmiCheckoutInvoice(t, a, "pending-refund", false, 48*time.Hour)
+		invoice := nmiCheckoutInvoice(t, a, "pending-refund", false)
 		invoice = payNMICheckout(t, a, invoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "1111"}), true)
 		pendingCharge := *invoice.Payment.PaymentID
 		p.core.Intercept(nmiRefundRequest, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {

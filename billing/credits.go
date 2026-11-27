@@ -339,13 +339,11 @@ type MerchantCheckoutSettings struct {
 }
 
 // BalanceNoticeSettings are a merchant's default low-balance lines: a
-// customer's own line (LowBalanceLine) overrides each part. RunwayHours is
-// hours of spend at the customer's burn rate, 24 when nil; LowAmounts are
-// amount lines per currency, none for a currency not listed. 0 turns a line
-// off. balance.depleted cannot be turned off.
+// customer's own line (LowBalanceLine) overrides one. A balance is low once
+// what the customer may spend is at or under its currency's amount; a
+// currency not listed has no line, and 0 turns it off. balance.depleted
+// cannot be turned off.
 type BalanceNoticeSettings struct {
-	// RunwayHours is the line in hours of spend at the customer's burn rate: 24 when unset, 0 off.
-	RunwayHours *int `json:"runway_hours,omitempty"`
 	// LowAmounts are amount lines per currency; none for a currency not listed.
 	LowAmounts []BalanceNoticeAmount `json:"low_amounts,omitempty"`
 }

@@ -456,7 +456,7 @@ var jsonRules = map[string]jsonRule{
 		"status": textValue, "payment_status": textValue, "number": integerValue, "payment_id": uuidValue, "reason": textValue, "settlement_source": textValue,
 		// A balance event: the balance as its crossing was seen.
 		"available_amount": moneyStringValue, "owed_amount": moneyStringValue, "accrual_rate_per_hour": moneyStringValue, "as_of": textValue, "depletes_at": nullable(textValue),
-		"usage_rate_per_hour": moneyStringValue, "low_balance_amount": moneyStringValue, "runway_ends_at": nullable(textValue)}),
+		"low_balance_amount": moneyStringValue}),
 	"provider_intents.solana_pull.payload": object(map[string]jsonRule{"subscription_pda": textValue, "row_id": uuidValue, "next_pull_at": textValue}),
 	"provider_intents.payload":             nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
 	"provider_intents.result_evidence":     nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),

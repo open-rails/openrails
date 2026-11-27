@@ -47,8 +47,7 @@ customer asking again for the same lines (not from a cart) gets the open invoice
 back (`FindOrCreate`, `lines_digest`, `invoices_open_lines_key`); their own unpaid
 one-line invoice of another price of the product is canceled for the new one. A
 cart invoice empties the cart in the same transaction (`takeCart`). A zero total
-completes at once. An invoice in one of the merchant's own units is paid from the customer's balance in it as it is created (`payFromBalance`): each line draws the live lots, soonest expiry first, one `credit_spend` per lot at (`invoice`, `invoice_line`, line) naming the invoice, after the customer's pending usage and running charges posted (lots are spent in time order), and a balance short of the total is `insufficient_credits` with nothing written. It has no payment (`invoices_complete_payment_check`), takes no `payment` or pay URL, and keeps the request's `Idempotency-Key`, which is required, so a retry answers it. Lifetimes: `invoices.CustomerTTL` 24 h; merchant invoices
-`MerchantTTL` 30 days, at most `MaxMerchantTTL` 120 days.
+completes at once. An invoice in one of the merchant's own units is paid from the customer's balance in it as it is created (`payFromBalance`): each line draws the live lots, soonest expiry first, one `credit_spend` per lot at (`invoice`, `invoice_line`, line) naming the invoice, after the customer's pending usage and running charges posted (lots are spent in time order), and a balance short of the total is `insufficient_credits` with nothing written. It has no payment (`invoices_complete_payment_check`), takes no `payment` or pay URL, and keeps the request's `Idempotency-Key`, which is required, so a retry answers it. Lifetimes: a customer's purchase expires after `invoices.CustomerTTL` (24 h, Stripe Checkout's); a merchant invoice is a bill and never expires, though its pay URL does (`paymentpage.Plan`: an hour, 30 minutes to 24 hours).
 
 **Pay.** `payment.InvoiceAttemptService.PayInvoice` (`internal/modules/payment/invoice_pay.go`)
 takes exactly one payment:
@@ -80,9 +79,11 @@ invoices cannot be canceled by customers, and merchant-created invoices can be
 canceled only through the merchant route. Subscription invoices keep their
 refusal: cancel the subscription instead. `close` cancels or expires an open
 invoice, releases its claims and
-abandons a challenged attempt at the provider (`AbandonInvoiceAttempt`). An invoice
-past `expires_at` reads expired at once (`Invoice.AsOf`); the `openrails.invoice_expiry`
-scan of the hourly billing pass (`InvoiceExpiryWorker`) writes it. Money landing on
+abandons a challenged attempt at the provider (`AbandonInvoiceAttempt`). Only a
+customer's purchase has `expires_at`: one past it reads expired at once
+(`Invoice.AsOf`), the `openrails.invoice_expiry` scan of the hourly billing pass
+(`InvoiceExpiryWorker`) writes it, and the customer's own list leaves it out
+(`ListFilter.OmitExpiredPurchases`). Money landing on
 a closed invoice revives it while its claims are free; otherwise it is recorded,
 its full refund is queued (`intents.RefundLateInvoicePayment`; CCBill's is left to a
 person) and a critical `life.invoice.late_payment` is raised, as for a second
@@ -238,6 +239,8 @@ partial indexes `invoices_expires_at_live_idx` and `invoice_attempts_expires_at_
 Checks:
 - OR-J04-S37: an expiry backlog past one batch drains in one pass.
 - OR-J08-S70, OR-J08-S71, OR-J09-S70: expired invoices act expired before any pass.
+- OR-J08-S72, OR-J08-S73: a merchant invoice never expires; past 30 days it is paid or canceled.
+- OR-J08-S74: a purchase that expired unpaid leaves the customer's own list; the merchant's keeps it.
 
 ### 8. Abuse protection
 The `purchase` bucket ([limits](../standalone.md#abuse-limits)) covers `POST /v1/me/invoices`, `…/pay`, `…/confirm` and `POST /v1/invoices/{id}/solana-pay` (`ClassifyBucket`), and its captcha subjects ride into the sale (`intents.WithInvoiceCaptchaSubjects`). A pay URL allows 120 reads and 10 pays a minute per invoice (`payURLLimit`) and 10 declines (`paymentpage.MaxDeclines`, `pay_url_attempts_exhausted`). `GuardCardAttempt` checks the card-testing ledger before any provider call (`card_attempts_blocked`); an Idempotency-Key or any field of the invoice create or pay body holding a card number is refused (`cardguard.ContainsPAN`, `cardguard.PANField`). Previews, carts, cancels and reads are not limited here, only bounded by `billing.MaxInvoiceLines` and `MaxCartLines`.

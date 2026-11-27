@@ -47,8 +47,8 @@ internal/modules/subscriptions/lifecycle_service.go|return time.Now()|business_t
 internal/modules/subscriptions/subscription.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/subscriptions/subscription_repo.go|now = time.Now()|business_time_boundary|Standalone repository convenience defaults; services use explicit-time variants|2
 internal/modules/subscriptions/subscription_repo.go|return r.GetActiveSubscriptionAt(ctx, userID, time.Now())|business_time_boundary|Standalone repository convenience defaults; services use explicit-time variants|1
-internal/modules/subscriptions/user_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/modules/subscriptions/user_service.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/subscriptions/customer_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/subscriptions/customer_service.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhookhealth/recorder.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/basistheory.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/ccbill.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1

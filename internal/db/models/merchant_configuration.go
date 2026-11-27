@@ -67,11 +67,9 @@ type MerchantConfiguration struct {
 }
 
 // BalanceNoticeConfiguration is a merchant's validated default low-balance
-// lines: RunwayHours nil ⇒ the built-in 24; a currency absent from LowAmounts
-// has no amount line.
+// lines: a currency absent from LowAmounts has none.
 type BalanceNoticeConfiguration struct {
-	RunwayHours *int             `json:"runway_hours,omitempty"`
-	LowAmounts  map[string]int64 `json:"low_amounts,omitempty"`
+	LowAmounts map[string]int64 `json:"low_amounts,omitempty"`
 }
 
 type PSPRoutingRule = billing.PSPRoutingRule

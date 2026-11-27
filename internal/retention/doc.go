@@ -21,7 +21,7 @@
 // notification_events, host_outbox and the event log 90 days; webhook_events
 // 90 days after completion; idempotency_keys and
 // solana_pay_references at expiry (after the 7-day watch);
-// user_destructive_reservations 24 hours; limit_windows a day after
+// customer_destructive_reservations 24 hours; limit_windows a day after
 // window_ends_at, 61 days once reached_at is set (lifetime and rate limits
 // stay; usage settled after a window ended counts toward none); leases with
 // their in-flight reports, and limit_adjustments, 61 days after the last
