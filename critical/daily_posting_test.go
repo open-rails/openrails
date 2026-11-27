@@ -23,6 +23,118 @@ func TestDailyPosting(t *testing.T) {
 	t.Run("OR-J25-S46/a-stop-posts-nothing-until-the-daily-posting", stopPostsNothing)
 	t.Run("OR-J24-S88/a-receipt-holds-a-volume-fall-beside-new-usage", receiptHoldsAFall)
 	t.Run("OR-J48-S20/a-posting-in-a-unit-forgives-with-the-event-store-down", unitPostingWithoutStore)
+	t.Run("OR-J24-S89/a-posting-past-a-periods-end-dates-each-periods-owed-in-its-period", owedInItsPeriod)
+	t.Run("OR-J24-S90", func(t *testing.T) {
+		t.Run("a-fall-is-credited-before-a-later-rise-is-spent-in-usd", func(t *testing.T) { fallBeforeRise(t, "USD") })
+		t.Run("a-fall-is-credited-before-a-later-rise-is-spent-in-a-unit", func(t *testing.T) { fallBeforeRise(t, "GOLD") })
+	})
+}
+
+// calendarMonthsAtMonthEnd prices usage by calendar month and starts at noon
+// on a month's last day.
+func calendarMonthsAtMonthEnd(w *world) {
+	m := cfgMerchant(w.cfg, "alpha")
+	m.BillingPeriodBoundary = "calendar_month"
+	setCfgMerchant(&w.cfg, "alpha", m)
+	now := w.clock.Now().UTC()
+	advanceTo(w, time.Date(now.Year(), now.Month()+2, 1, 0, 0, 0, 0, time.UTC).Add(-12*time.Hour))
+}
+
+// priceMeter prices an event type's property in a currency.
+func priceMeter(t *testing.T, client *openrails.Client, key, eventType, property string, currency catalog.Currency, price catalog.RatePrice) {
+	t.Helper()
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: key})
+	require.NoError(t, err)
+	price.Currency = currency
+	_, err = client.SetMeter(t.Context(), key, billing.SetMeterParams{EventType: eventType, ValueProperty: property, Aggregation: catalog.AggregationSum,
+		RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: product.ID, Price: price})})
+	require.NoError(t, err)
+}
+
+func owedInItsPeriod(t *testing.T) {
+	w := newWorld(t, calendarMonthsAtMonthEnd)
+	usageMeter(t, w.alpha, 100)
+	// An unfunded customer: what posts is owed.
+	customer := billing.CustomerID(uuid.New())
+	settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "last-day", 2))...)
+	last := w.clock.Now().UTC()
+	boundary := time.Date(last.Year(), last.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+	advanceTo(w, boundary.Add(30*time.Second))
+	settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "first-minute", 3))...)
+	fleet := startFleet(t, w)
+	posted := boundary.Add(time.Minute)
+	advanceTo(w, posted)
+	postDays(t, fleet)
+	require.EqualValues(t, 500, owed(t, w.alpha, customer))
+
+	// The day's posting, a minute into the new month, dates the old month's
+	// owed before its end and the new month's when it posted.
+	type dated struct {
+		at     time.Time
+		amount int64
+	}
+	read := func(query string) []dated {
+		t.Helper()
+		rows, err := w.pool.Query(t.Context(), query, customer.UUID())
+		require.NoError(t, err)
+		defer rows.Close()
+		var out []dated
+		for rows.Next() {
+			var d dated
+			require.NoError(t, rows.Scan(&d.at, &d.amount))
+			d.at = d.at.UTC()
+			out = append(out, d)
+		}
+		require.NoError(t, rows.Err())
+		return out
+	}
+	want := []dated{{boundary.Add(-time.Microsecond), 200}, {posted, 300}}
+	require.Equal(t, want, read("SELECT accrued_at, amount FROM "+pgx.Identifier{w.schema, "owed_items"}.Sanitize()+
+		" WHERE customer_id = $1 ORDER BY accrued_at"), "each period's owed item in its period")
+	require.Equal(t, want, read("SELECT effective_at, amount FROM "+pgx.Identifier{w.schema, "ledger_transfers"}.Sanitize()+
+		" WHERE customer_id = $1 AND book = 'general' AND transfer_type = 'usage_accrued' ORDER BY effective_at"), "and its revenue in the books")
+}
+
+func fallBeforeRise(t *testing.T, currency catalog.Currency) {
+	var w *world
+	var client *openrails.Client
+	customer := billing.CustomerID(uuid.New())
+	if currency == "GOLD" {
+		a := unitWorld(t, calendarMonthsAtMonthEnd)
+		w, client, customer = a.world, a.alpha, billing.CustomerID(uuid.MustParse(a.alice.ID))
+	} else {
+		w = newWorld(t, calendarMonthsAtMonthEnd)
+		client = w.alpha
+	}
+	// 10 a unit, 5 each once there are more than 10; storage 3 a gigabyte.
+	priceMeter(t, client, "compute", "compute", "units", currency, tiers(catalog.TierModeVolume, 10, 5, 10))
+	priceMeter(t, client, "storage", "storage", "gb", currency, catalog.RatePrice{Model: catalog.ModelPerUnit, PerUnit: &catalog.PerUnitPrice{UnitAmount: 3, DivideBy: 1}})
+	_, err := client.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: currency, Amount: 80, Source: "critical", SourceID: "eighty"}})
+	require.NoError(t, err)
+	use := func(id, eventType, property string, n int64, at time.Time) billing.LeaseUsage {
+		return billing.LeaseUsage{CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: currency, EventType: eventType,
+			Dimensions: map[string]int64{property: n}, Source: "critical", SourceID: id, OccurredAt: at}
+	}
+	last := w.clock.Now().UTC()
+	lease := newLease()
+	settleUsage(t, client, lease, numbered(1, use("eight", "compute", "units", 8, time.Time{}))...)
+	fleet := startFleet(t, w)
+	nextDay(w)
+	postDays(t, fleet)
+	unitBalance(t, client, customer, currency, 0, 0, 0)
+
+	// Four more of the last month's day bring its price to 60, 20 less than
+	// posted; the new month's storage costs 15. The posting credits the 20
+	// first, and the 15 draws it: 5 left, nothing owed or forgiven.
+	w.clock.Advance(10 * time.Hour)
+	settleUsage(t, client, lease, numbered(2, use("late", "compute", "units", 4, last.Add(time.Hour)), use("storage", "storage", "gb", 5, time.Time{}))...)
+	nextDay(w)
+	postDays(t, fleet)
+	b := unitBalance(t, client, customer, currency, 5, 0, 5)
+	require.Zero(t, b.OwedAmount, "the rise draws the fall's lot, nothing is owed")
+	receipts := usageReceiptRows(t, w, customer)
+	require.Len(t, receipts, 2)
+	require.Equal(t, [2]int64{-5, 0}, [2]int64{receipts[1].amount, receipts[1].forgiven}, "nothing is forgiven")
 }
 
 func chargeAtZoneMidnight(t *testing.T) {
@@ -131,27 +243,10 @@ func stopPostsNothing(t *testing.T) {
 }
 
 func receiptHoldsAFall(t *testing.T) {
-	w := newWorld(t, func(w *world) {
-		m := cfgMerchant(w.cfg, "alpha")
-		m.BillingPeriodBoundary = "calendar_month"
-		setCfgMerchant(&w.cfg, "alpha", m)
-		// Noon on a month's last day.
-		now := w.clock.Now().UTC()
-		advanceTo(w, time.Date(now.Year(), now.Month()+2, 1, 0, 0, 0, 0, time.UTC).Add(-12*time.Hour))
-	})
-	ctx := t.Context()
-	meter := func(key, eventType, property string, price catalog.RatePrice) {
-		t.Helper()
-		product, err := w.alpha.CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: key})
-		require.NoError(t, err)
-		price.Currency = "USD"
-		_, err = w.alpha.SetMeter(ctx, key, billing.SetMeterParams{EventType: eventType, ValueProperty: property, Aggregation: catalog.AggregationSum,
-			RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: product.ID, Price: price})})
-		require.NoError(t, err)
-	}
+	w := newWorld(t, calendarMonthsAtMonthEnd)
 	// 10 a unit, 5 each once there are more than 10.
-	meter("compute", "compute", "units", tiers(catalog.TierModeVolume, 10, 5, 10))
-	meter("storage", "storage", "gb", catalog.RatePrice{Model: catalog.ModelPerUnit, PerUnit: &catalog.PerUnitPrice{UnitAmount: 3, DivideBy: 1}})
+	priceMeter(t, w.alpha, "compute", "compute", "units", "USD", tiers(catalog.TierModeVolume, 10, 5, 10))
+	priceMeter(t, w.alpha, "storage", "storage", "gb", "USD", catalog.RatePrice{Model: catalog.ModelPerUnit, PerUnit: &catalog.PerUnitPrice{UnitAmount: 3, DivideBy: 1}})
 	customer, _ := fundedCustomer(t, w)
 	last := w.clock.Now().UTC()
 	october := time.Date(last.Year(), last.Month(), 1, 0, 0, 0, 0, time.UTC)

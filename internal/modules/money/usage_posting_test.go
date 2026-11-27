@@ -53,38 +53,53 @@ func TestAPostingPricesThePeriodsTotalLessWhatPosted(t *testing.T) {
 	require.Equal(t, [2]int64{0, 800 - 110*5}, [2]int64{spent, credited}, "the fall is credited at the posting that takes it")
 }
 
-// One receipt holds both signs: a period whose price rose and the running
-// charges are spent, a period whose price fell is credited. In a merchant's
-// unit what the lots cannot take is forgiven across the rising periods by
-// their amounts and each period's across its positive lines; a falling
-// period takes back at most what it forgave before, from its negative lines.
-func TestAReceiptSpendsRisesAndCreditsFalls(t *testing.T) {
+// One receipt holds both signs, and its falls are settled first: a period
+// whose price fell is credited, and the rises and running charges are spent
+// from the lots and that credit. In a merchant's unit a falling period first
+// takes back at most what it forgave before, from its negative lines, and
+// what neither the lots nor the credit can take is forgiven across the rising
+// periods by their amounts and each period's across its positive lines.
+func TestAReceiptCreditsFallsBeforeItSpendsRises(t *testing.T) {
 	oct, nov := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	line := func(period time.Time, meter string, amount int64) receiptLine {
-		return receiptLine{PeriodStartsAt: period, PostingLine: PostingLine{MeterKey: meter, Amount: amount}}
+		return receiptLine{PeriodStartsAt: period, PeriodEndsAt: period.AddDate(0, 1, 0), PostingLine: PostingLine{MeterKey: meter, Amount: amount}}
 	}
-	r := &receipt{
-		lines:   []receiptLine{line(oct, "images", -30), line(nov, "images", 60), line(nov, "words", -20), line(nov, "words", 40)},
-		periods: []periodNet{{start: oct, first: 0, last: 1, amount: -30}, {start: nov, first: 1, last: 4, amount: 80}},
-		charges: []receiptCharge{{Amount: 20, StartsAt: nov.Add(time.Hour)}},
+	both := func(charges ...receiptCharge) *receipt {
+		return &receipt{
+			lines:   []receiptLine{line(oct, "images", -30), line(nov, "images", 60), line(nov, "words", -20), line(nov, "words", 40)},
+			periods: []periodNet{{start: oct, first: 0, last: 1, amount: -30}, {start: nov, first: 1, last: 4, amount: 80}},
+			charges: charges,
+		}
 	}
-	spent, credited := r.spent()
-	require.Equal(t, [2]int64{100, 30}, [2]int64{spent, credited})
+	r := both(receiptCharge{Amount: 20, StartsAt: nov.Add(time.Hour)})
+	spend, credit := r.settle(false, 0, nil)
+	require.Equal(t, [2]int64{100, 30}, [2]int64{spend, credit}, "a registry currency forgives nothing")
+	require.Equal(t, []int64{0, 0, 0, 0}, forgiven(r))
 
-	r.forgive(9)
-	require.Equal(t, []int64{0, 5, 0, 4}, forgiven(r), "November's 9 over its positive lines, 60:40, to the largest remainder")
-	require.EqualValues(t, 12, r.takeBack(map[time.Time]int64{oct: 12}), "October forgave 12 before; its fall of 30 takes it all back")
-	require.Equal(t, []int64{-12, 5, 0, 4}, forgiven(r))
-	require.Zero(t, (&receipt{lines: []receiptLine{line(oct, "images", -30)}, periods: []periodNet{{start: oct, last: 1, amount: -30}}}).takeBack(nil),
-		"a period that forgave nothing takes nothing back")
+	// October forgave 12 before: its fall of 30 takes it back first and
+	// credits 18; the lots' 20 and that 18 pay 38 of November's 80, and
+	// 42 is forgiven over its positive lines, 60:40, to the largest remainder.
+	r = both()
+	spend, credit = r.settle(true, 20, map[time.Time]int64{oct: 12})
+	require.Equal(t, [2]int64{38, 18}, [2]int64{spend, credit})
+	require.Equal(t, []int64{-12, 25, 0, 17}, forgiven(r))
 
-	r.through = nov.AddDate(0, 0, 3)
-	r.lines[1].PeriodEndsAt, r.lines[2].PeriodEndsAt, r.lines[3].PeriodEndsAt = nov.AddDate(0, 0, 2), nov.AddDate(0, 0, 2), nov.AddDate(0, 0, 2)
-	shares := r.owedShares(func(end time.Time) time.Time { return earlier(end, r.through).Add(-time.Microsecond) })
-	periodEnd, receiptEnd := nov.AddDate(0, 0, 2).Add(-time.Microsecond), r.through.Add(-time.Microsecond)
-	require.Equal(t, []owedShare{{source: "metered:images", weight: 60, from: nov, at: periodEnd}, {source: "metered:words", weight: 40, from: nov, at: periodEnd},
-		{source: runningChargeOwedSource, weight: 20, from: nov.Add(time.Hour), at: receiptEnd}}, shares,
-		"owed by meter of the rising periods, dated before the period's end, and the charges before the receipt's")
+	// With empty lots, a fall of 20 pays a rise of 15 and nothing is forgiven.
+	small := &receipt{
+		lines:   []receiptLine{line(oct, "images", -20), line(nov, "words", 15)},
+		periods: []periodNet{{start: oct, first: 0, last: 1, amount: -20}, {start: nov, first: 1, last: 2, amount: 15}},
+	}
+	spend, credit = small.settle(true, 0, nil)
+	require.Equal(t, [2]int64{15, 20}, [2]int64{spend, credit})
+	require.Equal(t, []int64{0, 0}, forgiven(small), "the fall's credit pays the rise")
+
+	r = both(receiptCharge{Amount: 20, StartsAt: nov.Add(time.Hour)})
+	cut, through := nov.AddDate(0, 0, 3), nov.AddDate(0, 0, 2)
+	shares := r.owedShares(func(end time.Time) time.Time { return earlier(end, cut).Add(-time.Microsecond) }, through.Add(-time.Microsecond))
+	require.Equal(t, []owedShare{{source: "metered:images", weight: 60, from: nov, at: cut.Add(-time.Microsecond)},
+		{source: "metered:words", weight: 40, from: nov, at: cut.Add(-time.Microsecond)},
+		{source: runningChargeOwedSource, weight: 20, from: nov.Add(time.Hour), at: through.Add(-time.Microsecond)}}, shares,
+		"usage owed per rising period and meter, dated by its period's end and the cut; running charges by their own instant")
 }
 
 func forgiven(r *receipt) []int64 {

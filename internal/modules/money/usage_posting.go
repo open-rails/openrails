@@ -392,6 +392,23 @@ func (r *receipt) forgive(amount int64) {
 	}
 }
 
+// settle decides what the receipt moves, falls first: a falling period's
+// lot is spendable by the rises. In a merchant's unit a falling period takes
+// back what it forgave before, the rest of the fall is credited, and the
+// rises are spent from the lots and that credit, forgiving what neither
+// holds; spendable is what the lots hold, forgave each falling period's
+// earlier forgiveness. Elsewhere nothing is forgiven.
+func (r *receipt) settle(unit bool, spendable int64, forgave map[time.Time]int64) (spend, credit int64) {
+	spend, credit = r.spent()
+	if !unit {
+		return spend, credit
+	}
+	credit -= r.takeBack(forgave)
+	forgiven := max(spend-addSat(spendable, credit), 0)
+	r.forgive(forgiven)
+	return spend - forgiven, credit
+}
+
 // takeBack takes back of each period whose price fell what it forgave before,
 // at most its fall, from its negative lines; and answers what it took.
 func (r *receipt) takeBack(forgave map[time.Time]int64) int64 {
@@ -426,14 +443,14 @@ func (r *receipt) shareForgiven(p periodNet, amount int64) {
 	}
 }
 
-// postReceipt writes the receipt and moves the ledger: what it spends, the
-// lots first and the rest owed, split by period and meter, each dated before
-// its period's end and the posting's instant, and running charges, dated
-// just before that instant, never before the end of the customer's last
-// usage invoice (the general ledger's accrual at the earliest); then what it
-// credits, as a lot. In a merchant's unit, never owed, what the lots cannot
-// take is forgiven, and a period whose price fell takes back what it forgave
-// before it credits.
+// postReceipt writes the receipt and moves the ledger: first what it credits,
+// the periods whose price fell, as a lot; then what it spends, the lots first
+// (that one included) and the rest owed, split by period and meter, each
+// dated before its period's end and when its usage was taken, and by running
+// charges, dated before the posting's instant, never before the end of the
+// customer's last usage invoice. In a merchant's unit, never owed, a period
+// whose price fell takes back what it forgave before it credits, and what
+// the lots cannot take is forgiven.
 func (s *MoneyService) postReceipt(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency, reason string, r *receipt) error {
 	now := instant(s.now())
 	posting := *s
@@ -443,23 +460,21 @@ func (s *MoneyService) postReceipt(ctx context.Context, q *gen.Queries, merchant
 		accrued = r.liveAt
 	}
 	posting.posting = &ledgerPosting{accruedAsOf: accrued, liveAt: r.liveAt}
-	spend, credit := r.spent()
-	if IsMerchantUnit(currency) {
-		covered, err := posting.spendableUnits(ctx, q, merchantID, customer, currency)
-		if err != nil {
+	unit := IsMerchantUnit(currency)
+	var spendable int64
+	var forgave map[time.Time]int64
+	if unit {
+		var err error
+		if spendable, err = posting.spendableUnits(ctx, q, merchantID, customer, currency); err != nil {
 			return err
 		}
-		forgiven := max(spend-covered, 0)
-		r.forgive(forgiven)
-		spend -= forgiven
-		if credit > 0 {
-			forgave, err := periodForgiveness(ctx, q, merchantID, customer, currency, r)
-			if err != nil {
+		if _, falls := r.spent(); falls > 0 {
+			if forgave, err = periodForgiveness(ctx, q, merchantID, customer, currency, r); err != nil {
 				return err
 			}
-			credit -= r.takeBack(forgave)
 		}
 	}
+	spend, credit := r.settle(unit, spendable, forgave)
 	lines, err := json.Marshal(append([]receiptLine{}, r.lines...))
 	if err != nil {
 		return err
@@ -481,23 +496,22 @@ func (s *MoneyService) postReceipt(ctx context.Context, q *gen.Queries, merchant
 		return err
 	}
 	coord := ledger.Coord{Operation: OpUsagePosting, Source: usageReceiptSourcePrefix + row.ID.String(), SourceID: "1"}
+	if credit > 0 {
+		if err := s.creditFall(ctx, q, merchantID, customer, currency, row.ID, coord, credit, now); err != nil {
+			return err
+		}
+	}
 	if spend > 0 {
 		billed, err := q.LatestUsageInvoiceEndInCurrency(ctx, gen.LatestUsageInvoiceEndInCurrencyParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
 		if err != nil {
 			return err
 		}
-		bound := r.through
-		if bound.IsZero() {
-			bound = r.cut
+		// Usage is dated before its period's end and its cut, running charges
+		// before the instant they were posted through; none after now.
+		dated := func(bound time.Time) time.Time {
+			return later(earlier(bound.Add(-time.Microsecond), now), billed)
 		}
-		posting.posting.owed = r.owedShares(func(end time.Time) time.Time {
-			return later(earlier(earlier(end, bound).Add(-time.Microsecond), now), billed)
-		})
-		for i, o := range posting.posting.owed {
-			if i == 0 || o.at.Before(posting.posting.owedAt) {
-				posting.posting.owedAt = o.at
-			}
-		}
+		posting.posting.owed = r.owedShares(func(end time.Time) time.Time { return dated(earlier(end, r.cut)) }, dated(r.through))
 		key := MustIdempotencyKey(coord.Operation, coord.Source, coord.SourceID)
 		customerID := identity.CustomerID(customer)
 		_, _, applied, err := posting.spendBalanceThenOwedTx(ctx, q, customerID, customer.String(), currency, key, spend, true)
@@ -507,9 +521,6 @@ func (s *MoneyService) postReceipt(ctx context.Context, q *gen.Queries, merchant
 		if !applied {
 			return fmt.Errorf("usage receipt %s: the ledger already held it", row.ID)
 		}
-	}
-	if credit > 0 {
-		return s.creditFall(ctx, q, merchantID, customer, currency, row.ID, coord, credit, now)
 	}
 	return nil
 }
@@ -538,9 +549,8 @@ func periodForgiveness(ctx context.Context, q *gen.Queries, merchantID, customer
 
 // owedShares split what a receipt leaves owed: per period whose price rose
 // and meter, what its positive lines added, dated by the period's end; and
-// the running charges, dated by the receipt's instant. Each names when its
-// charges began.
-func (r *receipt) owedShares(dated func(end time.Time) time.Time) []owedShare {
+// the running charges, dated chargesAt. Each names when its charges began.
+func (r *receipt) owedShares(dated func(end time.Time) time.Time, chargesAt time.Time) []owedShare {
 	var out []owedShare
 	for _, p := range r.periods {
 		if p.amount <= 0 {
@@ -562,7 +572,7 @@ func (r *receipt) owedShares(dated func(end time.Time) time.Time) []owedShare {
 		}
 	}
 	if len(r.charges) > 0 {
-		charges := owedShare{source: runningChargeOwedSource, from: r.charges[0].StartsAt, at: dated(r.through)}
+		charges := owedShare{source: runningChargeOwedSource, from: r.charges[0].StartsAt, at: chargesAt}
 		for _, c := range r.charges {
 			charges.weight = addSat(charges.weight, c.Amount)
 			charges.from = earlier(charges.from, c.StartsAt)

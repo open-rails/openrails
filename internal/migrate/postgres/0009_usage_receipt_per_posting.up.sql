@@ -7,30 +7,40 @@
 ALTER TABLE billing.usage_receipts DROP CONSTRAINT usage_receipts_amount_check;
 ALTER TABLE billing.usage_receipts DROP CONSTRAINT usage_receipts_forgiven_check;
 ALTER TABLE billing.usage_receipts DROP CONSTRAINT usage_receipts_forgiven_lines_check;
+ALTER TABLE billing.usage_receipts DROP CONSTRAINT usage_receipts_lines_check;
 ALTER TABLE billing.usage_receipts DROP CONSTRAINT usage_receipts_period_ends_at_check;
 ALTER TABLE billing.usage_receipts DROP CONSTRAINT usage_receipts_reason_check;
 DROP INDEX billing.usage_receipts_forgiven_idx;
 DROP INDEX billing.usage_receipts_period_idx;
 
--- Each line takes its receipt's period and a share of what it forgave: the
--- lines of the forgiveness's sign in order, each up to its amount. A reversal
--- receipt did not record what its posting ran for: daily.
+-- Each line takes its receipt's period and its share of what the receipt
+-- forgave: by the amounts of the lines of the forgiveness's sign, each its
+-- exact share's floor, what the floors leave one at a time to the largest
+-- fractions, earlier first on a tie. A reversal receipt did not record what
+-- its posting ran for: daily.
 UPDATE billing.usage_receipts r
 SET reason = CASE r.reason WHEN 'reversal' THEN 'daily' ELSE r.reason END,
     lines = (
         SELECT COALESCE(jsonb_agg(e.line || jsonb_build_object(
                    'period_starts_at', to_char(r.period_starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
                    'period_ends_at', to_char(r.period_ends_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
-                   'forgiven', sign(r.forgiven)::bigint * LEAST(e.size, GREATEST(abs(r.forgiven) - (e.running - e.size), 0)))
+                   'forgiven', CASE WHEN r.forgiven < 0 THEN -1 ELSE 1 END * (e.part + CASE WHEN e.rest > 0 AND e.rank <= e.left_over THEN 1 ELSE 0 END)::bigint)
                    ORDER BY e.ord), '[]'::jsonb)
         FROM (
-            SELECT s.line, s.ord, s.size, (sum(s.size) OVER (ORDER BY s.ord))::bigint AS running
+            SELECT f.line, f.ord, f.part, f.rest,
+                   abs(r.forgiven) - sum(f.part) OVER () AS left_over,
+                   row_number() OVER (ORDER BY f.rest DESC, f.ord) AS rank
             FROM (
-                SELECT l.line, l.ord,
-                       CASE WHEN r.forgiven <> 0 AND ((l.line ->> 'amount')::bigint > 0) = (r.forgiven > 0)
-                            THEN abs((l.line ->> 'amount')::bigint) ELSE 0 END AS size
-                FROM jsonb_array_elements(r.lines) WITH ORDINALITY AS l(line, ord)
-            ) s
+                SELECT w.line, w.ord,
+                       COALESCE(div(abs(r.forgiven)::numeric * w.size, NULLIF(sum(w.size) OVER (), 0)), 0) AS part,
+                       COALESCE(mod(abs(r.forgiven)::numeric * w.size, NULLIF(sum(w.size) OVER (), 0)), 0) AS rest
+                FROM (
+                    SELECT l.line, l.ord,
+                           CASE WHEN r.forgiven <> 0 AND ((l.line ->> 'amount')::bigint > 0) = (r.forgiven > 0)
+                                THEN abs((l.line ->> 'amount')::bigint) ELSE 0 END AS size
+                    FROM jsonb_array_elements(r.lines) WITH ORDINALITY AS l(line, ord)
+                ) w
+            ) f
         ) e
     );
 
@@ -42,7 +52,10 @@ ALTER TABLE billing.usage_receipts DROP COLUMN forgiven_lines;
 
 ALTER TABLE billing.usage_receipts
     ADD CONSTRAINT usage_receipts_reason_check CHECK (reason IN ('daily', 'billing', 'credit', 'purge')),
-    ADD CONSTRAINT usage_receipts_charges_check CHECK (jsonb_typeof(charges) = 'array'),
+    -- One posting's lines and charges, up to 1 MiB each: a receipt never
+    -- fails for its size.
+    ADD CONSTRAINT usage_receipts_lines_check CHECK (jsonb_typeof(lines) = 'array' AND octet_length(lines::text) <= 1048576),
+    ADD CONSTRAINT usage_receipts_charges_check CHECK (jsonb_typeof(charges) = 'array' AND octet_length(charges::text) <= 1048576),
     -- A receipt takes something; its lines may net to zero.
     ADD CONSTRAINT usage_receipts_taken_check CHECK (jsonb_array_length(lines) + jsonb_array_length(charges) > 0),
     -- Only a merchant's unit forgives: it is never owed.

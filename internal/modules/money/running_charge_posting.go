@@ -25,11 +25,8 @@ const runningChargeOwedSource = "running_charge"
 // as of accruedAsOf, and the lots live just before liveAt are drawn.
 type ledgerPosting struct {
 	accruedAsOf, liveAt time.Time
-	// owed splits what the posting leaves owed.
+	// owed splits what the posting leaves owed, each share dated.
 	owed []owedShare
-	// owedAt dates what the posting leaves owed. Zero dates it at the
-	// posting.
-	owedAt time.Time
 }
 
 // owedShare is one part of what a posting leaves owed: its owed item's

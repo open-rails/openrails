@@ -2876,6 +2876,17 @@
     ],
     "OR-J48-S20": [
       "TestDailyPosting/OR-J48-S20/a-posting-in-a-unit-forgives-with-the-event-store-down"
+    ],
+    "OR-J24-S89": [
+      "TestDailyPosting/OR-J24-S89/a-posting-past-a-periods-end-dates-each-periods-owed-in-its-period"
+    ],
+    "OR-J24-S90": [
+      "TestDailyPosting/OR-J24-S90",
+      "TestDailyPosting/OR-J24-S90/a-fall-is-credited-before-a-later-rise-is-spent-in-usd",
+      "TestDailyPosting/OR-J24-S90/a-fall-is-credited-before-a-later-rise-is-spent-in-a-unit"
+    ],
+    "OR-J24-S91": [
+      "TestReceiptMigration/OR-J24-S91/an-old-receipts-forgiveness-is-shared-over-its-lines-by-their-amounts"
     ]
   }
 }
