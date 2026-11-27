@@ -717,12 +717,22 @@ function PSPRow({
             <AdminMessage id={"draining ("} />
             {psp.open_obligations})
           </Badge>
-        ) : (
+        ) : psp.armed ? (
           <Badge
             variant="secondary"
             className="bg-settled-surface text-settled"
           >
             <AdminMessage id={"active"} />
+          </Badge>
+        ) : (
+          <Badge
+            variant="secondary"
+            className="bg-held-surface text-held"
+            title={adminText(
+              "No new payment uses it: its credentials are incomplete or do not resolve."
+            )}
+          >
+            <AdminMessage id={"not armed"} />
           </Badge>
         )}
       </TableCell>

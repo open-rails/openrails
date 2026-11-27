@@ -18,7 +18,8 @@ import (
 // claiming it, bound to a new merchant permission group owned by
 // req.OwnerUserID (none: the operator's merchant). A user claim answers to
 // Config.MerchantCreation. It is how a merchant is created outside the
-// manifest; no OpenRails route creates one.
+// manifest: the CLI and the console's New merchant call it; no engine route
+// does.
 func (s *Server) ProvisionMerchant(ctx context.Context, req billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error) {
 	return operator.ProvisionMerchant(ctx, s.cp, req)
 }

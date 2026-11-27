@@ -27,7 +27,7 @@ export type AdminAccess = {
   merchant_config: "none" | "read" | "update"
   metrics: boolean
   scope_id: string
-  application_permissions: ("merchant:catalog:manage" | "merchant:catalog:read" | "merchant:config:manage" | "merchant:config:read" | "merchant:customer:manage" | "merchant:customer:read" | "merchant:entitlements:read" | "merchant:events:read" | "merchant:invoices:manage" | "merchant:metrics:read" | "merchant:provisioning:manage" | "merchant:provisioning:read" | "merchant:usage:manage" | "merchant:usage:read" | "root:admin-rate-limits:unlock" | "root:catalog:manage" | "root:catalog:read" | "root:config:manage" | "root:config:read" | "root:customer:manage" | "root:customer:read" | "root:entitlements:read" | "root:events:read" | "root:invoices:manage" | "root:merchants:delete" | "root:merchants:read" | "root:merchants:restore" | "root:metrics:read" | "root:provisioning:manage" | "root:provisioning:read" | "root:usage:manage" | "root:usage:read" | "root:worker-health:read")[]
+  application_permissions: ("merchant:catalog:manage" | "merchant:catalog:read" | "merchant:config:manage" | "merchant:config:read" | "merchant:customer:manage" | "merchant:customer:read" | "merchant:entitlements:read" | "merchant:events:read" | "merchant:invoices:manage" | "merchant:metrics:read" | "merchant:provisioning:manage" | "merchant:provisioning:read" | "merchant:usage:manage" | "merchant:usage:read" | "root:admin-rate-limits:unlock" | "root:catalog:manage" | "root:catalog:read" | "root:config:manage" | "root:config:read" | "root:customer:manage" | "root:customer:read" | "root:entitlements:read" | "root:events:read" | "root:invoices:manage" | "root:merchants:create" | "root:merchants:delete" | "root:merchants:read" | "root:merchants:restore" | "root:metrics:read" | "root:provisioning:manage" | "root:provisioning:read" | "root:usage:manage" | "root:usage:read" | "root:worker-health:read")[]
 }
 
 export type Agreement = {
@@ -1714,6 +1714,7 @@ export type PSP = {
   environment: "devnet" | "live" | "mainnet" | "sandbox" | "test" | "testnet"
   archived: boolean
   open_obligations: number
+  armed: boolean
   gateway_id?: string
   account_id?: string
   client_accnum?: string
