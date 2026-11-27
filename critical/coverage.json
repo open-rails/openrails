@@ -1416,12 +1416,12 @@
     {
       "id": "OR-J01-S36",
       "journey": "J01",
-      "name": "Where email is not configured an operator's invitation of an operator by email is not sent and is answered 201 with its /admin/invite#invite_code= link to share; an invite link carries its code as #link_code="
+      "name": "Where email is not configured an operator's invitation of an operator by email, made as the console's Team page makes it, is not sent and is answered 201 with its /admin/invite#invite_code= link; the invitee registers through it at once with the address unverified, enrolls a second factor and is an operator holding the invited root role alone; spent, the link registers nobody else (invitation_not_found); an invite link carries its code as #link_code="
     },
     {
       "id": "OR-J01-S37",
       "journey": "J01",
-      "name": "An operator's emailed invitation registers the invitee with its code: they prove the address, enroll a second factor and hold the invited root role, an operator in the console's directory"
+      "name": "An operator's emailed invitation answers no code; the invitee registers the invited address with the code from the email, which proves it with no second code sent, enrolls a second factor and holds the invited root role, an operator in the console's directory"
     },
     {
       "id": "OR-J01-S38",

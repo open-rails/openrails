@@ -14,3 +14,5 @@ its own and its README says how to run it.
 
 The three stores share `content.go`, `web/src/pages.tsx` and the catalog; only
 `main.go`, `web/src/clients.ts` and the run files differ.
+
+While no account holds a root role, each store's AuthKit logs a single-use `/setup#token=…` link on the store's origin at start; its `/setup` page renders auth-ui's `OwnerSetup`, which opens it and creates the owner account.

@@ -112,13 +112,15 @@ func TestStaffAccounts(t *testing.T) {
 		require.NotContains(t, string(out), "#token=")
 	})
 
-	t.Run("OR-J01-S36/without-email-an-operators-invitation-answers-its-link-to-share", func(t *testing.T) {
-		// Behind the deployment's proxy: an address may invite once a minute.
+	t.Run("OR-J01-S36/without-email-an-operators-invitation-link-registers-its-invitee-once", func(t *testing.T) {
+		// Behind the deployment's proxy, so a second visitor has an address of
+		// its own: one address registers once a minute.
 		s := startStaffServer(t, newWorld(t), map[string]any{"trusted_proxies": []string{"127.0.0.1/32"}})
 		owner, session := s.owner(t)
 		// The Team page's invitation by email: none is sent, so its link is
-		// the inviter's to share.
-		status, raw := owner.call(t, http.MethodPost, "/auth/v1/groups/root/invitations", session, map[string]string{"email": "teammate@critical.invalid", "role": operatorRole})
+		// the inviter's to hand over.
+		const email = "teammate@critical.invalid"
+		status, raw := owner.call(t, http.MethodPost, "/auth/v1/groups/root/invitations", session, map[string]string{"email": email, "role": operatorRole})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var created struct {
 			Code, URL  string
@@ -128,48 +130,63 @@ func TestStaffAccounts(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &created))
 		require.False(t, created.Emailed, string(raw))
 		require.Equal(t, operatorRole, created.Invitation.Role)
-		require.Equal(t, "teammate@critical.invalid", created.Invitation.Email)
-		require.Equal(t, created.Code, linkFragment(t, created.URL, "/admin/invite", "invite_code"))
+		require.Equal(t, email, created.Invitation.Email)
+		code := linkFragment(t, created.URL, "/admin/invite", "invite_code")
+		require.Equal(t, created.Code, code)
+
+		// The link is the credential: its holder registers at once, the
+		// address unproven, and enrolls a second factor, an operator holding
+		// the invited role alone.
+		invitee := s.browser(t)
+		status, raw = invitee.register(t, email, "teammate", code)
+		require.Equal(t, http.StatusOK, status, "no code can be sent: the sign-up is answered at once: %s", raw)
+		mate, mateID := invitee.enroll(t, raw)
+		require.False(t, invitee.emailVerified(t, mate), "nothing proved the address")
+		require.True(t, invitee.consoleRoot(t, mate), "the invitee is an operator")
+		members := owner.rootMembers(t, session)
+		require.Len(t, members, 2, "root holds the owner and the invitee: %v", members)
+		require.Equal(t, operatorRole, members[mateID])
+
+		// Spent, the link registers nobody else.
+		stranger := s.browser(t)
+		stranger.forwardedFor = "203.0.113.7"
+		status, raw = stranger.register(t, "stranger@critical.invalid", "stranger", code)
+		require.Equal(t, http.StatusNotFound, status, string(raw))
+		require.Contains(t, string(raw), "invitation_not_found")
+		require.Len(t, owner.rootMembers(t, session), 2)
+
 		// An invite link, for an account that holds one, carries its code
 		// as link_code.
-		elsewhere := *owner
-		elsewhere.forwardedFor = "203.0.113.7"
-		status, raw = elsewhere.call(t, http.MethodPost, "/auth/v1/groups/root/invitations", session, map[string]string{"role": operatorRole})
+		status, raw = owner.call(t, http.MethodPost, "/auth/v1/groups/root/invitations", session, map[string]string{"role": operatorRole})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		require.NoError(t, json.Unmarshal(raw, &created))
 		require.Equal(t, created.Code, linkFragment(t, created.URL, "/admin/invite", "link_code"))
-		status, raw = owner.call(t, http.MethodGet, "/auth/v1/groups/root/invitations", session, nil)
-		require.Equal(t, http.StatusOK, status, string(raw))
-		require.Equal(t, 2, strings.Count(string(raw), `"role":"`+operatorRole+`"`), string(raw))
 	})
 
-	t.Run("OR-J01-S37/an-accepted-invitation-makes-the-invitee-an-operator", func(t *testing.T) {
+	t.Run("OR-J01-S37/an-emailed-invitation-proves-the-address-and-makes-the-invitee-an-operator", func(t *testing.T) {
 		mail := smtptest.Start(t, smtptest.Options{})
 		s := startStaffServer(t, newWorld(t), map[string]any{"email_smtp": map[string]any{"host": mail.Host, "port": mail.Port, "from": "ops@critical.invalid"}})
 		owner, session := s.owner(t)
 		const email = "teammate@critical.invalid"
 		status, raw := owner.call(t, http.MethodPost, "/auth/v1/groups/root/invitations", session, map[string]string{"email": email, "role": operatorRole})
 		require.Equal(t, http.StatusAccepted, status, "an emailed invitation answers nothing to share: %s", raw)
+		// Its code went to the address alone: the invitee reads it there.
 		link := regexp.MustCompile(`https://\S+/admin/invite#\S+`).FindString(mailTo(t, mail, email, "invited").Text)
 		code := linkFragment(t, link, "/admin/invite", "invite_code")
 
-		// The invitee signs up with it, proves the address and enrolls a
-		// second factor: an operator from the first request on.
+		// Registering the invited address with it proves the address, so no
+		// second code is sent; the invitee enrolls a second factor, an
+		// operator from the first request on.
 		invitee := s.browser(t)
-		status, raw = invitee.call(t, http.MethodPost, "/auth/v1/register", "", map[string]string{"identifier": email, "username": "teammate", "password": authtest.Password, "invite_code": code})
-		require.Equal(t, http.StatusAccepted, status, string(raw))
-		var pending struct{ Challenge string }
-		require.NoError(t, json.Unmarshal(raw, &pending))
-		verify := regexp.MustCompile(`Code: (\S+)`).FindStringSubmatch(mailTo(t, mail, email, "Verify").Text)
-		require.Len(t, verify, 2)
-		status, raw = invitee.call(t, http.MethodPost, "/auth/v1/verify/confirm", "", map[string]string{"challenge": pending.Challenge, "code": verify[1]})
+		status, raw = invitee.register(t, email, "teammate", code)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		mate, mateID := invitee.enroll(t, raw)
+		require.True(t, invitee.emailVerified(t, mate), "the emailed code proved the address")
+		for _, m := range mail.Messages() {
+			require.False(t, slices.Contains(m.To, email) && strings.Contains(m.Subject, "Verify"), "a second code was sent: %s", m.Subject)
+		}
 		require.True(t, invitee.consoleRoot(t, mate), "the invitee is an operator")
-		status, raw = owner.call(t, http.MethodGet, "/auth/v1/groups/root/members", session, nil)
-		require.Equal(t, http.StatusOK, status, string(raw))
-		require.Contains(t, string(raw), mateID)
-		require.Contains(t, string(raw), operatorRole)
+		require.Equal(t, operatorRole, owner.rootMembers(t, session)[mateID])
 	})
 
 	t.Run("OR-J01-S38/a-server-whose-staff-sign-in-elsewhere-advertises-no-groups-or-setup", func(t *testing.T) {
@@ -344,6 +361,44 @@ func (b *staffBrowser) call(t *testing.T, method, path, token string, body any) 
 func (b *staffBrowser) setup(t *testing.T, token, email, username string) (int, []byte) {
 	t.Helper()
 	return b.call(t, http.MethodPost, "/auth/v1/setup", "", map[string]string{"token": token, "email": email, "username": username, "password": authtest.Password})
+}
+
+// register signs up with an invitation's code, as the console's
+// /admin/invite page does.
+func (b *staffBrowser) register(t *testing.T, email, username, code string) (int, []byte) {
+	t.Helper()
+	return b.call(t, http.MethodPost, "/auth/v1/register", "", map[string]string{"identifier": email, "username": username, "password": authtest.Password, "invite_code": code})
+}
+
+// emailVerified reports whether the session's account has proved its email.
+func (b *staffBrowser) emailVerified(t *testing.T, session string) bool {
+	t.Helper()
+	status, raw := b.call(t, http.MethodGet, "/auth/v1/me", session, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var me struct {
+		EmailVerified bool `json:"email_verified"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &me))
+	return me.EmailVerified
+}
+
+// rootMembers are root's people, each account id with its role.
+func (b *staffBrowser) rootMembers(t *testing.T, session string) map[string]string {
+	t.Helper()
+	status, raw := b.call(t, http.MethodGet, "/auth/v1/groups/root/members", session, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var page struct {
+		Data []struct {
+			Subject struct{ ID string }
+			Role    string
+		}
+	}
+	require.NoError(t, json.Unmarshal(raw, &page))
+	out := make(map[string]string, len(page.Data))
+	for _, m := range page.Data {
+		out[m.Subject.ID] = m.Role
+	}
+	return out
 }
 
 // enroll finishes a first sign-in, which the server's accounts start by

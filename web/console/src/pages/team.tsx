@@ -3,7 +3,8 @@ import { useStepUpGuard } from "@openrails/auth-ui"
 import type { AuthClient } from "@openrails/auth-ui/client"
 
 // The operators: root's people. Where email is not configured an invitation
-// is not sent, and the page shows its link to share.
+// is not sent, and the page shows its link to hand over privately: whoever
+// uses it first gets its role.
 export function TeamPage({
   auth,
   baseUrl,
