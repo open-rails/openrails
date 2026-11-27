@@ -14,6 +14,8 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	embedded "github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -149,6 +151,40 @@ func TestUsageBillingContracts(t *testing.T) {
 				balance(t, a.alpha, customer, 0, 0, 0)
 			})
 		}
+		t.Run("lowered-threshold", func(t *testing.T) {
+			// Lowering the collection threshold bills debt already above it,
+			// not at the bill date.
+			a, _ := newPSPWorld(t, func(w *world) {
+				w.clock.Advance(time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC).Sub(w.clock.Now()))
+			})
+			state, err := a.alphaRemote.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{DisplayName: ptr("Alpha"),
+				MerchantSettings: &billing.MerchantSettings{UsageBilling: &billing.UsageBillingSettings{BillingDay: 25,
+					Currencies: []billing.UsageBillingCurrency{{Currency: "USD", CreditLimit: 30_000_000, CollectionThreshold: ptr(int64(25_000_000)), MinimumInvoiceAmount: 1_000_000}}}}})
+			require.NoError(t, err)
+			customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+			_, err = a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{InvoiceProfile: catalog.Value(billing.InvoiceProfile{CollectionMethod: billing.CollectSendInvoice})})
+			require.NoError(t, err)
+			usageMeter(t, a.alpha, 10_000_000)
+			oneUsage(t, a.alpha, usageInput(customer, "below-old-threshold", 2))
+			nextDay(a.world)
+			fleet := quietFleet(t, a.world)
+			postDays(t, fleet)
+			runUsageDue(t, fleet)
+			require.EqualValues(t, 20_000_000, owed(t, a.alpha, customer))
+			rows, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
+			require.NoError(t, err)
+			require.Empty(t, rows.Items, "$20 owed waits under a $25 threshold")
+			state.UsageBilling.Currencies[0].CollectionThreshold = ptr(int64(10_000_000))
+			_, err = a.alphaRemote.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{MerchantSettings: &state.MerchantSettings})
+			require.NoError(t, err)
+			// What a change to the merchant's settings runs, on the settings
+			// the write committed.
+			require.NoError(t, embedded.Graph(a.engine).Runtime.MoneyService.MarkUsageAccountsDue(merchant.WithID(t.Context(), a.alpha.MerchantID())))
+			runUsageDue(t, fleet)
+			invoice := oneUsageInvoice(t, a, customer)
+			require.Equal(t, billing.InvoiceOpen, invoice.Status)
+			require.EqualValues(t, 20_000_000, invoice.Total)
+		})
 	})
 	t.Run("OR-J26-S02/a-merchant-without-usage-terms-bills-no-usage", func(t *testing.T) {
 		a, p, customer := usageBillingWorld(t, false, func(w *world) {

@@ -102,6 +102,8 @@ func TestUsageContracts(t *testing.T) {
 			refused := refusedItem(t, out, n)
 			require.Equal(t, http.StatusBadRequest, refused.Status)
 			require.Equal(t, billing.CodeInvalidParam, refused.Error.Code)
+			require.Equal(t, fmt.Sprintf("usage[%d].occurred_at", n-3), *refused.Error.Param)
+			require.Equal(t, "occurred_at must be within the last 35 days and not in the future", refused.Error.Message)
 		}
 		balance(t, w.alpha, customer, 200, 800, 1000)
 	})
@@ -110,6 +112,16 @@ func TestUsageContracts(t *testing.T) {
 		a := newAuthorityWorld(t)
 		usageMeter(t, a.alphaRemote, 100)
 		alice, bob := billing.CustomerID(uuid.MustParse(a.alice.ID)), billing.CustomerID(uuid.MustParse(a.bob.ID))
+		_, err := a.alphaRemote.GetBalance(t.Context(), alice, billing.GetBalanceParams{})
+		require.Equal(t, "currency", *requireCode(t, err, billing.CodeInvalidParam).Param)
+		status, raw := a.request(t, http.MethodGet, "/v1/me/usage", a.aliceToken, nil)
+		require.Equal(t, http.StatusBadRequest, status, string(raw))
+		var missing struct {
+			Error billing.ErrorDetails `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &missing))
+		require.Equal(t, billing.CodeInvalidParam, missing.Error.Code)
+		require.Equal(t, "currency", *missing.Error.Param)
 		lease := newLease()
 		items := numbered(1, usageInput(alice, "alice-good", 2), usageInput(billing.CustomerID{}, "invalid-customer", 5), usageInput(bob, "bob-good", 3))
 		out := syncLease(t, a.alphaRemote, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
@@ -124,7 +136,7 @@ func TestUsageContracts(t *testing.T) {
 		foreign := syncLease(t, a.betaRemote, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(1, usageInput(billing.CustomerID(uuid.New()), "beta-own", 1))})
 		require.EqualValues(t, 1, foreign.Usage.ThroughN)
 		require.Empty(t, foreign.Usage.Refused)
-		status, raw := a.request(t, http.MethodPost, "/v1/app/leases/sync", a.aliceToken, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
+		status, raw = a.request(t, http.MethodPost, "/v1/app/leases/sync", a.aliceToken, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
 		require.Equal(t, http.StatusForbidden, status, string(raw))
 
 		report := func(token string) billing.Usage {
