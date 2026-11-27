@@ -1026,6 +1026,12 @@
     "OR-J38-S16": [
       "TestPSPImportHistory/OR-J38-S16/an-nmi-schedule-paused-long-ago-ends-where-its-paid-time-ended"
     ],
+    "OR-J38-S17": [
+      "TestPSPImportHistory/OR-J38-S17/a-stripe-subscription-that-paid-for-nothing-ends-at-its-start-and-adds-no-mrr"
+    ],
+    "OR-J38-S18": [
+      "TestPSPImportHistory/OR-J38-S18/a-deleted-nmi-schedule-is-inferred-from-its-recurring-sales-ended-only"
+    ],
     "OR-J38-S42": [
       "TestPSPImport/OR-J38-S42/nmi-amounts-land-in-the-mapped-price-currency"
     ],
@@ -1598,7 +1604,7 @@
       "TestMRR/OR-J42-S04/stripe-cancel-at-period-end-is-scheduled-churn-a-portal-resume-reverses-it"
     ],
     "OR-J42-S05": [
-      "TestMRR/OR-J42-S05/ccbill-upgrade-replacing-a-subscription-is-one-expansion-an-import-opens"
+      "TestMRR/OR-J42-S05/ccbill-upgrade-replacing-a-subscription-is-one-expansion-an-import-is-new-at-its-start"
     ],
     "OR-J42-S06": [
       "TestMRR/OR-J42-S06/mrr-at-a-past-local-day-equals-the-movements-before-it"
@@ -1653,6 +1659,18 @@
     ],
     "OR-J42-S37": [
       "TestMRRUpgrade/OR-J42-S37/an-upgrade-keeps-every-mrr-measure-of-a-populated-database"
+    ],
+    "OR-J42-S38": [
+      "TestMRRHistory/OR-J42-S38/an-imported-subscription-is-new-at-its-start-and-churns-at-its-end"
+    ],
+    "OR-J42-S39": [
+      "TestMRRHistory/OR-J42-S39/a-customer-imported-from-two-rails-in-two-passes-reads-as-one-timeline"
+    ],
+    "OR-J42-S40": [
+      "TestMRRHistory/OR-J42-S40/churn-nrr-and-cohort-retention-over-imported-months-equal-the-same-history-booked-live"
+    ],
+    "OR-J42-S41": [
+      "TestMRRHistoryUpgrade/OR-J42-S41/an-upgrade-turns-openings-into-history-and-keeps-live-movements"
     ],
     "OR-J42-S36": [
       "TestMRRFacts/OR-J42-S36/at-risk-mrr-follows-a-price-change-during-a-case"

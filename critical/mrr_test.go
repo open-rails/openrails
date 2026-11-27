@@ -20,8 +20,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -189,10 +187,11 @@ func ccbillBook(price billing.PriceID, asOf time.Time, from, n int) billing.Decl
 	return book
 }
 
-// ghostCCBillMembership writes the customer a CCBill membership, opened as
-// an import opens one, that a legacy book left behind without its access: no
-// grant came of it, so a prune may remove it (a subscription that granted
-// access is surfaced, never pruned). It is canceled at its paid end.
+// ghostCCBillMembership writes the customer a CCBill membership, its MRR
+// history recorded as an import records it, that a legacy book left behind
+// without its access: no grant came of it, so a prune may remove it (a
+// subscription that granted access is surfaced, never pruned). It is
+// canceled at its paid end.
 func ghostCCBillMembership(t *testing.T, w *world, customer billing.CustomerID, psp uuid.UUID, ref string, start, paid, canceled time.Time) {
 	t.Helper()
 	var product, price uuid.UUID
@@ -201,16 +200,17 @@ func ghostCCBillMembership(t *testing.T, w *world, customer billing.CustomerID, 
 	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	require.NoError(t, database.MerchantTx(merchant.WithID(t.Context(), w.alpha.MerchantID()), func(ctx context.Context, tx pgx.Tx) error {
-		if err := db.SetMRRCause(ctx, gen.New(tx), db.MRRCauseImport); err != nil {
-			return err
-		}
 		if _, err := tx.Exec(ctx, "INSERT INTO billing.customers (merchant_id, id) VALUES ($1, $2) ON CONFLICT DO NOTHING", w.alpha.MerchantID().UUID(), customer.UUID()); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, "INSERT INTO billing.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, collection_policy, rail_subscription_id, psp_id,"+
+		var id uuid.UUID
+		if err := tx.QueryRow(ctx, "INSERT INTO billing.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, collection_policy, rail_subscription_id, psp_id,"+
 			" started_at, current_period_starts_at, current_period_ends_at, canceled_at, ended_at, cancel_type, created_at, updated_at)"+
-			" VALUES ($1, $2, $3, $4, 'canceled', 'ccbill', 'provider', $5, $6, $7, $7, $8, $9, $8, 'user', $10, $10)",
-			w.alpha.MerchantID().UUID(), customer.UUID(), product, price, ref, psp, start, paid, canceled, w.clock.Now())
+			" VALUES ($1, $2, $3, $4, 'canceled', 'ccbill', 'provider', $5, $6, $7, $7, $8, $9, $8, 'user', $10, $10) RETURNING id",
+			w.alpha.MerchantID().UUID(), customer.UUID(), product, price, ref, psp, start, paid, canceled, w.clock.Now()).Scan(&id); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, "SELECT billing.record_mrr_history($1, ARRAY[$2]::uuid[], $3)", w.alpha.MerchantID().UUID(), id, w.clock.Now())
 		return err
 	}))
 }
@@ -454,7 +454,7 @@ func TestMRR(t *testing.T) {
 		require.Equal(t, []string{mrrKind("USD", "new", 9_000_000)}, mrrKinds(mrrMoves(t, tw.world, tw.alpha, alice)), "the resume removes the churn")
 	})
 
-	t.Run("OR-J42-S05/ccbill-upgrade-replacing-a-subscription-is-one-expansion-an-import-opens", func(t *testing.T) {
+	t.Run("OR-J42-S05/ccbill-upgrade-replacing-a-subscription-is-one-expansion-an-import-is-new-at-its-start", func(t *testing.T) {
 		a := ccbillWebhookWorld(t)
 		price := ccbillMemberPrice(t, a.alpha)
 		upper, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "ccbill-plus", DisplayName: "CCBill plus", Entitlements: []string{"ccbill:plus"}})
@@ -470,14 +470,15 @@ func TestMRR(t *testing.T) {
 		sub := onlySubscription(t, a.alpha, bob)
 		require.Equal(t, billing.SubscriptionMRR{Amount: ccbillMemberMRR, Currency: "USD"}, mrrOf(t, a.alpha, sub.ID))
 		moves := mrrMoves(t, a.world, a.alpha, bob)
-		require.Equal(t, []string{mrrKind("USD", "opening", ccbillMemberMRR)}, mrrKinds(moves), "an import is not new business")
-		require.Equal(t, "import", moves[0].Cause)
+		require.Equal(t, []string{mrrKind("USD", "new", ccbillMemberMRR)}, mrrKinds(moves), "the member is new when it started, not at the import")
+		require.Equal(t, "subscribed", moves[0].Cause)
 		require.Equal(t, 1, moves[0].Logo)
 		started := legacy.StartedAt.UTC()
+		require.True(t, moves[0].OccurredAt.Equal(started), "dated at its start, %s", moves[0].OccurredAt)
 		var cohort time.Time
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT cohort_at FROM "+pgx.Identifier{a.schema, "mrr_movements"}.Sanitize()+
 			" WHERE merchant_id = $1 AND customer_id = $2 AND currency = 'USD' ORDER BY occurred_at LIMIT 1", a.alpha.MerchantID().UUID(), bob.UUID()).Scan(&cohort))
-		require.True(t, cohort.Equal(started), "the adopted cohort is when it started, %s", cohort)
+		require.True(t, cohort.Equal(started), "its cohort is when it started, %s", cohort)
 
 		// A minute later CCBill replaces its subscription with the upgrade's;
 		// OpenRails keeps the row and moves it onto the new price in one
@@ -492,7 +493,7 @@ func TestMRR(t *testing.T) {
 		require.Equal(t, plus.ID, upgraded.PriceID)
 		require.Equal(t, billing.SubscriptionMRR{Amount: ccbillPlusMRR, Currency: "USD"}, mrrOf(t, a.alpha, upgraded.ID))
 		moves = mrrMoves(t, a.world, a.alpha, bob)
-		require.Equal(t, []string{mrrKind("USD", "opening", ccbillMemberMRR), mrrKind("USD", "expansion", ccbillPlusMRR-ccbillMemberMRR)}, mrrKinds(moves), "one expansion: no churn, no new")
+		require.Equal(t, []string{mrrKind("USD", "new", ccbillMemberMRR), mrrKind("USD", "expansion", ccbillPlusMRR-ccbillMemberMRR)}, mrrKinds(moves), "one expansion: no churn, no new")
 		require.Equal(t, "price_change", moves[1].Cause)
 		require.Equal(t, 0, moves[1].Logo)
 		require.Equal(t, 2, moves[1].Lines, "the subscription leaves its product and enters the upgrade's")
@@ -652,7 +653,7 @@ func TestMRR(t *testing.T) {
 		}))
 		require.Equal(t, []uuid.UUID{pruned.ID.UUID()}, run.SubscriptionIDs)
 		moves := mrrMoves(t, w, w.alpha, gone)
-		require.Equal(t, []string{mrrKind("USD", "opening", ccbillMemberMRR), mrrKind("USD", "correction", -ccbillMemberMRR)}, mrrKinds(moves), "a prune is no churn")
+		require.Equal(t, []string{mrrKind("USD", "new", ccbillMemberMRR), mrrKind("USD", "correction", -ccbillMemberMRR)}, mrrKinds(moves), "a prune is no churn")
 		require.Equal(t, "prune", moves[1].Cause)
 		require.Equal(t, -1, moves[1].Logo)
 		require.Nil(t, moves[1].Voluntary)
@@ -668,13 +669,13 @@ func TestMRR(t *testing.T) {
 		require.Len(t, rows, 2)
 		undo("--apply", "--expect-rows", rows[1])
 		moves = mrrMovesBy(t, w, w.alpha, gone, settledBy(w))
-		require.Equal(t, []string{mrrKind("USD", "opening", ccbillMemberMRR), mrrKind("USD", "correction", -ccbillMemberMRR), mrrKind("USD", "correction", ccbillMemberMRR)},
+		require.Equal(t, []string{mrrKind("USD", "new", ccbillMemberMRR), mrrKind("USD", "correction", -ccbillMemberMRR), mrrKind("USD", "correction", ccbillMemberMRR)},
 			mrrKinds(moves))
 		require.Equal(t, "undo", moves[2].Cause)
 		require.Equal(t, 1, moves[2].Logo)
 		require.Equal(t, churnAtEnd, scheduledChurn())
 		require.Equal(t, [3]int64{2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, w.alpha, "USD", settledBy(w)))
-		require.Equal(t, map[string]int64{"opening": 2, "correction": 2}, mrrKindCounts(t, w, w.alpha, "USD", settledBy(w)))
+		require.Equal(t, map[string]int64{"new": 2, "correction": 2}, mrrKindCounts(t, w, w.alpha, "USD", settledBy(w)))
 	})
 
 	t.Run("OR-J42-S09/a-bulk-import-settles-once-its-reads-growing-with-the-book", func(t *testing.T) {
@@ -688,7 +689,7 @@ func TestMRR(t *testing.T) {
 		require.Len(t, res.Imported, members, "%v", res.Reasons)
 
 		require.Equal(t, [3]int64{members * ccbillMemberMRR, members, members}, mrrTotals(t, a.world, a.alpha, "USD", settledBy(a.world)))
-		require.Equal(t, map[string]int64{"opening": members}, mrrKindCounts(t, a.world, a.alpha, "USD", settledBy(a.world)), "one opening per customer")
+		require.Equal(t, map[string]int64{"new": members}, mrrKindCounts(t, a.world, a.alpha, "USD", settledBy(a.world)), "each customer new at its start")
 		// The commit settles once: every later row event probes its own row.
 		// The importing session reports its reads once idle.
 		var reads int64

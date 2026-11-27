@@ -106,6 +106,17 @@ func (m *Mock) AddCustomer(email, name string, metadata map[string]string) strin
 // period, in the pinned API version's shape (period on the item, charge under
 // invoice.payments). It returns the subscription id.
 func (m *Mock) AddSubscription(customer, method, price string, amount int64, start, end time.Time) string {
+	return m.addSubscription(customer, method, price, amount, start, end, true)
+}
+
+// AddIncompleteSubscription seeds a subscription whose first invoice is open
+// and unpaid (Stripe's incomplete): it moved no money. It returns the
+// subscription id.
+func (m *Mock) AddIncompleteSubscription(customer, method, price string, amount int64, start, end time.Time) string {
+	return m.addSubscription(customer, method, price, amount, start, end, false)
+}
+
+func (m *Mock) addSubscription(customer, method, price string, amount int64, start, end time.Time, paid bool) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.customers[customer]; !ok {
@@ -121,7 +132,10 @@ func (m *Mock) AddSubscription(customer, method, price string, amount int64, sta
 		"created": start.Unix(), "start_date": start.Unix(),
 		"default_payment_method": method, "metadata": map[string]string{}, "currency": "usd",
 		"items": Object{"object": "list", "data": []Object{{"id": m.id("si"), "price": item, "current_period_start": start.Unix(), "current_period_end": end.Unix()}}}}
-	m.invoiceLocked(id, amount, true)["billing_reason"] = "subscription_create"
+	m.invoiceLocked(id, amount, paid)["billing_reason"] = "subscription_create"
+	if !paid {
+		m.subs[id]["status"] = "incomplete"
+	}
 	return id
 }
 

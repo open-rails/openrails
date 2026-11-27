@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 912,
+  "scenario_count": 918,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1774,6 +1774,16 @@
       "name": "An NMI schedule paused long ago lands canceled where its paid time ended, not at the import"
     },
     {
+      "id": "OR-J38-S17",
+      "journey": "J38",
+      "name": "A Stripe subscription that paid for nothing (its first payment expired, or canceled before it) lands ended at its start and adds no MRR"
+    },
+    {
+      "id": "OR-J38-S18",
+      "journey": "J38",
+      "name": "A deleted NMI schedule is inferred from its recurring sales: ended only, marked inferred, priced by the one provider price they match, its sales its payments; a run no price matches stays history"
+    },
+    {
       "id": "OR-J38-S42",
       "journey": "J38",
       "name": "An NMI import lands each schedule in its mapped price's currency, NMI's decimal read exactly (1000.00 as 1000 JPY, 12.50 as 12.50 EUR); an amount not exact in that currency or a plan with no price stays blocked; a book's schedule in another currency than its price's is refused"
@@ -2846,7 +2856,7 @@
     {
       "id": "OR-J42-S05",
       "journey": "J42",
-      "name": "A CCBill upgrade replacing its subscription nets to one expansion; an imported subscription opens MRR rather than counting as new"
+      "name": "A CCBill upgrade replacing its subscription nets to one expansion; an imported subscription is new at its own start, not at the import"
     },
     {
       "id": "OR-J42-S06",
@@ -2952,6 +2962,26 @@
       "id": "OR-J42-S37",
       "journey": "J42",
       "name": "Migration 0013 over a book the rollups recorded (upgrades, an add-on, cancellations at period end taken and still ahead, resumes, at-risk cases of every reason, a scheduled downgrade, two currencies) keeps every MRR measure equal, read in UTC and New York; ends still ahead become scheduled movements, card_expiring and delinquent cases end superseded, and a later write settles on the converted book"
+    },
+    {
+      "id": "OR-J42-S38",
+      "journey": "J42",
+      "name": "An imported subscription is new at its own start and churns at its end, voluntary when the customer canceled; a live one is new at its start; nothing is booked at the import"
+    },
+    {
+      "id": "OR-J42-S39",
+      "journey": "J42",
+      "name": "A customer imported from two rails in two passes reads as one timeline: the second pass writes the first's movements again, its churn now a contraction"
+    },
+    {
+      "id": "OR-J42-S40",
+      "journey": "J42",
+      "name": "MRR, subscribers, churn rate, NRR, GRR, movements and cohort retention over imported months equal the same history booked live"
+    },
+    {
+      "id": "OR-J42-S41",
+      "journey": "J42",
+      "name": "An upgrade turns each opening an import wrote into its subscriptions' history from their start, gives an ended import its history, and keeps the live movements after it"
     },
     {
       "id": "OR-J28-S09",
