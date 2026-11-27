@@ -47,6 +47,41 @@ func (q *Queries) BoundImportedProductAccessByGrant(ctx context.Context, arg Bou
 	return err
 }
 
+const boundProductAccessToGrant = `-- name: BoundProductAccessToGrant :execrows
+UPDATE billing.product_access pa SET
+    starts_at = GREATEST(pa.starts_at, g.starts_at),
+    ends_at = CASE WHEN g.ends_at IS NULL THEN pa.ends_at
+                   WHEN pa.ends_at IS NULL THEN g.ends_at
+                   ELSE LEAST(pa.ends_at, g.ends_at) END,
+    updated_at = $1::timestamptz
+FROM billing.grants g
+WHERE pa.merchant_id = $2::uuid AND pa.id = $3::uuid
+  AND g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
+  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+  AND (pa.starts_at < g.starts_at OR g.ends_at IS NOT NULL AND (pa.ends_at IS NULL OR pa.ends_at > g.ends_at))
+  AND (g.ends_at IS NULL OR pa.starts_at < g.ends_at) AND (pa.ends_at IS NULL OR g.starts_at < pa.ends_at)
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.grants t
+      WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+        AND t.event IN ('revoke', 'expire', 'supersede'))
+`
+
+type BoundProductAccessToGrantParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// Cuts a live window that overlaps its live grant back to the grant's dates.
+// The conditions are rechecked on the row as it is when written.
+func (q *Queries) BoundProductAccessToGrant(ctx context.Context, arg BoundProductAccessToGrantParams) (int64, error) {
+	result, err := q.db.Exec(ctx, boundProductAccessToGrant, arg.Now, arg.MerchantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countLiveProductHolders = `-- name: CountLiveProductHolders :many
 SELECT candidate.product_id::uuid AS product_id, (
     SELECT count(DISTINCT pa.customer_id) FROM billing.product_access pa

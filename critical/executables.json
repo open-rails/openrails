@@ -1399,6 +1399,9 @@
     "OR-J27-S16": [
       "TestEntitlementReadPlans/OR-J27-S16/exact-checks-and-prefix-pages-stay-on-their-indexes"
     ],
+    "OR-J27-S17": [
+      "TestPublicEntitlements/OR-J27-S17/a-window-wider-than-its-grant-is-cut-back-to-the-grant"
+    ],
     "OR-J04-S42": [
       "TestBillingPass/OR-J04-S42/an-engine-renewal-waits-for-the-hourly-pass-with-access-unbroken"
     ],

@@ -307,6 +307,40 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 		})
 	}
 
+	// Window direction: a live window wider than its grant. The grant is the
+	// evidence, so the repair cuts the window back to it. A window outside its
+	// grant altogether has no trustworthy dates: an operator decides.
+	wide, err := q.ListAccessWindowsWiderThanGrant(ctx, gen.ListAccessWindowsWiderThanGrantParams{
+		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now, RowLimit: convergeScanCap,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("derive: scan access windows wider than their grant: %w", err)
+	}
+	markTruncated(ctx, len(wide), "derive.grant_effect.mismatch")
+	for i := range wide {
+		w := wide[i]
+		f := ConvergeFinding{
+			Type:       "derive.grant_effect.mismatch",
+			Shape:      ShapeMismatch,
+			Class:      ClassAuto,
+			Retracts:   true,
+			Severity:   "high",
+			SubjectKey: "product_access:" + w.AccessID.String(),
+			Provider:   "self",
+			Evidence: map[string]any{
+				"access_id": w.AccessID.String(), "grant_id": w.GrantID.String(), "customer_id": w.CustomerID.String(),
+				"product_id": billing.ProductID(w.ProductID).String(), "direction": "window",
+				"starts_at": w.StartsAt, "ends_at": w.EndsAt, "grant_starts_at": w.GrantStartsAt, "grant_ends_at": w.GrantEndsAt,
+			},
+			Repair: func(ctx context.Context) error { return p.lockedBoundWindow(ctx, scope, w.CustomerID, w.AccessID) },
+		}
+		if !w.Overlaps {
+			f.Class, f.Retracts, f.Repair = ClassAdmin, false, nil
+			f.RecommendedAction = fmt.Sprintf("Access window %s lies outside the dates of its grant %s. Check both, then revoke the window or leave it.", w.AccessID, w.GrantID)
+		}
+		out = append(out, f)
+	}
+
 	// derive.access.unjustified — the FREELOADER detector: a live product-access
 	// window whose source is proven absent or reversed (sub row missing;
 	// refunded one-off payment) with no live grant justifying it. Stale is not
@@ -401,6 +435,21 @@ func (p *derivePass) lockedMaterialize(ctx context.Context, scope Scope, g gen.B
 			}
 		}
 		return gl.MaterializeGrant(ctx, g)
+	})
+}
+
+// lockedBoundWindow cuts a window back to its grant under the customer's lock.
+func (p *derivePass) lockedBoundWindow(ctx context.Context, scope Scope, customer, access uuid.UUID) error {
+	ctx = merchant.WithID(ctx, scope.Merchant)
+	return p.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if err := grants.New(q, scope.Merchant.UUID()).LockCustomer(ctx, customer); err != nil {
+			return err
+		}
+		_, err := q.BoundProductAccessToGrant(ctx, gen.BoundProductAccessToGrantParams{
+			MerchantID: scope.Merchant.UUID(), ID: access, Now: p.e.Now(),
+		})
+		return err
 	})
 }
 

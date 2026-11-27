@@ -1148,3 +1148,27 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid
 -- A correction adopts the provider's start date.
 UPDATE billing.subscriptions SET started_at = sqlc.arg(started_at)::timestamptz, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- derive.grant_effect.mismatch (window direction): a live window that starts
+-- before its grant or ends after it. Every writer copies the grant's dates or
+-- narrows them, so the wider part has no grant behind it. A window outside
+-- its grant altogether has no trustworthy dates and goes to an operator.
+-- Terminated grants are derive.grant_effect.excess's. NULL customer_id =
+-- merchant-wide.
+-- name: ListAccessWindowsWiderThanGrant :many
+SELECT pa.id AS access_id, pa.customer_id, pa.product_id, pa.grant_id,
+       pa.starts_at, pa.ends_at, g.starts_at AS grant_starts_at, g.ends_at AS grant_ends_at,
+       ((g.ends_at IS NULL OR pa.starts_at < g.ends_at) AND (pa.ends_at IS NULL OR g.starts_at < pa.ends_at))::boolean AS overlaps
+FROM billing.product_access pa
+JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
+WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR pa.customer_id = sqlc.narg(customer_id)::uuid)
+  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+  AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(now)::timestamptz)
+  AND (pa.starts_at < g.starts_at OR g.ends_at IS NOT NULL AND (pa.ends_at IS NULL OR pa.ends_at > g.ends_at))
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.grants t
+      WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+        AND t.event IN ('revoke', 'expire', 'supersede'))
+ORDER BY pa.created_at, pa.id
+LIMIT sqlc.arg(row_limit)::int;
