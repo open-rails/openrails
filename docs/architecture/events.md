@@ -81,5 +81,5 @@ Checks:
 ## Tests
 
 - OR-J09-S01, OR-J09-S04, OR-J13-S01, OR-J14-S05, OR-J21-S04 and OR-J22-S04 commit or roll back facts with their domain transaction; OR-J31-S01 restores into a new stream where source cursors answer `event_cursor_expired`.
-- Balance notices: OR-J25-S04, OR-J25-S37, OR-J25-S40, OR-J25-S41, OR-J25-S42.
+- Balance notices: OR-J25-S04, OR-J25-S37, OR-J25-S40, OR-J25-S41, OR-J25-S42, OR-J25-S47, OR-J25-S48, OR-J25-S49.
 - Gaps: no test expires a cursor by retention (`eventlog.Prune`); `internal/eventlog` has no tests of its own.

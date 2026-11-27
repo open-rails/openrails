@@ -153,7 +153,7 @@ type savedCardReplay struct {
 
 // savedOnce saves the card under its customer's key: a saved card is
 // answered again; a refusal, or a card still awaiting the bank, runs again.
-func savedOnce(r *httprequest.Request, user *payment.UserIdentity, req billing.CreatePaymentMethodParams, key string) {
+func savedOnce(r *httprequest.Request, user *payment.CustomerIdentity, req billing.CreatePaymentMethodParams, key string) {
 	terms, err := json.Marshal(struct {
 		PSPID          billing.PSPID           `json:"psp_id"`
 		Token          string                  `json:"token"`
@@ -210,7 +210,7 @@ func savedOnce(r *httprequest.Request, user *payment.UserIdentity, req billing.C
 	}
 }
 
-func savePaymentMethod(r *httprequest.Request, user *payment.UserIdentity, req billing.CreatePaymentMethodParams) {
+func savePaymentMethod(r *httprequest.Request, user *payment.CustomerIdentity, req billing.CreatePaymentMethodParams) {
 	if req.PSPID.IsZero() {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "psp_id must name a PSP").WithParam("psp_id"))
 		return
@@ -370,7 +370,7 @@ func pspRail(r *httprequest.Request, merchantID, pspID uuid.UUID) string {
 }
 
 // saveStripeCard saves a card the page's Stripe fields tokenized.
-func saveStripeCard(r *httprequest.Request, user *payment.UserIdentity, psp uuid.UUID, token string) {
+func saveStripeCard(r *httprequest.Request, user *payment.CustomerIdentity, psp uuid.UUID, token string) {
 	resolver := r.State.StripeEngines()
 	if resolver == nil || r.State.PurchaseService == nil {
 		r.ErrorCode(billing.CodeServiceUnavailable, "Stripe card save unavailable")
@@ -428,7 +428,7 @@ func ConfirmPaymentMethod(r *httprequest.Request) {
 	writeSavedCard(r, user, http.StatusOK, saved, err)
 }
 
-func writeSavedCard(r *httprequest.Request, user *payment.UserIdentity, status int, saved payment.SavedCard, err error) {
+func writeSavedCard(r *httprequest.Request, user *payment.CustomerIdentity, status int, saved payment.SavedCard, err error) {
 	var refused *paymentmethods.PaymentMethodError
 	switch {
 	case errors.As(err, &refused):

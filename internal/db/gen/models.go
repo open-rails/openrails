@@ -27,10 +27,6 @@ type BillingBalanceWatch struct {
 	UpdatedAt  time.Time
 	// When the customer was funded (a deposit, a credit grant, a reinstatement or a payment of what it owes) since its last notice; only funding re-arms a notice, and a notice clears it.
 	FundedAt *time.Time
-	// Exponentially weighted rate of usage spend, one-hour time constant, in native units per hour: each look adds what the usage history's quarter hours that ended since rate_sampled_at cost.
-	UsageRatePerHour int64
-	// The instant usage_rate_per_hour was sampled at; quarter hours ended before it are not read again.
-	RateSampledAt *time.Time
 	// The available amount (balance less held) at or under which the balance is low, as the last look found the line; null with no line.
 	LowLineAmount *int64
 	// The available amount at or under which the balance is depleted, as the last look found it; null before a look.
@@ -319,6 +315,15 @@ type BillingCustomerDelinquency struct {
 	NextEvaluationAt *time.Time
 }
 
+// Merchant-global customer card-delete and soft-cancel rolling-hour/day rate reservations. No actor can obtain a separate budget. customer_id is an opaque identity and deliberately has no cascading customer FK. The canonical operation/card/subscription remains authoritative after pruning. Retention: rows are deleted 24 hours after reserved_at.
+type BillingCustomerDestructiveReservation struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ActionKey  string
+	Kind       string
+	ReservedAt time.Time
+}
+
 // Per-payer enterprise invoicing profile: net-N terms, collection method (charge_automatically | send_invoice for manual remittance) and document fields (PO, tax, contacts) snapshotted onto invoices at finalize.
 type BillingCustomerInvoiceProfile struct {
 	MerchantID       uuid.UUID
@@ -343,15 +348,14 @@ type BillingCustomerLimitOverride struct {
 	UpdatedAt  time.Time
 }
 
-// A customer's own low-balance line per currency: the amount line and the runway line (hours of spend at its burn rate). A null part inherits the merchant's settings.balance_notices; a line with no part set has no row.
+// A customer's own low-balance amount per currency: its balance is low once what it may spend is at or under it; 0 turns the notice off. A customer with no row inherits the merchant's settings.balance_notices.
 type BillingCustomerLowBalanceLine struct {
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	Currency    string
-	Amount      *int64
-	RunwayHours *int32
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Amount     int64
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // One message to a customer about one billing fact (a notification_events row) on one channel, and what became of it. No body is kept: it is the delivery log a dispute response cites. A fact sends at most one message per channel. Retention: rows are deleted two years (731 days) after created_at.
@@ -695,7 +699,7 @@ type BillingInvoice struct {
 	AttemptID        *uuid.UUID
 	PaymentID        *uuid.UUID
 	LastPaymentError []byte
-	// When an unpaid purchase expires; a renewal has none.
+	// When a customer's unpaid purchase (origin customer) expires; no other invoice expires.
 	ExpiresAt   *time.Time
 	CompletedAt *time.Time
 	CanceledAt  *time.Time
@@ -706,7 +710,7 @@ type BillingInvoice struct {
 	PaymentStatus string
 	// sha256 of the pay URL's secret; the secret is never stored. Set once on a merchant invoice; on a customer's own invoice, again each time the customer asks for its pay URL, which ends the last.
 	PayUrlSecretHash []byte
-	// When the pay URL stops working; no later than the invoice's own expiry.
+	// When the pay URL stops working: a customer purchase's with the purchase, a merchant invoice's on its own while the invoice stays open.
 	PayUrlExpiresAt *time.Time
 	// Where a merchant invoice's pay URL returns once paid. NULL on a customer's own embedded pay URL, which returns nowhere: the frame tells its page.
 	SuccessUrl          *string
@@ -2565,15 +2569,6 @@ type BillingUsageTotal struct {
 	// Pending: what the lease's settled usage costs at the provisional prices intake gave it, never below zero; zero once posted.
 	Amount    int64
 	UpdatedAt time.Time
-}
-
-// Merchant-global customer card-delete and soft-cancel rolling-hour/day rate reservations. No actor can obtain a separate budget. customer_id is an opaque identity and deliberately has no cascading customer FK. The canonical operation/card/subscription remains authoritative after pruning. Retention: rows are deleted 24 hours after reserved_at.
-type BillingUserDestructiveReservation struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	ActionKey  string
-	Kind       string
-	ReservedAt time.Time
 }
 
 // webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied. Retention: completed events are deleted 90 days after completed_at.

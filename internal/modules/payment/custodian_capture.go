@@ -129,7 +129,7 @@ func sameCaptureAccount(a, b models.CardCapture) bool {
 
 // captureContact uses authenticated contact facts when available; the request
 // supplies billing contact details only, never the vendor customer identity.
-func captureContact(details *billing.BillingDetails, user *UserIdentity) (string, string, error) {
+func captureContact(details *billing.BillingDetails, user *CustomerIdentity) (string, string, error) {
 	name, email := strings.TrimSpace(user.Username), ""
 	if details != nil {
 		if name == "" && details.Name != nil {
@@ -174,7 +174,7 @@ func captureFromMethod(owner billing.MerchantID, method *models.PaymentMethod) (
 // SaveCustodianCard opens hosted card fields for this customer's pending
 // payment method. Only the first accepted vendor session is exposed. Competing
 // vendor preparations may expire unused; none can charge a card.
-func (s *InvoiceAttemptService) SaveCustodianCard(ctx context.Context, req billing.CreatePaymentMethodParams, key string, user *UserIdentity, metadata map[string]any) (SavedCard, error) {
+func (s *InvoiceAttemptService) SaveCustodianCard(ctx context.Context, req billing.CreatePaymentMethodParams, key string, user *CustomerIdentity, metadata map[string]any) (SavedCard, error) {
 	if strings.TrimSpace(key) == "" || cardguard.ContainsPAN(key) || req.Token != "" || req.Card != nil || req.PSPID.IsZero() {
 		return SavedCard{}, fmt.Errorf("%w: custodian capture requires PSP id and Idempotency-Key, without a token or card", ErrInvoiceAttemptValidation)
 	}
@@ -304,7 +304,7 @@ func (s *InvoiceAttemptService) renderCapturedCard(ctx context.Context, method *
 // ConfirmCustodianCard reads the token back from its exact vendor session,
 // then attaches the instrument under the customer and custodian handle locks.
 // It never charges or creates a card-on-file mandate.
-func (s *InvoiceAttemptService) ConfirmCustodianCard(ctx context.Context, id uuid.UUID, user *UserIdentity, reference *billing.CustodianCaptureReference) (SavedCard, error) {
+func (s *InvoiceAttemptService) ConfirmCustodianCard(ctx context.Context, id uuid.UUID, user *CustomerIdentity, reference *billing.CustodianCaptureReference) (SavedCard, error) {
 	if reference == nil {
 		return SavedCard{}, fmt.Errorf("%w: capture reference required", ErrInvoiceAttemptValidation)
 	}

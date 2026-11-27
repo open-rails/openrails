@@ -66,6 +66,12 @@ or a lapsing lot); `openrails.balance_watch` takes watches due by `next_check_at
 once per crossing (a funding re-arms them) and sets the next look: at a lot's
 lapse or where a running charge's accrual crosses a line. It posts no running
 charge: the daily posting does.
+A balance is low once what the customer may spend is at or under an amount:
+its own (`customer_low_balance_lines`), else the merchant's
+`balance_notices.low_amounts` for the currency, else none; it is depleted at
+zero capacity. Usage and transfers are judged as they happen; time moves a
+balance only through a running charge's fixed rate and a lot's lapse, so a look
+is scheduled for the exact instant either crosses a line.
 
 ## Interfaces
 
@@ -186,7 +192,7 @@ Checks:
 - OR-J40-S10 a $50 pack of 55 credits releases exactly $10 for 11 credits and the remainder with its last; OR-J40-S11 expiry, revocation and reinstatement; OR-J40-S12 a gift spend, and owed repaid from a gift and from a bonus pack; OR-J40-S13 refunds of spent and unspent credit and a won dispute (`TestCreditBooks`).
 - Also: OR-J24-S22 and OR-J04-S44 (a lapsed lot is never drawn); OR-J23-S14
   (an open ticket holds its windows, not the balance); OR-J24-S71 (usage past
-  the balance posts owed); OR-J25-S37, OR-J25-S40 to S42 (balance looks);
+  the balance posts owed); OR-J25-S37, OR-J25-S40 to S42 (balance looks); OR-J25-S47 to S49 (low amounts, exact running-charge crossings);
   OR-J34-S01 to S04 (revocation ceilings).
 - No Go package test covers this system; `sqlc vet` prepares its queries.
 

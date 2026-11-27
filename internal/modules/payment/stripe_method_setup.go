@@ -61,7 +61,7 @@ type stripeCardSave struct {
 	psp      uuid.UUID
 }
 
-func (s *PurchaseService) stripeCardAccount(ctx context.Context, psp uuid.UUID, user *UserIdentity, resolver intents.StripeEngineServiceResolver) (*stripeCardSave, error) {
+func (s *PurchaseService) stripeCardAccount(ctx context.Context, psp uuid.UUID, user *CustomerIdentity, resolver intents.StripeEngineServiceResolver) (*stripeCardSave, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -96,7 +96,7 @@ func StripeCardID(merchantID, customer uuid.UUID, token string) uuid.UUID {
 
 // SaveStripeCard saves the card behind token, a pm_ the page's Stripe fields
 // made, to the customer.
-func (s *PurchaseService) SaveStripeCard(ctx context.Context, psp uuid.UUID, token string, user *UserIdentity, resolver intents.StripeEngineServiceResolver) (SavedCard, error) {
+func (s *PurchaseService) SaveStripeCard(ctx context.Context, psp uuid.UUID, token string, user *CustomerIdentity, resolver intents.StripeEngineServiceResolver) (SavedCard, error) {
 	token = strings.TrimSpace(token)
 	account, err := s.stripeCardAccount(ctx, psp, user, resolver)
 	if err != nil {
@@ -171,7 +171,7 @@ func (s *PurchaseService) SaveStripeCard(ctx context.Context, psp uuid.UUID, tok
 // ConfirmStripeCard reads the SetupIntent of a card the bank asked to
 // authenticate: succeeded saves it; still waiting answers its next action; a
 // refusal removes it.
-func (s *PurchaseService) ConfirmStripeCard(ctx context.Context, methodID uuid.UUID, user *UserIdentity, resolver intents.StripeEngineServiceResolver) (SavedCard, error) {
+func (s *PurchaseService) ConfirmStripeCard(ctx context.Context, methodID uuid.UUID, user *CustomerIdentity, resolver intents.StripeEngineServiceResolver) (SavedCard, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return SavedCard{}, err

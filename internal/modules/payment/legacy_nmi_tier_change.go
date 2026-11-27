@@ -164,7 +164,7 @@ func (s *PurchaseService) previewProviderNMITierChange(ctx context.Context, resp
 
 // processProviderNMITierChange freezes the change and runs it as one durable
 // operation (nmi_upgrade_intent.go). The same Idempotency-Key replays it.
-func (s *PurchaseService) processProviderNMITierChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity, newPrice *models.Price, newProduct *models.Product, sub *models.Subscription, action string) (*TierChangeResponse, error) {
+func (s *PurchaseService) processProviderNMITierChange(ctx context.Context, req *SubscriptionChangeRequest, user *CustomerIdentity, newPrice *models.Price, newProduct *models.Product, sub *models.Subscription, action string) (*TierChangeResponse, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err

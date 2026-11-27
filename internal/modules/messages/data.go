@@ -60,7 +60,7 @@ func messageData(f fact) billing.MessageData {
 			AvailableAmount: shown(d.AvailableAmount, d.Currency), OwedAmount: shown(d.OwedAmount, d.Currency),
 			LowBalanceAmount: shown(d.LowBalanceAmount, d.Currency),
 			EndedAt:          day(d.EndedAt), EffectiveAt: day(d.EffectiveAt), PeriodStartsAt: day(d.PeriodStartsAt), PeriodEndsAt: day(d.PeriodEndsAt),
-			DueAt: day(d.DueAt), NextAttemptAt: day(d.NextAttemptAt), RunwayEndsAt: day(d.RunwayEndsAt), OverdueStartedAt: day(d.OverdueStartedAt),
+			DueAt: day(d.DueAt), NextAttemptAt: day(d.NextAttemptAt), OverdueStartedAt: day(d.OverdueStartedAt),
 			InvoiceNumber: count(d.InvoiceNumber), OverdueInvoices: count(int64(d.OverdueInvoices)), Quantity: quantity(d.Quantity),
 			AccessEnded: d.AccessEnded, DowngradeApplied: d.DowngradeApplied, Voided: d.Voided,
 			RetryStatus: d.RetryStatus, RecoveryAction: d.RecoveryAction, CollectionMethod: d.CollectionMethod,
@@ -165,7 +165,7 @@ func sample(eventType string) fact {
 	case models.NotificationAccountDelinquent, models.NotificationAccountDelinquencyClosed:
 		d.OverdueAmount, d.OverdueInvoices, d.OverdueStartedAt = amount(30_000_000), 2, &at
 	case models.NotificationBalanceLow, models.NotificationBalanceDepleted:
-		d.AvailableAmount, d.OwedAmount, d.LowBalanceAmount, d.RunwayEndsAt = amount(4_000_000), amount(0), amount(5_000_000), &sooner
+		d.AvailableAmount, d.OwedAmount, d.LowBalanceAmount = amount(4_000_000), amount(0), amount(5_000_000)
 	case models.NotificationInvoiceDue, models.NotificationInvoiceOverdue:
 		d.InvoiceID, d.AmountDue, d.DueAt, d.CollectionMethod = invoice, amount(30_000_000), &sooner, billing.CollectSendInvoice
 	case models.NotificationSubscriptionRepriceScheduled:

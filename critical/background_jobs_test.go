@@ -203,7 +203,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NotContains(t, health, "openrails.customer_messages_dispatch", "a fact queues its message's job; no pass dispatches")
 		require.NotContains(t, health, "openrails.nmi_history", "NMI's own history is no job")
 		for _, scan := range []string{"openrails.usage_posting", "openrails.dunning", "openrails.balance_watch", "openrails.delinquency", "openrails.invoice_expiry",
-			"openrails.revenue_recognition", "openrails.config_realerts", "openrails.stored_card_refresh_due"} {
+			"openrails.revenue_recognition", "openrails.stored_card_refresh_due"} {
 			require.NotContains(t, health, scan, "a scan runs in the billing pass; it is no job kind")
 		}
 		require.NotContains(t, health, "openrails.operation_wakes")

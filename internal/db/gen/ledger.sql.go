@@ -23,8 +23,8 @@ WITH created AS (
     ON CONFLICT DO NOTHING
     RETURNING customer_id, currency
 )
-INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, look_each_change)
-SELECT $1::uuid, c.customer_id, c.currency, NULL::timestamptz, 0, true
+INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, look_each_change)
+SELECT $1::uuid, c.customer_id, c.currency, NULL::timestamptz, true
 FROM created c
 WHERE NOT EXISTS (
     SELECT 1 FROM billing.money_settings s

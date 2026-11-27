@@ -236,8 +236,6 @@ checkout:
     postal_code: ""
 # BalanceNotices are the default low-balance lines of the merchant's customers; a patch replaces it whole.
 balance_notices:
-  # RunwayHours is the line in hours of spend at the customer's burn rate: 24 when unset, 0 off.
-  runway_hours: 0
   # LowAmounts are amount lines per currency; none for a currency not listed.
   low_amounts:
       # Currency is the balance's currency.

@@ -31,12 +31,12 @@ func GetMySubscriptions(r *httprequest.Request) {
 	if q.Status != "all" {
 		filters.Status = q.Status
 	}
-	subs, err := r.State.UserSubscriptionService.ListUserSubscriptions(r.Request.Context(), user.ID, filters, page)
+	subs, err := r.State.CustomerSubscriptionService.ListCustomerSubscriptions(r.Request.Context(), user.ID, filters, page)
 	if err != nil {
 		writeRefusal(r, err, "failed to retrieve subscriptions")
 		return
 	}
-	writeSubscriptions(r, pagination.Map(subs, func(sub *subscriptions.UserSubscriptionResponse) billing.Subscription { return sub.View() }))
+	writeSubscriptions(r, pagination.Map(subs, func(sub *subscriptions.CustomerSubscriptionResponse) billing.Subscription { return sub.View() }))
 }
 
 // GetSubscription reads one of the customer's own subscriptions, with its

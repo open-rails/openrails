@@ -103,7 +103,7 @@ func (s *Service) agreements(ctx context.Context, customer billing.CustomerID, r
 	}
 	subs := map[uuid.UUID]billing.Subscription{}
 	if len(subIDs) > 0 {
-		page, err := s.rt.UserSubscriptionService.ListUserSubscriptions(ctx, customer.String(), subscriptions.GetSubscriptionsFilters{IDs: subIDs}, billing.PageRequest{Limit: len(subIDs)})
+		page, err := s.rt.CustomerSubscriptionService.ListCustomerSubscriptions(ctx, customer.String(), subscriptions.GetSubscriptionsFilters{IDs: subIDs}, billing.PageRequest{Limit: len(subIDs)})
 		if err != nil {
 			return nil, err
 		}
@@ -228,7 +228,7 @@ func (s *Service) revokeRecurring(ctx context.Context, customer billing.Customer
 			return nil, err
 		}
 	}
-	page, err := s.rt.UserSubscriptionService.ListUserSubscriptions(ctx, customer.String(), subscriptions.GetSubscriptionsFilters{IDs: []uuid.UUID{sub.ID}}, billing.PageRequest{Limit: 1})
+	page, err := s.rt.CustomerSubscriptionService.ListCustomerSubscriptions(ctx, customer.String(), subscriptions.GetSubscriptionsFilters{IDs: []uuid.UUID{sub.ID}}, billing.PageRequest{Limit: 1})
 	if err != nil || len(page.Items) == 0 {
 		return nil, errors.Join(err, errors.New("revoked agreement: subscription not found"))
 	}
@@ -394,10 +394,10 @@ func (s *Service) CancelSubscriptionForCustomer(ctx context.Context, customer bi
 // expiry when the rail supports a cancellation undo window.
 func (s *Service) cancelForCustomer(ctx context.Context, customer billing.CustomerID, sub *models.Subscription, reason string) error {
 	if sub.CollectionPolicy != models.CollectionPolicyEngine {
-		if s.rt.UserSubscriptionService == nil {
+		if s.rt.CustomerSubscriptionService == nil {
 			return fmt.Errorf("user subscription service unavailable")
 		}
-		return s.rt.UserSubscriptionService.CancelUserSubscription(ctx, customer.String(), sub.ID, reason)
+		return s.rt.CustomerSubscriptionService.CancelCustomerSubscription(ctx, customer.String(), sub.ID, reason)
 	}
 	if s.rt.SubscriptionLifecycleService == nil {
 		return fmt.Errorf("subscription lifecycle service unavailable")

@@ -69,7 +69,7 @@ func AdminPreviewSubscriptionChange(r *httprequest.Request) {
 
 func adminChangeRequest(
 	r *httprequest.Request,
-) (*payment.SubscriptionChangeRequest, *payment.UserIdentity, *models.Subscription, bool) {
+) (*payment.SubscriptionChangeRequest, *payment.CustomerIdentity, *models.Subscription, bool) {
 	var body ChangeSubscriptionRequest
 	if !r.BindJSON(&body) {
 		return nil, nil, nil, false
@@ -89,7 +89,7 @@ func adminChangeRequest(
 
 // adminChangeCustomer reads the subscription a staff change names and the
 // customer it changes for, with the customer's email from the directory.
-func adminChangeCustomer(r *httprequest.Request, subscriptionID uuid.UUID) (*payment.UserIdentity, *models.Subscription, bool) {
+func adminChangeCustomer(r *httprequest.Request, subscriptionID uuid.UUID) (*payment.CustomerIdentity, *models.Subscription, bool) {
 	if r.State.PurchaseService == nil || r.State.SubscriptionService == nil {
 		r.ErrorCode(billing.CodeInternalError, "subscription service unavailable")
 		return nil, nil, false
@@ -109,7 +109,7 @@ func adminChangeCustomer(r *httprequest.Request, subscriptionID uuid.UUID) (*pay
 		r.ErrorCode(billing.CodeInternalError, "subscription customer unavailable")
 		return nil, nil, false
 	}
-	user := &payment.UserIdentity{ID: subscription.CustomerID.String()}
+	user := &payment.CustomerIdentity{ID: subscription.CustomerID.String()}
 	if r.State.Contacts != nil {
 		found, err := r.State.Contacts.Contacts(r.Request.Context(), billing.MerchantID(subscription.MerchantID), []uuid.UUID{subscription.CustomerID})
 		if err != nil {

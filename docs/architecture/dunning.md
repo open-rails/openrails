@@ -175,7 +175,7 @@ Staff reads need `merchant:customer:read`, write-offs
 `merchant:customer:manage`, policy settings `merchant:config:manage`
 (`Route.Needs`). `retry-now` needs the customer acting in person
 (`actionCustomer`) and finds only that customer's subscription
-(`GetUserSubscriptionByID`).
+(`GetCustomerSubscriptionByID`).
 
 Checks:
 - `ListDueDunningMerchants`, `ListOverdueRenewalMerchants`, `ListDueDelinquency`
