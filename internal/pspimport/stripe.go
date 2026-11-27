@@ -192,13 +192,16 @@ func stripeSubscription(sub reconcile.RemoteSubscription, raw json.RawMessage) (
 		}
 	}
 	switch x.Status {
-	case "canceled", "incomplete_expired":
+	case "canceled":
 		// Service ended at ended_at; canceled_at is when the cancel was made.
 		data.Ended, data.EndedAt, data.CanceledAt = true, stripeTime(x.EndedAt), stripeTime(x.CanceledAt)
 		if data.EndedAt == nil {
 			data.EndedAt = data.CanceledAt
 		}
 		data.EndKind = stripeEndKind(x.Status, x.CancellationDetails.Reason)
+	case "incomplete_expired":
+		// Its first payment never completed: it served nothing.
+		data.Ended, data.CanceledAt, data.EndKind = true, stripeTime(x.CanceledAt), stripeEndKind(x.Status, x.CancellationDetails.Reason)
 	case "unpaid", "paused":
 		// Stripe states no end: its last paid invoice does (the lander's).
 		data.Ended, data.EndKind = true, string(reconcile.DeclaredCancelProviderTerminated)

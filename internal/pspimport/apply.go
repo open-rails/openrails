@@ -136,19 +136,24 @@ func termsOf(id string, amount int64, currency string, hours, months *int32) pri
 // (CCBill) instead takes every live provider price of the PSP, archived ones
 // included, by price.
 func (im *Importer) providerPrices(ctx context.Context, row gen.BillingPspImport) (map[string]priceTerms, map[uuid.UUID]priceTerms, error) {
-	if !planned[row.Rail] {
+	var recurring map[uuid.UUID]priceTerms
+	// A plan-less rail's subscriptions, and NMI's inferred schedules, land
+	// on the PSP's recurring prices.
+	if !planned[row.Rail] || row.Rail == "nmi" {
 		rows, err := im.DB.Gen(ctx).ListPSPProviderPricesOfPSP(ctx, gen.ListPSPProviderPricesOfPSPParams{MerchantID: row.MerchantID, PspID: row.PspID})
 		if err != nil {
 			return nil, nil, err
 		}
-		out := make(map[uuid.UUID]priceTerms, len(rows))
+		recurring = make(map[uuid.UUID]priceTerms, len(rows))
 		for _, r := range rows {
 			// A subscription lands only on a recurring price.
 			if t := termsOf(r.PublicID, r.Amount, r.Currency, r.BillingIntervalHours, r.BillingIntervalMonths); t.period() > 0 {
-				out[r.ID] = t
+				recurring[r.ID] = t
 			}
 		}
-		return nil, out, nil
+	}
+	if !planned[row.Rail] {
+		return nil, recurring, nil
 	}
 	out := map[string]priceTerms{}
 	plans, err := im.DB.Gen(ctx).ListPSPImportPlans(ctx, gen.ListPSPImportPlansParams{MerchantID: row.MerchantID, ImportID: row.ID})
@@ -162,7 +167,7 @@ func (im *Importer) providerPrices(ctx context.Context, row gen.BillingPspImport
 		}
 	}
 	if len(refs) == 0 {
-		return out, nil, nil
+		return out, recurring, nil
 	}
 	rows, err := im.DB.Gen(ctx).ListPSPProviderPrices(ctx, gen.ListPSPProviderPricesParams{MerchantID: row.MerchantID, PspID: row.PspID, Refs: refs})
 	if err != nil {
@@ -171,7 +176,7 @@ func (im *Importer) providerPrices(ctx context.Context, row gen.BillingPspImport
 	for _, r := range rows {
 		out[r.Ref] = termsOf(r.PublicID, r.Amount, r.Currency, r.BillingIntervalHours, r.BillingIntervalMonths)
 	}
-	return out, nil, nil
+	return out, recurring, nil
 }
 
 // planned are the rails whose subscriptions name a provider plan or price.
@@ -439,6 +444,13 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 			}
 			subRef := deref(r.SubscriptionRef)
 			sub, ok := subs[subRef]
+			// An inferred schedule no price lands leaves its sales history
+			// without a subscription, as they were before it was inferred.
+			if ok && inferred(subRef) {
+				if _, why := declareSub(sub); why != "" {
+					sub, ok, subRef = gen.BillingPspImportRecord{}, false, ""
+				}
+			}
 			if subRef == "" || !ok {
 				if l.scope.Rail != "nmi" {
 					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "history without a subscription is currently supported only for NMI"}
@@ -641,6 +653,14 @@ func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImpor
 		// History: it ends where its paid service did, and nothing is
 		// canceled at the provider.
 		end := data.ended(served)
+		if data.Inferred && data.LastPaidAt != nil {
+			end = price.through(*data.LastPaidAt)
+		}
+		// A Stripe subscription that paid nothing the history read served
+		// nothing: it adds no MRR, whatever date Stripe dropped it.
+		if l.scope.Rail == "stripe" && served.IsZero() && l.row.HistorySince != nil && !l.row.HistorySince.After(data.StartedAt) {
+			end = data.StartedAt
+		}
 		sub.PaidThrough, sub.Cancel = &end, data.endEvidence(end, l.asOf)
 	case scheduled && data.NextBillingAt != nil && (data.IntervalHours > 0) != (data.IntervalMonths > 0):
 		sub.AcceptedSchedule = &billing.DeclaredProviderSchedule{SourceReference: l.scope.Rail + "_subscription:" + r.Ref, Amount: data.Amount, Currency: catalog.Currency(data.Currency),
@@ -832,6 +852,9 @@ func (t priceTerms) agrees(cadence time.Duration) bool {
 // price's currency, whose interval agrees with the cadence it rebills at
 // when that is known; one that never rebilled, on the terms it signed up for.
 func (l *lander) priceOf(r gen.BillingPspImportRecord, plan string, stated *statedTerms, rebill rebills, cadence time.Duration) (priceTerms, string) {
+	if inferred(r.Ref) {
+		return l.inferredPrice(r)
+	}
 	if planned[l.scope.Rail] {
 		if plan == "" {
 			return priceTerms{}, "the provider names no plan for it"
@@ -873,4 +896,34 @@ func (l *lander) priceOf(r gen.BillingPspImportRecord, plan string, stated *stat
 		return priceTerms{}, fmt.Sprintf("%s %s%s: %d match among this PSP's recurring provider prices; %s", terms, rebill.decimal, every, len(match), pick)
 	}
 	return match[0], ""
+}
+
+// inferredPrice is the one recurring provider price of the PSP an inferred
+// schedule's sales equal, in its currency, at an interval its cadence agrees
+// with (any, from one sale).
+func (l *lander) inferredPrice(r gen.BillingPspImportRecord) (priceTerms, string) {
+	var data subscriptionData
+	if err := json.Unmarshal(r.Data, &data); err != nil {
+		return priceTerms{}, err.Error()
+	}
+	cadence := time.Duration(data.IntervalHours) * time.Hour
+	var match []priceTerms
+	for _, t := range l.pspPrices {
+		if t.amount == data.Amount && t.currency == data.Currency && (cadence == 0 || t.agrees(cadence)) {
+			match = append(match, t)
+		}
+	}
+	if len(match) != 1 {
+		return priceTerms{}, fmt.Sprintf("its recurring sales of %d every %d days: %d match among this PSP's recurring provider prices", data.Amount, data.IntervalHours/24, len(match))
+	}
+	return match[0], ""
+}
+
+// through is when an inferred schedule's paid time ended: one interval of
+// its price past its last sale.
+func (t priceTerms) through(last time.Time) time.Time {
+	if t.months > 0 {
+		return last.AddDate(0, t.months, 0)
+	}
+	return last.Add(time.Duration(t.hours) * time.Hour)
 }

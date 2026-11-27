@@ -77,6 +77,10 @@ type subscriptionData struct {
 	// Stated are the recurring terms a provider stated at signup (CCBill),
 	// which price a subscription that never rebilled.
 	Stated *statedTerms `json:"stated,omitempty"`
+	// Inferred is a deleted NMI schedule read from its recurring sales: its
+	// last paid one at LastPaidAt.
+	Inferred   bool       `json:"inferred,omitempty"`
+	LastPaidAt *time.Time `json:"last_paid_at,omitempty"`
 	// MethodRef is the saved card the provider bills, when it names one.
 	MethodRef string          `json:"method_ref,omitempty"`
 	Evidence  json.RawMessage `json:"evidence,omitempty"`
@@ -105,6 +109,9 @@ type transactionData struct {
 	// Decimal is a major-unit amount a provider reports without a currency;
 	// the subscription's price denominates it.
 	Decimal string `json:"decimal,omitempty"`
+	// Recurring is a charge a provider's schedule made (NMI's source
+	// recurring).
+	Recurring bool `json:"recurring,omitempty"`
 	// StripeInvoice is the complete invoice a Stripe charge paid.
 	StripeInvoice *billing.DeclaredStripeInvoice `json:"stripe_invoice,omitempty"`
 	// Remote is the transaction as a pull reads it.

@@ -80,6 +80,8 @@ type DeclaredSubscriptionFact struct {
 type DeclaredOutcome struct {
 	Code   string // imported | already_present | blocked
 	Reason string
+	// SubscriptionID is the row an imported fact created.
+	SubscriptionID uuid.UUID
 }
 
 const (
@@ -513,6 +515,9 @@ func ImportDeclaredSubscriptions(
 			}
 		}
 		out[f.SourceID] = DeclaredOutcome{Code: outcome}
+		if outcome == DeclaredImported {
+			out[f.SourceID] = DeclaredOutcome{Code: outcome, SubscriptionID: subID}
+		}
 	}
 	if book.needsAdmission() {
 		return out, ErrDeclaredAdmission

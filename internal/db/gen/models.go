@@ -1148,7 +1148,7 @@ type BillingMoneySetting struct {
 	UsageDueAt *time.Time
 }
 
-// One change of a customer's MRR in one currency: new (first MRR), reactivation (MRR again after none), expansion, contraction, churn (to none; voluntary for a customer's or merchant's cancel), opening (an import adopting subscriptions) or correction (a prune or an undo). Written at the commit of the transaction that made it; a scheduled one (a cancellation at period end) is dated at the end and counts once that instant passes. Retention: permanent, never pruned.
+// One change of a customer's MRR in one currency: new (first MRR), reactivation (MRR again after none), expansion, contraction, churn (to none; voluntary for a customer's or merchant's cancel) or correction (a prune or an undo). Written at the commit of the transaction that made it, or by an import at the instants of its subscriptions' history (imported); a scheduled one (a cancellation at period end) is dated at the end and counts once that instant passes. Retention: permanent, never pruned.
 type BillingMrrMovement struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
@@ -1171,6 +1171,8 @@ type BillingMrrMovement struct {
 	Scheduled bool
 	// 1 when the customer gains MRR in a first currency, -1 when it loses it in its last, 0 otherwise: distinct customers.
 	CustomerLogoDelta int32
+	// Written by an import from its subscriptions' history: the next import of the customer writes its imported movements again with its own.
+	Imported bool
 }
 
 // Each subscription's part of a movement, at its instant and in its currency: its product and price, its change of MRR and whether it began or stopped adding to it. A move to another product or currency leaves one and enters the other; at an equal MRR the lines stand alone (movement_id NULL). Retention: permanent, never pruned.
@@ -1188,6 +1190,8 @@ type BillingMrrMovementLine struct {
 	Cause           string
 	OccurredAt      time.Time
 	Currency        string
+	// A subscription's change an import wrote: kept as written when a later import of the customer writes its history again.
+	Imported bool
 }
 
 // One stretch of a subscription's MRR at risk for its status, from its first reason to its last: opened by its entry_reason, chaining reasons (mrr_risk_episodes), and closed recovered (healthy again while adding MRR), churned (its MRR ended while the case was open; voluntary for a customer's or merchant's cancel) or superseded (a prune, an upgrade or a change of currency). A cancel at period end closes it churned at the end, written at the cancel; a resume before then reopens it. card_expiring and delinquent cases end at their migration to state reads. The recovery rate is recovered MRR over recovered and churned. Retention: permanent, never pruned.
