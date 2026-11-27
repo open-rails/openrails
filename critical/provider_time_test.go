@@ -26,6 +26,7 @@ import (
 	embedded "github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -327,6 +328,71 @@ func TestProviderTime(t *testing.T) {
 				require.Equal(t, sale.TransactionID, kept.TransactionID)
 			})
 		}
+	})
+
+	t.Run("OR-J15-S75/prune-keeps-a-pending-refund-and-a-booked-nmi-chargeback", func(t *testing.T) {
+		a, p, sub := nmiMembership(t)
+		payments, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
+		require.NoError(t, err)
+		require.Len(t, payments.Items, 1)
+		absent := payments.Items[0]
+		invoice := nmiCheckoutInvoice(t, a, "pending-refund", false, 48*time.Hour)
+		invoice = payNMICheckout(t, a, invoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "1111"}), true)
+		pendingCharge := *invoice.Payment.PaymentID
+		p.core.Intercept(nmiRefundRequest, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
+			response := serve()
+			require.NoError(t, response.Body.Close())
+			return answer(r, http.StatusServiceUnavailable, ""), nil
+		})
+		reservation, err := a.alpha.RefundPayment(t.Context(), "unknown", pendingCharge, billing.RefundPaymentParams{Full: true, Reason: "Customer requested a refund"})
+		require.NoError(t, err)
+		require.Equal(t, billing.PaymentPending, reservation.Status)
+		p.core.ClearIntercepts()
+		require.Equal(t, intents.StatusUnknownNeedsVerify, nmiRefundOperation(t, a, pendingCharge, "unknown", false).Status)
+
+		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "charged-back", DisplayName: "Charged back", Entitlements: []string{"charged-back:owned"}})
+		require.NoError(t, err)
+		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "charged-back", UnitAmount: 6_000_000, Currency: "USD"})
+		require.NoError(t, err)
+		chargeInvoice, err := a.alpha.CreateInvoice(t.Context(), "charged-back", billing.CreateInvoiceParams{CustomerID: sub.CustomerID, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}})
+		require.NoError(t, err)
+		invoice = payNMICheckout(t, a, *chargeInvoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), true)
+		charge := *invoice.Payment.PaymentID
+		status, raw := nmiSignedDelivery(t, a, map[string]any{"event_id": "prune-chargeback", "event_type": "chargeback.batch.complete", "event_body": map[string]any{
+			"merchant": map[string]string{"id": "critical-gateway"}, "count": 1,
+			"chargebacks": []map[string]string{{"id": "cb-prune", "date": a.clock.Now().UTC().Format(time.DateOnly), "cc_number": "************4242", "amount": "6.00", "reason_code": "10.4", "reason": "Fraud"}}}}, "prune-chargeback")
+		require.Equal(t, http.StatusOK, status, raw)
+		before, err := a.alpha.GetPayment(t.Context(), charge)
+		require.NoError(t, err)
+		require.Len(t, before.Refunds, 1)
+		chargeback := before.Refunds[0]
+		require.Equal(t, billing.PaymentChargeback, chargeback.Kind)
+		pendingBefore, err := a.alpha.GetPayment(t.Context(), pendingCharge)
+		require.NoError(t, err)
+		p.core.EditSale(absent.TransactionID, func(s *nmimock.Sale) { s.Hidden = true })
+		since, until := a.clock.Now().Add(-time.Hour), a.clock.Now().Add(time.Hour)
+		plan := nmiPrune(t, a, since, until, nil)
+		require.Empty(t, plan.PaymentSkipReason)
+		excess := append(append([]uuid.UUID{}, plan.PaymentIDs...), plan.SkippedPaymentIDs...)
+		require.Contains(t, plan.PaymentIDs, absent.ID.UUID(), "a genuinely absent sale is still prunable")
+		require.NotContains(t, excess, reservation.ID.UUID())
+		require.NotContains(t, excess, chargeback.ID.UUID())
+		expected := plan.Payments + plan.Subscriptions
+		applied := nmiPrune(t, a, since, until, &expected)
+		require.Equal(t, plan.PaymentIDs, applied.PaymentIDs)
+		kept, err := a.alpha.GetPayment(t.Context(), reservation.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.PaymentPending, kept.Status)
+		kept, err = a.alpha.GetPayment(t.Context(), chargeback.ID)
+		require.NoError(t, err)
+		require.Equal(t, chargeback, *kept)
+		after, err := a.alpha.GetPayment(t.Context(), charge)
+		require.NoError(t, err)
+		require.Equal(t, before.AmountRefunded, after.AmountRefunded)
+		pendingAfter, err := a.alpha.GetPayment(t.Context(), pendingCharge)
+		require.NoError(t, err)
+		require.Equal(t, pendingBefore.AmountRefunded, pendingAfter.AmountRefunded)
+		require.Equal(t, pendingBefore.Refunds, pendingAfter.Refunds)
 	})
 
 	t.Run("OR-J15-S74/an-nmi-refresh-backlog-is-read-a-link-at-a-time-by-last-change", func(t *testing.T) {

@@ -22,6 +22,9 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	embedded "github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/stretchr/testify/require"
@@ -49,6 +52,33 @@ func archiveBytes(t *testing.T, client *openrails.Client) []byte {
 }
 
 func TestBillingArchive(t *testing.T) {
+	t.Run("OR-J31-S15/canceled-renewal-retains-revocation-evidence-through-restore", func(t *testing.T) {
+		a, p, sub := nmiEngineMembership(t)
+		p.core.LoseSales(1)
+		row := executeEngineRenewal(t, a, sub)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		a.clock.Advance(8 * 24 * time.Hour)
+		status, raw := a.request(t, http.MethodPost, "/v1/admin/subscriptions/"+sub.ID.String()+"/cancel", a.alphaKey.Secret, map[string]any{"reason": "Cut access immediately", "revoke_access": true})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		rt := embedded.Graph(a.engine).Runtime
+		require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+			var err error
+			row, err = rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Checked empty renewal order"})
+			return err
+		}))
+		require.Equal(t, intents.StatusFailedTerminal, row.Status)
+		require.Equal(t, a.clock.Now().UTC().Format(time.RFC3339Nano), intents.EvidenceString(row, "cancel_revoked_access_at"))
+		require.NoError(t, intents.ValidateSubscriptionCollectionTerminal(row))
+		archive := archiveBytes(t, a.alpha)
+		target, client := archiveTarget(t, a.world, func(w *world) { w.deps.NMITransport = a.deps.NMITransport })
+		_, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err)
+		var evidence []byte
+		require.NoError(t, target.pool.QueryRow(t.Context(), "SELECT result_evidence FROM "+pgx.Identifier{target.schema, "provider_intents"}.Sanitize()+" WHERE merchant_id=$1 AND id=$2", a.alpha.MerchantID().UUID(), row.ID).Scan(&evidence))
+		require.JSONEq(t, string(row.ResultEvidence), string(evidence))
+		row.ResultEvidence = evidence
+		require.NoError(t, intents.ValidateSubscriptionCollectionTerminal(row))
+	})
 	t.Run("OR-J31-S01/empty-target-restore-preserves-ledger-and-resets-destination-stream", func(t *testing.T) {
 		actor, provider := newPaymentWorld(t)
 		source := actor.world

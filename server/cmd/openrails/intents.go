@@ -109,15 +109,23 @@ plan; a refund: the approved refund of the reserved amount on the original
 sale) before the normal receipt path commits its local effects.
 
 --not-executed needs the operation type's own proof. For an NMI or custodian
-sale that is NMI showing a definitive decline as the one transaction under the
-sale's order, or zero transactions with the operator attesting release without
-proof of nonexecution. A submitted invoice collection, rebill or tier-change
-proration refuses it. An operation that never
-crossed its submission fence is released on that alone.
+sale or engine renewal (subscription_collection), that is NMI showing one
+definitive decline under the order, or zero transactions with the operator
+attesting release without proof of nonexecution. A renewal decline enters
+dunning; an empty-order release permits the next attempt under the same order,
+read before submission to catch late money. Renewals never release automatically.
+Stripe engine renewals refuse operator resolution. A submitted invoice
+collection, manual rebill or tier-change proration refuses --not-executed.
+An operation that never crossed its submission fence is released on that alone.
 
 --step selects the step of a multi-step operation (nmi_upgrade: successor or
 proration; stripe_tier_change: update, schedule or phases). --actor and
---reason are recorded on the operation and in the mutation log.`,
+--reason are recorded on the operation and in the mutation log.
+
+An NMI refund accepts --not-executed when NMI's transaction report shows no
+refund of the original sale since the refund was requested that OpenRails has
+not recorded, with --actor and --reason attesting release. A refund NMI refused
+outright is released automatically.`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			id, err := uuid.Parse(strings.TrimSpace(intentID))
@@ -133,7 +141,7 @@ proration; stripe_tier_change: update, schedule or phases). --actor and
 	cmd.Flags().StringVar(&intentID, "intent", "", "Unknown operation id (required)")
 	cmd.Flags().StringVar(&step, "step", "", "Provider step of a multi-step operation (nmi_upgrade: successor or proration; stripe_tier_change: update, schedule or phases)")
 	cmd.Flags().StringVar(&reference, "receipt", "", "Exact provider object id: transaction, subscription, schedule or refund id")
-	cmd.Flags().BoolVar(&notExecuted, "not-executed", false, "Record non-execution or attest release of an empty NMI sale order")
+	cmd.Flags().BoolVar(&notExecuted, "not-executed", false, "Record non-execution or attest release of an empty NMI sale order or a refund with no unrecorded NMI refunds")
 	cmd.Flags().StringVar(&actor, "actor", cliActor(), "Operator recorded with the resolution")
 	cmd.Flags().StringVar(&reason, "reason", "", "Evidence source, e.g. provider ticket or dashboard record (required)")
 	return cmd

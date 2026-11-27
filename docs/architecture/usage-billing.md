@@ -13,9 +13,15 @@ Usage billing decides what usage costs and bills it in arrears. Usage lives in t
   reported, its identity and its priced meter cells (card print and pricing
   period). Intake inserts into `usage_intake`, which stores nothing; its views
   write the event and the rollups: limit windows (from the windows that count
-  the item), period quantities, minutes (from its provisional amount) and
-  history (`usage_history`, by UTC hour, grouped into the merchant's
-  accounting-zone days as it is read).
+  the item), period quantities and history.
+- **Usage history** (`usage_history`, kept for good): one row per UTC quarter
+  hour, customer, currency, event type and meter cell. A row with no meter
+  counts the bucket's events (`requests`; `failed_requests`, `failed_amount`
+  and `forgiven` of the failed ones); a meter cell's row what they took of it
+  (`requests`, `quantity`, `stated`, `amount` at intake's price and
+  `discount`, a volume tier's fall), so amounts less discounts sum to what
+  posts. Reads group the quarter hours into any zone's hours, days, weeks and
+  months, exactly. The invoker is only in raw events (90 days).
 - **Pending usage**: what usage the ledger has not taken costs at its
   provisional prices, per customer, currency and lease
   (`usage_pending_amounts`); `usage_pending` is the posting queue. A balance
@@ -133,8 +139,9 @@ merchant's unit (OR-J24-S71). Pending usage is exact as of its intake.
   (`LocalClient`) `StartRunningChargeTx`, `StopRunningChargeTx`.
 - **Catalog**: `ListMeters`, `GetMeter`, `SetMeter`, or a catalog document.
 - **Staff**: `UpdateCustomer` (`usage_billing`); `WaiveInvoiceBalance`,
-  `MarkInvoiceUncollectible`, `RecordExternalPayment`.
-- **Customer**: `GET /v1/me/usage` (read by day of the merchant's accounting zone and priced per day, `UsageHistory`), `/v1/me/balance/transactions`.
+  `MarkInvoiceUncollectible`, `RecordExternalPayment`; `GetUsage`,
+  `GetUsageSeries` (the customer's reads).
+- **Customer**: `GET /v1/me/usage` (totals on any zone's days) and `GET /v1/me/usage/series` (by hour, day, week or month in any zone; at most `billing.MaxUsageBuckets` buckets), both from history by event type or meter (`UsageHistory`), by invoker from raw events within 90 days; `/v1/me/balance/transactions`.
 - **Metrics and events**: `usage_units` and `usage_charged` by `charge` (charged, forgiven) (`POST /v1/metrics/query`); `delinquency.*`; customer facts `invoice_due`, `invoice_overdue`, `invoice_collection_stopped`.
 - **Configuration**: merchant `usage_billing` (its terms turn usage billing on), `billing_period_boundary`
   ([usage billing](../client.md#usage-and-running-charges)).
@@ -159,13 +166,16 @@ Does not apply: usage comes from the merchant's backend, not a provider; a usage
 ### 3. Exact money
 Amounts are `int64` native units of their currency end to end. A period is
 priced on its total, so its postings sum to R of its quantity however the usage
-arrived, and history is priced per day of the accounting zone the same way,
-so the days sum to what posts. History is kept by UTC hour; ClickHouse groups
-the hours into the zone's days as they are read (`toStartOfDay` in the zone),
-so a 23- or 25-hour day holds its hours and a zone change regroups all of it
-(OR-J24-S57, OR-J24-S67). A zone whose offset is not whole hours (Kolkata,
-Kathmandu) has its days cut at the hour: an hour counts on the day it starts
-in.
+arrived. History keeps each charge at the price intake took it at, which never
+falls below zero, and where a volume tier's price fell its `discount`, so a
+period's amounts less discounts telescope to R as well (OR-J24-S81); intakes of
+one customer that price from the same position at once differ, as their
+pending amounts do. History is kept by UTC quarter hour; reads group the
+quarter hours into a zone's dates (`toDate` in the zone) and Go places each at
+its first instant, so a 23- or 25-hour day holds its hours, a half- or
+quarter-hour offset is exact and a zone change regroups all of it (OR-J24-S57,
+OR-J24-S67, OR-J24-S76, OR-J24-S77). Buckets of a series come from
+`calendarutil.Buckets`, from each day's first instant.
 Each item is one event (a UUIDv7 derived from
 merchant, lease and number at the lease's time, or from the request id), sorted by customer and event
 id; a resend inserts nothing, and postings read `FINAL`, so a duplicate copy never
@@ -175,8 +185,8 @@ currency; the one FX use, a spend window's cap, is in
 [entitlements and limits](entitlements.md).
 Checks:
 - `usage_price_test.go` prices a period's total, a card revision and a volume
-  crossing, and history by bucket folded into two zones' days; OR-J24-S49
-  posts them and OR-J24-S57 reads them by local day.
+  crossing; OR-J24-S49 posts them, OR-J24-S57 reads them by local day and
+  OR-J24-S81 shows a volume fall as the discount.
 - `postPeriod` fails if the ledger already holds the posting.
 - No `fx` import in `internal/modules/money/usage_intake.go`, `usage_price.go` or
   `usage_posting.go`.
@@ -184,7 +194,9 @@ Checks:
 
 ### 4. Access control and tenant isolation
 Running-charge routes declare the `merchant:usage:manage` or `merchant:usage:read`
-pair; `/v1/me/usage` reads the signed-in customer. The merchant comes from the
+pair; `/v1/me/usage` and `/v1/me/usage/series` read the signed-in customer, and
+their staff twins (`GetUsage`, `GetUsageSeries`) need `merchant:customer:read`
+(OR-J24-S80). The merchant comes from the
 credential (`merchant.Require`) and every table is keyed by `merchant_id`. The
 cross-merchant due scans run each row in its own merchant scope.
 Checks:
@@ -210,11 +222,12 @@ Classes, in each table comment and `internal/retention/tables.go`: permanent
 `usage_pending`, `usage_pending_amounts` and the meter and rate-card tables. The event store's tables
 expire by TTL (`retention.EventStoreTTLs`): raw events 90 days (the owner's
 choice; a period's last posting reads them up to 66 days on), period quantities
-100 days, minutes 2 days, limit windows 61 days after they end. Usage history has
-no TTL: it is kept, and a merchant purge deletes its rows. A merchant archive carries every table as the store holds
-it (OR-J24-S54). A SCIM deletion clears a customer's invoker and metadata there
-under its lock; a run stopped part way converges when run again (`EraseCustomer`,
-OR-J24-S53, OR-J24-S63). A merchant purge deletes the merchant's usage there in a
+100 days, limit windows a day after they end (usage settled later counts toward
+no window that ended, OR-J24-S83). Usage history has no TTL: it is kept, names
+no invoker, and a merchant purge deletes its rows (OR-J24-S78). A merchant archive carries every table as the store holds
+it (OR-J24-S54). A SCIM deletion clears a customer's invoker and metadata in its
+raw events under its lock and leaves history as it is; a run stopped part way
+converges when run again (`EraseCustomer`, OR-J24-S53, OR-J24-S63). A merchant purge deletes the merchant's usage there in a
 job queued with it (`openrails.merchant_usage_purge`, OR-J32-S07).
 Checks:
 - The table comments and `internal/retention/tables.go` agree on each class.
@@ -252,7 +265,7 @@ Critical journeys, over real PostgreSQL, Redis and Vault:
 - **J26**, usage billing and delinquency: OR-J26-S01 to S04, S30, S40, S50 to S58, S65.
 - **J40**, the usage receivable: OR-J40-S20 to S22, S27 to S29.
 
-Other tests: `internal/modules/money/rating_test.go` prices every accepted model; `usage_price_test.go` a period's total and history by bucket and zone; `usage_posting_test.go` the posting queue and what a posting takes after the store lost usage; `internal/modules/limits/window_test.go` a rate level from buckets.
+Other tests: `internal/modules/money/rating_test.go` prices every accepted model; `usage_price_test.go` a period's total and a zone's days; `usage_posting_test.go` the posting queue and what a posting takes after the store lost usage; `internal/modules/limits/window_test.go` a rate level from buckets.
 
 Gaps:
 - Nothing checks that `retention.Tables` matches the schema; it is review-only.

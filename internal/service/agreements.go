@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/invoices/usage"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -357,8 +356,7 @@ func (s *Service) endAgreement(ctx context.Context, m gen.BillingMandate, curren
 }
 
 // CancelSubscriptionForCustomer is the customer's own cancel at the
-// period's end. Destructive arming never holds it: only the merchant-wide
-// customer budget refuses it.
+// period's end. Destructive arming and the card-removal budget never refuse it.
 func (s *Service) CancelSubscriptionForCustomer(ctx context.Context, customer billing.CustomerID, sub *models.Subscription, reason string) error {
 	if sub == nil || customer.IsZero() || sub.CustomerID != customer.UUID() {
 		return subscriptions.ErrSubscriptionNotFound
@@ -386,14 +384,6 @@ func (s *Service) CancelSubscriptionForCustomer(ctx context.Context, customer bi
 	}
 
 	ctx = db.WithPSPID(ctx, sub.PspID)
-	// A completed cancellation is a domain no-op, including after reservation pruning.
-	if sub.Status != models.StatusCanceled {
-		limiter := destructive.NewUserActionLimiter(rt.DB)
-		if err := limiter.Reserve(ctx, destructive.CancelSubscription, fmt.Sprintf("cancel:%s:%d", sub.ID, sub.LifecycleRev), sub.CustomerID); err != nil {
-			return err
-		}
-	}
-
 	return s.cancelForCustomer(ctx, customer, sub, reason)
 }
 

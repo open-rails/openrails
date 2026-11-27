@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -110,6 +111,15 @@ func (c *NMIClient) readOrderAttempts(ctx context.Context, orderReference string
 	for _, txn := range report.Transactions {
 		if txn.OrderID != orderReference {
 			return OrderAttempts{}, receiptMismatch("order search returned another order's transaction")
+		}
+		// A duplicate refusal was rejected unprocessed; any charge it
+		// duplicated is its own transaction.
+		if len(txn.Actions) == 1 {
+			action := txn.Actions[0]
+			code, err := strconv.Atoi(strings.TrimSpace(action.ResponseCode))
+			if err == nil && action.Is("sale") && strings.TrimSpace(action.Success) == "0" && duplicateRefusal(code, action.ResponseText) {
+				continue
+			}
 		}
 		if accepted != nil && txn.OrderDescription != accepted.OrderDescription {
 			// Other attempts' conclusive refusals did not move money. Anything

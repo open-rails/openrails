@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
@@ -287,9 +288,17 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	)
 	err = s.transactor.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txDB := db.NewWithPgxTx(s.Log, tx)
+		if oldSub.CollectionPolicy == models.CollectionPolicyEngine {
+			if _, err := txDB.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: oldSub.MerchantID, ID: oldSub.CustomerID}); err != nil {
+				return err
+			}
+		}
 		locked, err := s.memberships.LockTierChangeTx(ctx, txDB, in.OldSubscriptionID)
 		if err != nil {
 			return err
+		}
+		if locked.CustomerID != oldSub.CustomerID || locked.CollectionPolicy != oldSub.CollectionPolicy {
+			return fmt.Errorf("%w: accepted customer or collection ownership changed", ErrTierChangeConflict)
 		}
 		if locked.Rail != models.RailSolana || locked.CustomerID.String() != in.UserID {
 			return fmt.Errorf("%w: old subscription does not belong to this subscriber", ErrPaymentUnverified)

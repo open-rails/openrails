@@ -144,9 +144,9 @@ type CheckParams struct {
 // merchants, and per merchant); system ops against the per-merchant automation
 // ceiling. Non-destructive types pass; an unknown origin fails closed.
 func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) error {
-	// Customer removals and cancellations are admitted once by the merchant-wide
-	// UserActionLimiter before their first local/provider effect. Their deferred
-	// provider cleanup and explicit retries must not spend another hourly budget.
+	// Customer card removals spend the UserActionLimiter budget at the request;
+	// customer cancellations spend none. Their provider cleanup and explicit
+	// retries must not spend an hourly intent budget.
 	if p.Origin == OriginUser {
 		switch p.IntentType {
 		case TypeNMIPaymentMethodDelete, TypeHyperSwitchMethodDelete, TypePlatformMethodDelete,

@@ -170,7 +170,8 @@ func TestDunning(t *testing.T) {
 		require.Len(t, p.effects(t), 2, "uncertainty cannot authorize a second collection")
 		p.restorePaymentResponses()
 		p.unavailableEvidence(false)
-		a.clock.Advance(time.Hour)
+		// A day unresolved puts the next verification at the 2h backoff cap.
+		a.clock.Advance(2 * time.Hour)
 		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
 		require.NoError(t, err)
 		for _, job := range jobs.Jobs {

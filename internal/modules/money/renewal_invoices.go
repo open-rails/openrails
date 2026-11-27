@@ -21,7 +21,7 @@ import (
 
 // renewalInvoicePaid settles the collection's renewal invoice with the payment
 // the renewal recorded.
-func (h *SubscriptionCollectionHandler) renewalInvoicePaid(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, transactionID string) error {
+func (h *SubscriptionCollectionHandler) renewalInvoicePaid(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, transactionID string, keepCanceled bool) error {
 	if p.InvoiceID == uuid.Nil {
 		return nil
 	}
@@ -34,7 +34,7 @@ func (h *SubscriptionCollectionHandler) renewalInvoicePaid(ctx context.Context, 
 	case !db.IsNotFound(err):
 		return err
 	}
-	return invoices.RenewalPaid(ctx, d, in.MerchantID, p.InvoiceID, in.ID, paid, transactionID, h.now(), h.Clock)
+	return invoices.RenewalPaid(ctx, d, in.MerchantID, p.InvoiceID, in.ID, paid, transactionID, h.now(), h.Clock, keepCanceled)
 }
 
 // renewalInvoiceUnpaid returns the collection's renewal invoice to the customer

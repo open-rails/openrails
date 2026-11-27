@@ -765,6 +765,12 @@
     },
     {
       "method": "GET",
+      "path": "/v1/me/usage/series",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
       "path": "/v1/merchant/alert-webhooks",
       "auth": "merchant",
       "feature": ""
@@ -1012,6 +1018,18 @@
     {
       "method": "DELETE",
       "path": "/v1/admin/customers/{customer_id}/payment-methods/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/customers/{customer_id}/usage",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/customers/{customer_id}/usage/series",
       "auth": "merchant",
       "feature": ""
     },

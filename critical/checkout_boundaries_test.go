@@ -501,6 +501,34 @@ func testNMISaleBoundaries(t *testing.T) {
 			require.NotEmpty(t, proof["localization_id"])
 			require.Empty(t, p.core.Vaults())
 		}
+		for _, resolve := range []bool{false, true} {
+			invoice := nmiCheckoutInvoice(t, a, fmt.Sprintf("lost-refusal-%t", resolve), false, 48*time.Hour)
+			p.core.DropSaleResponses(1)
+			invoice = payNMICheckout(t, a, invoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Decline: "410"}), false)
+			require.Equal(t, billing.InvoiceProcessing, invoice.Status)
+			row := nmiCheckoutOperation(t, a, invoice, false)
+			a.clock.Advance(intents.LostSubmissionSettle)
+			if resolve {
+				rt := embedded.Graph(a.engine).Runtime
+				require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+					var err error
+					row, err = rt.IntentRunner().Resolve(ctx, row.ID, intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Confirmed gateway refusal"})
+					return err
+				}))
+			} else {
+				row = nmiCheckoutOperation(t, a, invoice, true)
+			}
+			require.Equal(t, intents.StatusFailedTerminal, row.Status)
+			require.NoError(t, intents.ValidateNMISaleTerminal(row))
+			proof = nil
+			require.NoError(t, json.Unmarshal(row.ResultEvidence, &proof))
+			require.Equal(t, true, proof["request_refused"])
+			require.Equal(t, true, proof["gateway_refused"])
+			require.NotContains(t, proof, "declined")
+			current, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
+			require.NoError(t, err)
+			require.Equal(t, billing.InvoiceOpen, current.Status)
+		}
 		attempts, err = a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
 		require.NoError(t, err)
 		require.Empty(t, attempts.Items)

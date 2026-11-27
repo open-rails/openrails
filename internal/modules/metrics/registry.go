@@ -235,7 +235,7 @@ var Dimensions = []Dimension{
 	{Name: "months_since_start", Description: "whole months since the cohort's month: 0 is the cohort's own month"},
 	{Name: "basis", Description: "what cohort_retention counts: subscribers (customers with MRR; default) | mrr", Values: []string{"subscribers", "mrr"}},
 	{Name: "customer", Description: "the customer id (usage and limit measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseCustomerID(s) })},
-	{Name: "invoker", Description: "the invoker that fired a usage event (usage measures)"},
+	{Name: "invoker", Description: "the invoker that fired a usage event (usage measures; read from raw usage events, kept 90 days, so the range must start within them)"},
 	{Name: "outcome", Description: "how a funnel's row ended; its values depend on the measure (dim_values): attempts and nmi_history_authorizations approved | declined (the issuer said no) | refused (the merchant or its gateway refused it first) | error (it did not complete); purchases approved | recovered | failed | open; rebills approved | recovered | lost | open; checkouts and checkout_customers paid | abandoned | open; usage succeeded | failed; disputes open | won | lost | closed | unreported; fraud_reports recorded | refunded | nothing_to_refund | disputed"},
 	// Checkouts: from a checkout's creation to its payment, and who paid.
 	{Name: "step", Description: "how far a checkout got as of the range end: created | opened (its payment form loaded) | submitted (its customer asked to pay) | paid", Values: checkoutSteps},
@@ -622,9 +622,10 @@ var families = map[Family]familySpec{
 		},
 		BaseWhere: `g.funding_source IN ('purchase', 'recurring')`,
 	},
-	// Usage is the event store's history, priced at read (usage.go): each
-	// row once for what it charged and once for what grace forgave, so
-	// charge splits one total. The expressions name its columns.
+	// Usage is the event store's history at intake's prices (usage.go), or
+	// by invoker its raw events: each row once for what it charged and once
+	// for what grace forgave, so charge splits one total. The expressions
+	// name its columns.
 	FamUsage: {
 		Kind: "store",
 		DimExprs: map[string]string{
@@ -1308,7 +1309,7 @@ var declared = []Measure{
 		Formula:     "repeat top-ups / all top-ups",
 		Dims:        []string{"currency", "product_id"}},
 	{Name: "usage_charged", Class: ClassAdditive, Family: FamUsageCharged, Money: true, Unit: UnitMoney, Direction: UpIsGood,
-		Description: "priced usage from usage history, by charge: charged (the day's share of its period's price, and failed usage charged) or forgiven (failed usage the customer's grace absorbed, or usage in a merchant's unit its lots could not take when it posted, moved out of charged); cash-in is credits_sold",
+		Description: "priced usage from usage history, by charge: charged (the price intake took less volume-tier discounts, and failed usage charged) or forgiven (failed usage the customer's grace absorbed, or usage in a merchant's unit its lots could not take when it posted, moved out of charged); cash-in is credits_sold",
 		Formula:     "SUM(charged amount) + SUM(forgiven amount) of usage history",
 		Agg:         sum(`uc.amount`, ""),
 		Dims:        with(usageDims, "charge")},
@@ -1404,7 +1405,7 @@ var Caveats = []string{
 	"token_type exists from its instrumentation onward: NULL/legacy rows read 'unknown' and are excluded from token_type-filtered analyses; kind on payments exists from instrumentation onward; older and imported rows read 'unknown'. Declines are measured on attempts, not payments: Stripe- and CCBill-owned renewals are recorded as their providers report them",
 	"attempts, purchases and rebill cycles begin at their instrumentation: earlier history lives in payments and the provider. Purchases and cycles are dated by their first attempt and due date; their outcome is as of the range end: a purchase quiet for an hour has failed, a cycle past its 15-day dunning window is lost",
 	"nmi_history measures are NMI's own transaction history, read daily per NMI PSP and kept 25 months: they include what OpenRails sent and what came before it. Rows are dated by their month's first instant, so use month-aligned ranges. one_off_sale cannot separate initial sales from retries of declined rebills",
-	"limits_reached counts each window of a declared limit once, when settled and held usage first took it to capacity; a rate or lifetime limit's one window counts its first time only",
+	"limits_reached counts each window of a declared limit once, when settled and held usage first took it to capacity; a rate or lifetime limit's one window counts its first time only. A window that reached capacity is kept 61 days past its end",
 	"time buckets zero-fill: a bucket present with zeros means genuinely zero activity, not missing data",
 	"checkouts and sales count checkouts from their instrumentation (a purchase number set), dated by creation and payment; a zero-total checkout is a sale but not a checkout. Step and outcome are as of the range end; a checkout past its expiry is abandoned. Unpaid checkouts that never reached a payment attempt are kept 397 days, so checkout measures reach back 13 months. Attribution is the merchant's, unverified; country and language are the customer's, never their address",
 }
