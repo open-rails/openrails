@@ -246,6 +246,8 @@ balance_notices:
 accounting:
   # Timezone is the IANA zone (Europe/Berlin) whose days and months the metrics, MRR reports and usage history group in, and where usage posts at the end of each day; empty is UTC.
   timezone: ""
+  # Basis is which view of revenue the overview leads with: accrual (recognised revenue, the default) or cash (cash collected).
+  basis: ""
 # CardVault is where new cards are saved: a card PSP's key, whose own vault (or the custodian it names) holds them, or CardVaultPlatform.
 card_vault: ""
 # ChargePSPs are the card PSPs, in order, that new card charges go to: each must charge cards from CardVault.

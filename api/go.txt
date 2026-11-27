@@ -348,6 +348,8 @@ pkg openrails/adapters/smtpmail, func EmailSender(*smtp.Sender) openrails.EmailS
 pkg openrails/billing, const AccessNone AccessLevel = "none"
 pkg openrails/billing, const AccessRead AccessLevel = "read"
 pkg openrails/billing, const AccessUpdate AccessLevel = "update"
+pkg openrails/billing, const AccountingAccrual AccountingBasis = "accrual"
+pkg openrails/billing, const AccountingCash AccountingBasis = "cash"
 pkg openrails/billing, const AlertSeverityCritical AlertSeverity = "critical"
 pkg openrails/billing, const AlertSeverityWarning AlertSeverity = "warning"
 pkg openrails/billing, const AlertWebhookDiscord AlertWebhookFormat = "discord"
@@ -1303,7 +1305,9 @@ pkg openrails/billing, type AccessLevel string
 pkg openrails/billing, type AccessTenure struct
 pkg openrails/billing, type AccessTenure struct, AsOf time.Time `json:"as_of"`
 pkg openrails/billing, type AccessTenure struct, Seconds map[string]int64 `json:"seconds"`
+pkg openrails/billing, type AccountingBasis string
 pkg openrails/billing, type AccountingSettings struct
+pkg openrails/billing, type AccountingSettings struct, Basis AccountingBasis `json:"basis,omitempty"`
 pkg openrails/billing, type AccountingSettings struct, Timezone string `json:"timezone,omitempty"`
 pkg openrails/billing, type AdjustCustomerLimitParams struct
 pkg openrails/billing, type AdjustCustomerLimitParams struct, Amount int64 `json:"amount,string"`
@@ -2949,6 +2953,7 @@ pkg openrails/billing, type MetricsMeasure struct, Formula string `json:"formula
 pkg openrails/billing, type MetricsMeasure struct, Group MetricsGroup `json:"group"`
 pkg openrails/billing, type MetricsMeasure struct, Money bool `json:"money,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Name string `json:"name"`
+pkg openrails/billing, type MetricsMeasure struct, Per string `json:"per,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Program DisputeProgram `json:"program,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Thresholds []MetricsThreshold `json:"thresholds"`
 pkg openrails/billing, type MetricsMeasure struct, UTCDays bool `json:"utc_days,omitempty"`

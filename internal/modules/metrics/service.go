@@ -82,7 +82,8 @@ func (s *Service) Zone(ctx context.Context) (*time.Location, error) {
 }
 
 // Execute runs a validated plan and returns the merged tabular result; a
-// plan reading the MRR facts may be answered from the cache (CacheMRR).
+// plan reading the MRR facts or the live revenue schedules may be answered
+// from the cache (Cache).
 func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -246,6 +247,9 @@ func (s *Service) run(ctx context.Context, plan *Plan) ([][]any, error) {
 
 	groups := map[string]*group{}
 	if err := s.runUsage(ctx, plan, groups); err != nil {
+		return nil, err
+	}
+	if err := s.runRunoff(ctx, plan, groups); err != nil {
 		return nil, err
 	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

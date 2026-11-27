@@ -13879,6 +13879,13 @@
         "properties": {
           "timezone": {
             "type": "string"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "accrual",
+              "cash"
+            ]
           }
         }
       },
@@ -21962,6 +21969,9 @@
               "stripe",
               "visa_vamp"
             ]
+          },
+          "per": {
+            "type": "string"
           }
         },
         "required": [

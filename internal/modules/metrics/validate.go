@@ -290,6 +290,14 @@ func ValidateIn(q *Query, now time.Time, zone *time.Location) (*Plan, *Validatio
 		filters[name] = vals
 	}
 
+	for _, m := range measures {
+		if m.Per != "" && !contains(dims, m.Per) && len(filters[m.Per]) != 1 {
+			add(FieldError{Code: "dimension_required", Param: "by",
+				Message: fmt.Sprintf("measure %q adds unlike things across %s: group by %q or filter it to one value", m.Name, m.Per, m.Per),
+				Valid:   m.values[m.Per]})
+		}
+	}
+
 	for i, o := range q.Order {
 		if (o.Measure == "") == (o.Dimension == "") {
 			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("order[%d]", i),

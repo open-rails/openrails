@@ -77,7 +77,7 @@ func compile(plan *Plan, merchantID uuid.UUID, burns []burn) ([]stmt, error) {
 	for _, k := range famOrder {
 		fam := k.fam
 		leaves := famLeaves[k]
-		if storeFamily(fam) {
+		if storeFamily(fam) || fam == FamRunoff {
 			continue
 		}
 		spec := families[fam]
@@ -105,8 +105,8 @@ func compile(plan *Plan, merchantID uuid.UUID, burns []burn) ([]stmt, error) {
 			st, err = compileCohort(plan, merchantID, leaves)
 		case "trailing":
 			st, err = compileTrailing(plan, merchantID, leaves)
-		case "balance":
-			st, err = compileBalance(plan, merchantID, fam, spec, leaves)
+		case "ledger_balance":
+			st, err = compileLedgerBalance(plan, merchantID, fam, spec, leaves)
 		case "depletion":
 			st, err = compileDepletion(plan, merchantID, leaves, burns)
 		default:
@@ -128,7 +128,9 @@ var merchantCols = map[Family]string{
 	FamLimitsReached:  "lw.merchant_id",
 	FamSubsSnapshot:   "s.merchant_id",
 	FamEntitlSnapshot: "e.merchant_id",
-	FamBalance:        "lt.merchant_id",
+	FamRevenue:        "ld.merchant_id",
+	FamCreditsSold:    "ld.merchant_id",
+	FamBalances:       "x.merchant_id",
 	FamWebhookHealth:  "wh.merchant_id",
 	FamWebhookDaily:   "whd.merchant_id",
 	FamAttempts:       "a.merchant_id",
@@ -323,59 +325,6 @@ func trailingWindow(plan *Plan, b time.Time) (time.Time, time.Time) {
 	day := calendarutil.DayStart(y, m, d, plan.zone())
 	sy, sm, sd := time.Date(y, m-3, d, 0, 0, 0, 0, time.UTC).Date()
 	return calendarutil.DayStart(sy, sm, sd, plan.zone()).Add(end.Sub(day)), end
-}
-
-func compileBalance(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, leaves []*Measure) (stmt, error) {
-	var args []any
-	arg := func(v any) string { args = append(args, v); return fmt.Sprintf("$%d", len(args)) }
-
-	sel := []string{}
-	group := []string{}
-	// Read only under plan.HasTime — the non-time path uses plan.To directly
-	// in the WHERE below, so there is no meaningful zero value to seed here.
-	var firstEdge, lastEdge time.Time
-	if plan.HasTime {
-		firstEdge, lastEdge = plan.Buckets[0], plan.Buckets[len(plan.Buckets)-1]
-		sel = append(sel, fmt.Sprintf("CASE WHEN %s < %s THEN NULL ELSE %s END AS bucket",
-			spec.TimeExpr, arg(firstEdge), bucketExpr(spec, arg(plan.Grain), arg(plan.zone().String()))))
-		group = append(group, "1")
-	}
-	for _, d := range plan.Dims {
-		expr, ok := spec.DimExprs[d]
-		if !ok {
-			return stmt{}, fmt.Errorf("metrics: family %s lacks dimension %s (registry bug)", fam, d)
-		}
-		sel = append(sel, expr+" AS dim_"+d)
-		group = append(group, fmt.Sprintf("%d", len(sel)))
-	}
-	for _, m := range leaves {
-		sel = append(sel, m.Expr+" AS m_"+m.Name)
-	}
-
-	where := []string{merchantCols[fam] + " = " + arg(merchantID)}
-	if spec.BaseWhere != "" {
-		where = append(where, spec.BaseWhere)
-	}
-	if plan.HasTime {
-		where = append(where, fmt.Sprintf("%s < %s", spec.TimeExpr, arg(lastEdge)))
-	} else {
-		where = append(where, fmt.Sprintf("%s < %s", spec.TimeExpr, arg(plan.To)))
-	}
-	for _, d := range sortedFilterDims(plan.Filters) {
-		expr, ok := spec.DimExprs[d]
-		if !ok {
-			return stmt{}, fmt.Errorf("metrics: family %s lacks filter dimension %s (registry bug)", fam, d)
-		}
-		where = append(where, fmt.Sprintf("%s = ANY(%s)", expr, arg(plan.Filters[d])))
-	}
-
-	sql := "SELECT " + strings.Join(sel, ",\n       ") +
-		"\nFROM " + spec.From +
-		"\nWHERE " + strings.Join(where, "\n  AND ")
-	if len(group) > 0 {
-		sql += "\nGROUP BY " + strings.Join(group, ", ")
-	}
-	return stmt{family: fam, sql: sql, args: args, leaves: leaves, hasTime: plan.HasTime, balance: true}, nil
 }
 
 // compileDepletion: customers whose prepaid balance at the edge covers <= N days

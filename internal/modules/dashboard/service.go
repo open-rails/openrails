@@ -8,9 +8,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
 // Service persists per-merchant dashboards. Every read and write uses the
@@ -37,7 +39,15 @@ func (s *Service) Get(ctx context.Context) (*Dashboard, error) {
 			return nil, fmt.Errorf("dashboard: profile probe: %w", err)
 		}
 		profile := Profile{Subscriptions: found.HasSubscriptions, CardPayments: found.HasCardPayments, Usage: found.HasUsage, Credits: found.HasCredits, Checkouts: found.HasCheckouts}
-		return &Dashboard{Widgets: DefaultWidgets(profile), IsDefault: true, Profile: &profile}, nil
+		basis := billing.AccountingAccrual
+		settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
+		switch {
+		case err == nil:
+			basis = settings.Config.AccountingBasis
+		case !errors.Is(err, merchantconfig.ErrNoSettings):
+			return nil, fmt.Errorf("dashboard: settings: %w", err)
+		}
+		return &Dashboard{Widgets: DefaultWidgets(profile, basis), IsDefault: true, Profile: &profile}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("dashboard: load config: %w", err)

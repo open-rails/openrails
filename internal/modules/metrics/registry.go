@@ -56,14 +56,17 @@ const (
 type Family string
 
 const (
-	FamPayments       Family = "payments"        // flow over billing.payments (purchased_at)
+	FamPayments       Family = "payments"        // flow over billing.payments (purchased_at) and the processor fees in ledger_daily
 	FamGrants         Family = "grants"          // flow over credit-purchase grant lots (created_at)
 	FamUsage          Family = "usage"           // flow over the event store's usage history (day)
 	FamUsageCharged   Family = "usage_charged"   // flow over usage history, one row per charge (day)
 	FamLimitsReached  Family = "limits_reached"  // flow over limit windows (reached_at)
 	FamSubsSnapshot   Family = "subs_snapshot"   // interval reconstruction over subscriptions
 	FamEntitlSnapshot Family = "entitl_snapshot" // interval reconstruction over product access and product keys
-	FamBalance        Family = "balance"         // cumulative sums over ledger_transfers
+	FamRevenue        Family = "revenue"         // flow over ledger_daily: the general ledger's income-statement accounts
+	FamCreditsSold    Family = "credits_sold"    // flow over ledger_daily: credit lots' money deferred as it was paid
+	FamBalances       Family = "balances"        // an account's ledger_type_totals less its ledger_daily flows from t
+	FamRunoff         Family = "runoff"          // live revenue_schedules' recognitions still to post, computed in Go
 	FamDepletion      Family = "depletion"       // per-customer balance vs trailing-7d burn
 	FamWebhookHealth  Family = "webhook_health"  // snapshot over webhook_health watermarks
 	FamWebhookDaily   Family = "webhook_daily"   // flow over webhook_health_daily counter buckets
@@ -163,6 +166,9 @@ type Measure struct {
 	Program billing.DisputeProgram
 	// Untimed measures take no time grouping (their own dimensions order them).
 	Untimed bool
+	// Per is a dimension a query groups the measure by or filters to one
+	// value of: its sum across that dimension means nothing.
+	Per string
 
 	// values: each allowed dimension's closed vocabulary on this measure
 	// (nil: open), set by registry.
@@ -201,16 +207,11 @@ const (
 	priceMRRExpr     = `billing.price_mrr(pr, s.quantity)`
 	billingCycleExpr = `billing.billing_cycle_label(COALESCE(pr.billing_interval_hours, pr.billing_interval_months * 730))`
 
-	// streamExpr classifies a payment's revenue stream.
-	streamExpr = `CASE
-		WHEN p.subscription_id IS NOT NULL THEN 'subscription'
-		ELSE 'one_time' END`
-
 	// A sale row has no refunded_payment_id; a reversal (refund, chargeback,
 	// won dispute) names its sale and its reversal_kind. Settled rows count;
 	// a pending or failed refund does not.
 	settledRow     = `p.status IN ('succeeded','refunded')`
-	reversalKindOf = `CASE WHEN p.refunded_payment_id IS NULL THEN '%s'
+	reversalKindOf = `CASE WHEN p.fee THEN 'fee' WHEN p.refunded_payment_id IS NULL THEN '%s'
 		WHEN p.reversal_kind = 'refund' THEN 'refund'
 		WHEN p.reversal_kind = 'chargeback' THEN 'chargeback'
 		ELSE 'dispute_won' END`
@@ -222,7 +223,8 @@ var Dimensions = []Dimension{
 	{Name: "currency", Description: "currency code; added implicitly when a money measure is grouped without a single-currency filter"},
 	{Name: "rail", Description: "payment rail: nmi, ccbill, stripe or solana"},
 	{Name: "psp", Description: "the PSP's id (psp_…), empty when none"},
-	{Name: "stream", Description: "revenue stream: subscription | one_time", Values: []string{"subscription", "one_time"}},
+	{Name: "account", Description: "the general-ledger account, as the books name it. On recognized_revenue the income-statement account: subscription_revenue | one_time_revenue | usage_revenue | breakage_revenue (revenue, adding) | refunds | chargebacks | revenue_adjustments | promotional_credit (contra revenue) | bad_debt (subtracting). On balance the balance-sheet account: deferred_revenue (paid service not yet delivered) | deferred_revenue_credit (prepaid credit, in money) | usage_receivable | allowance_doubtful (its share reserved as uncollectible) | unapplied_cash | customer_units (the units book's credit balances, per unit). On cash and payments the revenue account the payment's bill funds: subscription_revenue | one_time_revenue | usage_revenue (a usage invoice or a bill of credit only; empty on a fee)", Values: accountValues},
+	{Name: "transfer_type", Description: "the general ledger's transfer type that moved the account: on recognized_revenue revenue_recognized (service earned) | credit_released (prepaid credit spent) | usage_accrued | usage_collected | credit_breakage (a lot lapsed) | credit_forfeited (revoked) | refund_recognized | chargeback_recognized | dispute_won | ... (docs/architecture/books.md)", Values: transferTypeValues},
 	{Name: "product_id", Description: "product id (prod_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseProductID(s) })},
 	{Name: "price_id", Description: "immutable price id (product:price:v1)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParsePriceID(s) })},
 	{Name: "billing_cycle", Description: "price cadence: hourly|daily|weekly|monthly|quarterly|semiannual|annual|one_time", Values: []string{"hourly", "daily", "weekly", "monthly", "quarterly", "semiannual", "annual", "one_time"}},
@@ -249,7 +251,7 @@ var Dimensions = []Dimension{
 	{Name: "attribution_campaign", Description: "the merchant's attribution campaign (utm_campaign), empty when none"},
 	{Name: "attribution_referrer", Description: "the host of the referrer the merchant reported, empty when none"},
 	{Name: "attribution_affiliate", Description: "the affiliate the merchant reported, empty when none"},
-	{Name: "cash_kind", Description: "what moved the cash: payment | refund | chargeback | dispute_won (a won dispute's return)", Values: []string{"payment", "refund", "chargeback", "dispute_won"}},
+	{Name: "cash_kind", Description: "what moved the cash: payment | refund | chargeback | dispute_won (a won dispute's return) | fee (a processor fee the books read: Stripe's, on charges, refunds and disputes)", Values: []string{"payment", "refund", "chargeback", "dispute_won", "fee"}},
 	{Name: "payment_kind", Description: "sale | refund | chargeback | dispute_won", Values: []string{"sale", "refund", "chargeback", "dispute_won"}},
 	{Name: "charge", Description: "priced usage: charged (billed to the customer) | forgiven (failed usage the customer's grace absorbed)", Values: []string{"charged", "forgiven"}},
 	{Name: "rate_card", Description: "metered event type (the usage's event_type; the key rate cards price)"},
@@ -398,7 +400,7 @@ func paymentDimExprs() map[string]string {
 		"currency":      `p.currency`,
 		"rail":          `p.rail`,
 		"psp":           `COALESCE('psp_' || p.psp_id::text, '')`,
-		"stream":        streamExpr,
+		"account":       paymentAccount,
 		"product_id":    `COALESCE('prod_' || pr.product_id::text, '')`,
 		"price_id":      `pr.public_id`,
 		"billing_cycle": billingCycleExpr,
@@ -526,11 +528,11 @@ var families = map[Family]familySpec{
 	},
 	FamPayments: {
 		Kind:      "flow",
-		From:      `billing.payments p`,
+		From:      paymentsFrom,
 		TimeExpr:  `p.purchased_at`,
 		DimJoins:  paymentJoins(),
 		DimExprs:  paymentDimExprs(),
-		DimValues: map[string][]string{"kind": {"initial", "renewal", "unknown"}},
+		DimValues: map[string][]string{"kind": {"initial", "renewal", "unknown"}, "account": paymentAccounts},
 	},
 	FamDisputes: {
 		Kind:     "flow",
@@ -662,16 +664,43 @@ var families = map[Family]familySpec{
 			"product_id":  `'prod_' || e.product_id::text`,
 		},
 	},
-	FamBalance: {
-		Kind: "balance",
-		From: `billing.ledger_transfers lt
-		JOIN billing.ledger_accounts da ON da.merchant_id = lt.merchant_id AND da.id = lt.debit_account_id
-		JOIN billing.ledger_accounts ca ON ca.merchant_id = lt.merchant_id AND ca.id = lt.credit_account_id`,
-		BaseWhere: `lt.book = 'units'`,
-		TimeExpr:  `lt.created_at`,
+	// Revenue at the general ledger's income-statement accounts, signed as
+	// their balances sit: revenue adds, contra revenue and bad debt subtract.
+	FamRevenue: {
+		Kind:      "flow",
+		From:      `billing.ledger_daily ld`,
+		TimeExpr:  `ld.bucket_at`,
+		BaseWhere: `ld.book = 'general' AND ld.account_type IN (` + quoted(incomeAccounts) + `)`,
 		DimExprs: map[string]string{
-			"currency": `lt.currency`,
+			"currency":      `ld.currency`,
+			"account":       `ld.account_type`,
+			"transfer_type": `ld.transfer_type`,
+			"product_id":    `COALESCE('prod_' || ld.product_id::text, '')`,
 		},
+		DimValues: map[string][]string{"account": incomeAccounts},
+	},
+	// A credit lot's price deferred as its payment applied it (or as an
+	// import declared it paid).
+	FamCreditsSold: {
+		Kind:      "flow",
+		From:      `billing.ledger_daily ld`,
+		TimeExpr:  `ld.bucket_at`,
+		BaseWhere: `ld.book = 'general' AND ld.account_type = 'deferred_revenue_credit' AND ld.transfer_type IN ('cash_applied', 'opening_balance')`,
+		DimExprs: map[string]string{
+			"currency":   `ld.currency`,
+			"product_id": `COALESCE('prod_' || ld.product_id::text, '')`,
+		},
+	},
+	// The waterfall: what the live schedules will recognise (runRunoff).
+	FamRunoff: {
+		Kind:      "runoff",
+		DimValues: map[string][]string{"account": {"subscription_revenue", "one_time_revenue"}},
+	},
+	// x is ledger_type_totals or ledger_daily (compileLedgerBalance).
+	FamBalances: {
+		Kind:      "ledger_balance",
+		DimExprs:  map[string]string{"currency": `x.currency`, "account": `x.account_type`},
+		DimValues: map[string][]string{"account": balanceAccounts},
 	},
 	FamDepletion: {
 		Kind: "depletion",
@@ -906,7 +935,7 @@ var (
 	attemptDims  = []string{"currency", "rail", "psp", "owner", "kind", "card_entry", "source", "observed_via", "decline_cause", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type", "advice_code", "network_advice_code", "visa_category", "network_transaction_id"}
 	purchaseDims = []string{"currency", "rail", "psp", "owner", "card_entry"}
 	cycleDims    = []string{"currency", "rail", "psp", "owner", "first_outcome", "first_decline_cause", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover", "card_brand", "card_bin", "token_type", "network_transaction_id"}
-	cashDims     = append([]string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "network", "kind", "discount_code"}, checkoutFactDims...)
+	cashDims     = append([]string{"currency", "rail", "psp", "account", "product_id", "price_id", "billing_cycle", "card_brand", "network", "kind", "discount_code"}, checkoutFactDims...)
 	disputeDims  = []string{"currency", "rail", "psp", "network", "kind", "dispute_kind", "dispute_reason", "outcome"}
 	networkDims  = []string{"rail", "psp"}
 	// A checkout's facts, on checkouts, sales and the cash they brought.
@@ -914,9 +943,10 @@ var (
 	checkoutDims     = append([]string{"currency", "origin", "surface", "purchase_number", "product_id", "price_id"}, checkoutFactDims...)
 	usageDims        = []string{"currency", "customer", "invoker", "outcome", "rate_card"}
 	creditDims       = []string{"currency", "product_id", "customer"}
+	booksDims        = []string{"currency", "product_id"}
 	webhookDims      = []string{"rail", "psp"}
 	// What a sale and its reversals both carry.
-	reversalRateDims = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "network"}
+	reversalRateDims = []string{"currency", "rail", "psp", "account", "product_id", "price_id", "billing_cycle", "card_brand", "network"}
 )
 
 // with is dims and more, copied.
@@ -983,9 +1013,9 @@ var Measures = registry(declared)
 var declared = []Measure{
 	// --- cash and payments ------------------------------------------------------
 	{Name: "cash", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: UnitMoney, Direction: UpIsGood,
-		Description: "money received less money returned, signed by cash_kind: payment and dispute_won add, refund and chargeback subtract; the total is net cash, gross of processor fees",
-		Formula:     "SUM(signed amount) over settled payments and their reversals",
-		Agg:         sum(`p.amount`, settledRow),
+		Description: "cash income: money received less money returned and processor fees, signed by cash_kind: payment and dispute_won add, refund, chargeback and fee subtract; the total is net cash. The cash basis of revenue (recognized_revenue is the accrual basis), by account as the payment's bill funds it",
+		Formula:     "SUM(signed amount) over settled payments, their reversals and the processor fees the books read",
+		Agg:         sum(`p.amount`, `(`+settledRow+`) OR p.fee`),
 		Dims:        with(cashDims, "cash_kind", "refund_reason")},
 	{Name: "payments", Class: ClassAdditive, Family: FamPayments, Unit: "count", Direction: Neutral,
 		Description: "settled payments and reversals, by payment_kind: sale, refund, chargeback, dispute_won",
@@ -1217,11 +1247,11 @@ var declared = []Measure{
 		Description: "collected / closed cycles whose first rebill failed or was missed",
 		Formula:     "rebills(recovered) / rebills(recovered, lost with first_outcome declined, refused, error or missed)",
 		Dims:        cycleDims},
-	{Name: "credits_sold", Class: ClassAdditive, Family: FamGrants, Money: true, Unit: UnitMoney, Direction: UpIsGood,
-		Description: "prepaid credit lots purchased (cash-in, native currency units); NOT recognized revenue until consumed",
-		Formula:     "SUM(grant lot amounts) over purchased credit grants",
-		Expr:        `COALESCE(SUM(g.units), 0)::bigint`,
-		Dims:        creditDims},
+	{Name: "credits_sold", Class: ClassAdditive, Family: FamCreditsSold, Money: true, Unit: UnitMoney, Direction: UpIsGood,
+		Description: "money paid for prepaid credit lots (cash in, in the currency paid), deferred until spent or lapsed; NOT recognized revenue until then",
+		Formula:     "SUM(credit lots' money deferred into deferred_revenue_credit as paid)",
+		Expr:        `COALESCE(SUM(ld.credits - ld.debits), 0)::bigint`,
+		Dims:        booksDims},
 	{Name: "credit_topups", Class: ClassAdditive, Family: FamGrants, Unit: "count", Internal: true,
 		Expr: `COUNT(*)`,
 		Dims: creditDims},
@@ -1257,20 +1287,20 @@ var declared = []Measure{
 		Formula:     "COUNT(limit windows by reached_at)",
 		Expr:        `COUNT(*)`,
 		Dims:        []string{"limit", "customer"}},
-	{Name: "outstanding_credit_liability", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: UnitMoney, Direction: Neutral,
-		Description: "unconsumed prepaid credit at t, at face: net customer_units across the units book",
-		Formula:     "SUM(customer balances) at t",
-		Expr: `COALESCE(SUM(
-			CASE WHEN ca.account_type = 'customer_units' THEN lt.amount ELSE 0 END
-			- CASE WHEN da.account_type = 'customer_units' THEN lt.amount ELSE 0 END), 0)::bigint`,
-		Dims: []string{"currency"}},
-	{Name: "outstanding_owed", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: UnitMoney, Direction: DownIsGood,
-		Description: "arrears accounts receivable at t: accrued-but-unpaid usage debt",
-		Formula:     "SUM(arrears owed) at t",
-		Expr: `COALESCE(SUM(
-			CASE WHEN da.account_type = 'customer_owed' THEN lt.amount ELSE 0 END
-			- CASE WHEN ca.account_type = 'customer_owed' THEN lt.amount ELSE 0 END), 0)::bigint`,
-		Dims: []string{"currency"}},
+	// --- books: revenue on the accrual basis, and balances ----------------------------
+	{Name: "recognized_revenue", Class: ClassAdditive, Family: FamRevenue, Money: true, Unit: UnitMoney, Direction: UpIsGood,
+		Description: "revenue on the accrual basis, as the general ledger recognises it, signed by account: subscription, one-time, usage and breakage revenue add; refunds, chargebacks, revenue adjustments, promotional credit and bad debt subtract; the total is net revenue. Dated when it takes effect: a month's recognition in the month it earns; by transfer_type, expiry (credit_breakage) and forfeit (credit_forfeited) apart. cash is the cash basis",
+		Formula:     "SUM(credits - debits) of the income-statement accounts' flows",
+		Expr:        `COALESCE(SUM(ld.credits - ld.debits), 0)::bigint`,
+		Dims:        []string{"currency", "account", "transfer_type", "product_id"}},
+	{Name: "scheduled_revenue", Class: ClassAdditive, Family: FamRunoff, Money: true, Unit: UnitMoney, Direction: Neutral,
+		Description: "deferred revenue the live revenue schedules will recognise, dated as each recognition will post (a month's on its last instant, the rest at the service's end), if nothing reverses it: the forward waterfall of balance's deferred_revenue, read with range.next. Prepaid credit has none: it is released as it is spent",
+		Formula:     "SUM(recognitions still to post of live revenue schedules)",
+		Dims:        []string{"currency", "account", "product_id"}},
+	{Name: "balance", Class: ClassSnapshot, Family: FamBalances, Money: true, Unit: UnitMoney, Direction: Neutral, Per: "account",
+		Description: "an account's balance at t, on its normal side, by account: deferred_revenue (paid service not yet delivered), deferred_revenue_credit (prepaid credit, in money), usage_receivable (usage owed), allowance_doubtful (its share reserved as uncollectible), unapplied_cash, and the units book's customer_units (credit held, per unit at face); group or filter it by account",
+		Formula:     "account total less its flows from t",
+		Dims:        []string{"currency", "account"}},
 	{Name: "customers_at_depletion_risk", Class: ClassSnapshot, Family: FamDepletion, Unit: "count", Direction: DownIsGood,
 		Description: "customers whose prepaid balance at t covers <= 7 days of their trailing-7d burn (in any currency)",
 		Formula:     "COUNT(customers with balance / (7d burn / 7) <= 7 days)",
@@ -1316,14 +1346,15 @@ var declared = []Measure{
 // Deferred names the measures later phases build (MRR movements, retention,
 // the books, trials); naming one is refused as planned.
 var Deferred = []string{
-	"recognized_revenue", "balance", "trials", "trial_conversion_rate", "revenue_nrr",
+	"trials", "trial_conversion_rate", "revenue_nrr",
 }
 
 // Caveats are documented limitations surfaced verbatim in /schema.
 var Caveats = []string{
-	"all money is GROSS OF PROCESSOR FEES (fees are not captured per-charge); cash differs from bank deposits by fee amounts",
+	"money is gross of processor fees but for cash's fee kind: the fees the books read (Stripe's, on charges, refunds and disputes; NMI's and CCBill's are not read)",
+	"recognized_revenue, credits_sold and balance read the general ledger, which starts when the merchant's first payment was booked; earlier money appears once the books' rebuild books it. Their flows are kept by quarter hour, so an RFC 3339 range reads whole quarter hours",
 	"money never sums across currencies; when a money measure is grouped without a single-currency filter, 'currency' is added as an implicit group-by dimension",
-	"cash is signed: refunds and chargebacks are negative, a won dispute's return positive; its total is net cash",
+	"cash is signed: refunds, chargebacks and fees are negative, a won dispute's return positive; its total is net cash. recognized_revenue is signed by account the same way; its total is net revenue",
 	"MRR measures read the MRR movements as of the query, cached for 60 seconds: a cancellation at period end is a movement dated at its end, counted once it passes; netted per customer and currency per transaction. At-risk MRR now reads state; its past reads cases of the subscriptions' own status, so card_expiring and delinquent have no history",
 	"snapshot series evaluate at each bucket's START instant (UTC); without a time grouping they evaluate at the range end (balance measures: strictly-before semantics)",
 	"token_type exists from its instrumentation onward: NULL/legacy rows read 'unknown' and are excluded from token_type-filtered analyses; kind on payments exists from instrumentation onward; older and imported rows read 'unknown'. Declines are measured on attempts, not payments: Stripe- and CCBill-owned renewals are recorded as their providers report them",
