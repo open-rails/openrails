@@ -701,6 +701,51 @@ func (q *Queries) GetPaymentRefundTotals(ctx context.Context, arg GetPaymentRefu
 	return items, nil
 }
 
+const getPeriodChargedAndKept = `-- name: GetPeriodChargedAndKept :one
+WITH charges AS (
+    SELECT p.id, p.amount FROM billing.payments p
+    WHERE p.merchant_id = $1::uuid
+      AND p.subscription_id = $2::uuid
+      AND p.currency = $3::text
+      AND p.metadata ->> 'period_start' = $4::text
+      AND p.status IN ('succeeded', 'refunded') AND p.amount > 0
+      AND p.refunded_payment_id IS NULL AND p.reversal_kind IS NULL
+      AND p.deleted_at IS NULL
+)
+SELECT COALESCE((SELECT sum(c.amount) FROM charges c), 0)::bigint AS charged,
+       GREATEST(COALESCE((SELECT sum(c.amount) FROM charges c), 0)
+         + COALESCE((SELECT sum(r.amount) FROM billing.payments r JOIN charges c ON r.refunded_payment_id = c.id
+                     WHERE r.merchant_id = $1::uuid
+                       AND r.status IN ('succeeded', 'pending') AND r.deleted_at IS NULL), 0), 0)::bigint AS kept
+`
+
+type GetPeriodChargedAndKeptParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	Currency       string
+	PeriodStart    string
+}
+
+type GetPeriodChargedAndKeptRow struct {
+	Charged int64
+	Kept    int64
+}
+
+// What a subscription's charges for one paid period took, and what they keep
+// after their refunds, chargebacks and won disputes. A pending refund counts
+// as given back.
+func (q *Queries) GetPeriodChargedAndKept(ctx context.Context, arg GetPeriodChargedAndKeptParams) (GetPeriodChargedAndKeptRow, error) {
+	row := q.db.QueryRow(ctx, getPeriodChargedAndKept,
+		arg.MerchantID,
+		arg.SubscriptionID,
+		arg.Currency,
+		arg.PeriodStart,
+	)
+	var i GetPeriodChargedAndKeptRow
+	err := row.Scan(&i.Charged, &i.Kept)
+	return i, err
+}
+
 const getRefundByAdminIdempotencyKey = `-- name: GetRefundByAdminIdempotencyKey :one
 SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, invoice_id, ledger_transfer_id, quantity, refund_reason, payment_method_id FROM billing.payments purch
 WHERE purch.merchant_id = $2::uuid AND purch.refunded_payment_id = $1
