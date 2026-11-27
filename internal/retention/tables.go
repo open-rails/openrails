@@ -37,6 +37,7 @@ var Tables = map[string]Table{
 	"notification_channel_state":   {Class: State},
 	// Money, grants, owed usage and receipts.
 	"ledger_accounts":               {Permanent, permanent},
+	"bank_accounts":                 {Permanent, permanent},
 	"ledger_transfers":              {Permanent, permanent},
 	"revenue_schedules":             {Permanent, permanent},
 	"books_starts":                  {Permanent, permanent},
@@ -142,6 +143,7 @@ var Tables = map[string]Table{
 	"subscription_verifications": {Class: State},
 	"stored_card_checks":         {Class: State},
 	"stripe_fee_reads":           {Class: State},
+	"stripe_payout_reads":        {Class: State},
 	"solana_subscriptions":       {Class: State},
 	"product_access":             {Class: State},
 	"money_settings":             {Class: State},

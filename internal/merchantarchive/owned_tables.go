@@ -4,6 +4,7 @@ package merchantarchive
 // shared with the host, so the archive judges only these; each needs a decision.
 var ownedTables = []string{
 	"books_starts",
+	"bank_accounts",
 	"eventlog_events",
 	"eventlog_streams",
 	"eventlog_pending",
@@ -115,6 +116,7 @@ var ownedTables = []string{
 	"subscription_verifications",
 	"stored_card_checks",
 	"stripe_fee_reads",
+	"stripe_payout_reads",
 	"subscription_mrr",
 	"subscriptions",
 	"usage_card_prints",

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 909,
+  "scenario_count": 912,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3812,6 +3812,21 @@
       "id": "OR-J40-S42",
       "journey": "J40",
       "name": "Staff partial and full refunds of revoked or spent purchased credit return 409 resource_conflict and move nothing"
+    },
+    {
+      "id": "OR-J40-S60",
+      "journey": "J40",
+      "name": "A Stripe payout is read with its balance transactions and bank account expanded and its reserve lines a hundred at a time, at the pinned API version, writing nothing; its cents post as exact micros"
+    },
+    {
+      "id": "OR-J40-S61",
+      "journey": "J40",
+      "name": "A payout leaves cash clearing for cash in transit and lands in its bank account on its arrival date in the accounting timezone; its reserve line is held and a later one released; a payout that fails after landing and one canceled before come back; a read again posts nothing new; a read that keeps failing waits for books.payout.unread; a provider figure at a source of unknown basis is refused"
+    },
+    {
+      "id": "OR-J40-S62",
+      "journey": "J40",
+      "name": "After a known history of a sale, a reserve held and released, two payouts landing and a manual payout failing, each day in the accounting timezone moves each payout account as the history says, each day's legs balance, and ledger-audit is clean; the merchant's archive carries its bank accounts and payout books to an empty deployment"
     },
     {
       "id": "OR-J04-S80",

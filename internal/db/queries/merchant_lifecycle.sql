@@ -37,6 +37,12 @@ SELECT count(*) FROM billing.stripe_fee_reads WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsStripeFeeReads :exec
 DELETE FROM billing.stripe_fee_reads WHERE merchant_id = $1;
 
+-- name: CountMerchantRowsStripePayoutReads :one
+SELECT count(*) FROM billing.stripe_payout_reads WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsStripePayoutReads :exec
+DELETE FROM billing.stripe_payout_reads WHERE merchant_id = $1;
+
 -- name: CountMerchantRowsFraudReports :one
 SELECT count(*) FROM billing.fraud_reports WHERE merchant_id = $1;
 
