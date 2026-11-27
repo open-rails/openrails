@@ -2864,6 +2864,18 @@
     ],
     "OR-J34-S44": [
       "TestDestructiveSafeguards/OR-J34-S44/an-owed-provider-stop-of-a-customer-holding-the-product-blocks-its-row-not-the-book"
+    ],
+    "OR-J25-S45": [
+      "TestDailyPosting/OR-J25-S45/a-running-charge-posts-at-the-accounting-zones-midnight-on-the-days-receipt"
+    ],
+    "OR-J25-S46": [
+      "TestDailyPosting/OR-J25-S46/a-stop-posts-nothing-until-the-daily-posting"
+    ],
+    "OR-J24-S88": [
+      "TestDailyPosting/OR-J24-S88/a-receipt-holds-a-volume-fall-beside-new-usage"
+    ],
+    "OR-J48-S20": [
+      "TestDailyPosting/OR-J48-S20/a-posting-in-a-unit-forgives-with-the-event-store-down"
     ]
   }
 }

@@ -175,27 +175,23 @@ func (q *Queries) InsertUsageCardPrint(ctx context.Context, arg InsertUsageCardP
 }
 
 const insertUsageReceipt = `-- name: InsertUsageReceipt :one
-INSERT INTO billing.usage_receipts (merchant_id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines,
-    forgiven, forgiven_lines, created_at)
-VALUES ($1::uuid, $2::uuid, $3::text, $4::timestamptz,
-    $5::timestamptz, $6::timestamptz, $7::text, $8::bigint,
-    $9::jsonb, $10::bigint, $11::jsonb, $12::timestamptz)
-RETURNING merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven, forgiven_lines
+INSERT INTO billing.usage_receipts (merchant_id, customer_id, currency, cut_at, reason, amount, lines, charges, forgiven, created_at)
+VALUES ($1::uuid, $2::uuid, $3::text, $4::timestamptz, $5::text,
+    $6::bigint, $7::jsonb, $8::jsonb, $9::bigint, $10::timestamptz)
+RETURNING merchant_id, id, customer_id, currency, cut_at, reason, amount, lines, created_at, forgiven, charges
 `
 
 type InsertUsageReceiptParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	Currency       string
-	PeriodStartsAt time.Time
-	PeriodEndsAt   time.Time
-	CutAt          time.Time
-	Reason         string
-	Amount         int64
-	Lines          []byte
-	Forgiven       int64
-	ForgivenLines  []byte
-	Now            time.Time
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	CutAt      time.Time
+	Reason     string
+	Amount     int64
+	Lines      []byte
+	Charges    []byte
+	Forgiven   int64
+	Now        time.Time
 }
 
 func (q *Queries) InsertUsageReceipt(ctx context.Context, arg InsertUsageReceiptParams) (BillingUsageReceipt, error) {
@@ -203,14 +199,12 @@ func (q *Queries) InsertUsageReceipt(ctx context.Context, arg InsertUsageReceipt
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
-		arg.PeriodStartsAt,
-		arg.PeriodEndsAt,
 		arg.CutAt,
 		arg.Reason,
 		arg.Amount,
 		arg.Lines,
+		arg.Charges,
 		arg.Forgiven,
-		arg.ForgivenLines,
 		arg.Now,
 	)
 	var i BillingUsageReceipt
@@ -219,15 +213,13 @@ func (q *Queries) InsertUsageReceipt(ctx context.Context, arg InsertUsageReceipt
 		&i.ID,
 		&i.CustomerID,
 		&i.Currency,
-		&i.PeriodStartsAt,
-		&i.PeriodEndsAt,
 		&i.CutAt,
 		&i.Reason,
 		&i.Amount,
 		&i.Lines,
 		&i.CreatedAt,
 		&i.Forgiven,
-		&i.ForgivenLines,
+		&i.Charges,
 	)
 	return i, err
 }
@@ -293,8 +285,8 @@ func (q *Queries) ListDueUsagePending(ctx context.Context, arg ListDueUsagePendi
 }
 
 const listForgivenUsageReceipts = `-- name: ListForgivenUsageReceipts :many
-SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven, forgiven_lines FROM billing.usage_receipts
-WHERE merchant_id = $1::uuid AND forgiven <> 0
+SELECT merchant_id, id, customer_id, currency, cut_at, reason, amount, lines, created_at, forgiven, charges FROM billing.usage_receipts
+WHERE merchant_id = $1::uuid AND jsonb_path_exists(lines, '$[*] ? (@.forgiven != 0)')
   AND cut_at > $2::timestamptz AND cut_at <= $3::timestamptz
 ORDER BY cut_at, id
 `
@@ -305,8 +297,8 @@ type ListForgivenUsageReceiptsParams struct {
 	CutThrough time.Time
 }
 
-// The merchant's receipts that forgave usage or took forgiveness back, cut
-// after one instant and through another.
+// The merchant's receipts with a line that forgave usage or took forgiveness
+// back, cut after one instant and through another.
 func (q *Queries) ListForgivenUsageReceipts(ctx context.Context, arg ListForgivenUsageReceiptsParams) ([]BillingUsageReceipt, error) {
 	rows, err := q.db.Query(ctx, listForgivenUsageReceipts, arg.MerchantID, arg.CutAfter, arg.CutThrough)
 	if err != nil {
@@ -321,15 +313,13 @@ func (q *Queries) ListForgivenUsageReceipts(ctx context.Context, arg ListForgive
 			&i.ID,
 			&i.CustomerID,
 			&i.Currency,
-			&i.PeriodStartsAt,
-			&i.PeriodEndsAt,
 			&i.CutAt,
 			&i.Reason,
 			&i.Amount,
 			&i.Lines,
 			&i.CreatedAt,
 			&i.Forgiven,
-			&i.ForgivenLines,
+			&i.Charges,
 		); err != nil {
 			return nil, err
 		}
@@ -462,63 +452,8 @@ func (q *Queries) ListUsagePositions(ctx context.Context, arg ListUsagePositions
 	return items, nil
 }
 
-const listUsageReceipts = `-- name: ListUsageReceipts :many
-SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven, forgiven_lines FROM billing.usage_receipts
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-  AND currency = $3::text AND period_starts_at = ANY($4::timestamptz[])
-ORDER BY period_starts_at, created_at, id
-`
-
-type ListUsageReceiptsParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	Periods    []time.Time
-}
-
-// A customer's receipts in a currency of some pricing periods: what their
-// postings took.
-func (q *Queries) ListUsageReceipts(ctx context.Context, arg ListUsageReceiptsParams) ([]BillingUsageReceipt, error) {
-	rows, err := q.db.Query(ctx, listUsageReceipts,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Currency,
-		arg.Periods,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingUsageReceipt
-	for rows.Next() {
-		var i BillingUsageReceipt
-		if err := rows.Scan(
-			&i.MerchantID,
-			&i.ID,
-			&i.CustomerID,
-			&i.Currency,
-			&i.PeriodStartsAt,
-			&i.PeriodEndsAt,
-			&i.CutAt,
-			&i.Reason,
-			&i.Amount,
-			&i.Lines,
-			&i.CreatedAt,
-			&i.Forgiven,
-			&i.ForgivenLines,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listUsageReceiptsByIDs = `-- name: ListUsageReceiptsByIDs :many
-SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven, forgiven_lines FROM billing.usage_receipts
+SELECT merchant_id, id, customer_id, currency, cut_at, reason, amount, lines, created_at, forgiven, charges FROM billing.usage_receipts
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND id = ANY($3::uuid[])
 `
@@ -543,15 +478,13 @@ func (q *Queries) ListUsageReceiptsByIDs(ctx context.Context, arg ListUsageRecei
 			&i.ID,
 			&i.CustomerID,
 			&i.Currency,
-			&i.PeriodStartsAt,
-			&i.PeriodEndsAt,
 			&i.CutAt,
 			&i.Reason,
 			&i.Amount,
 			&i.Lines,
 			&i.CreatedAt,
 			&i.Forgiven,
-			&i.ForgivenLines,
+			&i.Charges,
 		); err != nil {
 			return nil, err
 		}
@@ -741,6 +674,58 @@ func (q *Queries) ShareUsagePending(ctx context.Context, arg ShareUsagePendingPa
 	return items, nil
 }
 
+const sumPeriodForgiveness = `-- name: SumPeriodForgiveness :many
+SELECT (l.line ->> 'period_starts_at')::timestamptz AS period_starts_at, sum((l.line ->> 'forgiven')::bigint)::bigint AS forgiven
+FROM billing.usage_receipts r
+CROSS JOIN LATERAL jsonb_array_elements(r.lines) AS l(line)
+WHERE r.merchant_id = $1::uuid AND r.customer_id = $2::uuid AND r.currency = $3::text
+  AND r.cut_at >= $4::timestamptz
+  AND (l.line ->> 'period_starts_at')::timestamptz = ANY($5::timestamptz[])
+GROUP BY 1
+`
+
+type SumPeriodForgivenessParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	CutFrom    time.Time
+	Periods    []time.Time
+}
+
+type SumPeriodForgivenessRow struct {
+	PeriodStartsAt time.Time
+	Forgiven       int64
+}
+
+// What a customer's receipts in a currency forgave, net, of each of some
+// pricing periods: every receipt that took usage of a period was cut at or
+// after its start.
+func (q *Queries) SumPeriodForgiveness(ctx context.Context, arg SumPeriodForgivenessParams) ([]SumPeriodForgivenessRow, error) {
+	rows, err := q.db.Query(ctx, sumPeriodForgiveness,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.CutFrom,
+		arg.Periods,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SumPeriodForgivenessRow
+	for rows.Next() {
+		var i SumPeriodForgivenessRow
+		if err := rows.Scan(&i.PeriodStartsAt, &i.Forgiven); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertUsagePending = `-- name: UpsertUsagePending :exec
 
 INSERT INTO billing.usage_pending AS u (merchant_id, customer_id, currency, due_at, updated_at)
@@ -759,11 +744,13 @@ type UpsertUsagePendingParams struct {
 	DueAts      []time.Time
 }
 
-// What the ledger took of usage: who has usage no posting has taken (the
-// queue), the running totals intake settles and postings price, each posting's
-// usage receipt, and the rate cards usage was priced under.
+// What the ledger took of usage and running charges: who has either that no
+// posting has taken (the queue), the running totals intake settles and
+// postings price, each posting's usage receipt, and the rate cards usage was
+// priced under.
 // Intake queues customers' usage in a currency for posting, in the
-// transaction that settles it, in customer order: the earliest due date wins.
+// transaction that settles it, in customer order, and a running charge's
+// start its customer: the earliest due date wins.
 func (q *Queries) UpsertUsagePending(ctx context.Context, arg UpsertUsagePendingParams) error {
 	_, err := q.db.Exec(ctx, upsertUsagePending,
 		arg.MerchantID,

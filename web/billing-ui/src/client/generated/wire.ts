@@ -187,7 +187,7 @@ export type BalanceTransaction = {
   resource: string | null
   source: string
   source_id: string
-  usage: UsageDeduction | null
+  usage: UsageReceipt | null
   created_at: string
 }
 
@@ -2898,15 +2898,25 @@ export type UsageBucket = {
   discount: string
 }
 
-export type UsageDeduction = {
-  period_starts_at: string
-  period_ends_at: string
+export type UsageReceipt = {
   through: string
   amount: string
-  lines: UsageDeductionLine[]
+  lines: UsageReceiptLine[]
+  charges: UsageReceiptCharge[]
 }
 
-export type UsageDeductionLine = {
+export type UsageReceiptCharge = {
+  running_charge_id: string
+  reference: string
+  resource: string | null
+  starts_at: string
+  ends_at: string
+  amount: string
+}
+
+export type UsageReceiptLine = {
+  period_starts_at: string
+  period_ends_at: string
   meter_key: string
   cell: string | null
   requests: number

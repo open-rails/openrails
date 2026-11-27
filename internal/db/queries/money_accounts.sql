@@ -20,9 +20,9 @@ SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
     COALESCE((SELECT SUM(p.amount) FROM billing.usage_totals p
               WHERE p.merchant_id = a.merchant_id AND p.customer_id = a.customer_id AND p.currency = a.currency), 0)::bigint AS pending,
-    COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, sqlc.arg(as_of)::timestamptz) - rc.posted_amount, 0))
+    COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, LEAST(sqlc.arg(as_of)::timestamptz, rc.stopped_at)) - rc.posted_amount, 0))
               FROM billing.running_charges rc
-             WHERE rc.merchant_id = a.merchant_id AND rc.customer_id = a.customer_id AND rc.currency = a.currency AND rc.stopped_at IS NULL), 0)::bigint AS accrued,
+             WHERE rc.merchant_id = a.merchant_id AND rc.customer_id = a.customer_id AND rc.currency = a.currency AND rc.stopped_at IS DISTINCT FROM rc.posted_through_at), 0)::bigint AS accrued,
     -- A revoked collection agreement leaves only the balance to spend.
     CASE WHEN s.collection_revoked_at IS NULL THEN COALESCE(s.billing_mode, 'prepaid') ELSE 'prepaid' END::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
@@ -54,9 +54,9 @@ SELECT
     COALESCE(a.credits_posted - a.debits_posted, 0)::bigint AS balance,
     COALESCE((SELECT SUM(p.amount) FROM billing.usage_totals p
               WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.customer_id = c.id AND p.currency = sqlc.arg(currency)::text), 0)::bigint AS pending,
-    COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, sqlc.arg(as_of)::timestamptz) - rc.posted_amount, 0))
+    COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, LEAST(sqlc.arg(as_of)::timestamptz, rc.stopped_at)) - rc.posted_amount, 0))
               FROM billing.running_charges rc
-             WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id = c.id AND rc.currency = sqlc.arg(currency)::text AND rc.stopped_at IS NULL), 0)::bigint AS accrued,
+             WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id = c.id AND rc.currency = sqlc.arg(currency)::text AND rc.stopped_at IS DISTINCT FROM rc.posted_through_at), 0)::bigint AS accrued,
     CASE WHEN s.collection_revoked_at IS NULL THEN COALESCE(s.billing_mode, 'prepaid') ELSE 'prepaid' END::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     COALESCE(s.credit_limit_override, false)::boolean AS credit_limit_override,
@@ -189,11 +189,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(c
 -- name: GetUnpostedAmounts :one
 -- What the ledger has not taken of a customer's balance: pending usage at its
 -- provisional prices, and what running charges accrued since their last
--- posting. A posting through an instant reads the accrual as of it
--- (accrued_as_of); every other read, as of as_of.
+-- posting, a stopped one up to its stop. A posting through an instant reads
+-- the accrual as of it (accrued_as_of); every other read, as of as_of.
 SELECT
     COALESCE((SELECT SUM(p.amount) FROM billing.usage_totals p
               WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.customer_id = sqlc.arg(customer_id)::uuid AND p.currency = sqlc.arg(currency)::text), 0)::bigint AS pending,
-    COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, COALESCE(sqlc.narg(accrued_as_of)::timestamptz, sqlc.arg(as_of)::timestamptz)) - rc.posted_amount, 0))
+    COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, LEAST(COALESCE(sqlc.narg(accrued_as_of)::timestamptz, sqlc.arg(as_of)::timestamptz), rc.stopped_at)) - rc.posted_amount, 0))
               FROM billing.running_charges rc
-             WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id = sqlc.arg(customer_id)::uuid AND rc.currency = sqlc.arg(currency)::text AND rc.stopped_at IS NULL), 0)::bigint AS accrued;
+             WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id = sqlc.arg(customer_id)::uuid AND rc.currency = sqlc.arg(currency)::text AND rc.stopped_at IS DISTINCT FROM rc.posted_through_at), 0)::bigint AS accrued;

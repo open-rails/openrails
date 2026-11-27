@@ -577,8 +577,9 @@ func (s *Service) existingMerchantTables(ctx context.Context) ([]string, error) 
 	return out, nil
 }
 
-// postUsage posts the merchant's usage the ledger has not taken, whose money
-// the purge keeps, and answers the event store its usage is deleted from.
+// postUsage posts the merchant's usage and running charges the ledger has
+// not taken, whose money the purge keeps, and answers the event store its
+// usage is deleted from.
 func (s *Service) postUsage(ctx context.Context, id billing.MerchantID) (*eventstore.Store, error) {
 	var store *eventstore.Store
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
@@ -590,11 +591,11 @@ func (s *Service) postUsage(ctx context.Context, id billing.MerchantID) (*events
 		}
 		usage := db.UsageLedgerOf(q)
 		if usage == nil {
-			return errors.New("no usage ledger is bound: its pending usage cannot post")
+			return errors.New("no usage ledger is bound: its pending usage and running charges cannot post")
 		}
 		now := time.Now().UTC()
 		for _, r := range rows {
-			if _, err := usage.PostUsage(ctx, q, id.UUID(), r.CustomerID, r.Currency, time.Time{}, now, "purge"); err != nil {
+			if _, err := usage.PostUsage(ctx, q, id.UUID(), r.CustomerID, r.Currency, time.Time{}, now, now, "purge"); err != nil {
 				return fmt.Errorf("post usage of customer %s: %w", r.CustomerID, err)
 			}
 		}

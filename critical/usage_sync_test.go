@@ -130,6 +130,19 @@ func postDays(t *testing.T, fleet *river.Client[pgx.Tx]) {
 	runRegistered(t, fleet, "openrails.billing_pass", 1)
 }
 
+// periodless are a receipt's lines without their pricing period, once each
+// line's period is checked to hold at, when its usage occurred.
+func periodless(t *testing.T, at time.Time, lines []billing.UsageReceiptLine) []billing.UsageReceiptLine {
+	t.Helper()
+	out := make([]billing.UsageReceiptLine, len(lines))
+	for i, l := range lines {
+		require.True(t, !at.Before(l.PeriodStartsAt) && at.Before(l.PeriodEndsAt), "line %d's period %s to %s holds %s", i, l.PeriodStartsAt, l.PeriodEndsAt, at)
+		l.PeriodStartsAt, l.PeriodEndsAt = time.Time{}, time.Time{}
+		out[i] = l
+	}
+	return out
+}
+
 // usageDeductions are the customer's balance transactions that posted usage,
 // newest first.
 func usageDeductions(t *testing.T, client *openrails.Client, customer billing.CustomerID) []billing.BalanceTransaction {

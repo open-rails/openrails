@@ -186,25 +186,37 @@ type UsageBucket struct {
 	Discount int64      `json:"discount,string"`
 }
 
-// UsageDeduction is what one posting of a customer's usage was for: the
-// pricing period, the instant usage before which it took (Through), Amount
-// the period's price less what earlier postings took, and per meter and cell
-// what it added: requests, quantity and amount. A volume tier whose price
-// fell credits a negative Amount.
-type UsageDeduction struct {
-	PeriodStartsAt time.Time            `json:"period_starts_at"`
-	PeriodEndsAt   time.Time            `json:"period_ends_at"`
-	Through        time.Time            `json:"through"`
-	Amount         int64                `json:"amount,string"`
-	Lines          []UsageDeductionLine `json:"lines"`
+// UsageReceipt is what one posting of a customer's metered spend in a
+// currency took: the usage that occurred before Through, per pricing period
+// and meter cell the period's price less what earlier postings took, and
+// what each running charge accrued since its last posting. Amount sums them;
+// a period whose volume price fell has negative lines.
+type UsageReceipt struct {
+	Through time.Time            `json:"through"`
+	Amount  int64                `json:"amount,string"`
+	Lines   []UsageReceiptLine   `json:"lines"`
+	Charges []UsageReceiptCharge `json:"charges"`
 }
 
-// UsageDeductionLine is one meter cell of a usage deduction; Cell is null
-// without a matrix.
-type UsageDeductionLine struct {
-	MeterKey string  `json:"meter_key"`
-	Cell     *string `json:"cell"`
-	Requests int64   `json:"requests"`
-	Quantity int64   `json:"quantity"`
-	Amount   int64   `json:"amount,string"`
+// UsageReceiptLine is what a receipt added for one meter cell in a pricing
+// period: requests, quantity and amount. Cell is null without a matrix.
+type UsageReceiptLine struct {
+	PeriodStartsAt time.Time `json:"period_starts_at"`
+	PeriodEndsAt   time.Time `json:"period_ends_at"`
+	MeterKey       string    `json:"meter_key"`
+	Cell           *string   `json:"cell"`
+	Requests       int64     `json:"requests"`
+	Quantity       int64     `json:"quantity"`
+	Amount         int64     `json:"amount,string"`
+}
+
+// UsageReceiptCharge is what a running charge accrued from StartsAt, its last
+// posting, to EndsAt.
+type UsageReceiptCharge struct {
+	RunningChargeID RunningChargeID `json:"running_charge_id"`
+	Reference       string          `json:"reference"`
+	Resource        *string         `json:"resource"`
+	StartsAt        time.Time       `json:"starts_at"`
+	EndsAt          time.Time       `json:"ends_at"`
+	Amount          int64           `json:"amount,string"`
 }

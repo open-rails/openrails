@@ -150,8 +150,6 @@ type balanceView struct {
 	// the balance until it does, which the look does at once.
 	lapsed bool
 	lots   []creditLot
-	// checkpointDue: a charge is not yet posted through the last 00:00 UTC.
-	checkpointDue bool
 }
 
 // capacityFloors are the floors of a balance: capacity is zero at floor
@@ -180,9 +178,6 @@ func (s *MoneyService) viewBalance(ctx context.Context, q *gen.Queries, bal *mod
 	var err error
 	lines := runningLines(charges)
 	v.accrualRate = lines.ratePerHour
-	for _, c := range charges {
-		v.checkpointDue = v.checkpointDue || c.PostedThroughAt.Before(bal.AsOf.Truncate(24*time.Hour))
-	}
 	if v.owed, err = s.moneyLedger(q, bal.MerchantID).OutstandingOwed(ctx, bal.CustomerID, bal.Currency); err != nil {
 		return v, err
 	}
@@ -264,8 +259,8 @@ func (v balanceView) project(line lowBalanceLine, usageRate int64) balanceProjec
 }
 
 // next is when to look again: now while a lapsed lot is not expired, the
-// next lot's lapse, the next 00:00 UTC while a charge runs, and each armed
-// crossing an exact cause moves the balance to. Nil: only a mark.
+// next lot's lapse, and each armed crossing an exact cause (a running
+// charge's accrual, a lapse) moves the balance to. Nil: only a mark.
 func (v balanceView) next(p balanceProjection, lowArmed, depletedArmed bool) *time.Time {
 	var next *time.Time
 	consider := func(at *time.Time) {
@@ -281,10 +276,6 @@ func (v balanceView) next(p balanceProjection, lowArmed, depletedArmed bool) *ti
 		if lot.remaining > 0 {
 			consider(lot.endsAt)
 		}
-	}
-	if len(v.charges) > 0 {
-		midnight := nextMidnight(v.asOf)
-		consider(&midnight)
 	}
 	if lowArmed {
 		consider(p.lowAt)
@@ -372,11 +363,10 @@ func later(a, b time.Time) time.Time {
 }
 
 // WatchBalanceInTx looks at one customer's balance under its lock: it expires
-// lapsed credit lots, posts each running charge through the last 00:00 UTC,
-// samples the usage rate, tells the host and the customer of a low or
-// depleted balance once per crossing, and writes when to look next. A
-// customer with no watch, or one not due, is left alone; an arrears one with
-// no running charge and no lot that lapses loses its watch.
+// lapsed credit lots, samples the usage rate, tells the host and the customer
+// of a low or depleted balance once per crossing, and writes when to look
+// next. A customer with no watch, or one not due, is left alone; an arrears
+// one with no running charge and no lot that lapses loses its watch.
 func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, customer identity.CustomerID, currency string) error {
 	if s == nil || txDB == nil {
 		return fmt.Errorf("balance watch requires a bound transaction")
@@ -403,28 +393,16 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 	if watch.NextCheckAt == nil || watch.NextCheckAt.After(now) {
 		return nil
 	}
-	// Lots that lapsed are settled in the order they lapsed; each posting
-	// stops at every 00:00 UTC on its way.
+	// Lots that lapsed are settled in the order they lapsed.
 	if _, err := txSvc.creditLots(q, key.MerchantID).ExpireLapsedBy(ctx, key.CustomerID, currency, now); err != nil {
 		return err
-	}
-	charges, err := q.ListRunningChargesByCustomer(ctx, gen.ListRunningChargesByCustomerParams{MerchantID: key.MerchantID, CustomerID: key.CustomerID, Currency: currency})
-	if err != nil {
-		return err
-	}
-	day := now.Truncate(24 * time.Hour)
-	for _, c := range charges {
-		if c.PostedThroughAt.Before(day) {
-			if _, err := txSvc.postRunningCharge(ctx, q, c, day, false); err != nil {
-				return err
-			}
-		}
 	}
 	bal, err := txSvc.deriveBalance(ctx, q, key.MerchantID, key.CustomerID, currency)
 	if err != nil {
 		return err
 	}
-	if charges, err = runningCharges(ctx, q, bal); err != nil {
+	charges, err := runningCharges(ctx, q, bal)
+	if err != nil {
 		return err
 	}
 	view, err := txSvc.viewBalance(ctx, q, bal, charges)
@@ -570,9 +548,8 @@ func (s *MoneyService) watchBalance(ctx context.Context, q *gen.Queries, merchan
 	}
 	out := view.project(line, usageRate)
 	next := view.next(out, lowArmed, depletedArmed)
-	// A charge started in the past may already be due a day's checkpoint, and
-	// a funding may be waiting to re-arm a notice.
-	if view.checkpointDue || (watch.FundedAt != nil && (!lowArmed || !depletedArmed)) {
+	// A funding may be waiting to re-arm a notice.
+	if watch.FundedAt != nil && (!lowArmed || !depletedArmed) {
 		next = &bal.AsOf
 	}
 	low, floor := view.lines(out)
@@ -683,7 +660,7 @@ func enqueueBalanceEvent(ctx context.Context, q *gen.Queries, merchantID uuid.UU
 	_, err = q.EnqueueHostLifecycleEvent(ctx, gen.EnqueueHostLifecycleEventParams{
 		MerchantID: merchantID, EventType: string(eventType), SubjectType: "customer", SubjectID: event.CustomerID.UUID(),
 		Currency: string(event.Currency), OccurredAt: event.AsOf, Data: data,
-		DedupeKey: fmt.Sprintf("%s:%s:%s:%s", eventType, event.CustomerID, event.Currency, event.AsOf.Format(runningChargeInstantLayout)),
+		DedupeKey: fmt.Sprintf("%s:%s:%s:%s", eventType, event.CustomerID, event.Currency, event.AsOf.Format(instantLayout)),
 	})
 	return err
 }
@@ -701,7 +678,7 @@ func notifyBalance(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, ki
 	}
 	customer := event.CustomerID.UUID()
 	_, err = billingfact.Record(ctx, q, billingfact.Fact{
-		ID:         uuidutil.DerivedV7(event.AsOf, customer, string(kind)+":"+string(event.Currency)+":"+event.AsOf.Format(runningChargeInstantLayout)),
+		ID:         uuidutil.DerivedV7(event.AsOf, customer, string(kind)+":"+string(event.Currency)+":"+event.AsOf.Format(instantLayout)),
 		MerchantID: merchantID, CustomerID: customer, EventType: string(kind), Data: data, CreatedAt: event.AsOf,
 	})
 	return err

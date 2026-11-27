@@ -252,37 +252,6 @@ GROUP BY customer_id, b, currency, event_type, invoker`
 	return out, err
 }
 
-// PeriodCharge is what one invoker's usage of one event type charged a meter
-// cell in a pricing period, at intake's price less the volume discount.
-type PeriodCharge struct {
-	Invoker, EventType, Meter, Cell string
-	Amount                          int64
-}
-
-// PeriodCharges are what a customer's deduplicated usage in a currency
-// charged in the pricing period starting at period, before cut, by invoker,
-// event type and meter cell: how a posting shares what it forgives.
-func (s *Store) PeriodCharges(ctx context.Context, customer billing.CustomerID, currency string, period, cut time.Time) ([]PeriodCharge, error) {
-	mid, err := s.merchant(ctx)
-	if err != nil {
-		return nil, err
-	}
-	sql := fmt.Sprintf(`SELECT invoker, event_type, charges.meter, charges.cell, sum(charges.amount) - sum(charges.discount)
-FROM {database}.usage_events FINAL ARRAY JOIN charges
-WHERE merchant_id = %s AND customer_id = %s AND currency = %s AND period_starts_at = %s AND occurred_at >= %s AND occurred_at < %s
-GROUP BY invoker, event_type, charges.meter, charges.cell`, mid, uuidLiteral(uuid.UUID(customer)), stringLiteral(currency), timeLiteral(period), timeLiteral(period), timeLiteral(cut))
-	var out []PeriodCharge
-	err = s.query(ctx, "read usage charges", sql, func(rows interface{ Scan(...any) error }) error {
-		var c PeriodCharge
-		if err := rows.Scan(&c.Invoker, &c.EventType, &c.Meter, &c.Cell, &c.Amount); err != nil {
-			return err
-		}
-		out = append(out, c)
-		return nil
-	})
-	return out, err
-}
-
 // UsageExists reports whether the merchant has usage of any of eventTypes:
 // a meter that read it may not change what it means.
 func (s *Store) UsageExists(ctx context.Context, eventTypes []string) (bool, error) {

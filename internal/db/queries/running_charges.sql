@@ -20,16 +20,25 @@ ON CONFLICT (merchant_id, reference) DO NOTHING
 RETURNING *;
 
 -- name: PostRunningCharge :one
--- Moves a running charge's posting to an instant, and stops it there when
--- asked. posted_amount is the caller's total through it, which the table
--- checks against running_charge_total. The caller holds the customer lock.
+-- Moves a charge's posting to an instant, no later than its stop.
+-- posted_amount is the caller's total through it, which the table checks
+-- against running_charge_total. The caller holds the customer lock.
 UPDATE billing.running_charges
 SET posted_through_at = sqlc.arg(through)::timestamptz,
     posted_amount = sqlc.arg(posted_amount)::bigint,
-    stopped_at = CASE WHEN sqlc.arg(stop)::boolean THEN sqlc.arg(through)::timestamptz END,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND stopped_at IS NULL AND posted_through_at <= sqlc.arg(through)::timestamptz
+  AND posted_through_at <= sqlc.arg(through)::timestamptz
+  AND (stopped_at IS NULL OR sqlc.arg(through)::timestamptz <= stopped_at)
+RETURNING *;
+
+-- name: StopRunningCharge :one
+-- Stops a running charge at an instant not before its last posting; what it
+-- accrued since posts later. The caller holds the customer lock.
+UPDATE billing.running_charges
+SET stopped_at = sqlc.arg(stopped_at)::timestamptz, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND stopped_at IS NULL AND posted_through_at <= sqlc.arg(stopped_at)::timestamptz
 RETURNING *;
 
 -- name: ListRunningChargesByCustomer :many
@@ -38,6 +47,18 @@ SELECT * FROM billing.running_charges
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text AND stopped_at IS NULL
 ORDER BY started_at, id;
+
+-- name: ListUnpostedRunningCharges :many
+-- A customer's charges in one currency a posting may take, oldest first: the
+-- running ones and those stopped after their last posting.
+SELECT * FROM billing.running_charges
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND currency = sqlc.arg(currency)::text AND stopped_at IS DISTINCT FROM posted_through_at
+ORDER BY started_at, id;
+
+-- name: ListRunningChargesByIDs :many
+SELECT * FROM billing.running_charges
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
 
 -- name: ListRunningCharges :many
 -- Newest first: ids are uuidv7, so the primary key is the invoice.

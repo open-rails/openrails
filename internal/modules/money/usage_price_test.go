@@ -69,8 +69,8 @@ func TestCellPriceIsThePriceOfTheTotal(t *testing.T) {
 	require.Error(t, err, "a print with no card is not priced")
 }
 
-// A posting takes the price less what earlier receipts took, line by line;
-// a volume crossing leaves a negative remainder.
+// A posting takes the price less the price of what posted before, line by
+// line; a volume crossing leaves a negative remainder.
 func TestPostingDeltaTakesWhatIsLeft(t *testing.T) {
 	period := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	p := prints(volume(10, 5, 100))

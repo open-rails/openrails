@@ -2209,7 +2209,7 @@ type BillingRevenueSchedule struct {
 	Forfeited int64
 }
 
-// One row per running charge: a customer charged rate_per_hour (native units of currency) from started_at until stopped_at. No row changes while it runs; a posting moves what accrued through posted_through_at to the ledger, and a stopped charge is posted through stopped_at. Retention: permanent, never pruned.
+// One row per running charge: a customer charged rate_per_hour (native units of currency) from started_at until stopped_at. No row changes while it runs but at its postings, which move what accrued through posted_through_at to the ledger; a stop posts nothing, and a stopped charge is posted through stopped_at by a later posting. Retention: permanent, never pruned.
 type BillingRunningCharge struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -2515,37 +2515,35 @@ type BillingUsageCardPrint struct {
 	CreatedAt  time.Time
 }
 
-// A customer with usage in a currency no posting has taken: the posting queue. Intake holds the row FOR KEY SHARE from before it writes its usage until it commits, and writes it only to move due_at earlier; a posting locks it FOR UPDATE, so it waits for every intake of the customer, and deletes it once nothing is unposted.
+// A customer with usage or a running charge in a currency no posting has taken: the posting queue. Intake holds the row FOR KEY SHARE from before it writes its usage until it commits, and writes it only to move due_at earlier; a running charge's start writes it under the customer lock; a posting locks it FOR UPDATE, so it waits for every intake of the customer, and deletes it once nothing is unposted.
 type BillingUsagePending struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
-	// When the daily posting takes it: the end of the merchant's accounting-zone day its oldest unposted usage occurred in.
+	// When the daily posting takes it: the end of the merchant's accounting-zone day its oldest unposted usage occurred in, or a running charge was last posted through.
 	DueAt     time.Time
 	UpdatedAt time.Time
 }
 
-// What one posting took of a customer's usage in one pricing period, never changed once written: the price of the period's settled quantity less what its earlier receipts took, itemized by meter. The posting draws the lots first, one credit_spend each, and leaves the rest owed in one owed_accrual, at (usage_posting, usage_receipt:<id>, 1); a reversal credits a period whose price fell, as usage_reversed. Retention: permanent, never pruned.
+// What one posting took of a customer's metered spend in a currency, never changed once written: per pricing period, meter cell and card print the price of the period's settled quantity less what its earlier receipts took, and what each running charge accrued since its last posting. The posting draws the lots first, one credit_spend each, and leaves the rest owed in one owed_accrual, at (usage_posting, usage_receipt:<id>, 1); a period whose price fell is credited at the same coordinate as a lot, usage_reversed. Retention: permanent, never pruned.
 type BillingUsageReceipt struct {
-	MerchantID     uuid.UUID
-	ID             uuid.UUID
-	CustomerID     uuid.UUID
-	Currency       string
-	PeriodStartsAt time.Time
-	PeriodEndsAt   time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
 	// The receipt took the settled usage that occurred before it: a credit lot's lapse, else all of it (the posting's instant plus the usage clock skew).
 	CutAt time.Time
-	// daily: once the accounting-zone day of the oldest pending usage ended; billing: before a usage invoice is billed; credit: before a credit lot's expiry, revocation or refund, or an invoice paid from the balance; purge: before a merchant purge; reversal: the period's price fell below what its receipts took (a volume tier).
+	// daily: once the accounting-zone day of the oldest pending usage or running charge ended; billing: before a usage invoice is billed; credit: before a credit lot's expiry, revocation or refund, or an invoice paid from the balance; purge: before a merchant purge.
 	Reason string
-	// What the posting took: positive for usage, negative for a reversal.
+	// The sum of the lines and charges: what the posting took less what it credited.
 	Amount int64
-	// Per meter, cell and card print, what the posting added: [{meter_key, cell, print, requests, quantity, stated, amount}]. A period's receipts sum to the price of its settled usage.
+	// Per pricing period, meter, cell and card print, what the posting added: [{period_starts_at, period_ends_at, meter_key, cell, print, requests, quantity, stated, amount, forgiven}]. A period's receipts sum to the price of its settled usage; a period whose price fell has negative lines. forgiven is the line's share of what a merchant's unit could not take (positive) or took back (negative).
 	Lines     []byte
 	CreatedAt time.Time
-	// Of amount, what the ledger did not take: usage in a merchant's unit its lots could not cover, never owed (positive); a reversal's share that took back forgiveness rather than credit (negative). Zero in a registry currency.
+	// The sum of the lines' forgiven: of amount, what the ledger did not take. Zero in a registry currency.
 	Forgiven int64
-	// How forgiven is shared, as the posting computed it: [{invoker, event_type, meter_key, cell, amount}], by what the period charged each before the cut, to the largest remainder; a reversal takes back from the period's shares the same way. NULL when nothing was forgiven.
-	ForgivenLines []byte
+	// Each running charge the posting took, from its last posting to its end here: [{running_charge_id, starts_at, ends_at, amount}].
+	Charges []byte
 }
 
 // A customer's settled usage of one meter cell under one card print in one pricing period: the next item's tier position, pending usage and what a posting prices. Intake adds to its lease's row (only that lease's syncs write it, so gates never wait on each other); a posting folds the rows it took into the posted row (lease_id the nil UUID) and deletes them. Retention: rows are deleted a day after their period's late usage window closes (36 days after period_ends_at), once none of the period's rows is unposted.

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 883,
+  "scenario_count": 887,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3181,7 +3181,7 @@
     {
       "id": "OR-J48-S08",
       "journey": "J48",
-      "name": "A gate decides on the unit balance and an overrun is forgiven usage"
+      "name": "A gate decides on the unit balance and an overrun is forgiven usage, recorded on the receipt's line and shown with no invoker"
     },
     {
       "id": "OR-J48-S09",
@@ -3191,7 +3191,7 @@
     {
       "id": "OR-J48-S10",
       "journey": "J48",
-      "name": "A period in a unit whose volume price falls below what its receipts took is credited at the posting that takes the usage, taking back what the period forgave, from the shares its receipt stored, before crediting what the lots paid beyond its price"
+      "name": "A period in a unit whose volume price falls below what its receipts took is credited at the posting that takes the usage, taking back on its falling line what the period forgave before crediting what the lots paid beyond its price"
     },
     {
       "id": "OR-J48-S11",
@@ -4417,6 +4417,26 @@
       "id": "OR-J04-S96",
       "journey": "J04",
       "name": "Keep-policy verification does not lock the membership"
+    },
+    {
+      "id": "OR-J25-S45",
+      "journey": "J25",
+      "name": "A running charge in a merchant whose accounting zone is not UTC posts nothing at 00:00 UTC and posts at that zone's midnight, through it, on the same receipt as the day's usage"
+    },
+    {
+      "id": "OR-J25-S46",
+      "journey": "J25",
+      "name": "A stop records its instant and posts nothing: what the charge accrued stays pending in the balance, frozen at the stop, until the daily posting takes it once"
+    },
+    {
+      "id": "OR-J24-S88",
+      "journey": "J24",
+      "name": "One receipt holds a period whose volume price fell beside a new period's usage: the rise is spent, the fall credited as a lot, both at the receipt's coordinate, and each period's receipts sum to the price of its quantity"
+    },
+    {
+      "id": "OR-J48-S20",
+      "journey": "J48",
+      "name": "A posting in a merchant's unit forgives what the lots cannot take with the event store out of reach, recording it on its receipt's lines; the metric shows it by rate card with no invoker"
     }
   ]
 }
