@@ -54,10 +54,33 @@ tasks:
       - ./{{.BIN_DIR}}/{{.BINARY_NAME}} run-server
 
   dev:
-    desc: "Hot reload: the Compose dependencies (PostgreSQL, Valkey, ClickHouse, Vault), the API under Air on 127.0.0.1:3053 and the console under Vite at http://localhost:3054/admin/, with the local operator and a sandbox merchant; Ctrl+C stops the API and console"
+    desc: "Hot reload: the API under Air on 127.0.0.1:3053, its output also in tmp/dev.log, and the console under Vite at http://localhost:3054/admin/, with the local operator and a sandbox merchant; needs `task dev:services`; Ctrl+C stops the API and console"
     cmds:
-      - task: dev:services
+      - task: dev:check
       - task: dev:run
+
+  dev:check:
+    internal: true
+    silent: true
+    cmds:
+      # In memory, Vault forgets its mounts when its container restarts.
+      - cmd: |
+          bash <<'BASH'
+          up() { (: </dev/tcp/127.0.0.1/"$1") 2>/dev/null; }
+          down=()
+          up 5434 || down+=("PostgreSQL :5434")
+          up 6380 || down+=("Valkey :6380")
+          up 9000 || down+=("ClickHouse :9000")
+          if ! up 8200; then
+            down+=("Vault :8200")
+          elif ! curl -fsS -H "X-Vault-Token: {{.DEV_VAULT_TOKEN}}" http://127.0.0.1:8200/v1/sys/mounts 2>/dev/null | grep -q '"kv/"'; then
+            down+=("Vault's kv mount")
+          fi
+          (( ${#down[@]} == 0 )) && exit 0
+          printf -v list '%s, ' "${down[@]}"
+          echo "task dev: ${list%, } not up; run \`task dev:services\`" >&2
+          exit 1
+          BASH
 
   dev:run:
     internal: true
@@ -70,13 +93,19 @@ tasks:
         vars: { PUBLIC_URL: "http://localhost:3054" }
 
   dev:services:
-    desc: Start the Compose dependencies (PostgreSQL, Valkey, ClickHouse, Vault) and mount Vault's engines; `docker compose down -v` discards them
+    desc: Start the Compose dependencies (PostgreSQL, Valkey, ClickHouse, Vault) and mount Vault's engines; `task dev:services:stop` stops them, `docker compose down -v` discards them
     cmds:
       - docker compose up -d --wait postgres valkey clickhouse vault
       - docker compose run --rm vault-init
 
+  dev:services:stop:
+    desc: Stop the Compose dependencies, keeping their data but Vault's, which is in memory
+    cmds:
+      - docker compose stop
+
   dev:api:
-    desc: The API server under Air on 127.0.0.1:3053 (the default host), rebuilt on every Go change
+    desc: The API server under Air on 127.0.0.1:3053 (the default host), rebuilt on every Go change; its output is also tmp/dev.log, replaced each start
+    set: [pipefail]
     env: &dev-env
       PUBLIC_URL: '{{.PUBLIC_URL | default "http://localhost:3053"}}'
       # The Compose dependencies without a default: PostgreSQL and ClickHouse
@@ -86,7 +115,9 @@ tasks:
       VAULT_TOKEN: "{{.DEV_VAULT_TOKEN}}"
       VAULT_KV_MOUNT: kv
     cmds:
-      - air -c .air.toml
+      - mkdir -p tmp
+      # tee -i outlives Ctrl+C, so Air, which stops the server, never writes to a closed pipe.
+      - air -c .air.toml 2>&1 | tee -i tmp/dev.log
 
   dev:seed:
     desc: "Once the local API is ready: the local operator (operator@localhost.test, password openrails, root:owner) and the sandbox merchant; refuses anything but localhost"
