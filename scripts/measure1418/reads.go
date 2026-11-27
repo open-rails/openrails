@@ -38,9 +38,9 @@ type readVariant struct {
 
 var readVariants = []readVariant{
 	{Measure: "mrr", Arms: []string{armFacts, armClose}},
-	{Measure: "mrr", Name: "by product_id", By: []string{"product_id"}, Arms: []string{armFacts, armWide}},
-	{Measure: "subscribers", Arms: []string{armFacts}},
-	{Measure: "subscribers", Name: "by product_id", By: []string{"product_id"}, Arms: []string{armFacts, armWide}},
+	{Measure: "mrr", Name: "by product_id", By: []string{"product_id"}, Arms: []string{armFacts, armWide, armClose}},
+	{Measure: "subscribers", Arms: []string{armFacts, armClose}},
+	{Measure: "subscribers", Name: "by product_id", By: []string{"product_id"}, Arms: []string{armFacts, armWide, armClose}},
 	{Measure: "arpa", Arms: []string{armFacts, armClose}},
 	{Measure: "mrr_movements", Arms: []string{armFacts}},
 	{Measure: "mrr_movements", Name: "by movement", By: []string{"movement"}, Arms: []string{armFacts}},
@@ -63,7 +63,7 @@ var readVariants = []readVariant{
 // The tiles: a value at the range's end.
 var kpiVariants = []readVariant{
 	{Measure: "mrr", Name: "kpi", KPI: true, Arms: []string{armFacts, armClose}},
-	{Measure: "subscribers", Name: "kpi", KPI: true, Arms: []string{armFacts}},
+	{Measure: "subscribers", Name: "kpi", KPI: true, Arms: []string{armFacts, armClose}},
 	{Measure: "arpa", Name: "kpi", KPI: true, Arms: []string{armFacts, armClose}},
 	{Measure: "mrr_at_risk", Name: "kpi", KPI: true, Arms: []string{armFacts, armState}},
 }
@@ -236,7 +236,8 @@ func dumpSQL(dir string) error {
 			}
 		}
 	}
-	for name, sql := range map[string]string{"sim.sql": simSQL, "settle_facts.sql": settleFactsSQL, "proto.sql": protoSQL, "proto_indexes.sql": protoIndexesSQL} {
+	for name, sql := range map[string]string{"sim.sql": simSQL, "settle_facts.sql": settleFactsSQL, "proto.sql": protoSQL, "proto_indexes.sql": protoIndexesSQL,
+		"month_close.sql": monthCloseSQL, "product_close.sql": productCloseSQL, "customer_logos.sql": customerLogosSQL, "customer_close.sql": customerCloseSQL} {
 		if err := os.WriteFile(filepath.Join(dir, "0000-"+name), []byte(sql), 0o644); err != nil {
 			return err
 		}

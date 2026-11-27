@@ -32,3 +32,25 @@ CREATE TABLE proto.mrr_month_close (
     customers bigint NOT NULL,
     PRIMARY KEY (merchant_id, at, currency)
 );
+CREATE TABLE proto.product_month_close (
+    merchant_id uuid NOT NULL,
+    currency text NOT NULL,
+    product_id uuid NOT NULL,
+    at timestamptz NOT NULL,
+    mrr bigint NOT NULL,
+    subscribers bigint NOT NULL,
+    PRIMARY KEY (merchant_id, at, currency, product_id)
+);
+-- The customer-level logo change a movement would carry: +1 when the
+-- customer gains MRR in a first currency, -1 when it loses its last.
+CREATE TABLE proto.customer_logos (
+    merchant_id uuid NOT NULL,
+    occurred_at timestamptz NOT NULL,
+    d integer NOT NULL
+);
+CREATE TABLE proto.customer_month_close (
+    merchant_id uuid NOT NULL,
+    at timestamptz NOT NULL,
+    customers bigint NOT NULL,
+    PRIMARY KEY (merchant_id, at)
+);

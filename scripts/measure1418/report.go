@@ -42,7 +42,8 @@ var tableKinds = []struct{ kind, name string }{
 	{"rollup", "billing.mrr_customer_flows"}, {"rollup", "billing.mrr_customer_totals"}, {"rollup", "billing.mrr_risk_flows"},
 	{"rollup", "billing.mrr_risk_totals"}, {"queue", "billing.mrr_risk_due"},
 	{"other", "billing.subscriptions"}, {"other", "billing.customers"}, {"other", "billing.subscription_status_transitions"},
-	{"proposed", "proto.lines_wide"}, {"proposed", "proto.mrr_month_close"},
+	{"proposed", "proto.lines_wide"}, {"proposed", "proto.mrr_month_close"}, {"proposed", "proto.product_month_close"},
+	{"proposed", "proto.customer_logos"}, {"proposed", "proto.customer_month_close"},
 }
 
 var protoIndexes = []string{"proto_mrr_movements_at_idx", "proto_mrr_movements_cohort_idx", "proto_mrr_movements_logo_idx",

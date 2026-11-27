@@ -36,6 +36,15 @@ var protoIndexesSQL string
 //go:embed month_close.sql
 var monthCloseSQL string
 
+//go:embed product_close.sql
+var productCloseSQL string
+
+//go:embed customer_logos.sql
+var customerLogosSQL string
+
+//go:embed customer_close.sql
+var customerCloseSQL string
+
 type config struct {
 	dsn          string
 	customers    int
@@ -165,8 +174,20 @@ func run(ctx context.Context, c config) error {
 	if _, err := pool.Exec(ctx, protoIndexesSQL); err != nil {
 		return fmt.Errorf("proto indexes: %w", err)
 	}
-	if _, err := pool.Exec(ctx, monthCloseSQL, w.merchant, asof); err != nil {
-		return fmt.Errorf("month close: %w", err)
+	for _, st := range []struct {
+		name string
+		sql  string
+		args []any
+	}{
+		{"month close", monthCloseSQL, []any{w.merchant, asof}},
+		{"product close", productCloseSQL, []any{w.merchant, asof}},
+		{"customer logos", customerLogosSQL, []any{w.merchant}},
+		{"customer logos index", "CREATE INDEX proto_customer_logos_at_idx ON proto.customer_logos (merchant_id, occurred_at) INCLUDE (d)", nil},
+		{"customer close", customerCloseSQL, []any{w.merchant, asof}},
+	} {
+		if _, err := pool.Exec(ctx, st.sql, st.args...); err != nil {
+			return fmt.Errorf("%s: %w", st.name, err)
+		}
 	}
 	if _, err := pool.Exec(ctx, "VACUUM (ANALYZE)"); err != nil {
 		return fmt.Errorf("vacuum: %w", err)

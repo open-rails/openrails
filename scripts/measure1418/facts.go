@@ -47,6 +47,16 @@ const (
 	armClose = "facts+close" // a month-close per currency anchors the snapshot reads
 )
 
+// closeSpec is a month-close a snapshot read starts from: its table, and its
+// columns for the read's dimensions and leaves.
+type closeSpec struct {
+	at     time.Time
+	table  string
+	m      string
+	dims   map[string]string
+	leaves map[string]string
+}
+
 // monthStart is the UTC month start at or before t: the month-close a read
 // anchored at t starts from.
 func monthStart(t time.Time) time.Time {
@@ -76,16 +86,20 @@ func factsStatements(p *metrics.Plan, measure, arm string, mid uuid.UUID, asof t
 		where: []string{"l.merchant_id = " + m, "mv.merchant_id = " + m}, at: "mv.occurred_at",
 		dims: map[string]string{"currency": "mv.currency", "product_id": "'prod_' || l.product_id::text"}}
 	lineDelta, lineSubs := "l.delta", "l.subscriber_delta"
-	if arm == armWide {
+	if arm == armWide || arm == armClose {
 		lines = source{from: "proto.lines_wide l", where: []string{"l.merchant_id = " + m}, at: "l.occurred_at",
 			dims: map[string]string{"currency": "l.currency", "product_id": "'prod_' || l.product_id::text"}}
 	}
 	byProduct := slices.Contains(p.Dims, "product_id")
 	one := func(sql string) []statement { return []statement{{Name: measure, SQL: sql, Args: a.args}} }
-	var anchor *time.Time
+	var anchor, productClose *closeSpec
 	if arm == armClose {
 		s0 := monthStart(clip(edges[0]))
-		anchor = &s0
+		anchor = &closeSpec{at: s0, table: "proto.mrr_month_close c", m: m, dims: map[string]string{"currency": "c.currency"},
+			leaves: map[string]string{"m.delta": "c.mrr", "m.logo_delta": "c.customers"}}
+		productClose = &closeSpec{at: s0, table: "proto.product_month_close c", m: m,
+			dims:   map[string]string{"currency": "c.currency", "product_id": "'prod_' || c.product_id::text"},
+			leaves: map[string]string{"l.delta": "c.mrr", "l.subscriber_delta": "c.subscribers"}}
 	}
 
 	switch measure {
@@ -95,15 +109,18 @@ func factsStatements(p *metrics.Plan, measure, arm string, mid uuid.UUID, asof t
 			leaves = append(leaves, dimCol{"subscribers", "m.logo_delta"})
 		}
 		if byProduct {
-			return one(snapshotSQL(a, lines, p.Dims, nil, []dimCol{{"mrr", lineDelta}}, edges, clip(edges[len(edges)-1]), nil)), nil
+			return one(snapshotSQL(a, lines, p.Dims, nil, []dimCol{{"mrr", lineDelta}}, edges, clip(edges[len(edges)-1]), productClose)), nil
 		}
 		return one(snapshotSQL(a, moves, p.Dims, nil, leaves, edges, clip(edges[len(edges)-1]), anchor)), nil
 	case "subscribers":
 		if byProduct {
-			return one(snapshotSQL(a, lines, p.Dims, nil, []dimCol{{"subscribers", lineSubs}}, edges, clip(edges[len(edges)-1]), nil)), nil
+			return one(snapshotSQL(a, lines, p.Dims, nil, []dimCol{{"subscribers", lineSubs}}, edges, clip(edges[len(edges)-1]), productClose)), nil
 		}
 		if slices.Contains(p.Dims, "currency") {
 			return one(snapshotSQL(a, moves, p.Dims, nil, []dimCol{{"subscribers", "m.logo_delta"}}, edges, clip(edges[len(edges)-1]), anchor)), nil
+		}
+		if arm == armClose {
+			return one(distinctCloseSQL(a, m, edges, clip(edges[len(edges)-1]), monthStart(clip(edges[0])))), nil
 		}
 		return one(distinctSubscribersSQL(a, m, edges, clip(edges[len(edges)-1]))), nil
 	case "mrr_movements", "subscriber_movements":
@@ -178,7 +195,7 @@ func crossTypes(p *metrics.Plan) []string {
 // they precede (width_bucket), then summed per edge. cross dims (churn_type)
 // repeat every row. With an anchor (movements only), the rows read start at
 // it and the month-close there stands for every row before.
-func snapshotSQL(a *argList, src source, dims, cross []string, leaves []dimCol, edges []time.Time, last time.Time, anchor *time.Time) string {
+func snapshotSQL(a *argList, src source, dims, cross []string, leaves []dimCol, edges []time.Time, last time.Time, anchor *closeSpec) string {
 	e, l := a.add(edges), a.add(last)
 	var own []string
 	for _, d := range dims {
@@ -217,18 +234,17 @@ func snapshotSQL(a *argList, src source, dims, cross []string, leaves []dimCol, 
 	where := append(slices.Clone(src.where), src.at+" < "+l)
 	closeRows := ""
 	if anchor != nil {
-		s0 := a.add(*anchor)
+		s0 := a.add(anchor.at)
 		where = append(where, src.at+" >= "+s0)
 		csel := []string{}
-		for range own {
-			csel = append(csel, "c.currency")
+		for _, d := range own {
+			csel = append(csel, anchor.dims[d])
 		}
 		csel = append(csel, "0")
 		for _, lf := range leaves {
-			csel = append(csel, map[string]string{"m.delta": "c.mrr", "m.logo_delta": "c.customers"}[lf.expr])
+			csel = append(csel, anchor.leaves[lf.expr])
 		}
-		closeRows = "\n  UNION ALL\n  SELECT " + strings.Join(csel, ", ") + " FROM proto.mrr_month_close c WHERE " +
-			strings.Replace(src.where[0], "m.", "c.", 1) + " AND c.at = " + s0
+		closeRows = "\n  UNION ALL\n  SELECT " + strings.Join(csel, ", ") + " FROM " + anchor.table + " WHERE c.merchant_id = " + anchor.m + " AND c.at = " + s0
 	}
 	return "WITH g AS (\n  SELECT " + strings.Join(gsel, ", ") +
 		"\n  FROM " + src.from + "\n  WHERE " + strings.Join(where, " AND ") +
@@ -252,6 +268,25 @@ func distinctSubscribersSQL(a *argList, m string, edges []time.Time, last time.T
 ), g AS (
   SELECT width_bucket(x.occurred_at, ` + e + `::timestamptz[]) AS k, sum((x.n > 0)::integer - (x.n - x.logo_delta > 0)::integer) AS d
   FROM x GROUP BY 1
+)
+SELECT e.edge AS bucket, COALESCE(sum(g.d), 0)::bigint AS m_subscribers
+FROM unnest(` + e + `::timestamptz[]) WITH ORDINALITY AS e(edge, k)
+LEFT JOIN g ON g.k < e.k
+GROUP BY e.edge`
+}
+
+// distinctCloseSQL is distinctSubscribersSQL from a customer-level logo
+// change (proto.customer_logos: what a movement would carry) and a month
+// close of distinct customers.
+func distinctCloseSQL(a *argList, m string, edges []time.Time, last, s0 time.Time) string {
+	e, l, s := a.add(edges), a.add(last), a.add(s0)
+	return `WITH g AS (
+  SELECT width_bucket(x.occurred_at, ` + e + `::timestamptz[]) AS k, sum(x.d) AS d
+  FROM proto.customer_logos x
+  WHERE x.merchant_id = ` + m + ` AND x.occurred_at >= ` + s + ` AND x.occurred_at < ` + l + `
+  GROUP BY 1
+  UNION ALL
+  SELECT 0, c.customers FROM proto.customer_month_close c WHERE c.merchant_id = ` + m + ` AND c.at = ` + s + `
 )
 SELECT e.edge AS bucket, COALESCE(sum(g.d), 0)::bigint AS m_subscribers
 FROM unnest(` + e + `::timestamptz[]) WITH ORDINALITY AS e(edge, k)
