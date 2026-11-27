@@ -51,12 +51,12 @@ type gateState struct {
 	refused  []error
 	// failure is the last sync attempt's failure, nil once one succeeds;
 	// unreachable when OpenRails could not be reached, since when it has
-	// not been.
+	// not been. applied is that sync's build.
 	failure     error
 	unreachable bool
 	failedAt    time.Time
 	downSince   time.Time
-	attempts    uint64
+	applied     int64
 	synced      chan struct{}
 	writing     int
 	closing     bool
@@ -247,12 +247,6 @@ func (g *gateState) lastFailure() error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.failure
-}
-
-func (g *gateState) failed(err error, unreachable bool) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.failLocked(unavailable(err), unreachable, time.Now())
 }
 
 // failLocked records a failed attempt made at at; the first unreachable
@@ -734,7 +728,7 @@ func (g *gateState) syncOnce() {
 	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 	res, err := g.c.SyncLeases(ctx, params)
 	cancel()
-	acks := g.apply(params, keys, res, err, sent)
+	acks := g.apply(params, keys, res, err, build, sent)
 	g.write(acks)
 	g.mu.Lock()
 	// A view this sync asked for and the server deferred is asked again at
@@ -773,10 +767,10 @@ func partial(usage []billing.LeaseUsage, res *billing.SyncLeasesResult, err erro
 	return err == nil && len(usage) > 0 && res.Usage.ThroughN >= usage[0].N && res.Usage.ThroughN < usage[len(usage)-1].N
 }
 
-// apply takes in one sync's answer, or its failure: settled usage leaves
-// the views it was counted in at the moment the same views are replaced,
-// and the requests waiting for a view are answered.
-func (g *gateState) apply(params billing.SyncLeasesParams, keys []string, res *billing.SyncLeasesResult, err error, sent time.Time) []billing.LeaseUsageRef {
+// apply takes in the answer of sync number build, or its failure: settled
+// usage leaves the views it was counted in at the moment the same views are
+// replaced, and the requests waiting for a view are answered.
+func (g *gateState) apply(params billing.SyncLeasesParams, keys []string, res *billing.SyncLeasesResult, err error, build int64, sent time.Time) []billing.LeaseUsageRef {
 	if err == nil && len(res.LimitSets) != len(params.Views) {
 		err = fmt.Errorf("%w: a sync answered %d limit sets for %d views", billing.ErrUnreachable, len(res.LimitSets), len(params.Views))
 	}
@@ -794,7 +788,7 @@ func (g *gateState) apply(params billing.SyncLeasesParams, keys []string, res *b
 		}
 		g.failLocked(err, down, sent)
 		g.answerWaitersLocked(keys, nil, nil, g.failure)
-		g.attempts++
+		g.applied = build
 		g.writing++
 		g.mu.Unlock()
 		return nil
@@ -803,7 +797,7 @@ func (g *gateState) apply(params billing.SyncLeasesParams, keys []string, res *b
 	g.gates, g.reported = res.Gates, len(params.InFlight) > 0
 	g.leaseClosed = g.leaseClosed || params.Close
 	acks, settled := g.settleLocked(g.lease, res.Usage)
-	g.attempts++
+	g.applied = build
 	g.writing++
 	g.mu.Unlock()
 
@@ -1143,7 +1137,9 @@ func (g *gateState) takeLocked(lease billing.LeaseID, n int64) []*queued {
 }
 
 // flush waits until the usage queued before the call has settled, or a
-// sync fails, or ctx (bounded when it has no deadline) ends.
+// sync built after the call fails, or ctx (bounded when it has no deadline)
+// ends. A sync built before may fail after OpenRails is back: not its
+// failure.
 func (g *gateState) flush(ctx context.Context, closing bool) error {
 	if !g.started.Load() {
 		return nil
@@ -1157,7 +1153,7 @@ func (g *gateState) flush(ctx context.Context, closing bool) error {
 			targets[e] = true
 		}
 	}
-	start := g.attempts
+	start := g.builds
 	g.mu.Unlock()
 	var kicked time.Time
 	for {
@@ -1168,7 +1164,7 @@ func (g *gateState) flush(ctx context.Context, closing bool) error {
 				done = done && !targets[e]
 			}
 		}
-		failure, down, attempted, ch := g.failure, g.unreachable, g.attempts > start, g.synced
+		failure, down, attempted, ch := g.failure, g.unreachable, g.applied > start, g.synced
 		var refused []error
 		if done {
 			refused, g.refused = g.refused, nil
@@ -1252,17 +1248,17 @@ func (g *gateState) unsent(cause error) error {
 	return fmt.Errorf("openrails: gate: closed with %d usage items unsent (%s): %w", n, strings.Join(held, "; "), cause)
 }
 
-// closeLease waits for a sync built after Close began, which closes the
-// lease; one refused ends the wait with its failure, and one that could not
+// closeLease waits for a sync that closes the lease; one built after it
+// began and refused ends the wait with its failure, and one that could not
 // reach OpenRails is retried, at most once a sync interval.
 func (g *gateState) closeLease(ctx context.Context) error {
 	g.mu.Lock()
-	start := g.attempts
+	start := g.builds
 	g.mu.Unlock()
 	var kicked time.Time
 	for {
 		g.mu.Lock()
-		closed, failure, down, tried, ch := g.leaseClosed, g.failure, g.unreachable, g.attempts > start, g.synced
+		closed, failure, down, tried, ch := g.leaseClosed, g.failure, g.unreachable, g.applied > start, g.synced
 		g.mu.Unlock()
 		switch {
 		case closed:
