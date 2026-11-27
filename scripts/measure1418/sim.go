@@ -2,8 +2,8 @@ package main
 
 import (
 	"container/heap"
-	"fmt"
 	"context"
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"slices"

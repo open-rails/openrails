@@ -37,23 +37,23 @@ type readVariant struct {
 }
 
 var readVariants = []readVariant{
-	{Measure: "mrr", Arms: []string{armFacts}},
+	{Measure: "mrr", Arms: []string{armFacts, armClose}},
 	{Measure: "mrr", Name: "by product_id", By: []string{"product_id"}, Arms: []string{armFacts, armWide}},
 	{Measure: "subscribers", Arms: []string{armFacts}},
 	{Measure: "subscribers", Name: "by product_id", By: []string{"product_id"}, Arms: []string{armFacts, armWide}},
-	{Measure: "arpa", Arms: []string{armFacts}},
+	{Measure: "arpa", Arms: []string{armFacts, armClose}},
 	{Measure: "mrr_movements", Arms: []string{armFacts}},
 	{Measure: "mrr_movements", Name: "by movement", By: []string{"movement"}, Arms: []string{armFacts}},
 	{Measure: "subscriber_movements", Arms: []string{armFacts}},
 	{Measure: "subscriber_movements", Name: "by movement", By: []string{"movement"}, Arms: []string{armFacts}},
 	{Measure: "scheduled_mrr", Arms: []string{armFacts}},
 	{Measure: "scheduled_mrr", Name: "by movement", By: []string{"movement"}, Arms: []string{armFacts}},
-	{Measure: "subscriber_churn_rate", Arms: []string{armFacts}},
+	{Measure: "subscriber_churn_rate", Arms: []string{armFacts, armClose}},
 	{Measure: "subscriber_churn_rate", Name: "by churn_type", By: []string{"churn_type"}, Arms: []string{armFacts}},
-	{Measure: "nrr", Arms: []string{armFacts}},
-	{Measure: "grr", Arms: []string{armFacts}},
+	{Measure: "nrr", Arms: []string{armFacts, armClose}},
+	{Measure: "grr", Arms: []string{armFacts, armClose}},
 	{Measure: "cohort_retention", Arms: []string{armFacts}},
-	{Measure: "ltv", Arms: []string{armFacts}},
+	{Measure: "ltv", Arms: []string{armFacts, armClose}},
 	{Measure: "mrr_at_risk", Arms: []string{armFacts}},
 	{Measure: "mrr_at_risk", Name: "by risk_reason", By: []string{"risk_reason"}, Arms: []string{armFacts}},
 	{Measure: "at_risk_recovery_rate", Arms: []string{armFacts}},
@@ -62,9 +62,9 @@ var readVariants = []readVariant{
 
 // The tiles: a value at the range's end.
 var kpiVariants = []readVariant{
-	{Measure: "mrr", Name: "kpi", KPI: true, Arms: []string{armFacts}},
+	{Measure: "mrr", Name: "kpi", KPI: true, Arms: []string{armFacts, armClose}},
 	{Measure: "subscribers", Name: "kpi", KPI: true, Arms: []string{armFacts}},
-	{Measure: "arpa", Name: "kpi", KPI: true, Arms: []string{armFacts}},
+	{Measure: "arpa", Name: "kpi", KPI: true, Arms: []string{armFacts, armClose}},
 	{Measure: "mrr_at_risk", Name: "kpi", KPI: true, Arms: []string{armFacts, armState}},
 }
 

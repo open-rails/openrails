@@ -23,6 +23,8 @@ type report struct {
 	Version         string
 	Sim             simSummary
 	FutureMovements int64
+	RiskCases       int64
+	RiskCasesMoved  int64
 	Tables          []tableRow
 	Reads           []*readRow
 	Writes          []writeRow
@@ -40,7 +42,7 @@ var tableKinds = []struct{ kind, name string }{
 	{"rollup", "billing.mrr_customer_flows"}, {"rollup", "billing.mrr_customer_totals"}, {"rollup", "billing.mrr_risk_flows"},
 	{"rollup", "billing.mrr_risk_totals"}, {"queue", "billing.mrr_risk_due"},
 	{"other", "billing.subscriptions"}, {"other", "billing.customers"}, {"other", "billing.subscription_status_transitions"},
-	{"proposed", "proto.lines_wide"},
+	{"proposed", "proto.lines_wide"}, {"proposed", "proto.mrr_month_close"},
 }
 
 var protoIndexes = []string{"proto_mrr_movements_at_idx", "proto_mrr_movements_cohort_idx", "proto_mrr_movements_logo_idx",
@@ -55,6 +57,19 @@ func (r *report) tables(ctx context.Context, pool *pgxpool.Pool, mid uuid.UUID) 
 		}
 		r.Tables = append(r.Tables, row)
 	}
+	// At-risk cases whose subscription's MRR moved while they were open: the
+	// amount a case's mrr_at_entry does not follow.
+	var moved, cases int64
+	if err := pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE EXISTS (
+		    SELECT 1 FROM billing.mrr_movement_lines l
+		    JOIN billing.mrr_movements v ON v.merchant_id = l.merchant_id AND v.id = l.movement_id
+		   WHERE l.merchant_id = c.merchant_id AND l.subscription_id = c.subscription_id
+		     AND v.occurred_at > c.opened_at AND v.occurred_at < COALESCE(c.closed_at, 'infinity'))), count(*)
+		FROM billing.mrr_risk_cases c WHERE c.merchant_id = $1`,
+		mid).Scan(&moved, &cases); err != nil {
+		return fmt.Errorf("risk diagnostic: %w", err)
+	}
+	r.RiskCasesMoved, r.RiskCases = moved, cases
 	for _, ix := range protoIndexes {
 		row := tableRow{Table: "index " + ix, Kind: "proposed"}
 		if err := pool.QueryRow(ctx, "SELECT pg_relation_size(c.oid) FROM pg_class c WHERE c.relname = $1", ix).Scan(&row.Bytes); err != nil {
@@ -90,6 +105,7 @@ func (r *report) markdown() string {
 		}
 		b.WriteString("\n")
 	}
+	fmt.Fprintf(b, "At-risk cases: %d; with the subscription's MRR changed while open: %d.\n\n", r.RiskCases, r.RiskCasesMoved)
 	b.WriteString("## Data\n\n| table | kind | rows | size |\n|---|---|---:|---:|\n")
 	for _, t := range r.Tables {
 		fmt.Fprintf(b, "| %s | %s | %d | %s |\n", t.Table, t.Kind, t.Rows, mb(t.Bytes))
@@ -116,7 +132,7 @@ func (r *report) markdown() string {
 			return fmt.Sprintf("%.1f | %d | %d", a.P50MS, a.Buffers, a.RowsScanned)
 		}
 		other := ""
-		for _, arm := range []string{armWide, armState} {
+		for _, arm := range []string{armWide, armClose, armState} {
 			if a := row.Arms[arm]; a != nil {
 				if a.Err != "" {
 					other += arm + " ERR "

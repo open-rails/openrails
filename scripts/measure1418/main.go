@@ -33,6 +33,9 @@ var protoSQL string
 //go:embed proto_indexes.sql
 var protoIndexesSQL string
 
+//go:embed month_close.sql
+var monthCloseSQL string
+
 type config struct {
 	dsn          string
 	customers    int
@@ -162,6 +165,9 @@ func run(ctx context.Context, c config) error {
 	if _, err := pool.Exec(ctx, protoIndexesSQL); err != nil {
 		return fmt.Errorf("proto indexes: %w", err)
 	}
+	if _, err := pool.Exec(ctx, monthCloseSQL, w.merchant, asof); err != nil {
+		return fmt.Errorf("month close: %w", err)
+	}
 	if _, err := pool.Exec(ctx, "VACUUM (ANALYZE)"); err != nil {
 		return fmt.Errorf("vacuum: %w", err)
 	}
@@ -255,4 +261,3 @@ func measureConn(ctx context.Context, pool *pgxpool.Pool) (*pgxpool.Conn, error)
 }
 
 func outPath(c config, name string) string { return filepath.Join(c.out, name) }
-

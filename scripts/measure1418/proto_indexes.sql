@@ -22,3 +22,13 @@ SELECT l.merchant_id, m.occurred_at, m.currency, l.product_id, l.delta, l.subscr
   FROM billing.mrr_movement_lines l
   JOIN billing.mrr_movements m ON m.merchant_id = l.merchant_id AND m.id = l.movement_id;
 CREATE INDEX proto_lines_wide_at_idx ON proto.lines_wide (merchant_id, occurred_at) INCLUDE (currency, product_id, delta, subscriber_delta);
+-- A month-close per currency: MRR and customers with MRR at each UTC month
+-- start, so a snapshot read starts from the close before its range.
+CREATE TABLE proto.mrr_month_close (
+    merchant_id uuid NOT NULL,
+    currency text NOT NULL,
+    at timestamptz NOT NULL,
+    mrr bigint NOT NULL,
+    customers bigint NOT NULL,
+    PRIMARY KEY (merchant_id, at, currency)
+);

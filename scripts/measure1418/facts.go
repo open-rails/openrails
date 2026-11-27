@@ -41,10 +41,18 @@ type source struct {
 
 // Arms of the facts-only reads.
 const (
-	armFacts = "facts" // movements, lines, cases and episodes as they are
+	armFacts = "facts"       // movements, lines, cases and episodes as they are
 	armWide  = "facts+lines" // lines that carry their movement's instant and currency
-	armState = "state" // at risk now from the subscriptions, cards and delinquency
+	armState = "state"       // at risk now from the subscriptions, cards and delinquency
+	armClose = "facts+close" // a month-close per currency anchors the snapshot reads
 )
+
+// monthStart is the UTC month start at or before t: the month-close a read
+// anchored at t starts from.
+func monthStart(t time.Time) time.Time {
+	t = t.UTC()
+	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
 
 // factsStatements is the facts-only read of one measure: what the metrics
 // compiler would emit if it read the MRR facts. asof bounds what has
@@ -74,6 +82,11 @@ func factsStatements(p *metrics.Plan, measure, arm string, mid uuid.UUID, asof t
 	}
 	byProduct := slices.Contains(p.Dims, "product_id")
 	one := func(sql string) []statement { return []statement{{Name: measure, SQL: sql, Args: a.args}} }
+	var anchor *time.Time
+	if arm == armClose {
+		s0 := monthStart(clip(edges[0]))
+		anchor = &s0
+	}
 
 	switch measure {
 	case "mrr", "arpa":
@@ -82,15 +95,15 @@ func factsStatements(p *metrics.Plan, measure, arm string, mid uuid.UUID, asof t
 			leaves = append(leaves, dimCol{"subscribers", "m.logo_delta"})
 		}
 		if byProduct {
-			return one(snapshotSQL(a, lines, p.Dims, nil, []dimCol{{"mrr", lineDelta}}, edges, clip(edges[len(edges)-1]))), nil
+			return one(snapshotSQL(a, lines, p.Dims, nil, []dimCol{{"mrr", lineDelta}}, edges, clip(edges[len(edges)-1]), nil)), nil
 		}
-		return one(snapshotSQL(a, moves, p.Dims, nil, leaves, edges, clip(edges[len(edges)-1]))), nil
+		return one(snapshotSQL(a, moves, p.Dims, nil, leaves, edges, clip(edges[len(edges)-1]), anchor)), nil
 	case "subscribers":
 		if byProduct {
-			return one(snapshotSQL(a, lines, p.Dims, nil, []dimCol{{"subscribers", lineSubs}}, edges, clip(edges[len(edges)-1]))), nil
+			return one(snapshotSQL(a, lines, p.Dims, nil, []dimCol{{"subscribers", lineSubs}}, edges, clip(edges[len(edges)-1]), nil)), nil
 		}
 		if slices.Contains(p.Dims, "currency") {
-			return one(snapshotSQL(a, moves, p.Dims, nil, []dimCol{{"subscribers", "m.logo_delta"}}, edges, clip(edges[len(edges)-1]))), nil
+			return one(snapshotSQL(a, moves, p.Dims, nil, []dimCol{{"subscribers", "m.logo_delta"}}, edges, clip(edges[len(edges)-1]), anchor)), nil
 		}
 		return one(distinctSubscribersSQL(a, m, edges, clip(edges[len(edges)-1]))), nil
 	case "mrr_movements", "subscriber_movements":
@@ -102,20 +115,20 @@ func factsStatements(p *metrics.Plan, measure, arm string, mid uuid.UUID, asof t
 	case "scheduled_mrr":
 		return one(scheduledSQL(a, p, m, asof)), nil
 	case "subscriber_churn_rate":
-		snap := snapshotSQL(a, moves, nil, crossTypes(p), []dimCol{{"subscribers_at_period_start", "m.logo_delta"}}, edges, clip(edges[len(edges)-1]))
+		snap := snapshotSQL(a, moves, nil, crossTypes(p), []dimCol{{"subscribers_at_period_start", "m.logo_delta"}}, edges, clip(edges[len(edges)-1]), anchor)
 		first := statement{Name: "subscribers_at_period_start", SQL: snap, Args: a.args}
 		b := &argList{}
 		return []statement{first, {Name: "churn", SQL: churnSQL(b, p, mid, clip(p.To)), Args: b.args}}, nil
 	case "nrr", "grr":
-		snap := snapshotSQL(a, moves, p.Dims, nil, []dimCol{{"mrr_at_period_start", "m.delta"}}, edges, clip(edges[len(edges)-1]))
+		snap := snapshotSQL(a, moves, p.Dims, nil, []dimCol{{"mrr_at_period_start", "m.delta"}}, edges, clip(edges[len(edges)-1]), anchor)
 		first := statement{Name: "mrr_at_period_start", SQL: snap, Args: a.args}
 		b := &argList{}
 		return []statement{first, {Name: "base", SQL: baseSQL(b, p, mid, measure, clip(p.To)), Args: b.args}}, nil
 	case "ltv":
-		snap := snapshotSQL(a, moves, p.Dims, nil, []dimCol{{"mrr", "m.delta"}, {"subscribers", "m.logo_delta"}}, edges, clip(edges[len(edges)-1]))
+		snap := snapshotSQL(a, moves, p.Dims, nil, []dimCol{{"mrr", "m.delta"}, {"subscribers", "m.logo_delta"}}, edges, clip(edges[len(edges)-1]), anchor)
 		first := statement{Name: "arpa", SQL: snap, Args: a.args}
 		b := &argList{}
-		return []statement{first, {Name: "trailing", SQL: trailingSQL(b, p, mid, asof), Args: b.args}}, nil
+		return []statement{first, {Name: "trailing", SQL: trailingSQL(b, p, mid, asof, arm == armClose), Args: b.args}}, nil
 	case "cohort_retention":
 		return one(cohortSQL(a, p, m, clip(p.To))), nil
 	case "mrr_at_risk":
@@ -139,7 +152,7 @@ func factsStatements(p *metrics.Plan, measure, arm string, mid uuid.UUID, asof t
 				WHERE c.merchant_id = ` + m + ` AND c.closed_at < ` + last + `) x`,
 				where: []string{"x.merchant_id = " + m}, at: "x.at", dims: map[string]string{"currency": "x.currency"}}
 		}
-		return one(snapshotSQL(a, src, p.Dims, nil, []dimCol{{"mrr_at_risk", "x.amount"}}, edges, clip(edges[len(edges)-1]))), nil
+		return one(snapshotSQL(a, src, p.Dims, nil, []dimCol{{"mrr_at_risk", "x.amount"}}, edges, clip(edges[len(edges)-1]), nil)), nil
 	case "at_risk_recovery_rate":
 		src := source{from: "billing.mrr_risk_cases c", where: []string{"c.merchant_id = " + m}, at: "c.closed_at",
 			dims: map[string]string{"currency": "c.currency", "risk_reason": "c.entry_reason"}}
@@ -163,8 +176,9 @@ func crossTypes(p *metrics.Plan) []string {
 // snapshotSQL is each leaf's sum over the source's rows dated before each
 // edge: one pass over the rows before the last edge, numbered by the edges
 // they precede (width_bucket), then summed per edge. cross dims (churn_type)
-// repeat every row.
-func snapshotSQL(a *argList, src source, dims, cross []string, leaves []dimCol, edges []time.Time, last time.Time) string {
+// repeat every row. With an anchor (movements only), the rows read start at
+// it and the month-close there stands for every row before.
+func snapshotSQL(a *argList, src source, dims, cross []string, leaves []dimCol, edges []time.Time, last time.Time, anchor *time.Time) string {
 	e, l := a.add(edges), a.add(last)
 	var own []string
 	for _, d := range dims {
@@ -201,9 +215,24 @@ func snapshotSQL(a *argList, src source, dims, cross []string, leaves []dimCol, 
 		crossJoin = "\nCROSS JOIN (VALUES ('voluntary'), ('involuntary'), ('chargeback')) ct(v)"
 	}
 	where := append(slices.Clone(src.where), src.at+" < "+l)
+	closeRows := ""
+	if anchor != nil {
+		s0 := a.add(*anchor)
+		where = append(where, src.at+" >= "+s0)
+		csel := []string{}
+		for range own {
+			csel = append(csel, "c.currency")
+		}
+		csel = append(csel, "0")
+		for _, lf := range leaves {
+			csel = append(csel, map[string]string{"m.delta": "c.mrr", "m.logo_delta": "c.customers"}[lf.expr])
+		}
+		closeRows = "\n  UNION ALL\n  SELECT " + strings.Join(csel, ", ") + " FROM proto.mrr_month_close c WHERE " +
+			strings.Replace(src.where[0], "m.", "c.", 1) + " AND c.at = " + s0
+	}
 	return "WITH g AS (\n  SELECT " + strings.Join(gsel, ", ") +
 		"\n  FROM " + src.from + "\n  WHERE " + strings.Join(where, " AND ") +
-		"\n  GROUP BY " + strings.Join(gby, ", ") + "\n)" +
+		"\n  GROUP BY " + strings.Join(gby, ", ") + closeRows + "\n)" +
 		"\nSELECT " + strings.Join(append([]string{"e.edge AS bucket"}, osel...), ", ") +
 		"\nFROM unnest(" + e + "::timestamptz[]) WITH ORDINALITY AS e(edge, k)\nCROSS JOIN " + dpart + crossJoin +
 		"\nLEFT JOIN g ON " + strings.Join(join, " AND ") +
@@ -334,7 +363,7 @@ GROUP BY 1, 2`
 // prune took out, the churn the base's. A movement's run began at the
 // customer's latest gain from none at or before it within the rows read
 // (none read: before them all).
-func trailingSQL(a *argList, p *metrics.Plan, mid uuid.UUID, asof time.Time) string {
+func trailingSQL(a *argList, p *metrics.Plan, mid uuid.UUID, asof time.Time, anchored bool) string {
 	labels := []time.Time{p.To}
 	if p.HasTime {
 		labels = p.Buckets
@@ -358,6 +387,12 @@ func trailingSQL(a *argList, p *metrics.Plan, mid uuid.UUID, asof time.Time) str
 	m := a.add(mid)
 	w := "unnest(" + a.add(labels) + "::timestamptz[], " + a.add(starts) + "::timestamptz[], " + a.add(ends) + "::timestamptz[]) AS w(bucket, starts_at, ends_at)"
 	u, ulast := a.add(uniq), a.add(uniq[len(uniq)-1])
+	since, closeRows := "", ""
+	if anchored {
+		s0 := a.add(monthStart(uniq[0]))
+		since = " AND m.occurred_at >= " + s0
+		closeRows = "\n  UNION ALL\n  SELECT c.currency, 0, c.customers FROM proto.mrr_month_close c WHERE c.merchant_id = " + m + " AND c.at = " + s0
+	}
 	return `WITH mv AS (
   SELECT m.currency, m.kind, m.logo_delta, m.occurred_at,
          max(m.occurred_at) FILTER (WHERE m.logo_delta = 1) OVER (PARTITION BY m.customer_id, m.currency ORDER BY m.occurred_at, m.id
@@ -369,8 +404,8 @@ func trailingSQL(a *argList, p *metrics.Plan, mid uuid.UUID, asof time.Time) str
 ), g AS (
   SELECT m.currency, width_bucket(m.occurred_at, ` + u + `::timestamptz[]) AS k, sum(m.logo_delta) AS d
   FROM billing.mrr_movements m
-  WHERE m.merchant_id = ` + m + ` AND m.logo_delta <> 0 AND m.occurred_at < ` + ulast + `
-  GROUP BY 1, 2
+  WHERE m.merchant_id = ` + m + ` AND m.logo_delta <> 0 AND m.occurred_at < ` + ulast + since + `
+  GROUP BY 1, 2` + closeRows + `
 ), s AS (
   SELECT c.currency, uu.u, COALESCE(sum(g.d), 0) AS subs
   FROM unnest(` + u + `::timestamptz[]) WITH ORDINALITY AS uu(u, k)
@@ -459,15 +494,17 @@ func riskNowSQL(a *argList, p *metrics.Plan, m string, asof time.Time) string {
 FROM billing.subscription_mrr sm
 JOIN billing.subscriptions s ON s.merchant_id = sm.merchant_id AND s.id = sm.subscription_id
 JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id
+LEFT JOIN billing.money_settings ms ON ms.merchant_id = s.merchant_id AND ms.customer_id = s.customer_id AND ms.currency = pr.currency
 LEFT JOIN billing.payment_methods pm ON pm.merchant_id = s.merchant_id
   AND pm.id = CASE s.collection_policy
-      WHEN 'engine' THEN billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy)
+      WHEN 'engine' THEN COALESCE(s.payment_method_id, CASE WHEN s.rail IN ('nmi', 'stripe') THEN ms.default_payment_method_id END)
       WHEN 'nmi_schedule' THEN s.payment_method_id END
+LEFT JOIN billing.customer_delinquency d ON d.merchant_id = s.merchant_id AND d.customer_id = s.customer_id
+  AND d.currency = pr.currency AND d.state = 'delinquent'
 WHERE sm.merchant_id = ` + m + ` AND sm.mrr > 0 AND (sm.ends_at IS NULL OR sm.ends_at > ` + now + `) AND s.deleted_at IS NULL
   AND (s.status IN ('past_due', 'awaiting_method', 'unverified')
     OR (make_date(pm.card_exp_year, pm.card_exp_month, 1) + interval '1 month') AT TIME ZONE 'UTC' <= s.current_period_ends_at
-    OR EXISTS (SELECT 1 FROM billing.customer_delinquency d WHERE d.merchant_id = s.merchant_id AND d.customer_id = s.customer_id
-               AND d.currency = pr.currency AND d.state = 'delinquent'))`
+    OR d.customer_id IS NOT NULL)`
 	if len(by) > 0 {
 		sql += "\nGROUP BY " + strings.Join(by, ", ")
 	}
