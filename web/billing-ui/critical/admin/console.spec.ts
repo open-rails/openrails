@@ -503,7 +503,7 @@ test("console-proposals-group-approve-held-dismiss", async ({
 })
 
 test("console-dashboard-shows-merchant-units", async ({ page }) => {
-  // Credits sold in the merchant's own units read at each unit's scale with
+  // Credit held in the merchant's own units reads at each unit's scale with
   // its name, never as an unregistered currency.
   for (const [currency, amount] of [
     ["CREDITS", "20.00 Credits"],
@@ -511,7 +511,7 @@ test("console-dashboard-shows-merchant-units", async ({ page }) => {
   ]) {
     await open(page, `/?currency=${currency}`)
     await expect(
-      page.locator('[data-widget="kpi-credits-sold"]')
+      page.locator('[data-widget="kpi-outstanding-credit"]')
     ).toContainText(amount)
     await expect(page.getByText("unregistered currency")).toHaveCount(0)
   }

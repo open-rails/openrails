@@ -329,14 +329,16 @@ func healthOverview(t *testing.T) {
 	all := billing.DashboardProfile{Subscriptions: true, CardPayments: true, Usage: true, Credits: true, Checkouts: true}
 	for bits := range 32 {
 		profile := billing.DashboardProfile{Subscriptions: bits&1 != 0, CardPayments: bits&2 != 0, Usage: bits&4 != 0, Credits: bits&8 != 0, Checkouts: bits&16 != 0}
-		saved, err := a.beta.SetDashboard(t.Context(), billing.SetDashboardParams{Widgets: dashboard.DefaultWidgets(profile)})
-		require.NoError(t, err, "%+v", profile)
-		require.False(t, saved.IsDefault)
+		for _, basis := range []billing.AccountingBasis{billing.AccountingCash, billing.AccountingAccrual} {
+			saved, err := a.beta.SetDashboard(t.Context(), billing.SetDashboardParams{Widgets: dashboard.DefaultWidgets(profile, basis)})
+			require.NoError(t, err, "%+v %s", profile, basis)
+			require.False(t, saved.IsDefault)
+		}
 	}
 	saved, err := a.beta.GetDashboard(t.Context())
 	require.NoError(t, err)
 	require.Nil(t, saved.Profile)
-	require.Len(t, saved.Widgets, len(dashboard.DefaultWidgets(all)))
+	require.Len(t, saved.Widgets, len(dashboard.DefaultWidgets(all, billing.AccountingAccrual)))
 	overviewAnswers(t, a.beta, saved.Widgets, "")
 
 	// Nothing saves a removed measure.
@@ -425,18 +427,23 @@ func moneyPerCurrency(t *testing.T) {
 	for _, m := range schema.Measures {
 		if m.Money {
 			money = append(money, m.Name)
-			result, err := a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{m.Name}, Range: window})
+			var per []string
+			if m.Per != "" {
+				per = []string{m.Per}
+			}
+			result, err := a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{m.Name}, By: per, Range: window})
 			require.NoError(t, err, m.Name)
 			require.Contains(t, result.Columns, billing.MetricsColumn{Name: "currency", Kind: "dimension"}, m.Name)
 		}
 	}
-	require.Subset(t, money, []string{"cash", "mrr", "credits_sold", "usage_charged", "outstanding_credit_liability", "outstanding_owed"})
+	require.Subset(t, money, []string{"cash", "mrr", "credits_sold", "usage_charged", "recognized_revenue", "balance"})
 	perCurrency := map[string]int64{"USD": 10_000_000, "EUR": 50_000_000}
 	require.Equal(t, perCurrency, split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, Range: window}), "currency", "cash"))
 	require.Equal(t, perCurrency, split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, Range: window,
 		Filters: map[string][]string{"currency": {"usd", "EUR"}}}), "currency", "cash"), "two currencies named stay apart")
 	require.Equal(t, map[string]int64{"USD": 2_000_000, "EUR": 3_000_000},
-		split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"outstanding_credit_liability"}, Range: window}), "currency", "outstanding_credit_liability"))
+		split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"balance"}, Range: window,
+			Filters: map[string][]string{"account": {"customer_units"}}}), "currency", "balance"))
 	mrr := split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"mrr"}, Range: window}), "currency", "mrr")
 	require.Equal(t, []string{"USD"}, slices.Collect(maps.Keys(mrr)))
 	// Grouped by PSP or time, each row is one currency's.
