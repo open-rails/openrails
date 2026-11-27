@@ -48,6 +48,11 @@ type fakeViews struct {
 	// busyUntil answers every sync before it 503, as a server that could
 	// not take its locks in time.
 	busyUntil time.Time
+	// refuse answers the next sync with that status.
+	refuse int
+	// hold keeps the next request in flight until it closes; held closes
+	// once it is held (holdNext).
+	hold, held chan struct{}
 }
 
 type fakeLimit struct {
@@ -76,8 +81,17 @@ func newFakeViews(limits map[string]fakeLimit) *fakeViews {
 
 func (f *fakeViews) RoundTrip(r *http.Request) (*http.Response, error) {
 	f.mu.Lock()
-	down, slow := f.down, f.slow
+	down, slow, hold, held := f.down, f.slow, f.hold, f.held
+	f.hold, f.held = nil, nil
 	f.mu.Unlock()
+	if hold != nil {
+		close(held)
+		select {
+		case <-hold:
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		}
+	}
 	if down {
 		return nil, errors.New("fake: connection refused")
 	}
@@ -201,6 +215,11 @@ func (f *fakeViews) sync(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	if now.Before(f.busyUntil) {
 		writeFakeError(w, 503, billing.CodeServiceUnavailable, "the sync could not take its locks in time; retry it")
+		return
+	}
+	if status := f.refuse; status != 0 {
+		f.refuse = 0
+		writeFakeError(w, status, billing.CodeInvalidParam, "refused")
 		return
 	}
 	f.syncs = append(f.syncs, p)
@@ -354,6 +373,15 @@ func (f *fakeViews) set(fn func(f *fakeViews)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	fn(f)
+}
+
+// holdNext keeps the next request in flight until release closes: it fails
+// as unreachable if OpenRails was when it was sent. The returned channel
+// closes once it is held.
+func (f *fakeViews) holdNext(release chan struct{}) <-chan struct{} {
+	held := make(chan struct{})
+	f.set(func(f *fakeViews) { f.hold, f.held = release, held })
+	return held
 }
 
 func (f *fakeViews) settledOf(customer billing.CustomerID, limit string) int64 {
@@ -1124,6 +1152,86 @@ func TestGateCloseRidesOutTransientFailures(t *testing.T) {
 		err := g.Close(ctx)
 		if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "2 usage items unsent") {
 			t.Fatalf("Close past its bound: %v, want ErrUnavailable naming 2 unsent items", err)
+		}
+	})
+}
+
+// A sync sent while OpenRails was unreachable can fail after it is back and
+// a Flush has begun: that failure is not the Flush's.
+func TestGateFlushCountsOnlySyncsSentAfterItBegins(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 1000}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		warm(t, g, customer)
+		sent, next := make(chan struct{}), make(chan struct{})
+		f.set(func(f *fakeViews) { f.down = true })
+		held := f.holdNext(sent)
+		tk := mustAdmit(t, g, work(customer, "outage", 2))
+		if err := tk.Capture(t.Context(), capture(2)); err != nil {
+			t.Fatal(err)
+		}
+		<-held
+		f.set(func(f *fakeViews) { f.down = false })
+		flushed := make(chan error, 1)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			flushed <- g.Flush(ctx)
+		}()
+		synctest.Wait()
+		// The held sync fails while the next is in flight.
+		held = f.holdNext(next)
+		close(sent)
+		<-held
+		synctest.Wait()
+		close(next)
+		if err := <-flushed; err != nil {
+			t.Fatalf("Flush after OpenRails came back: %v", err)
+		}
+		if got := f.settledOf(customer, "quota"); got != 3 {
+			t.Fatalf("%d units settled, want 3", got)
+		}
+	})
+}
+
+// Close ends its lease past a refusal of a sync sent before it began.
+func TestGateCloseCountsOnlySyncsSentAfterItBegins(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 1000}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		customer := billing.CustomerID(uuid.New())
+		warm(t, g, customer)
+		sent, next := make(chan struct{}), make(chan struct{})
+		f.set(func(f *fakeViews) { f.refuse = http.StatusBadRequest })
+		held := f.holdNext(sent)
+		if err := mustAdmit(t, g, work(customer, "open", 1)).Release(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		<-held
+		closed := make(chan error, 1)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			closed <- g.Close(ctx)
+		}()
+		synctest.Wait()
+		// The held sync is refused while the next is in flight.
+		held = f.holdNext(next)
+		close(sent)
+		<-held
+		synctest.Wait()
+		close(next)
+		if err := <-closed; err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if !f.leases[g.g.lease].closed {
+			t.Fatal("Close returned with its lease open")
 		}
 	})
 }
