@@ -48,25 +48,22 @@ func (q *Queries) BoundImportedProductAccessByGrant(ctx context.Context, arg Bou
 }
 
 const boundProductAccessToGrant = `-- name: BoundProductAccessToGrant :execrows
-WITH bound AS (
-    SELECT pa.id, GREATEST(pa.starts_at, g.starts_at) AS starts_at,
-           CASE WHEN g.ends_at IS NULL THEN pa.ends_at
-                WHEN pa.ends_at IS NULL THEN g.ends_at
-                ELSE LEAST(pa.ends_at, g.ends_at) END AS ends_at
-    FROM billing.product_access pa
-    JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
-    WHERE pa.merchant_id = $2::uuid AND pa.id = $3::uuid
-      AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND (pa.starts_at < g.starts_at OR g.ends_at IS NOT NULL AND (pa.ends_at IS NULL OR pa.ends_at > g.ends_at))
-)
 UPDATE billing.product_access pa SET
-    starts_at = CASE WHEN b.ends_at IS NULL OR b.starts_at < b.ends_at THEN b.starts_at ELSE pa.starts_at END,
-    ends_at = CASE WHEN b.ends_at IS NULL OR b.starts_at < b.ends_at THEN b.ends_at ELSE pa.ends_at END,
-    revoked_at = CASE WHEN b.ends_at IS NULL OR b.starts_at < b.ends_at THEN NULL ELSE $1::timestamptz END,
-    revoke_reason = CASE WHEN b.ends_at IS NULL OR b.starts_at < b.ends_at THEN NULL ELSE 'outside_grant' END,
+    starts_at = GREATEST(pa.starts_at, g.starts_at),
+    ends_at = CASE WHEN g.ends_at IS NULL THEN pa.ends_at
+                   WHEN pa.ends_at IS NULL THEN g.ends_at
+                   ELSE LEAST(pa.ends_at, g.ends_at) END,
     updated_at = $1::timestamptz
-FROM bound b
-WHERE pa.merchant_id = $2::uuid AND pa.id = b.id
+FROM billing.grants g
+WHERE pa.merchant_id = $2::uuid AND pa.id = $3::uuid
+  AND g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
+  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+  AND (pa.starts_at < g.starts_at OR g.ends_at IS NOT NULL AND (pa.ends_at IS NULL OR pa.ends_at > g.ends_at))
+  AND (g.ends_at IS NULL OR pa.starts_at < g.ends_at) AND (pa.ends_at IS NULL OR g.starts_at < pa.ends_at)
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.grants t
+      WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+        AND t.event IN ('revoke', 'expire', 'supersede'))
 `
 
 type BoundProductAccessToGrantParams struct {
@@ -75,8 +72,8 @@ type BoundProductAccessToGrantParams struct {
 	ID         uuid.UUID
 }
 
-// Cuts a live window back to its grant's dates. A window with no part inside
-// the grant is revoked.
+// Cuts a live window that overlaps its live grant back to the grant's dates.
+// The conditions are rechecked on the row as it is when written.
 func (q *Queries) BoundProductAccessToGrant(ctx context.Context, arg BoundProductAccessToGrantParams) (int64, error) {
 	result, err := q.db.Exec(ctx, boundProductAccessToGrant, arg.Now, arg.MerchantID, arg.ID)
 	if err != nil {

@@ -110,7 +110,8 @@ subscription's recurrence never shortens a paid period; an uncertain or
 `unverified` subscription keeps its access. Repair rechecks recorded evidence and
 never reopens access a recorded revocation ended. A live window never covers more
 than its grant: convergence cuts a wider one back to the grant's dates, once the
-merchant's destructive switch is armed.
+merchant's destructive switch is armed. A window wholly outside its grant goes to
+an operator unchanged.
 Checks:
 - `internal/intents/refund.go` calls `RevokeRefundedPaymentAccess` with the
   refund's transaction (`txDB`).

@@ -184,40 +184,62 @@ func TestPublicEntitlements(t *testing.T) {
 	t.Run("OR-J27-S17/a-window-wider-than-its-grant-is-cut-back-to-the-grant", func(t *testing.T) {
 		a, _ := newPaymentWorld(t, func(w *world) { publicPastClock(w, 72*time.Hour) })
 		a.clock.Advance(48 * time.Hour)
-		grant := publicGrant(t, a, "one-day-comp", 24)
-		// Drift no writer makes: the window starts a day early and runs a month late.
-		_, err := a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" SET starts_at=$1, ends_at=$2 WHERE merchant_id=$3 AND id=$4",
-			grant.StartsAt.Add(-24*time.Hour), grant.EndsAt.Add(30*24*time.Hour), a.alpha.MerchantID().UUID(), grant.ID.UUID())
-		require.NoError(t, err)
-		publicAccess(t, a, grant.EndsAt.Add(time.Hour), true)
+		wide := publicGrant(t, a, "one-day-comp", 24)
+		outside := publicGrant(t, a, "outside-comp", 24)
+		narrowed := publicGrant(t, a, "narrowed-comp", 24)
+		// Drift no writer makes: one window starts a day early and runs a month
+		// late, one lies wholly after its grant. A narrowed window is normal.
+		window := func(id billing.ProductAccessID, starts, ends time.Time) {
+			t.Helper()
+			_, err := a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" SET starts_at=$1, ends_at=$2 WHERE merchant_id=$3 AND id=$4",
+				starts, ends, a.alpha.MerchantID().UUID(), id.UUID())
+			require.NoError(t, err)
+		}
+		window(wide.ID, wide.StartsAt.Add(-24*time.Hour), wide.EndsAt.Add(30*24*time.Hour))
+		window(outside.ID, outside.EndsAt.Add(24*time.Hour), outside.EndsAt.Add(48*time.Hour))
+		window(narrowed.ID, narrowed.StartsAt, narrowed.EndsAt.Add(-12*time.Hour))
+		publicAccess(t, a, wide.EndsAt.Add(time.Hour), true)
 
 		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		customer := uuid.MustParse(a.alice.ID)
-		convergeCustomer := func(status billing.FindingStatus) {
+		convergeCustomer := func() map[string]billing.FindingStatus {
 			t.Helper()
 			_, err := converge.NewConvergeEngine(database, a.clock).Converge(ctx, converge.Scope{Merchant: a.alpha.MerchantID(), Customer: &customer})
 			require.NoError(t, err)
-			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "derive.grant_effect.mismatch", Status: status})
-			require.NoError(t, err)
-			require.Len(t, findings.Items, 1)
-			require.Equal(t, "product_access:"+grant.ID.UUID().String(), findings.Items[0].SubjectKey)
+			statuses := map[string]billing.FindingStatus{}
+			for _, status := range []billing.FindingStatus{"reconcile_required", "requires_review", "auto_fixed"} {
+				findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "derive.grant_effect.mismatch", Status: status})
+				require.NoError(t, err)
+				for _, f := range findings.Items {
+					statuses[f.SubjectKey] = f.Status
+				}
+			}
+			return statuses
 		}
-		// Cutting access back waits for the merchant's destructive switch.
-		convergeCustomer("reconcile_required")
-		publicAccess(t, a, grant.EndsAt.Add(time.Hour), true)
+		subject := func(g billing.ProductAccessGrant) string { return "product_access:" + g.ID.UUID().String() }
+		// Cutting access back waits for the merchant's destructive switch; a
+		// window outside its grant is an operator's call.
+		require.Equal(t, map[string]billing.FindingStatus{subject(wide): "reconcile_required", subject(outside): "requires_review"}, convergeCustomer())
+		publicAccess(t, a, wide.EndsAt.Add(time.Hour), true)
 		armDestructive(t, a, true)
-		convergeCustomer("auto_fixed")
+		require.Equal(t, map[string]billing.FindingStatus{subject(wide): "auto_fixed", subject(outside): "requires_review"}, convergeCustomer())
 
-		rows, err := a.alpha.ListProductAccess(t.Context(), billing.ProductAccessListParams{IDs: []billing.ProductAccessID{grant.ID}})
+		rows, err := a.alpha.ListProductAccess(t.Context(), billing.ProductAccessListParams{IDs: []billing.ProductAccessID{wide.ID, outside.ID}})
 		require.NoError(t, err)
-		require.Len(t, rows.Items, 1)
-		require.True(t, rows.Items[0].StartsAt.Equal(grant.StartsAt), "starts at the grant's start: %s", rows.Items[0].StartsAt)
-		require.True(t, rows.Items[0].EndsAt.Equal(*grant.EndsAt), "ends at the grant's end: %s", rows.Items[0].EndsAt)
-		require.Nil(t, rows.Items[0].RevokedAt)
+		require.Len(t, rows.Items, 2)
+		for _, row := range rows.Items {
+			require.Nil(t, row.RevokedAt)
+			if row.ID == wide.ID {
+				require.True(t, row.StartsAt.Equal(wide.StartsAt), "starts at the grant's start: %s", row.StartsAt)
+				require.True(t, row.EndsAt.Equal(*wide.EndsAt), "ends at the grant's end: %s", row.EndsAt)
+			} else {
+				require.True(t, row.StartsAt.Equal(outside.EndsAt.Add(24*time.Hour)), "an operator's window is left as found: %s", row.StartsAt)
+			}
+		}
 		publicAccess(t, a, a.clock.Now(), true)
-		publicAccess(t, a, grant.EndsAt.Add(time.Hour), false)
+		publicAccess(t, a, wide.EndsAt.Add(time.Hour), false)
 	})
 	t.Run("OR-J27-S03/exact-window-boundaries-and-historical-tenure", func(t *testing.T) {
 		a, _ := newPaymentWorld(t, func(w *world) { publicPastClock(w, 48*time.Hour) })

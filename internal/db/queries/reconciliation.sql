@@ -1151,11 +1151,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- derive.grant_effect.mismatch (window direction): a live window that starts
 -- before its grant or ends after it. Every writer copies the grant's dates or
--- narrows them, so the wider part has no grant behind it. Terminated grants
--- are derive.grant_effect.excess's. NULL customer_id = merchant-wide.
+-- narrows them, so the wider part has no grant behind it. A window outside
+-- its grant altogether has no trustworthy dates and goes to an operator.
+-- Terminated grants are derive.grant_effect.excess's. NULL customer_id =
+-- merchant-wide.
 -- name: ListAccessWindowsWiderThanGrant :many
 SELECT pa.id AS access_id, pa.customer_id, pa.product_id, pa.grant_id,
-       pa.starts_at, pa.ends_at, g.starts_at AS grant_starts_at, g.ends_at AS grant_ends_at
+       pa.starts_at, pa.ends_at, g.starts_at AS grant_starts_at, g.ends_at AS grant_ends_at,
+       ((g.ends_at IS NULL OR pa.starts_at < g.ends_at) AND (pa.ends_at IS NULL OR g.starts_at < pa.ends_at))::boolean AS overlaps
 FROM billing.product_access pa
 JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
 WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid

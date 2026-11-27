@@ -308,7 +308,8 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	}
 
 	// Window direction: a live window wider than its grant. The grant is the
-	// evidence, so the repair cuts the window back to it.
+	// evidence, so the repair cuts the window back to it. A window outside its
+	// grant altogether has no trustworthy dates: an operator decides.
 	wide, err := q.ListAccessWindowsWiderThanGrant(ctx, gen.ListAccessWindowsWiderThanGrantParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now, RowLimit: convergeScanCap,
 	})
@@ -318,7 +319,7 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	markTruncated(ctx, len(wide), "derive.grant_effect.mismatch")
 	for i := range wide {
 		w := wide[i]
-		out = append(out, ConvergeFinding{
+		f := ConvergeFinding{
 			Type:       "derive.grant_effect.mismatch",
 			Shape:      ShapeMismatch,
 			Class:      ClassAuto,
@@ -332,7 +333,12 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 				"starts_at": w.StartsAt, "ends_at": w.EndsAt, "grant_starts_at": w.GrantStartsAt, "grant_ends_at": w.GrantEndsAt,
 			},
 			Repair: func(ctx context.Context) error { return p.lockedBoundWindow(ctx, scope, w.CustomerID, w.AccessID) },
-		})
+		}
+		if !w.Overlaps {
+			f.Class, f.Retracts, f.Repair = ClassAdmin, false, nil
+			f.RecommendedAction = fmt.Sprintf("Access window %s lies outside the dates of its grant %s. Check both, then revoke the window or leave it.", w.AccessID, w.GrantID)
+		}
+		out = append(out, f)
 	}
 
 	// derive.access.unjustified — the FREELOADER detector: a live product-access
