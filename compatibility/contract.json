@@ -4581,6 +4581,7 @@
       "payment": "github.com/open-rails/openrails/internal/modules/payment",
       "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
       "payments": "github.com/open-rails/openrails/internal/modules/payments",
+      "reconcile": "github.com/open-rails/openrails/internal/reconcile",
       "slog": "log/slog",
       "strings": "strings",
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
