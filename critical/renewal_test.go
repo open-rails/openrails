@@ -36,7 +36,7 @@ func runRegistered(t *testing.T, fleet *river.Client[pgx.Tx], kind string, copie
 	finished := finishPass(t, fleet, kind, func() []int64 {
 		ids := make([]int64, 0, copies)
 		for range copies {
-			job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: registeredQueue(kind)})
+			job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: openrails.QueueBilling})
 			require.NoError(t, err)
 			ids = append(ids, job.Job.ID)
 		}
@@ -58,14 +58,6 @@ func runRegistered(t *testing.T, fleet *river.Client[pgx.Tx], kind string, copie
 			}
 		}
 	}
-}
-
-// registeredQueue is the queue OpenRails serves kind on.
-func registeredQueue(kind string) string {
-	if kind == "openrails.nmi_history" {
-		return "nmi_history"
-	}
-	return openrails.QueueBilling
 }
 
 func renewalSettled(t *testing.T, a *authorityWorld, p *providerLedger, sub *billing.Subscription, due time.Time) {

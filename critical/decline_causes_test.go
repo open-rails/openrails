@@ -661,40 +661,6 @@ func TestDeclineCauses(t *testing.T) {
 			require.NotEmpty(t, answers[id], id)
 		}
 	})
-	t.Run("OR-J45-S08/nmi-history-months-carry-each-answers-outcome-and-cause", func(t *testing.T) {
-		a, p := newNMIWorld(t)
-		vault := p.core.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
-		at := a.clock.Now().Add(-48 * time.Hour)
-		for _, sale := range []nmimock.Sale{
-			{},
-			{},
-			{Declined: "200", IssuerCode: "51"},
-			{Declined: "200", IssuerCode: "05"},
-			{Declined: "200", IssuerCode: "59"},
-			{Declined: "461"},
-		} {
-			sale.Vault, sale.Amount, sale.At = vault, "10.00", at
-			p.core.AddSale(sale)
-			at = at.Add(time.Minute)
-		}
-		require.NoError(t, p.persist(t.Context()))
-		awaitHistoryQueued(t, a)
-		fleet := quietFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.nmi_history", 1)
-		rows := metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"nmi_history_authorizations"},
-			By: []string{"outcome", "decline_cause", "reason"}, Range: &billing.MetricsRange{Last: "90d"}})
-		got := map[string]int64{}
-		for _, row := range rows {
-			got[fmt.Sprintf("%v/%v/%v", row["outcome"], row["decline_cause"], row["reason"])] += whole(t, row["nmi_history_authorizations"])
-		}
-		require.Equal(t, map[string]int64{
-			"approved//":                           2,
-			"declined/customer/insufficient_funds": 1,
-			"declined/issuer/do_not_honor":         1,
-			"declined/fraud/suspected_fraud":       1,
-			"refused/merchant/brand_not_accepted":  1,
-		}, got, "NMI's catch-all 200 is the issuer's code; its 461 is the merchant account's")
-	})
 }
 
 // awaitDeferredToRenewal checks a case the issuer's advice deferred past the

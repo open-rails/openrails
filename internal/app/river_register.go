@@ -180,9 +180,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}
 	// Customer messages: each pending one's job, queued by the dispatcher or
 	// its periodic backstop, and the job that sends it.
-	if err := addWorker(workers, &riverjobs.CustomerMessageDispatchWorker{Messages: r.Messages}); err != nil {
-		return fmt.Errorf("add customer message dispatch worker: %w", err)
-	}
 	if err := addWorker(workers, &riverjobs.CustomerMessageWorker{Messages: r.Messages}); err != nil {
 		return fmt.Errorf("add customer message worker: %w", err)
 	}
@@ -202,19 +199,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if err := addWorker(workers, usage); err != nil {
 		return fmt.Errorf("add usage invoice worker: %w", err)
 	}
-	// Each NMI PSP's own history, as monthly aggregates, in its own hourly job
-	// on its own queue: a slow provider report holds no billing worker.
-	if err := addWorker(workers, &riverjobs.NMIHistoryWorker{DB: r.DB, Leases: r.leaseDB, Clock: clock, NMIResolver: r.CollectionResolver, Log: r.Log}); err != nil {
-		return fmt.Errorf("add NMI history worker: %w", err)
-	}
 	// Every due scan, in turn, at the top of each hour. Renewals, retries,
 	// delinquency and lapses are critical: a day overdue fails job progress.
 	dunning := &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, Lifecycle: r.SubscriptionLifecycleService, Log: r.Log}
 	balances := &riverjobs.BalanceWatchWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
 	delinquency := &riverjobs.DelinquencyWorker{DB: r.DB, Clock: clock, Log: r.Log}
 	expiry := &riverjobs.InvoiceExpiryWorker{DB: r.DB, Invoices: r.Invoices, Clock: clock}
-	// Overdue NMI rebills are probed.
-	rebills := &riverjobs.RebillWatchWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, Lifecycle: r.SubscriptionLifecycleService, Log: r.Log}
 	// Undeclared accounts alert their operator again while unresolved.
 	realerts := &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}
 	storedCards := &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture(), Log: r.Log}
@@ -234,7 +224,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}
 	scans = append(scans,
 		riverjobs.Scan{Kind: money.KindUsageInvoices, Run: usage.Pass, DueBy: usage.DueBy},
-		riverjobs.Scan{Kind: riverjobs.KindRebillWatch, Run: rebills.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindConfigRealerts, Run: realerts.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindStoredCardRefreshDue, Run: storedCards.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindOperationWakes, Run: (&riverjobs.OperationWakes{DB: r.DB, Clock: clock, Log: r.Log}).Pass},

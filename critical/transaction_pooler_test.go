@@ -183,7 +183,7 @@ WHERE application_name = $1 AND (query LIKE 'LISTEN %river%' OR query LIKE '-- p
 }
 
 // workerChannels are the channels OpenRails' workers listen on.
-var workerChannels = []string{"openrails_unverified", "openrails_solana_pay", "openrails_customer_messages", "openrails_dispute_responses", "openrails_mrr_risk"}
+var workerChannels = []string{"openrails_unverified", "openrails_solana_pay", "openrails_dispute_responses", "openrails_mrr_risk"}
 
 func TestTransactionPooler(t *testing.T) {
 	t.Run("OR-J04-S86/behind-pgbouncer-each-statement-runs-as-its-merchant-and-no-setting-survives-its-transaction", func(t *testing.T) {

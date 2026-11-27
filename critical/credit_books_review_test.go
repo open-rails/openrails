@@ -5,7 +5,6 @@ package critical_test
 import (
 	"bytes"
 	"context"
-	"log/slog"
 	"net/http"
 	"testing"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -49,7 +47,7 @@ func TestCreditBooksEdges(t *testing.T) {
 				} else {
 					s.spend(t, 55_000_000, "all-of-it")
 				}
-				database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+				database, err := producerDB(w.pool, w.schema)
 				require.NoError(t, err)
 				ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 				effects := s.p.effects(t)
@@ -142,7 +140,7 @@ func (s *creditShop) chargeback(t *testing.T, payment billing.PaymentID, id stri
 func (s *creditShop) recover(t *testing.T, payment billing.PaymentID, chargeback uuid.UUID, amount int64, key string) {
 	t.Helper()
 	w := s.a.world
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 	service := payments.NewPaymentService(database, w.clock)
@@ -431,7 +429,7 @@ func (s *creditShop) cardPayment(t *testing.T, amount int64, movement models.Mon
 	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "invoice_lines")+" (merchant_id, id, invoice_id, customer_id, position, description, quantity, unit_amount, amount, credit_grant, source)"+
 		" VALUES ($1, $2, $3, $4, 0, 'Credit pack', 1, $5, $5, '{\"from_payment\": true}', 'provider_line')", mid, uuid.New(), invoice, s.customer.UUID(), amount)
 	require.NoError(t, err)
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 	id := uuid.New()
@@ -464,7 +462,7 @@ func (s *creditShop) issue(t *testing.T, unit string, units, paid int64, payment
 func (s *creditShop) reverse(t *testing.T, payment uuid.UUID, amount int64, kind, key string) {
 	t.Helper()
 	w := s.a.world
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 	service := payments.NewPaymentService(database, w.clock)

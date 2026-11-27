@@ -63,7 +63,6 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 			riverjobs.QueueBilling:         standaloneRiverBillingQueueMaxWorkers,
 			riverjobs.QueuePSPImport:       riverPSPImportQueueMaxWorkers,
 			riverjobs.QueueProviderRefresh: riverProviderRefreshQueueMaxWorkers,
-			riverjobs.QueueNMIHistory:      riverNMIHistoryQueueMaxWorkers,
 		}
 		if !host {
 			queues[river.QueueDefault] = standaloneRiverDefaultQueueMaxWorkers

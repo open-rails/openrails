@@ -320,7 +320,7 @@
       "const (\n\tMerchantCustomerRead Permission = \"merchant:customer:read\"\n\tRootCustomerRead     Permission = \"root:customer:read\"\n\n\tMerchantCustomerManage Permission = \"merchant:customer:manage\"\n\tRootCustomerManage     Permission = \"root:customer:manage\"\n\n\tMerchantCatalogManage Permission = \"merchant:catalog:manage\"\n\tRootCatalogManage     Permission = \"root:catalog:manage\"\n\n\tMerchantConfigRead   Permission = \"merchant:config:read\"\n\tRootConfigRead       Permission = \"root:config:read\"\n\tMerchantConfigManage Permission = \"merchant:config:manage\"\n\tRootConfigManage     Permission = \"root:config:manage\"\n\n\tMerchantMetricsRead Permission = \"merchant:metrics:read\"\n\tRootMetricsRead     Permission = \"root:metrics:read\"\n\n\tMerchantEntitlementsRead Permission = \"merchant:entitlements:read\"\n\tRootEntitlementsRead     Permission = \"root:entitlements:read\"\n\n\tMerchantCatalogRead Permission = \"merchant:catalog:read\"\n\tRootCatalogRead     Permission = \"root:catalog:read\"\n\n\tMerchantUsageRead Permission = \"merchant:usage:read\"\n\tRootUsageRead     Permission = \"root:usage:read\"\n\n\tMerchantUsageManage Permission = \"merchant:usage:manage\"\n\tRootUsageManage     Permission = \"root:usage:manage\"\n\n\tMerchantEventsRead Permission = \"merchant:events:read\"\n\tRootEventsRead     Permission = \"root:events:read\"\n\n\tMerchantInvoicesManage Permission = \"merchant:invoices:manage\"\n\tRootInvoicesManage     Permission = \"root:invoices:manage\"\n\n\tMerchantProvisioningRead   Permission = \"merchant:provisioning:read\"\n\tRootProvisioningRead       Permission = \"root:provisioning:read\"\n\tMerchantProvisioningManage Permission = \"merchant:provisioning:manage\"\n\tRootProvisioningManage     Permission = \"root:provisioning:manage\"\n)",
       "const (\n\tMerchantGroupPersona = \"merchant\"\n\tCustomerGroupPersona = \"customer\"\n)",
       "const (\n\tMerchantRetirementRefusedNotLive       MerchantRetirementRefusal = \"not_live\"\n\tMerchantRetirementRefusedGroupMismatch MerchantRetirementRefusal = \"group_mismatch\"\n\tMerchantRetirementRefusedReserved      MerchantRetirementRefusal = \"reserved\"\n\tMerchantRetirementRefusedActive        MerchantRetirementRefusal = \"active\"\n)",
-      "const (\n\tMessagePending MessageStatus = \"pending\"\n\n\tMessageQueued MessageStatus = \"queued\"\n\n\tMessageSending MessageStatus = \"sending\"\n\n\tMessageSent MessageStatus = \"sent\"\n\n\tMessageDisabled MessageStatus = \"disabled\"\n\n\tMessageTestEnvironment MessageStatus = \"test_environment\"\n\n\tMessageNoContact MessageStatus = \"no_contact\"\n\n\tMessageRateLimited MessageStatus = \"rate_limited\"\n\n\tMessageFailed MessageStatus = \"failed\"\n)",
+      "const (\n\tMessageQueued MessageStatus = \"queued\"\n\n\tMessageSending MessageStatus = \"sending\"\n\n\tMessageSent MessageStatus = \"sent\"\n\n\tMessageDisabled MessageStatus = \"disabled\"\n\n\tMessageTestEnvironment MessageStatus = \"test_environment\"\n\n\tMessageNoContact MessageStatus = \"no_contact\"\n\n\tMessageRateLimited MessageStatus = \"rate_limited\"\n\n\tMessageFailed MessageStatus = \"failed\"\n)",
       "const (\n\tMessageSendFailed MessageError = \"send_failed\"\n\n\tMessageRefused MessageError = \"refused\"\n\n\tMessageRenderFailed MessageError = \"render_failed\"\n\n\tMessageInvalidRecipient MessageError = \"invalid_recipient\"\n\n\tMessageNoSender MessageError = \"no_sender\"\n\n\tMessageEventMissing MessageError = \"event_missing\"\n\n\tMessageEventUnreadable MessageError = \"event_unreadable\"\n\n\tMessageUnavailable MessageError = \"unavailable\"\n)",
       "const (\n\tMigrationKeepGrandfathered MigrationFallback = \"keep_grandfathered\"\n\n\tMigrationCancelAtPeriodEnd MigrationFallback = \"cancel_at_period_end\"\n)",
       "const (\n\tMigrationScheduled PriceMigrationDisposition = \"scheduled\"\n\n\tMigrationSkipped PriceMigrationDisposition = \"skipped\"\n\n\tMigrationBlocked PriceMigrationDisposition = \"blocked\"\n)",
@@ -1551,6 +1551,9 @@
     "internal/balancelook": [
       "type Args struct {\n\tMerchantID uuid.UUID  `json:\"merchant_id\" river:\"unique\"`\n\tCustomerID uuid.UUID  `json:\"customer_id\" river:\"unique\"`\n\tCurrency   string     `json:\"currency\" river:\"unique\"`\n\tAt         *time.Time `json:\"at,omitempty\" river:\"unique\"`\n}"
     ],
+    "internal/billingfact": [
+      "type SendArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tMessageID  uuid.UUID `json:\"message_id\"`\n}"
+    ],
     "internal/cardguard": [
       "func (Card) MarshalJSON() ([]byte, error) { return []byte(`\"` + Redacted + `\"`), nil }",
       "func (Card) MarshalText() ([]byte, error) { return []byte(Redacted), nil }",
@@ -1787,9 +1790,6 @@
       "type TrustRule struct {\n\tTier          string `json:\"tier\"`\n\tNetPaidAmount int64  `json:\"net_paid_amount\"`\n\tDays          int    `json:\"days\"`\n}",
       "type trustParam struct {\n\tDefault string                 `json:\"default\"`\n\tRules   map[string][]TrustRule `json:\"rules\"`\n}"
     ],
-    "internal/modules/messages": [
-      "type SendArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tMessageID  uuid.UUID `json:\"message_id\"`\n}"
-    ],
     "internal/modules/metrics": [
       "func (c *MoneyCell) UnmarshalJSON(raw []byte) error {\n\tvar text string\n\tif err := json.Unmarshal(raw, \u0026text); err != nil {\n\t\treturn err\n\t}\n\tvalue, err := strconv.ParseInt(text, 10, 64)\n\tif err != nil {\n\t\treturn err\n\t}\n\t*c = MoneyCell(value)\n\treturn nil\n}",
       "func (c MoneyCell) MarshalJSON() ([]byte, error) {\n\treturn json.Marshal(strconv.FormatInt(int64(c), 10))\n}",
@@ -1998,7 +1998,6 @@
     ],
     "internal/river": [
       "type CleanupExpiredDataArgs struct {\n\tAfter *uuid.UUID `json:\"after,omitempty\"`\n}",
-      "type NMIHistoryReport struct {\n\tRead int `json:\"read\"`\n}",
       "type PacedProviderRefreshArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tPSPID      uuid.UUID `json:\"psp_id\" river:\"unique\"`\n}",
       "type PassReport struct {\n\tOverdue []string `json:\"overdue\"`\n}",
       "type ProviderRefreshRequestArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}",
@@ -2578,6 +2577,18 @@
       "rivertype": "github.com/riverqueue/river/rivertype",
       "time": "time",
       "uuid": "github.com/google/uuid"
+    },
+    "internal/billingfact/billingfact.go": {
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "river": "github.com/riverqueue/river",
+      "rivertype": "github.com/riverqueue/river/rivertype",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/cardguard/card.go": {
       "context": "context",
@@ -3779,12 +3790,6 @@
       "slices": "slices",
       "strings": "strings"
     },
-    "internal/modules/messages/jobs.go": {
-      "river": "github.com/riverqueue/river",
-      "rivertype": "github.com/riverqueue/river/rivertype",
-      "time": "time",
-      "uuid": "github.com/google/uuid"
-    },
     "internal/modules/metrics/service.go": {
       "big": "math/big",
       "billing": "github.com/open-rails/openrails/billing",
@@ -4962,25 +4967,6 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5",
       "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks"
-    },
-    "internal/river/jobs_nmi_history.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "clockwork": "github.com/jonboulle/clockwork",
-      "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "logx": "github.com/open-rails/openrails/internal/logx",
-      "merchants": "github.com/open-rails/openrails/internal/merchants",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
-      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
-      "river": "github.com/riverqueue/river",
-      "slog": "log/slog",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/river/jobs_provider_refresh.go": {
       "alerting": "github.com/open-rails/openrails/internal/modules/alerting",

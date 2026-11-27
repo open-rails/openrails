@@ -223,7 +223,7 @@ if err := bill.Start(ctx, openrails.WithRiverClient(fleet)); err != nil {
 }
 ```
 
-`RiverJobs` adds the `billing` (20 workers), `psp_import` (2), `provider_refresh` (4) and `nmi_history` (1) queues when missing and sets `RescueStuckJobsAfter` to 10 minutes, or the fleet's `JobTimeout` if longer, when unset; each worker declares its own timeout. The fleet must be in `DatabaseConfig.RiverSchema`, run on every replica, and is yours to start and stop. `Start` without `WithRiverClient` after `RiverJobs` went to a fleet is refused. AuthKit joins the same fleet when its River schema matches. Every kind, queue and schedule: [River jobs](river-jobs.md).
+`RiverJobs` adds the `billing` (20 workers), `psp_import` (2) and `provider_refresh` (4) queues when missing and sets `RescueStuckJobsAfter` to 10 minutes, or the fleet's `JobTimeout` if longer, when unset; each worker declares its own timeout. The fleet must be in `DatabaseConfig.RiverSchema`, run on every replica, and is yours to start and stop. `Start` without `WithRiverClient` after `RiverJobs` went to a fleet is refused. AuthKit joins the same fleet when its River schema matches. Every kind, queue and schedule: [River jobs](river-jobs.md).
 
 ## Several instances
 

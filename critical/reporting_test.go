@@ -31,6 +31,31 @@ func TestReporting(t *testing.T) {
 	t.Run("OR-J53-S04/a-sale-at-2330-in-the-accounting-timezone-counts-on-that-local-day", accountingDays)
 	t.Run("OR-J53-S05/a-day-chart-across-a-midnight-clock-change-has-one-row-per-local-day", midnightTransition)
 	t.Run("OR-J53-S08/a-sort-term-the-query-cannot-order-by-is-refused-on-its-order-param", orderRefusals)
+	t.Run("OR-J53-S09/nmis-own-history-is-no-measure-authorizations-are-measured-on-attempts", noNMIHistory)
+}
+
+// NMI's own transaction history is no measure: the schema names no
+// nmi_history measure or nmi_kind dimension, and a query naming one is
+// refused. Authorizations are measured on attempts.
+func noNMIHistory(t *testing.T) {
+	w := newWorld(t)
+	schema, err := w.alpha.GetMetricsSchema(t.Context())
+	require.NoError(t, err)
+	var measures, dimensions []string
+	for _, m := range schema.Measures {
+		measures = append(measures, m.Name)
+	}
+	for _, d := range schema.Dimensions {
+		dimensions = append(dimensions, d.Name)
+	}
+	require.Contains(t, measures, "authorization_rate")
+	require.NotContains(t, measures, "nmi_history_authorizations")
+	require.NotContains(t, dimensions, "nmi_kind")
+	for _, c := range schema.Caveats {
+		require.NotContains(t, c, "nmi_history")
+	}
+	_, err = w.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"nmi_history_authorizations"}, Range: &billing.MetricsRange{Last: "90d"}})
+	require.Equal(t, "unknown_measure", metricRefusals(t, err)["measures[0]"]["code"])
 }
 
 // Each order term the query cannot sort by is refused on its own order[i]
@@ -87,7 +112,6 @@ func midnightTransition(t *testing.T) {
 		utc[m.Name] = m.UTCDays
 	}
 	require.True(t, utc["webhook_rejects"])
-	require.True(t, utc["nmi_history_authorizations"])
 	require.False(t, utc["cash"])
 }
 

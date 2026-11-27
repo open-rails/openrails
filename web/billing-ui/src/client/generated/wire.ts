@@ -703,7 +703,7 @@ export type CustomerMessage = {
   event_id: string
   event_type: string
   channel: "email"
-  status: "disabled" | "failed" | "no_contact" | "pending" | "queued" | "rate_limited" | "sending" | "sent" | "test_environment"
+  status: "disabled" | "failed" | "no_contact" | "queued" | "rate_limited" | "sending" | "sent" | "test_environment"
   attempts: number
   last_error: "event_missing" | "event_unreadable" | "invalid_recipient" | "no_sender" | "refused" | "render_failed" | "send_failed" | "unavailable" | null
   recipient: string | null

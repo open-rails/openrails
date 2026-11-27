@@ -274,7 +274,7 @@
       "TestVerificationBinding/OR-J15-S07/verification-burst-reads-only-flagged-subscriptions"
     ],
     "OR-J15-S30": [
-      "TestBackgroundJobs/OR-J15-S30/rebill-watch-backs-off-a-failing-probe"
+      "TestBackgroundJobs/OR-J15-S30/a-failed-nmi-verification-read-waits-for-the-hourly-retry"
     ],
     "OR-J16-S01": [
       "TestDunning/OR-J16-S01/retryable-decline-recovers-on-bounded-weekly-schedule"
@@ -1270,7 +1270,12 @@
       "TestDueWork/OR-J16-S70/a-provider-billed-grace-that-ends-unanswered-is-read-by-the-due-pass"
     ],
     "OR-J16-S71": [
-      "TestDueWork/OR-J16-S71/an-overdue-renewal-is-asked-before-the-rebill-watch-reads-nmi"
+      "TestDueWork/OR-J16-S71/an-overdue-nmi-renewal-is-unverified-before-nmi-is-read"
+    ],
+    "OR-J16-S72": [
+      "TestDueWork/OR-J16-S72",
+      "TestDueWork/OR-J16-S72/stripe",
+      "TestDueWork/OR-J16-S72/ccbill"
     ],
     "OR-J16-S54": [
       "TestDunningSchedule/OR-J16-S54/a-declared-failure-inside-the-merchants-longer-schedule-stays-in-dunning"
@@ -1288,7 +1293,7 @@
       "TestDunningSchedule/OR-J16-S57/a-customers-own-declined-payments-spend-no-scheduled-retry"
     ],
     "OR-J15-S70": [
-      "TestDueWork/OR-J15-S70/an-nmi-renewal-the-probe-cannot-settle-is-read-by-id-after-its-grace"
+      "TestDueWork/OR-J15-S70/an-nmi-renewal-unpaid-a-day-past-its-period-is-unverified-access-kept"
     ],
     "OR-J15-S72": [
       "TestDueWork/OR-J15-S72/a-complete-provider-refresh-queues-no-due-work"
@@ -1543,9 +1548,6 @@
       "TestRefundRecovery/OR-J20-S08/an-unresolved-nmi-refund-is-named-and-closed-by-the-operator/lost-response",
       "TestRefundRecovery/OR-J20-S08/an-unresolved-nmi-refund-is-named-and-closed-by-the-operator/lost-request"
     ],
-    "OR-J04-S71": [
-      "TestBillingPass/OR-J04-S71/a-failed-nmi-history-read-fails-its-own-job-and-the-next-hours-reads-it"
-    ],
     "OR-J04-S72": [
       "TestHostDeps/OR-J04-S72/boots-on-a-pool-without-a-connection-string"
     ],
@@ -1676,6 +1678,9 @@
     "OR-J15-S75": [
       "TestProviderTime/OR-J15-S75/prune-keeps-a-pending-refund-and-a-booked-nmi-chargeback"
     ],
+    "OR-J15-S76": [
+      "TestNMIRecovery/OR-J15-S76/a-schedule-nmi-no-longer-holds-ends-and-its-cycle-is-missed-as-gone"
+    ],
     "OR-J28-S13": [
       "TestProviderTime/OR-J28-S13/a-ccbill-account-archived-or-in-the-other-money-class-is-declarable-by-another-merchant"
     ],
@@ -1771,6 +1776,12 @@
     "OR-J39-S25": [
       "TestCustomerMessages/OR-J39-S25/a-staff-refund-completed-a-week-late-sends-its-receipt"
     ],
+    "OR-J39-S26": [
+      "TestCustomerMessages/OR-J39-S26/a-facts-message-is-sent-with-no-dispatcher-running"
+    ],
+    "OR-J39-S27": [
+      "TestCustomerMessages/OR-J39-S27/a-fact-recorded-twice-queues-one-message-and-one-send-job"
+    ],
     "OR-J28-S16": [
       "TestProviderTime/OR-J28-S16/access-restored-after-an-nmi-chargeback-survives-a-replayed-batch"
     ],
@@ -1818,6 +1829,9 @@
     ],
     "OR-J53-S08": [
       "TestReporting/OR-J53-S08/a-sort-term-the-query-cannot-order-by-is-refused-on-its-order-param"
+    ],
+    "OR-J53-S09": [
+      "TestReporting/OR-J53-S09/nmis-own-history-is-no-measure-authorizations-are-measured-on-attempts"
     ],
     "OR-J43-S01": [
       "TestConfigurationHistory/OR-J43-S01/an-edit-and-its-entry-commit-and-roll-back-together"
@@ -2172,9 +2186,6 @@
     "OR-J45-S07": [
       "TestDeclineCauses/OR-J45-S07/authorization-rates-the-decline-mix-and-their-cuts-read-the-stored-answers"
     ],
-    "OR-J45-S08": [
-      "TestDeclineCauses/OR-J45-S08/nmi-history-months-carry-each-answers-outcome-and-cause"
-    ],
     "OR-J45-S10": [
       "TestDeclineCauses/OR-J45-S10/the-system-errors-finding-counts-the-rails-own-errors-not-the-issuers",
       "TestDeclineCauses/OR-J45-S10/the-system-errors-finding-counts-the-rails-own-errors-not-the-issuers/an-issuers-malfunction-is-not-ours",
@@ -2402,9 +2413,6 @@
     ],
     "OR-J04-S82": [
       "TestHostDeps/OR-J04-S82/provider-endpoints-are-loopback-fakes-never-beside-a-live-psp"
-    ],
-    "OR-J04-S83": [
-      "TestBillingPass/OR-J04-S83/a-slow-nmi-history-read-holds-up-no-billing-pass-and-catches-up"
     ],
     "OR-J04-S84": [
       "TestBackgroundJobs/OR-J04-S84/fleets-sharing-a-database-report-no-stall-while-another-queues-the-billing-pass"

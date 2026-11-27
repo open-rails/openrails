@@ -5,8 +5,6 @@ import (
 
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
-
-	"github.com/open-rails/openrails/internal/modules/messages"
 )
 
 // Periodic is one recurring pass, queued by its Args' InsertOpts. Its kind is
@@ -24,16 +22,12 @@ var Periodics = []Periodic{
 	// Every due scan, in turn: what is due by the pass is billed, retried,
 	// lapsed or expired by it.
 	{Args: BillingPassArgs{}, Every: BillingPassInterval, Hourly: true},
-	// NMI PSPs due for their roughly daily history read, off the billing queue.
-	{Args: NMIHistoryArgs{}, Every: NMIHistoryInterval, Hourly: true},
 	// Health findings and timed access lapses, for merchants with activity.
 	{Args: MerchantHealthArgs{}, Every: MerchantHealthInterval},
 	{Args: CleanupExpiredDataArgs{}, Every: CleanupInterval},
 	// Queues every Stripe PSP's endpoint pass: Stripe disables or deletes an
 	// endpoint without telling us.
 	{Args: StripeWebhookReconcileArgs{}, Every: StripeWebhookReconcileInterval},
-	// Customer messages queued while no dispatcher listened.
-	{Args: messages.DispatchArgs{}, Every: messages.DispatchInterval},
 	// MRR risk changes queued while no drain was woken.
 	{Args: MRRRiskArgs{}, Every: MRRRiskInterval},
 }

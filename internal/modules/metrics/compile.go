@@ -151,7 +151,6 @@ var merchantCols = map[Family]string{
 	FamAttempts:       "a.merchant_id",
 	FamPurchases:      "ck.merchant_id",
 	FamRebillCycles:   "cy.merchant_id",
-	FamNMIHistory:     "h.merchant_id",
 	FamFindings:       "f.merchant_id",
 	FamCheckouts:      "o.merchant_id",
 	FamSales:          "o.merchant_id",

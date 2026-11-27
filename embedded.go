@@ -265,8 +265,7 @@ func (e *Engine) RiverJobs() riverhelpers.Contribution {
 }
 
 // QueueBilling and QueuePSPImport name the billing and PSP import queues.
-// RiverJobs also adds the provider_refresh queue for operator requests and the
-// nmi_history queue for NMI reporting reads.
+// RiverJobs also adds the provider_refresh queue for operator requests.
 // Hosts may set concurrency in the shared River config.
 const (
 	QueueBilling   = "billing"

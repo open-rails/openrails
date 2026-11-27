@@ -339,6 +339,8 @@ func TestDunning(t *testing.T) {
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		// The verifier reads the overdue renewal NMI skipped and collects it.
+		subscriptionState(t, a, sub.ID, "past_due")
 		hold := p.core.Hold(func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/transact.php") }, nmimock.HoldRequest)
 		defer hold.Release()
 		runRegistered(t, fleet, "openrails.billing_pass", 1)

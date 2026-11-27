@@ -19,7 +19,7 @@ func TestRegistry(t *testing.T) {
 		}
 	}
 	slices.Sort(ops)
-	want := []string{"entitled_customers", "nmi_history_authorizations", "open_findings", "verification_pressure",
+	want := []string{"entitled_customers", "open_findings", "verification_pressure",
 		"verification_pressure_age_seconds", "webhook_drift_events", "webhook_rejects", "webhook_silence_age_seconds"}
 	if !slices.Equal(ops, want) {
 		t.Fatalf("ops measures = %v, want %v", ops, want)

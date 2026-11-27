@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"math"
 	"net/http"
 	"testing"
@@ -16,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/failpoint"
@@ -80,7 +78,7 @@ func TestPublicEntitlements(t *testing.T) {
 		buy(uniquePrice.ID, "unique-second")
 		customer := owned.CustomerID.UUID()
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		convergeCustomer := func() []billing.Finding {
 			t.Helper()
@@ -150,7 +148,7 @@ func TestPublicEntitlements(t *testing.T) {
 
 		// A dated revoke from an Ops finding also revokes the grant, names
 		// its staff member, and stays revoked through re-projection.
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		asOf := second.StartsAt.Add(30 * time.Minute).UTC().Truncate(time.Second)
@@ -304,7 +302,7 @@ func TestPublicEntitlements(t *testing.T) {
 
 func exactCheckCacheMetadata(t *testing.T, a *authorityWorld, grant billing.ProductAccessGrant) {
 	t.Helper()
-	database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+	database, err := producerDB(a.pool, a.schema)
 	require.NoError(t, err)
 	service := entitlements.NewEntitlementService(database, a.clock)
 	ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
@@ -384,7 +382,7 @@ func TestSubscriptionAccessRepair(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				a, _, sub := purchasedMembership(t)
 				enableLifecycleMaintenance(t, a)
-				database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+				database, err := producerDB(a.pool, a.schema)
 				require.NoError(t, err)
 				ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 				a.clock.Advance(time.Hour)
@@ -461,7 +459,7 @@ func assertGrantTermination(t *testing.T, a *authorityWorld, grant uuid.UUID, at
 func TestSubscriptionAccessBoundary(t *testing.T) {
 	t.Run("OR-J27-S06/closure-is-atomic-and-source-scoped", func(t *testing.T) {
 		a, _, sub := purchasedMembership(t)
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		a.clock.Advance(time.Hour)
@@ -528,7 +526,7 @@ func TestSubscriptionAccessBoundary(t *testing.T) {
 func TestSubscriptionAccessRepairRecheck(t *testing.T) {
 	t.Run("OR-J27-S07/repair-rechecks-chargeback-after-detection", func(t *testing.T) {
 		a, _, sub := purchasedMembership(t)
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		a.clock.Advance(time.Hour)
@@ -571,7 +569,7 @@ func TestSubscriptionAccessRepairPreservesSources(t *testing.T) {
 		for _, status := range []string{"canceled", "unverified"} {
 			t.Run(status, func(t *testing.T) {
 				a, _, sub := purchasedMembership(t)
-				database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+				database, err := producerDB(a.pool, a.schema)
 				require.NoError(t, err)
 				ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 				a.clock.Advance(time.Hour)
@@ -620,7 +618,7 @@ func TestSubscriptionAccessRepairTerminated(t *testing.T) {
 	t.Run("OR-J27-S09/an-ended-window-still-applies-its-recorded-revocation", func(t *testing.T) {
 		a, _, sub := purchasedMembership(t)
 		armDestructive(t, a, true)
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		a.clock.Advance(time.Hour)
@@ -751,7 +749,7 @@ func TestImportedAdminGrants(t *testing.T) {
 		require.Equal(t, 5, supersedes)
 		require.Equal(t, 1, revokes)
 		// The ordinary module projection can replay every stored grant twice.
-		database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+		database, err := producerDB(w.pool, w.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 		for range 2 {

@@ -80,9 +80,6 @@ const (
 	// riverPSPImportQueueMaxWorkers bounds the PSP pulls one fleet runs at
 	// once: after an upgrade every PSP of every merchant pulls.
 	riverPSPImportQueueMaxWorkers = 2
-	// riverNMIHistoryQueueMaxWorkers: one hourly history job, which reads its
-	// due PSPs in turn.
-	riverNMIHistoryQueueMaxWorkers = 1
 	// leaseConns sizes the separate pool that renews leases, copied from
 	// Deps.Postgres's configuration: count it in max_connections.
 	leaseConns = 4

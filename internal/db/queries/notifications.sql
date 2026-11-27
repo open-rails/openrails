@@ -1,14 +1,24 @@
--- Immutable customer notification facts.
--- name: CreateNotification :execrows
-INSERT INTO billing.notification_events (id,merchant_id,customer_id,event_type,data,created_at)
-VALUES(sqlc.arg(id)::uuid,sqlc.arg(merchant_id)::uuid,sqlc.arg(customer_id)::uuid,sqlc.arg(event_type)::text,COALESCE(sqlc.narg(data),'{}'::jsonb),
-COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz,'0001-01-01 00:00:00+00'::timestamptz),now()));
-
--- name: CreateNotificationIfAbsent :exec
-INSERT INTO billing.notification_events (id,merchant_id,customer_id,event_type,data,created_at)
-VALUES(sqlc.arg(id)::uuid,sqlc.arg(merchant_id)::uuid,sqlc.arg(customer_id)::uuid,sqlc.arg(event_type)::text,COALESCE(sqlc.narg(data),'{}'::jsonb),
-COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz,'0001-01-01 00:00:00+00'::timestamptz),now()))
-ON CONFLICT(merchant_id,id) DO NOTHING;
+-- name: RecordNotification :one
+-- A customer billing fact, once by its id, with its email message queued: none
+-- in a billing restore, or when the fact's message was logged before. No row
+-- when the fact was recorded before. Only billingfact.Record runs it, queueing
+-- the message's send job in the same transaction.
+WITH fact AS (
+    INSERT INTO billing.notification_events (id,merchant_id,customer_id,event_type,data,created_at)
+    VALUES(sqlc.arg(id)::uuid,sqlc.arg(merchant_id)::uuid,sqlc.arg(customer_id)::uuid,sqlc.arg(event_type)::text,COALESCE(sqlc.narg(data)::jsonb,'{}'::jsonb),
+    COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz,'0001-01-01 00:00:00+00'::timestamptz),now()))
+    ON CONFLICT(merchant_id,id) DO NOTHING
+    RETURNING merchant_id, id, customer_id, event_type, created_at
+), message AS (
+    INSERT INTO billing.customer_messages (merchant_id, customer_id, event_id, event_type, channel, status, attempts)
+    SELECT f.merchant_id, f.customer_id, f.id, f.event_type, 'email', 'queued', 0
+    FROM fact f
+    WHERE NOT billing.billing_restore_active(f.merchant_id)
+    ON CONFLICT (merchant_id, event_id, channel) DO NOTHING
+    RETURNING id
+)
+SELECT f.created_at, m.id AS message_id
+FROM fact f LEFT JOIN message m ON true;
 
 -- The access ledger, rather than billing status, determines whether stopping a
 -- subscription actually ended membership. A future grant after a gap does not
