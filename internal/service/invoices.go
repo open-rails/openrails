@@ -490,8 +490,8 @@ func (s *Service) payInvoice(ctx context.Context, rt *invoiceRuntime, actor Invo
 	if err := s.reconsentPaying(ctx, actor.Customer.UUID(), pay.method, key); err != nil {
 		return payment.InvoiceCharge{}, err
 	}
-	user := &payment.UserIdentity{ID: actor.Customer.String(), ClientIP: actor.ClientIP}
-	identify := func(ctx context.Context, user *payment.UserIdentity) error { return s.identify(ctx, actor, user) }
+	user := &payment.CustomerIdentity{ID: actor.Customer.String(), ClientIP: actor.ClientIP}
+	identify := func(ctx context.Context, user *payment.CustomerIdentity) error { return s.identify(ctx, actor, user) }
 	return rt.Attempts.PayInvoice(ctx, payment.InvoicePayInput{Invoice: invoice, PaymentMethodID: pay.method, Card: pay.card, Solana: pay.solana, Hosted: pay.hosted, Key: key, User: user,
 		Identify: identify, Prices: quote.prices, Products: quote.products})
 }
@@ -499,7 +499,7 @@ func (s *Service) payInvoice(ctx context.Context, rt *invoiceRuntime, actor Invo
 // identify names the customer to a provider's own page (a CCBill FlexForm):
 // the verified email and username their credential carries, else the
 // merchant's directory's.
-func (s *Service) identify(ctx context.Context, actor InvoiceActor, user *payment.UserIdentity) error {
+func (s *Service) identify(ctx context.Context, actor InvoiceActor, user *payment.CustomerIdentity) error {
 	if p := actor.Principal; p.EmailVerified && strings.TrimSpace(p.Email) != "" {
 		email := strings.TrimSpace(p.Email)
 		user.Email = &email
@@ -808,7 +808,7 @@ func (s *Service) invoiceOptions(ctx context.Context, customer uuid.UUID, actor 
 		if actor != nil && o.Rail == string(models.RailCCBill) {
 			// A hint only: paying checks again, so a directory outage
 			// leaves the option without it rather than failing the read.
-			user := &payment.UserIdentity{ID: actor.Customer.String()}
+			user := &payment.CustomerIdentity{ID: actor.Customer.String()}
 			if err := s.identify(ctx, *actor, user); err != nil {
 				s.Log.WarnContext(ctx, "ccbill option: cannot read the customer's identity", logx.Err(err), "customer_id", actor.Customer.String())
 			} else {

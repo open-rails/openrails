@@ -123,7 +123,7 @@ func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
 type CleanupResult struct {
 	EventLog int64
 
-	UserActionReservations     int64
+	CustomerActionReservations int64
 	NotificationEvents         int64
 	Carts                      int64
 	IdempotencyKeys            int64
@@ -283,12 +283,12 @@ func (w CleanupExpiredDataWorker) sweepDeployment(ctx context.Context, now time.
 	}
 
 	for range cleanupIndexedMaxBatches {
-		n, err := destructive.PruneUserActionReservations(ctx, w.DB, cleanupDeleteBatch)
+		n, err := destructive.PruneCustomerActionReservations(ctx, w.DB, cleanupDeleteBatch)
 		if err != nil {
-			*cleanupErr = errors.Join(*cleanupErr, fmt.Errorf("prune user action reservations: %w", err))
+			*cleanupErr = errors.Join(*cleanupErr, fmt.Errorf("prune customer action reservations: %w", err))
 			break
 		}
-		result.UserActionReservations += n
+		result.CustomerActionReservations += n
 		if n < cleanupDeleteBatch {
 			break
 		}

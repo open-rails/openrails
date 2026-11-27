@@ -315,6 +315,15 @@ type BillingCustomerDelinquency struct {
 	NextEvaluationAt *time.Time
 }
 
+// Merchant-global customer card-delete and soft-cancel rolling-hour/day rate reservations. No actor can obtain a separate budget. customer_id is an opaque identity and deliberately has no cascading customer FK. The canonical operation/card/subscription remains authoritative after pruning. Retention: rows are deleted 24 hours after reserved_at.
+type BillingCustomerDestructiveReservation struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ActionKey  string
+	Kind       string
+	ReservedAt time.Time
+}
+
 // Per-payer enterprise invoicing profile: net-N terms, collection method (charge_automatically | send_invoice for manual remittance) and document fields (PO, tax, contacts) snapshotted onto invoices at finalize.
 type BillingCustomerInvoiceProfile struct {
 	MerchantID       uuid.UUID
@@ -2560,15 +2569,6 @@ type BillingUsageTotal struct {
 	// Pending: what the lease's settled usage costs at the provisional prices intake gave it, never below zero; zero once posted.
 	Amount    int64
 	UpdatedAt time.Time
-}
-
-// Merchant-global customer card-delete and soft-cancel rolling-hour/day rate reservations. No actor can obtain a separate budget. customer_id is an opaque identity and deliberately has no cascading customer FK. The canonical operation/card/subscription remains authoritative after pruning. Retention: rows are deleted 24 hours after reserved_at.
-type BillingUserDestructiveReservation struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	ActionKey  string
-	Kind       string
-	ReservedAt time.Time
 }
 
 // webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied. Retention: completed events are deleted 90 days after completed_at.

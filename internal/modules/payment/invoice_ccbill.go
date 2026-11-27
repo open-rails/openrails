@@ -57,7 +57,7 @@ var ErrCCBillIdentityRequired = apperr.New(http.StatusBadRequest, billing.CodeCu
 
 // CCBillIdentityMissing is what a FlexForm still needs to name user:
 // "verified_email" and "username", each when absent. Empty when it can.
-func CCBillIdentityMissing(user *UserIdentity) []string {
+func CCBillIdentityMissing(user *CustomerIdentity) []string {
 	var missing []string
 	if user.Email == nil || strings.TrimSpace(*user.Email) == "" {
 		missing = append(missing, "verified_email")

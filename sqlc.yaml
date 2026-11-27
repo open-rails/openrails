@@ -13,6 +13,7 @@ sql:
       - "internal/migrate/postgres/0008_rebill_watch_dropped.up.sql"
       - "internal/migrate/postgres/0009_usage_receipt_per_posting.up.sql"
       - "internal/migrate/postgres/0010_amount_low_balance.up.sql"
+      - "internal/migrate/postgres/0011_customer_destructive_reservations.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

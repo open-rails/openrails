@@ -11,6 +11,7 @@ migration 0007_retired_jobs.up.sql sha256:ba9b17805a8b793bc4eb5f96a22a72e8af1df6
 migration 0008_rebill_watch_dropped.up.sql sha256:7d1008c1f618110cd1418a1c66e1dc8b4cd79fee7523e7b9548360000276ae98
 migration 0009_usage_receipt_per_posting.up.sql sha256:d384be58251eea8f5c1270889cc3204e538673039c0c67c517fa1ade287a060e
 migration 0010_amount_low_balance.up.sql sha256:a3c81f7e13cf137c8381c00c235485c03041fa2e0f8ae781f827f52e55a94b55
+migration 0011_customer_destructive_reservations.up.sql sha256:0636ae0008ee371fcb4f6fb70538caa58f5a11d77fc47af876266c6c2e576437
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -404,6 +405,20 @@ table billing.customer_delinquency
   index CREATE INDEX customer_delinquency_due_idx ON billing.customer_delinquency USING btree (next_evaluation_at, merchant_id, customer_id, currency) WHERE (next_evaluation_at IS NOT NULL)
   index CREATE UNIQUE INDEX customer_delinquency_pkey ON billing.customer_delinquency USING btree (merchant_id, customer_id, currency)
   trigger CREATE TRIGGER customer_delinquency_track_mrr_risk AFTER INSERT OR UPDATE OF state ON billing.customer_delinquency FOR EACH ROW EXECUTE FUNCTION billing.customer_delinquency_track_mrr_risk()
+
+table billing.customer_destructive_reservations
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column action_key text NOT NULL
+  column kind text NOT NULL
+  column reserved_at timestamp with time zone NOT NULL
+  constraint customer_destructive_reservations_action_key_check CHECK (((action_key <> ''::text) AND (octet_length(action_key) <= 512)))
+  constraint customer_destructive_reservations_kind_check CHECK ((kind = ANY (ARRAY['delete_payment_method'::text, 'cancel_subscription'::text])))
+  constraint customer_destructive_reservations_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
+  constraint customer_destructive_reservations_pkey PRIMARY KEY (merchant_id, action_key)
+  index CREATE INDEX customer_destructive_reservations_expiry_idx ON billing.customer_destructive_reservations USING btree (reserved_at, merchant_id, action_key)
+  index CREATE UNIQUE INDEX customer_destructive_reservations_pkey ON billing.customer_destructive_reservations USING btree (merchant_id, action_key)
+  index CREATE INDEX customer_destructive_reservations_window_idx ON billing.customer_destructive_reservations USING btree (merchant_id, reserved_at) INCLUDE (customer_id)
 
 table billing.customer_invoice_profiles
   column merchant_id uuid NOT NULL
@@ -3633,20 +3648,6 @@ table billing.usage_totals
   constraint usage_totals_stated_check CHECK ((stated >= 0))
   index CREATE INDEX usage_totals_closed_idx ON billing.usage_totals USING btree (merchant_id, period_ends_at) WHERE (lease_id = '00000000-0000-0000-0000-000000000000'::uuid)
   index CREATE UNIQUE INDEX usage_totals_pkey ON billing.usage_totals USING btree (merchant_id, customer_id, currency, period_starts_at, meter_key, cell, print, lapse_at, lease_id)
-
-table billing.user_destructive_reservations
-  column merchant_id uuid NOT NULL
-  column customer_id uuid NOT NULL
-  column action_key text NOT NULL
-  column kind text NOT NULL
-  column reserved_at timestamp with time zone NOT NULL
-  constraint user_destructive_reservations_action_key_check CHECK (((action_key <> ''::text) AND (octet_length(action_key) <= 512)))
-  constraint user_destructive_reservations_kind_check CHECK ((kind = ANY (ARRAY['delete_payment_method'::text, 'cancel_subscription'::text])))
-  constraint user_destructive_reservations_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
-  constraint user_destructive_reservations_pkey PRIMARY KEY (merchant_id, action_key)
-  index CREATE INDEX user_destructive_reservations_expiry_idx ON billing.user_destructive_reservations USING btree (reserved_at, merchant_id, action_key)
-  index CREATE UNIQUE INDEX user_destructive_reservations_pkey ON billing.user_destructive_reservations USING btree (merchant_id, action_key)
-  index CREATE INDEX user_destructive_reservations_window_idx ON billing.user_destructive_reservations USING btree (merchant_id, reserved_at) INCLUDE (customer_id)
 
 table billing.webhook_events
   column merchant_id uuid NOT NULL

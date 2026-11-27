@@ -344,10 +344,10 @@ type InvoicePayInput struct {
 	Solana          *InvoiceSolana
 	Hosted          *InvoiceHosted
 	Key             string
-	User            *UserIdentity
+	User            *CustomerIdentity
 	// Identify fills User's verified email and username, which a provider's
 	// own page (a CCBill FlexForm) names the customer by.
-	Identify func(context.Context, *UserIdentity) error
+	Identify func(context.Context, *CustomerIdentity) error
 	Prices   []*models.Price
 	Products []*models.Product
 }
@@ -879,7 +879,7 @@ func (s *InvoiceAttemptService) prepareBasisTheoryCard(ctx context.Context, purc
 
 // newCardBilling is who a new NMI card bills: the details entered with it,
 // the customer's email otherwise.
-func newCardBilling(d *billing.BillingDetails, user *UserIdentity) *payments.NewCardBilling {
+func newCardBilling(d *billing.BillingDetails, user *CustomerIdentity) *payments.NewCardBilling {
 	out := &payments.NewCardBilling{}
 	text := func(v *string) string {
 		if v == nil {

@@ -1598,7 +1598,7 @@
     ],
     "internal/destructive": [
       "type DrainErasuresArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\n\tFollows int64 `json:\"follows,omitempty\" river:\"unique\"`\n\n\tRecovers string `json:\"recovers,omitempty\" river:\"unique\"`\n}",
-      "type userActionRateEvidence struct {\n\tWindow                 string    `json:\"window\"`\n\tHourlyCustomers        int64     `json:\"hourly_customers\"`\n\tMaximumHourlyCustomers int64     `json:\"maximum_hourly_customers\"`\n\tDailyCustomers         int64     `json:\"daily_customers\"`\n\tMaximumDailyCustomers  int64     `json:\"maximum_daily_customers\"`\n\tCancellations          int64     `json:\"cancellations\"`\n\tCardRemovals           int64     `json:\"card_removals\"`\n\tWaveStartedAt          time.Time `json:\"wave_started_at\"`\n\tRetryAfterSeconds      int64     `json:\"retry_after_seconds\"`\n}"
+      "type customerActionRateEvidence struct {\n\tWindow                 string    `json:\"window\"`\n\tHourlyCustomers        int64     `json:\"hourly_customers\"`\n\tMaximumHourlyCustomers int64     `json:\"maximum_hourly_customers\"`\n\tDailyCustomers         int64     `json:\"daily_customers\"`\n\tMaximumDailyCustomers  int64     `json:\"maximum_daily_customers\"`\n\tCancellations          int64     `json:\"cancellations\"`\n\tCardRemovals           int64     `json:\"card_removals\"`\n\tWaveStartedAt          time.Time `json:\"wave_started_at\"`\n\tRetryAfterSeconds      int64     `json:\"retry_after_seconds\"`\n}"
     ],
     "internal/disputejob": [
       "type MonitorArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tPSPID      uuid.UUID `json:\"psp_id\" river:\"unique\"`\n\tAfter      int64     `json:\"after,omitempty\" river:\"unique\"`\n}",
@@ -2748,20 +2748,7 @@
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
-    "internal/destructive/erasure.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "river": "github.com/riverqueue/river",
-      "rivertype": "github.com/riverqueue/river/rivertype",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
-    },
-    "internal/destructive/user_actions.go": {
+    "internal/destructive/customer_actions.go": {
       "alertjob": "github.com/open-rails/openrails/internal/modules/alerting/alertjob",
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
@@ -2773,6 +2760,19 @@
       "logx": "github.com/open-rails/openrails/internal/logx",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/destructive/erasure.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "river": "github.com/riverqueue/river",
+      "rivertype": "github.com/riverqueue/river/rivertype",
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"

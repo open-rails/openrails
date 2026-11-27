@@ -44,7 +44,7 @@ func tierChangeIdempotencyKey(customerID, key string) string {
 	return "tier_change:" + customerID + ":" + strings.TrimSpace(key)
 }
 
-func tierChangeCustomer(user *UserIdentity) string {
+func tierChangeCustomer(user *CustomerIdentity) string {
 	if user == nil {
 		return ""
 	}
@@ -114,7 +114,7 @@ func tierChangeOwnedBy(row gen.BillingProviderIntent, want tierChangeSubject) er
 // key is new. A tier change without a key is refused here, before any
 // admission or mutation: the key is the client's only handle on a lost
 // response.
-func (s *PurchaseService) ReplayTierChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity) (*TierChangeResponse, bool, error) {
+func (s *PurchaseService) ReplayTierChange(ctx context.Context, req *SubscriptionChangeRequest, user *CustomerIdentity) (*TierChangeResponse, bool, error) {
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, false, tierChangeKeyRequired()
 	}
@@ -141,7 +141,7 @@ func (s *PurchaseService) ReplayTierChange(ctx context.Context, req *Subscriptio
 // replayTierChangeOperation answers a request that names an existing
 // operation: its stored result, or its live state after claiming committed
 // work that is still runnable. The frozen payload is never refreshed.
-func (s *PurchaseService) replayTierChangeOperation(ctx context.Context, in gen.BillingProviderIntent, req *SubscriptionChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
+func (s *PurchaseService) replayTierChangeOperation(ctx context.Context, in gen.BillingProviderIntent, req *SubscriptionChangeRequest, user *CustomerIdentity) (*TierChangeResponse, error) {
 	subject, err := decodeTierChangeSubject(in)
 	if err != nil {
 		return nil, err

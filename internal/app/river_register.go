@@ -398,7 +398,7 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 	if r.SubscriptionService == nil {
 		return fmt.Errorf("billing worker runtime subscription service is required")
 	}
-	if r.UserSubscriptionService == nil {
+	if r.CustomerSubscriptionService == nil {
 		return fmt.Errorf("billing worker runtime user subscription service is required")
 	}
 	if r.SubscriptionLifecycleService == nil {

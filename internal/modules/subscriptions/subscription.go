@@ -96,7 +96,7 @@ const (
 	StatusMessagePending = "pending"
 )
 
-func (s *SubscriptionService) GetUserSubscription(ctx context.Context, userID string) (*models.Subscription, error) {
+func (s *SubscriptionService) GetCustomerSubscription(ctx context.Context, userID string) (*models.Subscription, error) {
 	return s.GetByUserID(ctx, userID)
 }
 

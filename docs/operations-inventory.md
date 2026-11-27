@@ -172,6 +172,7 @@ The source scan found 511 named SQL statements in 94 files with an explicit qual
 | [custodian_method_delete.sql](../internal/db/queries/custodian_method_delete.sql) | 4 | `payment_methods`, `provider_intents` |
 | [custodians.sql](../internal/db/queries/custodians.sql) | 1 | `custodians` |
 | [customer_contacts.sql](../internal/db/queries/customer_contacts.sql) | 3 | `customer_contacts` |
+| [customer_destructive.sql](../internal/db/queries/customer_destructive.sql) | 3 | `customer_destructive_reservations` |
 | [customer_invoice_profiles.sql](../internal/db/queries/customer_invoice_profiles.sql) | 2 | `customer_invoice_profiles` |
 | [customer_low_balance_lines.sql](../internal/db/queries/customer_low_balance_lines.sql) | 2 | `customer_low_balance_lines` |
 | [customer_messages.sql](../internal/db/queries/customer_messages.sql) | 3 | `customer_messages` |
@@ -251,7 +252,6 @@ The source scan found 511 named SQL statements in 94 files with an explicit qual
 | [usage_billing.sql](../internal/db/queries/usage_billing.sql) | 7 | `money_settings` |
 | [usage_invoices.sql](../internal/db/queries/usage_invoices.sql) | 15 | `invoice_lines`, `invoices`, `owed_items`, `payments` |
 | [usage_posting.sql](../internal/db/queries/usage_posting.sql) | 7 | `usage_card_prints`, `usage_pending`, `usage_receipts`, `usage_totals` |
-| [user_destructive.sql](../internal/db/queries/user_destructive.sql) | 3 | `user_destructive_reservations` |
 | [webhook_events.sql](../internal/db/queries/webhook_events.sql) | 2 | `webhook_events` |
 | [webhook_health.sql](../internal/db/queries/webhook_health.sql) | 5 | `psp_refresh_watermarks`, `webhook_health`, `webhook_health_daily` |
 
@@ -259,7 +259,7 @@ The migrations declare these 135 billing tables; usage events live in the event 
 
 - `balance_watches`, `book_identity`, `books_starts`, `carts`, `catalog_applications`, `catalog_field_owners`, `catalog_limits`
 - `catalog_meters`, `catalog_product_limits`, `catalog_rate_cards`, `change_log`, `credit_grant_events`, `credit_grants`
-- `credit_reversal_shares`, `custodians`, `customer_contacts`, `customer_delinquency`, `customer_invoice_profiles`, `customer_limit_overrides`, `customer_low_balance_lines`
+- `credit_reversal_shares`, `custodians`, `customer_contacts`, `customer_delinquency`, `customer_destructive_reservations`, `customer_invoice_profiles`, `customer_limit_overrides`, `customer_low_balance_lines`
 - `customer_messages`, `customer_mrr`, `customers`, `dashboard_configs`, `destructive_actions`, `destructive_holds`, `destructive_run_before_images`
 - `disputes`, `event_store`, `eventlog_events`, `eventlog_migrations`, `eventlog_pending`, `eventlog_streams`, `fraud_reports`
 - `grants`, `host_outbox`, `idempotency_keys`, `lease_in_flight`, `leases`, `ledger_accounts`, `ledger_daily`
@@ -275,7 +275,7 @@ The migrations declare these 135 billing tables; usage events live in the event 
 - `psp_import_basis`, `psp_import_mappings`, `psp_import_records`, `psp_imports`, `psp_refresh_watermarks`, `psps`, `rebill_cycles`
 - `reconciliation_findings`, `reconciliation_state`, `revenue_schedules`, `running_charges`, `scheduled_changes`, `solana_crankers`, `solana_pay_receipts`
 - `solana_pay_references`, `solana_subscriptions`, `stored_card_checks`, `stripe_fee_reads`, `subscription_billing_changes`, `subscription_cancellations`, `subscription_mrr`
-- `subscription_status_transitions`, `subscription_verifications`, `subscriptions`, `usage_card_prints`, `usage_pending`, `usage_receipts`, `usage_totals`, `user_destructive_reservations`
+- `subscription_status_transitions`, `subscription_verifications`, `subscriptions`, `usage_card_prints`, `usage_pending`, `usage_receipts`, `usage_totals`
 - `webhook_events`, `webhook_health`, `webhook_health_daily`
 
 </details>
