@@ -137,9 +137,13 @@ func creditsAndUsageOnBothBases(t *testing.T) {
 		bought := a.clock.Now()
 		_, lot := s.buy(t, s.pack(t, "bases-pack", 11_000_000, 10_000_000, 1), 10_000_000, "bases-pack")
 		s.spend(t, 1_000_000, "bases-one")
+		// A lot's money is dated when the lot and its spends were stored,
+		// on the database's clock.
+		heldAt := time.Now().Add(time.Hour)
 		held := billing.QueryMetricsParams{Measures: []string{"balance"}, By: []string{"account"},
-			Range:   &billing.MetricsRange{From: bought.Add(-time.Hour).Format(time.RFC3339), To: bought.Add(time.Hour).Format(time.RFC3339)},
+			Range:   &billing.MetricsRange{From: bought.Add(-time.Hour).Format(time.RFC3339), To: heldAt.Format(time.RFC3339)},
 			Filters: map[string][]string{"account": {"deferred_revenue_credit"}}}
+		require.EqualValues(t, 9_090_910, glBalanceAt(t, w, "general", "deferred_revenue_credit", heldAt))
 		require.Equal(t, map[string]int64{"deferred_revenue_credit": 9_090_910}, keyed(t, metricTable(t, a.alpha, held), "balance", "account"),
 			"credit held, in money: ten credits at the pack's rate")
 
