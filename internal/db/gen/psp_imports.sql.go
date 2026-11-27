@@ -779,49 +779,6 @@ func (q *Queries) ListPSPImportRecordsByIDs(ctx context.Context, arg ListPSPImpo
 	return items, nil
 }
 
-const mergePSPImportRecords = `-- name: MergePSPImportRecords :exec
-INSERT INTO billing.psp_import_records AS prior (merchant_id, import_id, kind, ref, customer_ref, subscription_ref, occurred_at, facts, data, state)
-SELECT $1::uuid, $2::uuid, r.kind, r.ref, NULLIF(r.customer_ref, ''), NULLIF(r.subscription_ref, ''),
-    NULLIF(r.occurred_at, '0001-01-01 00:00:00+00'::timestamptz), r.facts, r.data, 'unmatched'
-FROM unnest($3::text[], $4::text[], $5::text[], $6::text[],
-    $7::timestamptz[], $8::jsonb[], $9::jsonb[])
-    AS r(kind, ref, customer_ref, subscription_ref, occurred_at, facts, data)
-ON CONFLICT (merchant_id, import_id, kind, ref) DO UPDATE SET
-    customer_ref = COALESCE(EXCLUDED.customer_ref, prior.customer_ref),
-    subscription_ref = COALESCE(EXCLUDED.subscription_ref, prior.subscription_ref),
-    occurred_at = COALESCE(EXCLUDED.occurred_at, prior.occurred_at),
-    facts = prior.facts || EXCLUDED.facts, data = prior.data || EXCLUDED.data, updated_at = now()
-`
-
-type MergePSPImportRecordsParams struct {
-	MerchantID       uuid.UUID
-	ImportID         uuid.UUID
-	Kinds            []string
-	Refs             []string
-	CustomerRefs     []string
-	SubscriptionRefs []string
-	OccurredAts      []time.Time
-	Facts            [][]byte
-	Data             [][]byte
-}
-
-// Facts a provider states across several reads (a CCBill member's signup,
-// then its end) fill one record: each read's keys replace only their own.
-func (q *Queries) MergePSPImportRecords(ctx context.Context, arg MergePSPImportRecordsParams) error {
-	_, err := q.db.Exec(ctx, mergePSPImportRecords,
-		arg.MerchantID,
-		arg.ImportID,
-		arg.Kinds,
-		arg.Refs,
-		arg.CustomerRefs,
-		arg.SubscriptionRefs,
-		arg.OccurredAts,
-		arg.Facts,
-		arg.Data,
-	)
-	return err
-}
-
 const listPSPImportRecordsByKind = `-- name: ListPSPImportRecordsByKind :many
 SELECT merchant_id, import_id, id, kind, ref, customer_ref, subscription_ref, occurred_at, facts, data, state, customer_id, linked_via, manual_customer_id, reason, created_at, updated_at, manual_price_id FROM billing.psp_import_records
 WHERE merchant_id = $1::uuid AND import_id = $2::uuid AND kind = $3::text
@@ -1336,6 +1293,49 @@ func (q *Queries) LookupPSPImportSubscriptionMappings(ctx context.Context, arg L
 		return nil, err
 	}
 	return items, nil
+}
+
+const mergePSPImportRecords = `-- name: MergePSPImportRecords :exec
+INSERT INTO billing.psp_import_records AS prior (merchant_id, import_id, kind, ref, customer_ref, subscription_ref, occurred_at, facts, data, state)
+SELECT $1::uuid, $2::uuid, r.kind, r.ref, NULLIF(r.customer_ref, ''), NULLIF(r.subscription_ref, ''),
+    NULLIF(r.occurred_at, '0001-01-01 00:00:00+00'::timestamptz), r.facts, r.data, 'unmatched'
+FROM unnest($3::text[], $4::text[], $5::text[], $6::text[],
+    $7::timestamptz[], $8::jsonb[], $9::jsonb[])
+    AS r(kind, ref, customer_ref, subscription_ref, occurred_at, facts, data)
+ON CONFLICT (merchant_id, import_id, kind, ref) DO UPDATE SET
+    customer_ref = COALESCE(EXCLUDED.customer_ref, prior.customer_ref),
+    subscription_ref = COALESCE(EXCLUDED.subscription_ref, prior.subscription_ref),
+    occurred_at = COALESCE(EXCLUDED.occurred_at, prior.occurred_at),
+    facts = prior.facts || EXCLUDED.facts, data = prior.data || EXCLUDED.data, updated_at = now()
+`
+
+type MergePSPImportRecordsParams struct {
+	MerchantID       uuid.UUID
+	ImportID         uuid.UUID
+	Kinds            []string
+	Refs             []string
+	CustomerRefs     []string
+	SubscriptionRefs []string
+	OccurredAts      []time.Time
+	Facts            [][]byte
+	Data             [][]byte
+}
+
+// Facts a provider states across several reads (a CCBill member's signup,
+// then its end) fill one record: each read's keys replace only their own.
+func (q *Queries) MergePSPImportRecords(ctx context.Context, arg MergePSPImportRecordsParams) error {
+	_, err := q.db.Exec(ctx, mergePSPImportRecords,
+		arg.MerchantID,
+		arg.ImportID,
+		arg.Kinds,
+		arg.Refs,
+		arg.CustomerRefs,
+		arg.SubscriptionRefs,
+		arg.OccurredAts,
+		arg.Facts,
+		arg.Data,
+	)
+	return err
 }
 
 const recordPSPImportBasis = `-- name: RecordPSPImportBasis :exec
