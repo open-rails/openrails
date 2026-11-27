@@ -10,9 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
-	"slices"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -36,16 +34,19 @@ import (
 type mrrMove struct {
 	Currency, Kind, Cause string
 	Delta, Before, After  int64
-	Logo                  int
+	Logo, CustomerLogo    int
 	Voluntary             *bool
 	OccurredAt            time.Time
+	Scheduled             bool
 	Lines                 int
 }
 
-// mrrMoves are the customer's MRR movements, oldest first.
+// mrrMoves are the customer's MRR movements, oldest first, the scheduled
+// ones still ahead included.
 func mrrMoves(t *testing.T, w *world, client *openrails.Client, customer billing.CustomerID) []mrrMove {
 	t.Helper()
-	rows, err := w.pool.Query(t.Context(), `SELECT m.currency, m.kind, m.cause, m.delta, m.mrr_before, m.mrr_after, m.logo_delta, m.voluntary, m.occurred_at,
+	rows, err := w.pool.Query(t.Context(), `SELECT m.currency, m.kind, m.cause, m.delta, m.mrr_before, m.mrr_after, m.logo_delta, m.customer_logo_delta,
+		m.voluntary, m.occurred_at, m.scheduled,
 		(SELECT count(*) FROM `+pgx.Identifier{w.schema, "mrr_movement_lines"}.Sanitize()+` l WHERE l.merchant_id = m.merchant_id AND l.movement_id = m.id)
 		FROM `+pgx.Identifier{w.schema, "mrr_movements"}.Sanitize()+` m WHERE m.merchant_id = $1 AND m.customer_id = $2 ORDER BY m.occurred_at, m.id`,
 		client.MerchantID().UUID(), customer.UUID())
@@ -54,10 +55,22 @@ func mrrMoves(t *testing.T, w *world, client *openrails.Client, customer billing
 	var out []mrrMove
 	for rows.Next() {
 		var m mrrMove
-		require.NoError(t, rows.Scan(&m.Currency, &m.Kind, &m.Cause, &m.Delta, &m.Before, &m.After, &m.Logo, &m.Voluntary, &m.OccurredAt, &m.Lines))
+		require.NoError(t, rows.Scan(&m.Currency, &m.Kind, &m.Cause, &m.Delta, &m.Before, &m.After, &m.Logo, &m.CustomerLogo, &m.Voluntary, &m.OccurredAt, &m.Scheduled, &m.Lines))
 		out = append(out, m)
 	}
 	require.NoError(t, rows.Err())
+	return out
+}
+
+// mrrMovesBy are the customer's movements dated at or before at.
+func mrrMovesBy(t *testing.T, w *world, client *openrails.Client, customer billing.CustomerID, at time.Time) []mrrMove {
+	t.Helper()
+	var out []mrrMove
+	for _, m := range mrrMoves(t, w, client, customer) {
+		if !m.OccurredAt.After(at) {
+			out = append(out, m)
+		}
+	}
 	return out
 }
 
@@ -74,66 +87,37 @@ func mrrKind(currency, kind string, delta int64) string {
 	return currency + " " + kind + " " + strconv.FormatInt(delta, 10)
 }
 
-// mrrEntries are the subscription's scheduled MRR changes, each kind and
-// status, oldest first.
-func mrrEntries(t *testing.T, w *world, client *openrails.Client, sub billing.SubscriptionID) []string {
+// mrrKindCounts counts the merchant's movements in currency dated by at, by
+// kind, and the voluntary and chargeback churn apart: each movement once.
+func mrrKindCounts(t *testing.T, w *world, client *openrails.Client, currency string, at time.Time) map[string]int64 {
 	t.Helper()
-	rows, err := w.pool.Query(t.Context(), "SELECT kind || ' ' || status FROM "+pgx.Identifier{w.schema, "mrr_scheduled"}.Sanitize()+
-		" WHERE merchant_id = $1 AND subscription_id = $2 ORDER BY scheduled_at, id", client.MerchantID().UUID(), sub.UUID())
-	require.NoError(t, err)
-	out, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	require.NoError(t, err)
-	return out
-}
-
-// mrrFlows sums the merchant's entries of each measure in currency, over
-// every bucket.
-func mrrFlows(t *testing.T, w *world, client *openrails.Client, currency string) map[string]int64 {
-	t.Helper()
-	rows, err := w.pool.Query(t.Context(), "SELECT measure, sum(entries)::bigint FROM "+pgx.Identifier{w.schema, "mrr_flows"}.Sanitize()+
-		" WHERE merchant_id = $1 AND currency = $2 GROUP BY measure", client.MerchantID().UUID(), currency)
+	rows, err := w.pool.Query(t.Context(), `SELECT x.k, count(*) FROM `+pgx.Identifier{w.schema, "mrr_movements"}.Sanitize()+` m
+		CROSS JOIN LATERAL (SELECT m.kind UNION ALL SELECT 'churn_voluntary' WHERE m.voluntary
+		                    UNION ALL SELECT 'churn_chargeback' WHERE m.kind = 'churn' AND m.cause = 'chargeback') x(k)
+		WHERE m.merchant_id = $1 AND m.currency = $2 AND m.occurred_at <= $3 GROUP BY x.k`, client.MerchantID().UUID(), currency, at)
 	require.NoError(t, err)
 	defer rows.Close()
 	out := map[string]int64{}
 	for rows.Next() {
-		var measure string
-		var entries int64
-		require.NoError(t, rows.Scan(&measure, &entries))
-		out[measure] = entries
+		var kind string
+		var n int64
+		require.NoError(t, rows.Scan(&kind, &n))
+		out[kind] = n
 	}
 	require.NoError(t, rows.Err())
 	return out
 }
 
-// mrrScheduledFlows counts the merchant's scheduled MRR entries in currency
-// by kind and event, as reports derive them: added by scheduled_at, then
-// reversed, effected or superseded by resolved_at.
-func mrrScheduledFlows(t *testing.T, w *world, client *openrails.Client, currency string) map[string]int64 {
-	t.Helper()
-	table := pgx.Identifier{w.schema, "mrr_scheduled"}.Sanitize()
-	rows, err := w.pool.Query(t.Context(), `SELECT 'scheduled_' || kind || '_added', count(*) FROM `+table+` WHERE merchant_id = $1 AND currency = $2 GROUP BY kind
-		UNION ALL SELECT 'scheduled_' || kind || '_' || status, count(*) FROM `+table+` WHERE merchant_id = $1 AND currency = $2 AND resolved_at IS NOT NULL GROUP BY kind, status`,
-		client.MerchantID().UUID(), currency)
-	require.NoError(t, err)
-	defer rows.Close()
-	out := map[string]int64{}
-	for rows.Next() {
-		var measure string
-		var entries int64
-		require.NoError(t, rows.Scan(&measure, &entries))
-		out[measure] = entries
-	}
-	require.NoError(t, rows.Err())
-	return out
-}
-
-// mrrTotals is the merchant's MRR now in currency, its customers and
-// subscribers.
-func mrrTotals(t *testing.T, w *world, client *openrails.Client, currency string) [3]int64 {
+// mrrTotals is the merchant's MRR in currency at at, its customers with any
+// and the subscriptions adding it, from the movements and their lines.
+func mrrTotals(t *testing.T, w *world, client *openrails.Client, currency string, at time.Time) [3]int64 {
 	t.Helper()
 	var out [3]int64
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT mrr, customers, subscribers FROM "+pgx.Identifier{w.schema, "mrr_totals"}.Sanitize()+
-		" WHERE merchant_id = $1 AND currency = $2", client.MerchantID().UUID(), currency).Scan(&out[0], &out[1], &out[2]))
+	require.NoError(t, w.pool.QueryRow(t.Context(), `SELECT COALESCE(sum(m.delta), 0)::bigint, COALESCE(sum(m.logo_delta), 0)::bigint,
+		(SELECT COALESCE(sum(l.subscriber_delta), 0)::bigint FROM `+pgx.Identifier{w.schema, "mrr_movement_lines"}.Sanitize()+` l
+		  WHERE l.merchant_id = $1 AND l.currency = $2 AND l.occurred_at <= $3)
+		FROM `+pgx.Identifier{w.schema, "mrr_movements"}.Sanitize()+` m WHERE m.merchant_id = $1 AND m.currency = $2 AND m.occurred_at <= $3`,
+		client.MerchantID().UUID(), currency, at).Scan(&out[0], &out[1], &out[2]))
 	return out
 }
 
@@ -318,6 +302,11 @@ func TestMRR(t *testing.T) {
 			require.Equal(t, logo, moves[i].Logo, "%s", moves[i].Kind)
 			require.Equal(t, 1, moves[i].Lines, "%s: one subscription moved", moves[i].Kind)
 		}
+		// Customers count once across currencies: the euro plan finds her
+		// already counted.
+		for i, logo := range []int{1, 0, 0, -1, 1, 0, 0} {
+			require.Equal(t, logo, moves[i].CustomerLogo, "%s %s", moves[i].Currency, moves[i].Kind)
+		}
 		require.Equal(t, []string{"subscribed", "subscribed", "merchant_canceled", "merchant_canceled", "subscribed", "subscribed", "subscribed"},
 			[]string{moves[0].Cause, moves[1].Cause, moves[2].Cause, moves[3].Cause, moves[4].Cause, moves[5].Cause, moves[6].Cause})
 		require.Equal(t, int64(dailyTenMRR+10_000_000), moves[1].After)
@@ -327,16 +316,16 @@ func TestMRR(t *testing.T) {
 			require.Nil(t, m.Voluntary, "%s", m.Kind)
 		}
 
-		require.Equal(t, [3]int64{dailyTenMRR + weeklyMRR, 1, 2}, mrrTotals(t, a.world, a.alpha, "USD"))
-		require.Equal(t, [3]int64{10_000_000, 1, 1}, mrrTotals(t, a.world, a.alpha, "EUR"))
+		now := a.clock.Now()
+		require.Equal(t, [3]int64{dailyTenMRR + weeklyMRR, 1, 2}, mrrTotals(t, a.world, a.alpha, "USD", now))
+		require.Equal(t, [3]int64{10_000_000, 1, 1}, mrrTotals(t, a.world, a.alpha, "EUR", now))
 		require.Equal(t, map[string]int64{"new": 1, "expansion": 2, "contraction": 1, "churn": 1, "churn_voluntary": 1, "reactivation": 1},
-			mrrFlows(t, a.world, a.alpha, "USD"), "each movement is counted once")
-		require.Equal(t, map[string]int64{"new": 1}, mrrFlows(t, a.world, a.alpha, "EUR"))
+			mrrKindCounts(t, a.world, a.alpha, "USD", now), "each movement is counted once")
+		require.Equal(t, map[string]int64{"new": 1}, mrrKindCounts(t, a.world, a.alpha, "EUR", now))
 	})
 
-	t.Run("OR-J42-S02/cancel-at-period-end-is-scheduled-churn-a-resume-reverses-it-the-end-churns", func(t *testing.T) {
+	t.Run("OR-J42-S02/cancel-at-period-end-shows-its-scheduled-churn-a-resume-clears-it", func(t *testing.T) {
 		a, _, sub := purchasedMembership(t)
-		alice := customerOf(a.alice)
 		end := *sub.CurrentPeriodEndsAt
 		customerCancel(t, a, sub.ID)
 
@@ -346,7 +335,6 @@ func TestMRR(t *testing.T) {
 		require.Equal(t, billing.ScheduledMRRChurn, mrr.Scheduled.Kind)
 		require.EqualValues(t, -dailyTenMRR, mrr.Scheduled.Amount)
 		require.True(t, mrr.Scheduled.EffectiveAt.Equal(end), "effective at %s", mrr.Scheduled.EffectiveAt)
-		require.Equal(t, []string{mrrKind("USD", "new", dailyTenMRR)}, mrrKinds(mrrMoves(t, a.world, a.alpha, alice)), "scheduled churn moves no MRR")
 		// The scheduled-churn list is the subscriptions scheduled by a date.
 		listed, err := a.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{ScheduledChangeBefore: end})
 		require.NoError(t, err)
@@ -361,29 +349,10 @@ func TestMRR(t *testing.T) {
 		resumed, err := a.alpha.ResumeSubscription(t.Context(), sub.ID)
 		require.NoError(t, err)
 		require.NotNil(t, resumed.MRR)
-		require.Equal(t, billing.SubscriptionMRR{Amount: dailyTenMRR, Currency: "USD"}, *resumed.MRR, "a resume reverses the scheduled churn")
-		require.Equal(t, []string{"churn reversed"}, mrrEntries(t, a.world, a.alpha, sub.ID))
-		require.Len(t, mrrMoves(t, a.world, a.alpha, alice), 1)
-
-		customerCancel(t, a, sub.ID)
-		require.Equal(t, []string{"churn reversed", "churn scheduled"}, mrrEntries(t, a.world, a.alpha, sub.ID))
-		a.clock.Advance(end.Sub(a.clock.Now()))
-		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.billing_pass", 2)
-		require.Eventually(t, func() bool { return len(mrrMoves(t, a.world, a.alpha, alice)) == 2 }, 20*time.Second, 20*time.Millisecond, "the end churns")
-		moves := mrrMoves(t, a.world, a.alpha, alice)
-		require.Equal(t, []string{mrrKind("USD", "new", dailyTenMRR), mrrKind("USD", "churn", -dailyTenMRR)}, mrrKinds(moves))
-		require.True(t, moves[1].OccurredAt.Equal(end), "the churn is dated at the end, %s", moves[1].OccurredAt)
-		require.Equal(t, "canceled", moves[1].Cause)
-		require.Equal(t, -1, moves[1].Logo)
-		require.NotNil(t, moves[1].Voluntary)
-		require.True(t, *moves[1].Voluntary)
-		require.Equal(t, []string{"churn reversed", "churn effected"}, mrrEntries(t, a.world, a.alpha, sub.ID))
-		require.Equal(t, billing.SubscriptionMRR{Amount: 0, Currency: "USD"}, mrrOf(t, a.alpha, sub.ID))
-		require.Equal(t, map[string]int64{"scheduled_churn_added": 2, "scheduled_churn_reversed": 1, "scheduled_churn_effected": 1},
-			mrrScheduledFlows(t, a.world, a.alpha, "USD"))
-		require.EqualValues(t, 1, mrrFlows(t, a.world, a.alpha, "USD")["churn_voluntary"])
-		require.Equal(t, [3]int64{0, 0, 0}, mrrTotals(t, a.world, a.alpha, "USD"))
+		require.Equal(t, billing.SubscriptionMRR{Amount: dailyTenMRR, Currency: "USD"}, *resumed.MRR, "a resume clears the scheduled churn")
+		cleared, err := a.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{ScheduledChangeBefore: end})
+		require.NoError(t, err)
+		require.Empty(t, cleared.Items)
 	})
 
 	t.Run("OR-J42-S03/scheduled-downgrade-is-scheduled-contraction-applied-at-renewal-a-canceled-change-reverses-it", func(t *testing.T) {
@@ -415,11 +384,9 @@ func TestMRR(t *testing.T) {
 		require.Nil(t, current.ScheduledChange)
 		require.NotNil(t, current.MRR)
 		require.Nil(t, current.MRR.Scheduled, "a canceled change reverses its contraction")
-		require.Equal(t, []string{"contraction reversed"}, mrrEntries(t, a.world, a.alpha, sub.ID))
 
 		_, err = a.alpha.ChangeSubscription(t.Context(), "mrr-downgrade-again", sub.ID, downgrade)
 		require.NoError(t, err)
-		require.Equal(t, []string{"contraction reversed", "contraction scheduled"}, mrrEntries(t, a.world, a.alpha, sub.ID))
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
 		runRegistered(t, fleet, "openrails.billing_pass", 2)
@@ -427,13 +394,12 @@ func TestMRR(t *testing.T) {
 			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 			return err == nil && current.PriceID == smaller.ID && current.CurrentPeriodStartsAt.Equal(due)
 		}, 20*time.Second, 20*time.Millisecond, "the renewal bills the smaller plan")
-		require.Equal(t, billing.SubscriptionMRR{Amount: dailyFiveMRR, Currency: "USD"}, mrrOf(t, a.alpha, sub.ID))
+		applied := mrrOf(t, a.alpha, sub.ID)
+		require.Equal(t, billing.SubscriptionMRR{Amount: dailyFiveMRR, Currency: "USD"}, applied, "the change applied schedules nothing more")
 		moves := mrrMoves(t, a.world, a.alpha, alice)
 		require.Equal(t, []string{mrrKind("USD", "new", dailyTenMRR), mrrKind("USD", "contraction", dailyFiveMRR-dailyTenMRR)}, mrrKinds(moves))
 		require.Equal(t, "price_change", moves[1].Cause)
-		require.Equal(t, []string{"contraction reversed", "contraction effected"}, mrrEntries(t, a.world, a.alpha, sub.ID))
-		require.Equal(t, map[string]int64{"scheduled_contraction_added": 2, "scheduled_contraction_reversed": 1, "scheduled_contraction_effected": 1},
-			mrrScheduledFlows(t, a.world, a.alpha, "USD"))
+		require.Equal(t, 2, moves[1].Lines, "the subscription leaves one product and enters the other")
 	})
 
 	t.Run("OR-J42-S04/stripe-cancel-at-period-end-is-scheduled-churn-a-portal-resume-reverses-it", func(t *testing.T) {
@@ -464,6 +430,10 @@ func TestMRR(t *testing.T) {
 		require.Equal(t, billing.ScheduledMRRChurn, canceled.MRR.Scheduled.Kind)
 		require.EqualValues(t, -9_000_000, canceled.MRR.Scheduled.Amount)
 		require.True(t, canceled.MRR.Scheduled.EffectiveAt.Equal(*sub.CurrentPeriodEndsAt))
+		moves := mrrMoves(t, tw.world, tw.alpha, alice)
+		require.Equal(t, []string{mrrKind("USD", "new", 9_000_000), mrrKind("USD", "churn", -9_000_000)}, mrrKinds(moves), "the churn is written dated at the end")
+		require.True(t, moves[1].Scheduled)
+		require.True(t, moves[1].OccurredAt.Equal(*sub.CurrentPeriodEndsAt))
 
 		tw.send(t, "customer.subscription.updated", tw.stripe.PortalCancelAtPeriodEnd(remote, false))
 		completedOnce(t, tw.fleet, kindConverge)
@@ -472,8 +442,7 @@ func TestMRR(t *testing.T) {
 		require.Equal(t, billing.SubscriptionActive, resumed.Status)
 		require.NotNil(t, resumed.MRR)
 		require.Equal(t, billing.SubscriptionMRR{Amount: 9_000_000, Currency: "USD"}, *resumed.MRR)
-		require.Equal(t, []string{"churn reversed"}, mrrEntries(t, tw.world, tw.alpha, sub.ID))
-		require.Equal(t, []string{mrrKind("USD", "new", 9_000_000)}, mrrKinds(mrrMoves(t, tw.world, tw.alpha, alice)), "neither moves MRR")
+		require.Equal(t, []string{mrrKind("USD", "new", 9_000_000)}, mrrKinds(mrrMoves(t, tw.world, tw.alpha, alice)), "the resume removes the churn")
 	})
 
 	t.Run("OR-J42-S05/ccbill-upgrade-replacing-a-subscription-is-one-expansion-an-import-opens", func(t *testing.T) {
@@ -497,8 +466,8 @@ func TestMRR(t *testing.T) {
 		require.Equal(t, 1, moves[0].Logo)
 		started := legacy.StartedAt.UTC()
 		var cohort time.Time
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT first_active_at FROM "+pgx.Identifier{a.schema, "customer_mrr"}.Sanitize()+
-			" WHERE merchant_id = $1 AND customer_id = $2 AND currency = 'USD'", a.alpha.MerchantID().UUID(), bob.UUID()).Scan(&cohort))
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT cohort_at FROM "+pgx.Identifier{a.schema, "mrr_movements"}.Sanitize()+
+			" WHERE merchant_id = $1 AND customer_id = $2 AND currency = 'USD' ORDER BY occurred_at LIMIT 1", a.alpha.MerchantID().UUID(), bob.UUID()).Scan(&cohort))
 		require.True(t, cohort.Equal(started), "the adopted cohort is when it started, %s", cohort)
 
 		// A minute later CCBill replaces its subscription with the upgrade's;
@@ -517,10 +486,10 @@ func TestMRR(t *testing.T) {
 		require.Equal(t, []string{mrrKind("USD", "opening", ccbillMemberMRR), mrrKind("USD", "expansion", ccbillPlusMRR-ccbillMemberMRR)}, mrrKinds(moves), "one expansion: no churn, no new")
 		require.Equal(t, "price_change", moves[1].Cause)
 		require.Equal(t, 0, moves[1].Logo)
-		require.Equal(t, 1, moves[1].Lines)
+		require.Equal(t, 2, moves[1].Lines, "the subscription leaves its product and enters the upgrade's")
 	})
 
-	t.Run("OR-J42-S06/mrr-at-a-past-date-equals-the-movements-and-every-report-read-has-an-index", func(t *testing.T) {
+	t.Run("OR-J42-S06/mrr-at-a-past-local-day-equals-the-movements-before-it", func(t *testing.T) {
 		zone, err := time.LoadLocation("America/New_York")
 		require.NoError(t, err)
 		// New York leaves daylight time at 2:00 on 2 November 2025: that day
@@ -535,8 +504,7 @@ func TestMRR(t *testing.T) {
 		settings, err := a.alphaRemote.GetMerchantConfiguration(t.Context())
 		require.NoError(t, err)
 		require.NotNil(t, settings.Accounting)
-		accounting := settings.Accounting.Timezone
-		require.Equal(t, "America/New_York", accounting)
+		require.Equal(t, "America/New_York", settings.Accounting.Timezone)
 		alice := customerOf(a.alice)
 		small := mrrPlan(t, a.alpha, "mrr-year-small", billing.CreatePriceParams{UnitAmount: 120_000_000, Currency: "USD", BillingIntervalHours: ptr(8760), AccessDurationHours: ptr(8760)})
 		large := mrrPlan(t, a.alpha, "mrr-year-large", billing.CreatePriceParams{UnitAmount: 240_000_000, Currency: "USD", BillingIntervalHours: ptr(8760), AccessDurationHours: ptr(8760)})
@@ -551,85 +519,44 @@ func TestMRR(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []string{mrrKind("USD", "new", 10_000_000), mrrKind("USD", "expansion", 20_000_000), mrrKind("USD", "contraction", -10_000_000)},
 			mrrKinds(mrrMoves(t, a.world, a.alpha, alice)))
+		a.clock.Advance(24 * time.Hour)
 
-		flows := pgx.Identifier{a.schema, "mrr_flows"}.Sanitize()
-		kinds := "('new', 'expansion', 'contraction', 'churn', 'reactivation', 'opening', 'correction')"
-		// Each local day's movements, from the buckets grouped in a zone.
-		byDay := `SELECT d.day || ' ' || d.amount::text FROM (SELECT to_char(f.bucket_at AT TIME ZONE $3, 'YYYY-MM-DD') AS day, sum(f.amount) AS amount
-			FROM ` + flows + ` f WHERE f.merchant_id = $1 AND f.currency = $2 AND f.measure IN ` + kinds + ` GROUP BY 1) d ORDER BY d.day`
-		days := func(zone string) []string {
-			t.Helper()
-			rows, err := a.pool.Query(t.Context(), byDay, a.alpha.MerchantID().UUID(), "USD", zone)
-			require.NoError(t, err)
-			out, err := pgx.CollectRows(rows, pgx.RowTo[string])
-			require.NoError(t, err)
-			return out
+		// Each local day's movements, as the metrics read them in the
+		// merchant's zone, the 25-hour day included.
+		days := map[string]int64{}
+		for _, row := range metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"mrr_movements"}, By: []string{"time"}, Grain: "day",
+			Range: &billing.MetricsRange{From: "2025-11-01", To: "2025-11-04"}}) {
+			if n := whole(t, row["mrr_movements"]); n != 0 {
+				day, err := time.Parse(time.RFC3339, fmt.Sprint(row["time"]))
+				require.NoError(t, err)
+				days[day.In(zone).Format(time.DateOnly)] = n
+			}
 		}
-		require.Equal(t, []string{"2025-11-01 10000000", "2025-11-02 20000000", "2025-11-03 -10000000"}, days(accounting), "New York days, the 25-hour one included")
-		require.Equal(t, []string{"2025-11-01 10000000", "2025-11-03 10000000"}, days("UTC"), "the same buckets in UTC days")
+		require.Equal(t, map[string]int64{"2025-11-01": 10_000_000, "2025-11-02": 20_000_000, "2025-11-03": -10_000_000}, days, "New York days")
 
-		// MRR at a local day's start: now less the movements of the buckets
-		// from it on, equal to the movements before it.
-		pastMRR := `SELECT t.mrr - COALESCE((SELECT sum(f.amount) FROM ` + flows + ` f
-			WHERE f.merchant_id = t.merchant_id AND f.currency = t.currency AND f.bucket_at >= $3 AND f.measure IN ` + kinds + `), 0)::bigint
-			FROM ` + pgx.Identifier{a.schema, "mrr_totals"}.Sanitize() + ` t WHERE t.merchant_id = $1 AND t.currency = $2`
+		// MRR at each local day's start is the movements before it.
 		movements := pgx.Identifier{a.schema, "mrr_movements"}.Sanitize()
+		starts := map[string]int64{}
+		for _, row := range metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"mrr"}, By: []string{"time"}, Grain: "day",
+			Range: &billing.MetricsRange{From: "2025-11-01", To: "2025-11-04"}}) {
+			starts[fmt.Sprint(row["time"])] = whole(t, row["mrr"])
+		}
 		for _, sample := range []struct {
 			day  int
 			want int64
 		}{{1, 0}, {2, 10_000_000}, {3, 30_000_000}, {4, 20_000_000}} {
 			start := time.Date(2025, time.November, sample.day, 0, 0, 0, 0, zone)
-			var fromBuckets, fromMovements int64
-			require.NoError(t, a.pool.QueryRow(t.Context(), pastMRR, a.alpha.MerchantID().UUID(), "USD", start).Scan(&fromBuckets))
+			var fromMovements int64
 			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(delta), 0)::bigint FROM "+movements+
 				" WHERE merchant_id = $1 AND currency = $2 AND occurred_at < $3", a.alpha.MerchantID().UUID(), "USD", start).Scan(&fromMovements))
-			require.Equal(t, sample.want, fromBuckets, "MRR at the start of New York's %d November", sample.day)
-			require.Equal(t, fromMovements, fromBuckets, "MRR at the start of New York's %d November equals its movements", sample.day)
+			require.Equal(t, sample.want, fromMovements, "MRR at the start of New York's %d November", sample.day)
+			if read, ok := starts[start.UTC().Format(time.RFC3339)]; ok {
+				require.Equal(t, sample.want, read, "the metrics read of New York's %d November", sample.day)
+			}
 		}
-
-		// With sequential scans off each read still plans on its index: proof
-		// that one serves it, not the plan a large table would get.
-		scheduled := pgx.Identifier{a.schema, "mrr_scheduled"}.Sanitize()
-		added := `SELECT to_char(e.scheduled_at AT TIME ZONE $3, 'YYYY-MM-DD'), e.kind, count(*), sum(e.mrr_delta) FROM ` + scheduled + ` e
-			WHERE e.merchant_id = $1 AND e.currency = $2 AND e.scheduled_at >= $4 AND e.scheduled_at < $5 GROUP BY 1, 2`
-		resolved := `SELECT to_char(e.resolved_at AT TIME ZONE $3, 'YYYY-MM-DD'), e.kind, e.status, count(*), sum(e.mrr_delta) FROM ` + scheduled + ` e
-			WHERE e.merchant_id = $1 AND e.currency = $2 AND e.resolved_at >= $4 AND e.resolved_at < $5 GROUP BY 1, 2, 3`
-		atRisk := `SELECT e.currency, e.kind, sum(e.mrr_delta) FROM ` + scheduled + ` e
-			WHERE e.merchant_id = $1 AND e.status = 'scheduled' AND e.effective_at <= $2 GROUP BY 1, 2`
-		month := []any{a.alpha.MerchantID().UUID(), "USD", accounting, time.Date(2025, time.November, 1, 0, 0, 0, 0, zone), time.Date(2025, time.December, 1, 0, 0, 0, 0, zone)}
-		due := `SELECT m.next_change_at, m.merchant_id, m.subscription_id FROM ` + pgx.Identifier{a.schema, "subscription_mrr"}.Sanitize() + ` m
-			WHERE m.next_change_at <= $1 AND ($2::timestamptz IS NULL OR (m.next_change_at, m.merchant_id, m.subscription_id) > ($2::timestamptz, $3::uuid, $4::uuid))
-			ORDER BY m.next_change_at, m.merchant_id, m.subscription_id LIMIT 200`
-		for _, read := range []struct {
-			sql  string
-			args []any
-			uses string
-		}{
-			{byDay, []any{a.alpha.MerchantID().UUID(), "USD", accounting}, "mrr_flows_pkey"},
-			{pastMRR, []any{a.alpha.MerchantID().UUID(), "USD", time.Date(2025, time.November, 3, 0, 0, 0, 0, zone)}, "mrr_flows_pkey"},
-			{due, []any{a.clock.Now(), nil, nil, nil}, "subscription_mrr_next_change_at_idx"},
-			{added, month, "mrr_scheduled_scheduled_at_idx"},
-			{resolved, month, "mrr_scheduled_resolved_at_idx"},
-			{atRisk, []any{a.alpha.MerchantID().UUID(), a.clock.Now().AddDate(0, 1, 0)}, "mrr_scheduled_effective_at_idx"},
-		} {
-			plan := func() []string {
-				tx, err := a.pool.Begin(t.Context())
-				require.NoError(t, err)
-				defer func() { _ = tx.Rollback(context.Background()) }()
-				_, err = tx.Exec(t.Context(), "SET LOCAL enable_seqscan = off")
-				require.NoError(t, err)
-				rows, err := tx.Query(t.Context(), "EXPLAIN "+read.sql, read.args...)
-				require.NoError(t, err)
-				plan, err := pgx.CollectRows(rows, pgx.RowTo[string])
-				require.NoError(t, err)
-				return plan
-			}()
-			text := strings.Join(plan, "\n")
-			require.NotContains(t, text, "Seq Scan", text)
-			require.Contains(t, text, read.uses, text)
-			require.False(t, slices.ContainsFunc(plan, func(line string) bool { return strings.Contains(line, "mrr_movements") }), text)
-		}
+		require.Len(t, starts, 4)
 	})
+
 	t.Run("OR-J42-S07/an-engine-upgrade-replacing-a-subscription-is-one-expansion", func(t *testing.T) {
 		a, _, sub := purchasedMembership(t)
 		alice := customerOf(a.alice)
@@ -652,11 +579,11 @@ func TestMRR(t *testing.T) {
 		require.Equal(t, "upgrade", moves[1].Cause, "the upgrade explains the movement")
 		require.Equal(t, 0, moves[1].Logo)
 		require.Equal(t, 2, moves[1].Lines, "both subscriptions moved")
-		require.Equal(t, [3]int64{dailyTwentyMRR, 1, 1}, mrrTotals(t, a.world, a.alpha, "USD"))
-		require.Equal(t, map[string]int64{"new": 1, "expansion": 1}, mrrFlows(t, a.world, a.alpha, "USD"))
+		require.Equal(t, [3]int64{dailyTwentyMRR, 1, 1}, mrrTotals(t, a.world, a.alpha, "USD", a.clock.Now()))
+		require.Equal(t, map[string]int64{"new": 1, "expansion": 1}, mrrKindCounts(t, a.world, a.alpha, "USD", a.clock.Now()))
 	})
 
-	t.Run("OR-J42-S08/a-prune-and-its-undo-are-corrections-the-pruned-scheduled-churn-is-superseded", func(t *testing.T) {
+	t.Run("OR-J42-S08/a-prune-and-its-undo-are-corrections-the-pruned-scheduled-churn-goes-and-comes-back", func(t *testing.T) {
 		var feed *httptest.Server
 		var rebill time.Time
 		w := newWorld(t, func(w *world) {
@@ -686,8 +613,19 @@ func TestMRR(t *testing.T) {
 		ghostCCBillMembership(t, w, gone, psps.Items[0].ID.UUID(), "223344556677889900", start, paid, rebill.Add(24*time.Hour))
 		pruned := onlySubscription(t, w.alpha, gone)
 		require.Equal(t, billing.SubscriptionCanceled, pruned.Status)
-		require.Equal(t, []string{"churn scheduled"}, mrrEntries(t, w, w.alpha, pruned.ID))
-		require.Equal(t, [3]int64{2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, w.alpha, "USD"))
+		scheduledChurn := func() []string {
+			var out []string
+			for _, m := range mrrMoves(t, w, w.alpha, gone) {
+				if m.Scheduled {
+					out = append(out, mrrKind(m.Currency, m.Kind, m.Delta)+" "+m.OccurredAt.UTC().Format(time.RFC3339))
+				}
+			}
+			return out
+		}
+		churnAtEnd := []string{mrrKind("USD", "churn", -ccbillMemberMRR) + " " + paid.UTC().Format(time.RFC3339)}
+		require.Equal(t, churnAtEnd, scheduledChurn(), "its churn is written, dated at its end")
+		now := w.clock.Now()
+		require.Equal(t, [3]int64{2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, w.alpha, "USD", now))
 
 		// CCBill's roster lists only the kept member: a prune removes the other.
 		database, err := producerDB(w.pool, w.schema)
@@ -710,25 +648,25 @@ func TestMRR(t *testing.T) {
 		require.Equal(t, "prune", moves[1].Cause)
 		require.Equal(t, -1, moves[1].Logo)
 		require.Nil(t, moves[1].Voluntary)
-		require.Equal(t, []string{"churn superseded"}, mrrEntries(t, w, w.alpha, pruned.ID), "the churn it scheduled never happens")
-		require.Equal(t, [3]int64{ccbillMemberMRR, 1, 1}, mrrTotals(t, w, w.alpha, "USD"))
+		require.Empty(t, scheduledChurn(), "the churn it scheduled never happens")
+		require.Equal(t, [3]int64{ccbillMemberMRR, 1, 1}, mrrTotals(t, w, w.alpha, "USD", w.clock.Now()))
 
 		// Undoing the prune restores the row: a correction back, and its
-		// churn scheduled again.
+		// churn written again.
 		undo := func(args ...string) string {
 			return hostCLI(t, w, append([]string{"undo-run", "--merchant", "id:" + w.alpha.MerchantID().String(), "--run", run.RunID.String()}, args...)...)
 		}
 		rows := regexp.MustCompile(`--expect-rows (\d+)`).FindStringSubmatch(undo())
 		require.Len(t, rows, 2)
 		undo("--apply", "--expect-rows", rows[1])
-		moves = mrrMoves(t, w, w.alpha, gone)
+		moves = mrrMovesBy(t, w, w.alpha, gone, w.clock.Now())
 		require.Equal(t, []string{mrrKind("USD", "opening", ccbillMemberMRR), mrrKind("USD", "correction", -ccbillMemberMRR), mrrKind("USD", "correction", ccbillMemberMRR)},
 			mrrKinds(moves))
 		require.Equal(t, "undo", moves[2].Cause)
 		require.Equal(t, 1, moves[2].Logo)
-		require.Equal(t, []string{"churn superseded", "churn scheduled"}, mrrEntries(t, w, w.alpha, pruned.ID))
-		require.Equal(t, [3]int64{2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, w.alpha, "USD"))
-		require.Equal(t, map[string]int64{"opening": 2, "correction": 2}, mrrFlows(t, w, w.alpha, "USD"))
+		require.Equal(t, churnAtEnd, scheduledChurn())
+		require.Equal(t, [3]int64{2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, w.alpha, "USD", w.clock.Now()))
+		require.Equal(t, map[string]int64{"opening": 2, "correction": 2}, mrrKindCounts(t, w, w.alpha, "USD", w.clock.Now()))
 	})
 
 	t.Run("OR-J42-S09/a-bulk-import-settles-once-its-reads-growing-with-the-book", func(t *testing.T) {
@@ -741,8 +679,8 @@ func TestMRR(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, res.Imported, members, "%v", res.Reasons)
 
-		require.Equal(t, [3]int64{members * ccbillMemberMRR, members, members}, mrrTotals(t, a.world, a.alpha, "USD"))
-		require.Equal(t, map[string]int64{"opening": members}, mrrFlows(t, a.world, a.alpha, "USD"), "one opening per customer")
+		require.Equal(t, [3]int64{members * ccbillMemberMRR, members, members}, mrrTotals(t, a.world, a.alpha, "USD", a.clock.Now()))
+		require.Equal(t, map[string]int64{"opening": members}, mrrKindCounts(t, a.world, a.alpha, "USD", a.clock.Now()), "one opening per customer")
 		// The commit settles once: every later row event probes its own row.
 		// The importing session reports its reads once idle.
 		var reads int64

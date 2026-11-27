@@ -286,6 +286,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	if err != nil {
 		return nil, err
 	}
+	// MRR reads are cached for a minute, in Redis when configured.
+	if nilRedis(redisClient) {
+		serviceInstances.MetricsService.CacheMRR(nil, clock.Now)
+	} else {
+		serviceInstances.MetricsService.CacheMRR(redisClient, clock.Now)
+	}
 	database.SetUsageLedger(serviceInstances.MoneyService)
 
 	// One sender for all of OpenRails' email: the host's.
@@ -533,7 +539,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	runtime.Contacts, runtime.HostUserInfo = directory, hostUserInfo
 	runtime.Messages = &messages.Service{DB: database, Email: sender, Contacts: directory,
 		Profiles: merchantconfig.NewStore(database), Renderer: renderer, Abuse: abuseState, Clock: clock, Log: logger}
-	runtime.MRRRisk = &subscriptions.MRRRisk{DB: database, Log: logger}
 
 	return runtime, nil
 }

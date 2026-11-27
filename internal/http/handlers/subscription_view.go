@@ -64,7 +64,7 @@ func withMRR(r *httprequest.Request, subs []billing.Subscription) bool {
 	for i, s := range subs {
 		ids[i] = s.ID.UUID()
 	}
-	byID, err := subscriptions.MRRViews(ctx, r.State.DB.Gen(ctx), mid.UUID(), ids)
+	byID, err := subscriptions.MRRViews(ctx, r.State.DB.Gen(ctx), mid.UUID(), ids, r.Clock.Now())
 	if err != nil {
 		r.InternalError("failed to read subscription MRR", err)
 		return false

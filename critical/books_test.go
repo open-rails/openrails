@@ -665,7 +665,7 @@ func TestBooks(t *testing.T) {
 		release()
 		require.NoError(t, first.wait())
 		require.NoError(t, second.wait())
-		require.Equal(t, [3]int64{2 * 2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, a.alpha, "USD"))
+		require.Equal(t, [3]int64{2 * 2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, a.alpha, "USD", w.clock.Now()))
 		require.Equal(t, [2]int64{4 * 100, 0}, booksTotal(t, w, "general", "usage_revenue"))
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
 	})

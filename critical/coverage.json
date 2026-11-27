@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 900,
+  "scenario_count": 902,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2816,7 +2816,7 @@
     {
       "id": "OR-J42-S02",
       "journey": "J42",
-      "name": "A cancellation at period end is scheduled churn with MRR unchanged; a resume reverses it; its end churns, dated at the end"
+      "name": "A cancellation at period end shows its scheduled churn on the subscription and in the scheduled-change filter, its MRR unchanged; a resume clears both"
     },
     {
       "id": "OR-J42-S03",
@@ -2836,7 +2836,7 @@
     {
       "id": "OR-J42-S06",
       "journey": "J42",
-      "name": "MRR at a past local day's start, across a daylight-saving change, read from 15-minute buckets equals its movements; with sequential scans off each report read, the scheduled ones included, and the due read still plan on an index"
+      "name": "MRR at a past local day's start, across a daylight-saving change, is the movements before it, and the metrics read the day's movements in the merchant's zone"
     },
     {
       "id": "OR-J42-S07",
@@ -2846,7 +2846,7 @@
     {
       "id": "OR-J42-S08",
       "journey": "J42",
-      "name": "A prune is a correction, not churn, and supersedes the pruned subscription's scheduled churn; undoing it is a correction back that schedules the churn again"
+      "name": "A prune is a correction, not churn, and removes the pruned subscription's scheduled churn; undoing it is a correction back that writes the churn again"
     },
     {
       "id": "OR-J42-S09",
@@ -2866,7 +2866,7 @@
     {
       "id": "OR-J42-S13",
       "journey": "J42",
-      "name": "A card that expires before the renewal it pays for enters at risk on the period change that passes its expiry and leaves when the account updater refreshes it"
+      "name": "A card that expires before the renewal it pays for puts the subscription's MRR at risk now, read from state with no job and no case; a new expiry clears it at once, and no past read holds it"
     },
     {
       "id": "OR-J42-S14",
@@ -2876,57 +2876,67 @@
     {
       "id": "OR-J42-S15",
       "journey": "J42",
-      "name": "Usage delinquency puts the customer's subscription MRR in the currency at risk with the overdue amount beside it; paying the debt recovers it"
-    },
-    {
-      "id": "OR-J42-S16",
-      "journey": "J42",
-      "name": "The risk drain holds a customer's subscriptions while an NMI decline for the same customer queues it and waits: both commit, and the decline, queued after the claim, is re-evaluated by the next drain"
+      "name": "Usage delinquency puts the customer's subscription MRR in the currency at risk now, read from state with no case; paying the debt clears it"
     },
     {
       "id": "OR-J42-S17",
       "journey": "J42",
-      "name": "A subscription at risk canceled at period end keeps its case open while it adds MRR; a resume continues the same case; canceled again, the end closes it churned, voluntary, once, at the end"
+      "name": "A subscription at risk for its status canceled at period end adds its MRR and stays at risk until the end, its case written closed churned, voluntary, at the end; a resume reopens the same case; canceled again, the end closes it with nothing run"
     },
     {
       "id": "OR-J42-S18",
       "journey": "J42",
-      "name": "A new default card that expires before the renewal puts the subscription following the default at risk through the queued change; an NMI schedule naming no card of its own is never at risk on the default"
+      "name": "A new default card that expires before the renewal puts the subscription following the default at risk at once, read from state; an NMI schedule naming no card of its own is never at risk on the default"
     },
     {
       "id": "OR-J42-S19",
       "journey": "J42",
-      "name": "An upgrade of a subscription at risk closes its case superseded, counted in no recovery rate, and its replacement opens its own case"
+      "name": "An upgrade of a subscription whose card expires before the renewal moves its at-risk MRR to the replacement, read from state, with no case for the card and no recovery rate"
     },
     {
       "id": "OR-J42-S21",
       "journey": "J42",
-      "name": "A merchant archive carries an open risk case, its episodes and at-risk MRR; the restore queues every customer with MRR, whom the target's drain re-evaluates"
-    },
-    {
-      "id": "OR-J42-S22",
-      "journey": "J42",
-      "name": "A customer whose risk evaluation fails alone is set aside with an mrr.risk.evaluation_failed finding while the rest of the merchant drains; set aside, it is skipped; a later evaluation takes its changes and closes the finding"
+      "name": "A merchant archive carries an open risk case and its episodes: the restore reads the same at-risk MRR now and at a past instant"
     },
     {
       "id": "OR-J42-S23",
       "journey": "J42",
-      "name": "A subscription at risk for its card, canceled at period end, still reads its card: a new expiry clears card_expiring and the case closes recovered"
+      "name": "A subscription whose card expires, canceled at period end, is at risk for the card until a new expiry clears it at once, with no case"
     },
     {
       "id": "OR-J42-S30",
       "journey": "J42",
-      "name": "Every MRR measure, by itself, by each dimension it declares, by two, and filtered by currency and by product, over time and not, in UTC and in a non-UTC zone, plans on indexes with sequential scans off: no relation is scanned whole, every scan's index condition names the merchant, and a rollup kept by time is read by its time"
+      "name": "Every MRR measure, by itself, by each dimension it declares, by two, and filtered by currency and by product, over time and not, ending now and in the past, in UTC and in a non-UTC zone, reads with sequential scans off: no relation is scanned whole, every scan's index condition names the merchant, and each movement, line, case and episode read is an index-only range scan bounded by its instant that runs once, never per edge"
     },
     {
       "id": "OR-J42-S32",
       "journey": "J42",
-      "name": "MRR leaving a product, a currency and a customer settles: a customer's euro plan ends while its dollar plan stays (it stays one customer), another's only plan ends at once, and the first's last plan churns at its period's end through the billing pass's MRR scan; the product totals and the distinct customers fall to none and agree with their flows"
+      "name": "MRR leaving a product, a currency and a customer settles: a customer's euro plan ends while its dollar plan stays (it stays one customer), another's only plan ends at once, and the first's last plan churns at its period's end with nothing run; each product's MRR and the distinct customers fall to none"
     },
     {
       "id": "OR-J42-S33",
       "journey": "J42",
       "name": "A full refund that revokes access ends a subscription whose MRR counted its customer: the refund finalizes, its replay returns the same refund, and the customer leaves the distinct customers once, as one churn, with nothing below zero"
+    },
+    {
+      "id": "OR-J42-S34",
+      "journey": "J42",
+      "name": "A cancellation at period end is a churn movement written at the cancel and dated at the end: MRR holds until then, even read at an instant past it, and drops at the end with no job; a resume before the end removes it"
+    },
+    {
+      "id": "OR-J42-S35",
+      "journey": "J42",
+      "name": "An add-on bought before a cancellation's end turns that end's churn into contraction: the customer stays one, and no churn is read"
+    },
+    {
+      "id": "OR-J42-S36",
+      "journey": "J42",
+      "name": "At-risk MRR follows a change of the subscription's MRR during its case: past reads give the new amount after the change, the case's episodes end at the old amount and begin at the new, and the recovery rate counts the amount recovered"
+    },
+    {
+      "id": "OR-J42-S37",
+      "journey": "J42",
+      "name": "Migration 0013 over a book the rollups recorded (upgrades, an add-on, cancellations at period end taken and still ahead, resumes, at-risk cases of every reason, a scheduled downgrade, two currencies) keeps every MRR measure equal, read in UTC and New York; ends still ahead become scheduled movements, card_expiring and delinquent cases end superseded, and a later write settles on the converted book"
     },
     {
       "id": "OR-J28-S09",

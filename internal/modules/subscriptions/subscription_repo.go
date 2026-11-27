@@ -39,6 +39,8 @@ type SubscriptionFilters struct {
 	// set, those at risk for it.
 	AtRisk     bool
 	RiskReason string
+	// At is the instant the MRR filters read.
+	At time.Time
 	// Dunning keeps the subscriptions past_due or awaiting_method.
 	Dunning bool
 	// Sort picks ListPage's order; Count ignores it.
@@ -700,7 +702,7 @@ func (r *SubscriptionRepo) ListPage(ctx context.Context, f SubscriptionFilters, 
 	var rows []gen.BillingSubscription
 	if f.AtRisk {
 		rows, err = r.listAtRiskPage(ctx, q, f, gen.ListAtRiskSubscriptionsPageParams{
-			MerchantID: mid.UUID(), RiskReason: optional(f.RiskReason), ScheduledChangeBefore: f.ScheduledChangeBefore,
+			MerchantID: mid.UUID(), At: f.At, RiskReason: optional(f.RiskReason), ScheduledChangeBefore: f.ScheduledChangeBefore,
 			CustomerID: customer, Status: status, PriceID: price, Rail: rail,
 			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
 			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
@@ -708,7 +710,7 @@ func (r *SubscriptionRepo) ListPage(ctx context.Context, f SubscriptionFilters, 
 		})
 	} else if f.ScheduledChangeBefore != nil {
 		rows, err = r.listScheduledPage(ctx, q, f, gen.ListScheduledSubscriptionsPageParams{
-			MerchantID: mid.UUID(), ScheduledChangeBefore: *f.ScheduledChangeBefore, CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+			MerchantID: mid.UUID(), At: f.At, ScheduledChangeBefore: *f.ScheduledChangeBefore, CustomerID: customer, Status: status, PriceID: price, Rail: rail,
 			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
 			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
 			AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
@@ -744,8 +746,8 @@ func (r *SubscriptionRepo) ListPage(ctx context.Context, f SubscriptionFilters, 
 	return r.manyWithDetails(ctx, rows)
 }
 
-// listScheduledPage is ListPage for a scheduled-change filter, driven by
-// mrr_scheduled's index of open entries.
+// listScheduledPage is ListPage for a scheduled-change filter: ends from
+// subscription_mrr's index of them, and scheduled changes.
 func (r *SubscriptionRepo) listScheduledPage(ctx context.Context, q *gen.Queries, f SubscriptionFilters, p gen.ListScheduledSubscriptionsPageParams) ([]gen.BillingSubscription, error) {
 	switch f.Sort {
 	case billing.SubscriptionSortCurrentPeriodEndsAt:
@@ -757,8 +759,8 @@ func (r *SubscriptionRepo) listScheduledPage(ctx context.Context, q *gen.Queries
 	}
 }
 
-// listAtRiskPage is ListPage for subscriptions at risk, driven by
-// subscription_mrr's index of at-risk rows.
+// listAtRiskPage is ListPage for subscriptions at risk at f.At, as state
+// says.
 func (r *SubscriptionRepo) listAtRiskPage(ctx context.Context, q *gen.Queries, f SubscriptionFilters, p gen.ListAtRiskSubscriptionsPageParams) ([]gen.BillingSubscription, error) {
 	switch f.Sort {
 	case billing.SubscriptionSortCurrentPeriodEndsAt:

@@ -60,6 +60,18 @@ type Plan struct {
 	// ImplicitCurrency: currency was added as a group-by because a money measure
 	// is present without a single-currency filter.
 	ImplicitCurrency bool
+	// AsOf is the instant the query is answered at: no fact dated after it
+	// counts (a scheduled movement waits for its date), and at-risk MRR from
+	// it on reads state.
+	AsOf time.Time
+}
+
+// asOf is t, or the plan's as-of instant when that is earlier.
+func (p *Plan) asOf(t time.Time) time.Time {
+	if p.AsOf.Before(t) {
+		return p.AsOf
+	}
+	return t
 }
 
 // zone is the plan's calendar, UTC when none was named.
@@ -350,7 +362,7 @@ func ValidateIn(q *Query, now time.Time, zone *time.Location) (*Plan, *Validatio
 		Measures: measures, Dims: dims, HasTime: hasTime, Grain: grain,
 		From: from, To: to, Zone: zone, Buckets: buckets, Filters: filters,
 		Order: q.Order, Limit: limit, Compare: q.Compare,
-		ImplicitCurrency: implicitCurrency,
+		ImplicitCurrency: implicitCurrency, AsOf: now.UTC(),
 	}
 	// History names no invoker: by invoker, usage is read from raw events.
 	if plan.ReadsUsage() && plan.byInvoker() && !from.IsZero() {

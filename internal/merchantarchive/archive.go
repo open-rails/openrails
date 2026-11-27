@@ -299,11 +299,6 @@ func Restore(ctx context.Context, database *db.DB, clock clockwork.Clock, id bil
 		if err := q.RebuildUsageDue(ctx, gen.RebuildUsageDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err
 		}
-		// The source's queued risk changes stay there: every customer whose
-		// MRR could be at risk is re-evaluated.
-		if err := q.QueueRestoredMRRRisk(ctx, gen.QueueRestoredMRRRiskParams{MerchantID: id.UUID(), At: restoreNow.UTC()}); err != nil {
-			return err
-		}
 		// The source's wakes stay in its River schema.
 		if err := queueWakes(ctx, database, tx, q, id); err != nil {
 			return err

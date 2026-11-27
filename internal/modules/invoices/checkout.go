@@ -232,9 +232,9 @@ var money = func() []string {
 }()
 
 // checkoutFacts stamps a new checkout with what its request and its
-// customer's history say, under the customer lock its creation holds.
-func checkoutFacts(ctx context.Context, q *gen.Queries, params *gen.CreateInvoiceParams, facts CheckoutFacts) error {
-	who, err := q.GetCheckoutCustomer(ctx, gen.GetCheckoutCustomerParams{MerchantID: params.MerchantID, CustomerID: params.CustomerID, Money: money})
+// customer's history at now say, under the customer lock its creation holds.
+func checkoutFacts(ctx context.Context, q *gen.Queries, params *gen.CreateInvoiceParams, facts CheckoutFacts, now time.Time) error {
+	who, err := q.GetCheckoutCustomer(ctx, gen.GetCheckoutCustomerParams{MerchantID: params.MerchantID, CustomerID: params.CustomerID, Money: money, At: now})
 	if err != nil {
 		return err
 	}

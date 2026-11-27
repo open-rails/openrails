@@ -21,18 +21,21 @@ INSERT INTO billing.invoices (
 -- name: GetCheckoutCustomer :one
 -- Who a new checkout's customer is: their paid purchases (complete invoices in
 -- money, never a merchant's unit, and observed initial enrollments), whether
--- they ever had MRR with the merchant, and whether they have any now.
+-- they ever had MRR with the merchant, and whether they have any at at: each
+-- currency's latest movement.
 SELECT
     (SELECT count(*) FROM billing.invoices
      WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
        AND status = 'complete' AND (origin IN ('customer', 'merchant') OR subscription_bill_kind = 'initial')
        AND currency = ANY(sqlc.arg(money)::text[]))::int AS purchases,
-    EXISTS (SELECT 1 FROM billing.customer_mrr
+    EXISTS (SELECT 1 FROM billing.mrr_movements
             WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-              AND first_active_at IS NOT NULL)::boolean AS had_mrr,
-    EXISTS (SELECT 1 FROM billing.customer_mrr
-            WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-              AND mrr > 0)::boolean AS has_mrr;
+              AND occurred_at <= sqlc.arg(at)::timestamptz)::boolean AS had_mrr,
+    EXISTS (SELECT 1 FROM (SELECT DISTINCT ON (v.currency) v.mrr_after FROM billing.mrr_movements v
+                            WHERE v.merchant_id = sqlc.arg(merchant_id)::uuid AND v.customer_id = sqlc.arg(customer_id)::uuid
+                              AND v.occurred_at <= sqlc.arg(at)::timestamptz
+                            ORDER BY v.currency, v.occurred_at DESC, v.id DESC) latest
+            WHERE latest.mrr_after > 0)::boolean AS has_mrr;
 
 -- name: MarkCheckoutOpened :execrows
 -- The customer's first read of the open checkout in person; a later read
