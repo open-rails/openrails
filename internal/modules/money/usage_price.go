@@ -28,7 +28,7 @@ import (
 
 // printCard is a card print's terms and when it was first written.
 type printCard struct {
-	card    ratingCard
+	card  ratingCard
 	order time.Time
 }
 

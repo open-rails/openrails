@@ -50,9 +50,9 @@ func (e *programError) Error() string { return e.msg }
 
 // Custom codes the fake answers with; any other refusal is Custom 1.
 const (
-	codeTokenOwnerMismatch    = 4
+	codeTokenOwnerMismatch   = 4
 	codeSubscriptionCanceled = 508
-	codePeriodAlreadyPaid     = 400
+	codePeriodAlreadyPaid    = 400
 )
 
 type Node struct {
