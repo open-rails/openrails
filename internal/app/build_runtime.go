@@ -80,9 +80,6 @@ const (
 	// riverPSPImportQueueMaxWorkers bounds the PSP pulls one fleet runs at
 	// once: after an upgrade every PSP of every merchant pulls.
 	riverPSPImportQueueMaxWorkers = 2
-	// riverNMIHistoryQueueMaxWorkers: one hourly history job, which reads its
-	// due PSPs in turn.
-	riverNMIHistoryQueueMaxWorkers = 1
 	// leaseConns sizes the separate pool that renews leases, copied from
 	// Deps.Postgres's configuration: count it in max_connections.
 	leaseConns = 4
@@ -355,7 +352,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		FXProvider:               serviceInstances.FXProvider,
 		FXRates:                  serviceInstances.FXRates,
 
-		UserSubscriptionService:      serviceInstances.UserSubscriptionService,
+		CustomerSubscriptionService:  serviceInstances.CustomerSubscriptionService,
 		AdminSubscriptionService:     serviceInstances.AdminSubscriptionService,
 		PriceMigrationService:        serviceInstances.PriceMigrationService,
 		EmailSender:                  sender,
@@ -461,7 +458,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	// nmi_delete_subscription intent and its River job in one transaction; the
 	// job runs it. Two instances of the one mechanism, differing only in
 	// origin:
-	//   - user-origin for user-asked cancellations (UserSubscriptionService):
+	//   - user-origin for user-asked cancellations (CustomerSubscriptionService):
 	//     reactive completion, executes under a limited write posture;
 	//   - system-origin for dunning exhaustion (the lifecycle service shared
 	//     by the webhook handlers, and Runtime.DeferredDeletes threaded into
@@ -480,8 +477,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	systemDeferredDeletes := newProviderCancelScheduler(database, rateCeiling, intents.OriginSystem,
 		"terminal lifecycle outcome; the provider schedule must stop billing")
 	runtime.DeferredDeletes = systemDeferredDeletes
-	if runtime.UserSubscriptionService != nil {
-		runtime.UserSubscriptionService.SetProviderCancelScheduler(userDeferredDeletes)
+	if runtime.CustomerSubscriptionService != nil {
+		runtime.CustomerSubscriptionService.SetProviderCancelScheduler(userDeferredDeletes)
 	}
 	if runtime.SubscriptionLifecycleService != nil {
 		runtime.SubscriptionLifecycleService.SetProviderCancelScheduler(systemDeferredDeletes)
@@ -524,7 +521,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	if runtime.RailPaymentMethodService != nil {
 		runtime.RailPaymentMethodService.DeleteIntents = &intents.PaymentMethodDeleteThrough{Runner: intentRunner,
 			BeforeUserDelete: func(ctx context.Context, pm *models.PaymentMethod) error {
-				return destructive.NewUserActionLimiter(runtime.DB).Reserve(ctx, destructive.DeletePaymentMethod, "method-delete:"+pm.ID.String(), pm.CustomerID)
+				return destructive.NewCustomerActionLimiter(runtime.DB).Reserve(ctx, destructive.DeletePaymentMethod, "method-delete:"+pm.ID.String(), pm.CustomerID)
 			},
 		}
 		runtime.RailPaymentMethodService.CardVaults = &intents.CardVaultThrough{Runner: intentRunner}
@@ -580,8 +577,8 @@ type servicesInstances struct {
 	FXProvider               *fx.Rates
 	FXRates                  *fx.Rates
 
-	UserSubscriptionService  *subscriptions.UserSubscriptionService
-	AdminSubscriptionService *subscriptions.AdminSubscriptionService
+	CustomerSubscriptionService *subscriptions.CustomerSubscriptionService
+	AdminSubscriptionService    *subscriptions.AdminSubscriptionService
 	// PriceMigrationService moves subscribers to another price at their
 	// renewal.
 	PriceMigrationService *subscriptions.PriceMigrationService
@@ -664,7 +661,7 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 	}
 
 	postures := controls.View{DB: database}
-	userSubscriptionService := subscriptions.NewUserSubscriptionService(database.Log,
+	userSubscriptionService := subscriptions.NewCustomerSubscriptionService(database.Log,
 		subscriptionService,
 		productService,
 		priceService,
@@ -767,7 +764,7 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 		SolanaPriceProvider:          solanaPriceProvider,
 		FXProvider:                   fxProvider,
 		FXRates:                      fxRates,
-		UserSubscriptionService:      userSubscriptionService,
+		CustomerSubscriptionService:  userSubscriptionService,
 		AdminSubscriptionService:     adminSubscriptionService,
 		PriceMigrationService:        priceMigrationService,
 		SubscriptionLifecycleService: subscriptionLifecycleService,

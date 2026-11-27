@@ -449,7 +449,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		oneUsage(t, a.alpha, usageInput(customer, "before-the-bill-date", 1))
 		_, err := a.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "through-the-bill-date", CustomerID: customer, Currency: "USD", RatePerHour: 360_000})
 		require.NoError(t, err)
-		// No balance watch runs, so nothing posts the charge at 00:00 UTC.
+		// No billing pass runs, so no daily posting takes the charge first.
 		fleet := hostFleet(t, a.world)
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))

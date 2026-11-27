@@ -4,7 +4,6 @@ package critical_test
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -75,7 +73,7 @@ func TestRenewalAgreements(t *testing.T) {
 		// The invoice's sale alone renews the first period.
 		_, err = a.pool.Exec(t.Context(), "DELETE FROM "+intents+" WHERE merchant_id = $1 AND idempotency_key = 'critical:second-agreement'", a.alpha.MerchantID().UUID())
 		require.NoError(t, err)
-		// Its recheck is a minute later; the period still starts at the boundary.
+		// The next pass takes it again; the period still starts at the boundary.
 		current = renewedAt(t, a, fleet, sub.ID, due.Add(2*time.Minute), due)
 		require.EqualValues(t, 1000, lastCharge(t, p, 2))
 		require.Empty(t, refused(), "the refusal closes once the renewal is admitted")
@@ -164,7 +162,7 @@ func TestSubscriptionGrantRevocations(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, billing.SubscriptionCanceled, canceled.Status)
 			}
-			database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+			database, err := producerDB(a.pool, a.schema)
 			require.NoError(t, err)
 			ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 			q := database.Gen(ctx)

@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/ccbillmock"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	embedded "github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
@@ -51,7 +50,7 @@ func nmiPrune(t *testing.T, a *authorityWorld, since, until time.Time, expect *i
 	require.NoError(t, err)
 	client.ReadOnly = true
 	client.UseTransport(a.deps.NMITransport)
-	database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+	database, err := producerDB(a.pool, a.schema)
 	require.NoError(t, err)
 	binding := reconcile.PSPBinding{ID: psp.ID.UUID(), Rail: "nmi", AccountID: psp.GatewayID}
 	var res reconcile.PruneResult
@@ -336,7 +335,7 @@ func TestProviderTime(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, payments.Items, 1)
 		absent := payments.Items[0]
-		invoice := nmiCheckoutInvoice(t, a, "pending-refund", false, 48*time.Hour)
+		invoice := nmiCheckoutInvoice(t, a, "pending-refund", false)
 		invoice = payNMICheckout(t, a, invoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "1111"}), true)
 		pendingCharge := *invoice.Payment.PaymentID
 		p.core.Intercept(nmiRefundRequest, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
@@ -412,7 +411,7 @@ func TestProviderTime(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, psps.Items, 1)
 		psp, mid := psps.Items[0].ID.UUID(), a.alpha.MerchantID().UUID()
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		scoped := func(fn func(context.Context, *gen.Queries) error) {
 			t.Helper()
@@ -655,7 +654,7 @@ func TestProviderTime(t *testing.T) {
 		dataLink.AddMember(ccbillmock.Member{SubscriptionID: sub, Username: "member", Email: "member@critical.invalid", Signup: start, Expiry: &paid})
 		dataLink.AddCancellation(ccbillmock.Cancellation{SubscriptionID: sub, At: now.Add(-3 * time.Hour), Expires: paid})
 		psp, _, run := liveCCBillRefresh(t, w)
-		database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+		database, err := producerDB(w.pool, w.schema)
 		require.NoError(t, err)
 		require.NoError(t, database.RunInMerchantConn(merchant.WithID(t.Context(), w.alpha.MerchantID()), func(ctx context.Context) error {
 			return database.Gen(ctx).UpsertPSPRefreshWatermark(ctx, gen.UpsertPSPRefreshWatermarkParams{MerchantID: w.alpha.MerchantID().UUID(), PspID: psp, WatermarkAt: now.Add(-30 * time.Hour)})
@@ -741,7 +740,7 @@ func TestProviderTime(t *testing.T) {
 		rebill := dataLink.AddRebill(ccbillmock.Rebill{SubscriptionID: sub, At: due, Amount: "10.00"})
 		dataLink.AddCancellation(ccbillmock.Cancellation{SubscriptionID: sub, At: due.Add(10 * time.Minute), Expires: paid})
 		psp, _, run := liveCCBillRefresh(t, w)
-		database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+		database, err := producerDB(w.pool, w.schema)
 		require.NoError(t, err)
 		require.NoError(t, database.RunInMerchantConn(merchant.WithID(t.Context(), w.alpha.MerchantID()), func(ctx context.Context) error {
 			return database.Gen(ctx).UpsertPSPRefreshWatermark(ctx, gen.UpsertPSPRefreshWatermarkParams{MerchantID: w.alpha.MerchantID().UUID(), PspID: psp, WatermarkAt: now.Add(-30 * time.Hour)})

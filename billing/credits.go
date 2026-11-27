@@ -213,10 +213,11 @@ type BalanceTransaction struct {
 	Resource      *string                `json:"resource"`
 	Source        string                 `json:"source"`
 	SourceID      string                 `json:"source_id"`
-	// Usage is what a usage deduction was for: the day's usage per meter.
-	// Every leg of one posting carries it; null on other movements.
-	Usage     *UsageDeduction `json:"usage"`
-	CreatedAt time.Time       `json:"created_at"`
+	// Usage is the usage receipt a posting's movement took: its usage per
+	// period and meter, and its running charges. Every leg of one posting
+	// carries it; null on other movements.
+	Usage     *UsageReceipt `json:"usage"`
+	CreatedAt time.Time     `json:"created_at"`
 }
 
 // BalanceTransactionListParams selects a customer's ledger in one currency,
@@ -338,13 +339,11 @@ type MerchantCheckoutSettings struct {
 }
 
 // BalanceNoticeSettings are a merchant's default low-balance lines: a
-// customer's own line (LowBalanceLine) overrides each part. RunwayHours is
-// hours of spend at the customer's burn rate, 24 when nil; LowAmounts are
-// amount lines per currency, none for a currency not listed. 0 turns a line
-// off. balance.depleted cannot be turned off.
+// customer's own line (LowBalanceLine) overrides one. A balance is low once
+// what the customer may spend is at or under its currency's amount; a
+// currency not listed has no line, and 0 turns it off. balance.depleted
+// cannot be turned off.
 type BalanceNoticeSettings struct {
-	// RunwayHours is the line in hours of spend at the customer's burn rate: 24 when unset, 0 off.
-	RunwayHours *int `json:"runway_hours,omitempty"`
 	// LowAmounts are amount lines per currency; none for a currency not listed.
 	LowAmounts []BalanceNoticeAmount `json:"low_amounts,omitempty"`
 }

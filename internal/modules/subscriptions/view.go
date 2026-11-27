@@ -11,7 +11,7 @@ import (
 // View projects a customer's own subscription onto the shared DTO, with the
 // scheduled plan change and the access it grants. Derived flags are evaluated
 // at the response's read time.
-func (r *UserSubscriptionResponse) View() billing.Subscription {
+func (r *CustomerSubscriptionResponse) View() billing.Subscription {
 	out := SubscriptionView(r.Subscription, r.Price, r.Dunning, r.EvaluationTime())
 	if out.ScheduledChange != nil {
 		out.ScheduledChange.Price = BuyerPrice(r.ScheduledPrice)

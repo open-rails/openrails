@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 882,
+  "scenario_count": 897,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2054,6 +2054,11 @@
       "name": "A restore waits a day, by the deployment's clock, after a prune that can still be undone"
     },
     {
+      "id": "OR-J34-S44",
+      "journey": "J34",
+      "name": "A declared canceled row whose NMI schedule is owed a stop, for a customer already holding the product, is blocked as a lifecycle conflict with no stop scheduled; the rest of the book lands"
+    },
+    {
       "id": "OR-J34-S34",
       "journey": "J34",
       "name": "A staff card removal is a staff admission and spends no customer-action budget"
@@ -2086,7 +2091,7 @@
     {
       "id": "OR-J16-S31",
       "journey": "J16",
-      "name": "Held awaiting-method expiry leaves the due pass until its recheck"
+      "name": "A held awaiting-method expiry is taken again by every pass, and one held a day past its due day is reported a day overdue"
     },
     {
       "id": "OR-J16-S32",
@@ -2136,7 +2141,7 @@
     {
       "id": "OR-J15-S30",
       "journey": "J15",
-      "name": "Rebill watch backs off a failing provider probe"
+      "name": "A failed NMI verification read waits for the hourly verification retry"
     },
     {
       "id": "OR-J26-S30",
@@ -2364,11 +2369,6 @@
       "name": "A superseded Stripe webhook endpoint is retired by the pass scheduled at its deadline"
     },
     {
-      "id": "OR-J06-S62",
-      "journey": "J06",
-      "name": "An unresolved undeclared account alerts its operator again once a day"
-    },
-    {
       "id": "OR-J06-S63",
       "journey": "J06",
       "name": "A Stripe PSP changed while its pass runs reaches Stripe without waiting for the backstop"
@@ -2426,7 +2426,12 @@
     {
       "id": "OR-J16-S71",
       "journey": "J16",
-      "name": "An overdue provider-billed renewal is asked by id from the due pass before the rebill watch reads NMI"
+      "name": "An overdue NMI renewal is unverified by the due pass before NMI is read"
+    },
+    {
+      "id": "OR-J16-S72",
+      "journey": "J16",
+      "name": "A Stripe or CCBill renewal unpaid a day past its period stays active; two days past, it is unverified with access kept"
     },
     {
       "id": "OR-J16-S54",
@@ -2451,7 +2456,7 @@
     {
       "id": "OR-J15-S70",
       "journey": "J15",
-      "name": "An NMI renewal the probe cannot settle is read by id once its grace passes"
+      "name": "An NMI renewal unpaid a day past its period is unverified by the due pass, access kept"
     },
     {
       "id": "OR-J15-S72",
@@ -2487,11 +2492,6 @@
       "id": "OR-J04-S70",
       "journey": "J04",
       "name": "The hourly health pass raises held engine renewals and closes them once attempted"
-    },
-    {
-      "id": "OR-J04-S71",
-      "journey": "J04",
-      "name": "An NMI history read that fails fails its own job, never the billing pass, and stays due; the next hour's job reads it and is due again a day later"
     },
     {
       "id": "OR-J27-S10",
@@ -2601,7 +2601,7 @@
     {
       "id": "OR-J08-S71",
       "journey": "J08",
-      "name": "An open invoice past its expiry reads expired, without next action or payment options, in every read and list, and cannot be canceled"
+      "name": "An open purchase past its expiry reads expired, without next action or payment options, in every read and the merchant's lists, leaves the customer's own list, and cannot be canceled"
     },
     {
       "id": "OR-J12-S70",
@@ -2626,7 +2626,7 @@
     {
       "id": "OR-J04-S37",
       "journey": "J04",
-      "name": "An invoice expiry backlog past one batch is expired by one billing pass"
+      "name": "A purchase expiry backlog past one batch is expired by one billing pass"
     },
     {
       "id": "OR-J04-S38",
@@ -2984,6 +2984,11 @@
       "name": "Prune keeps a pending refund and a booked NMI chargeback"
     },
     {
+      "id": "OR-J15-S76",
+      "journey": "J15",
+      "name": "An overdue NMI schedule NMI no longer holds ends, and its cycle is missed as schedule_gone"
+    },
+    {
       "id": "OR-J28-S13",
       "journey": "J28",
       "name": "A CCBill account another merchant archived, or holds only in the other money class, is declarable: only a current PSP of an unretired merchant in the same class holds it"
@@ -3011,7 +3016,7 @@
     {
       "id": "OR-J39-S02",
       "journey": "J39",
-      "name": "A fact written inside a billing restore queues no customer message; the same fact outside one queues one"
+      "name": "A fact written inside a billing restore queues no customer message and no send job; the same fact outside one queues one of each"
     },
     {
       "id": "OR-J39-S03",
@@ -3129,6 +3134,16 @@
       "name": "A staff refund OpenRails completes more than a week after it was asked sends its receipt"
     },
     {
+      "id": "OR-J39-S26",
+      "journey": "J39",
+      "name": "A fact's message is sent by a fleet the engine never started: its send job was queued in the fact's transaction, with no listener or periodic pass"
+    },
+    {
+      "id": "OR-J39-S27",
+      "journey": "J39",
+      "name": "A fact recorded twice queues one customer message, queued, and one send job"
+    },
+    {
       "id": "OR-J28-S16",
       "journey": "J28",
       "name": "A replayed NMI chargeback batch, its reversal already booked, reverses and revokes nothing again: access the merchant restored after the dispute survives it"
@@ -3171,7 +3186,7 @@
     {
       "id": "OR-J48-S08",
       "journey": "J48",
-      "name": "A gate decides on the unit balance and an overrun is forgiven usage"
+      "name": "A gate decides on the unit balance and an overrun is forgiven usage, recorded on the receipt's line and shown with no invoker"
     },
     {
       "id": "OR-J48-S09",
@@ -3181,7 +3196,7 @@
     {
       "id": "OR-J48-S10",
       "journey": "J48",
-      "name": "A period in a unit whose volume price falls below what its receipts took is credited at the posting that takes the usage, taking back what the period forgave, from the shares its receipt stored, before crediting what the lots paid beyond its price"
+      "name": "A period in a unit whose volume price falls below what its receipts took is credited at the posting that takes the usage, taking back on its falling line what the period forgave before crediting what the lots paid beyond its price"
     },
     {
       "id": "OR-J48-S11",
@@ -3267,6 +3282,11 @@
       "id": "OR-J53-S08",
       "journey": "J53",
       "name": "A metrics query's order term it cannot sort by is refused invalid_order on its own order[i] param: both a measure and a dimension, a direction other than asc or desc, a measure it does not ask for, a dimension it does not group by"
+    },
+    {
+      "id": "OR-J53-S09",
+      "journey": "J53",
+      "name": "NMI's own transaction history is no measure: the schema names no nmi_history measure or nmi_kind dimension, and a query naming nmi_history_authorizations is refused unknown_measure"
     },
     {
       "id": "OR-J43-S01",
@@ -3457,11 +3477,6 @@
       "id": "OR-J45-S07",
       "journey": "J45",
       "name": "Authorization rate, issuer-discretion decline rate and first-try rebill approval read the stored outcomes and causes: refusals and errors are in neither, missed renewals in neither; the decline mix and Visa categories, and cuts by kind, card brand, BIN, token type and whether the storing transaction's id was sent; the overview shows them as tiles and in Payment health"
-    },
-    {
-      "id": "OR-J45-S08",
-      "journey": "J45",
-      "name": "NMI history months carry each answer's outcome and cause: a catch-all 200 by the issuer's code, 461 as the merchant account's refusal"
     },
     {
       "id": "OR-J45-S10",
@@ -3762,11 +3777,6 @@
       "id": "OR-J04-S82",
       "journey": "J04",
       "name": "Deps.ProviderEndpoints sends provider clients only to loopback fakes: a hostname, a non-loopback address, userinfo or a source matching every address refuses New, and so does any endpoint beside a live PSP"
-    },
-    {
-      "id": "OR-J04-S83",
-      "journey": "J04",
-      "name": "A slow NMI history read runs on its own queue: a fleet with one billing worker finishes the billing pass while it waits, and once NMI answers the job catches the account up; the next hour reads nothing, the next day reads it again"
     },
     {
       "id": "OR-J04-S84",
@@ -4071,7 +4081,7 @@
     {
       "id": "OR-J47-S02",
       "journey": "J47",
-      "name": "A merchant's pay URL is opened only when its page reads it; an expired checkout is abandoned at the step it reached"
+      "name": "A merchant's pay URL is opened only when its page reads it; its bill stays open after the pay URL expires, and canceled it is abandoned at the step it reached"
     },
     {
       "id": "OR-J47-S04",
@@ -4151,7 +4161,7 @@
     {
       "id": "OR-J09-S74",
       "journey": "J09",
-      "name": "An empty NMI order releases after 24 hours, passes sale archive validation, and the merchant can cancel the reopened invoice or let it expire"
+      "name": "An empty NMI order releases after 24 hours, passes sale archive validation, and the merchant can cancel the reopened invoice or the customer's purchase expires"
     },
     {
       "id": "OR-J09-S75",
@@ -4334,11 +4344,6 @@
       "name": "A failed item's grace counts each failure once: the resend of a sync that failed reads no copy of its own failure, and a later chunk of one sync counts the failures of the chunks before it"
     },
     {
-      "id": "OR-J25-S44",
-      "journey": "J25",
-      "name": "The balance watch's burn rate reads usage history's quarter hours once each has ended: a look inside the quarter hour sees none of it, the next look all of it, once"
-    },
-    {
       "id": "OR-J14-S08",
       "journey": "J14",
       "name": "NMI engine renewal gateway refusals settle through dunning"
@@ -4412,6 +4417,76 @@
       "id": "OR-J04-S96",
       "journey": "J04",
       "name": "Keep-policy verification does not lock the membership"
+    },
+    {
+      "id": "OR-J25-S45",
+      "journey": "J25",
+      "name": "A running charge in a merchant whose accounting zone is not UTC posts nothing at 00:00 UTC and posts at that zone's midnight, through it, on the same receipt as the day's usage"
+    },
+    {
+      "id": "OR-J25-S46",
+      "journey": "J25",
+      "name": "A stop records its instant and posts nothing: what the charge accrued stays pending in the balance, frozen at the stop, until the daily posting takes it once"
+    },
+    {
+      "id": "OR-J24-S88",
+      "journey": "J24",
+      "name": "One receipt holds a period whose volume price fell beside a new period's usage: the rise is spent, the fall credited as a lot, both at the receipt's coordinate, and each period's receipts sum to the price of its quantity"
+    },
+    {
+      "id": "OR-J48-S20",
+      "journey": "J48",
+      "name": "A posting in a merchant's unit forgives what the lots cannot take with the event store out of reach, recording it on its receipt's lines; the metric shows it by rate card with no invoker"
+    },
+    {
+      "id": "OR-J24-S89",
+      "journey": "J24",
+      "name": "A posting just past a period's end dates each period's owed in its own period: the old period's before its end, the new period's when it posted, in its owed items and in the books"
+    },
+    {
+      "id": "OR-J24-S90",
+      "journey": "J24",
+      "name": "A posting credits an earlier period's volume fall before it spends a later period's rise, which draws the fall's lot: nothing owed in USD, nothing forgiven in a merchant's unit"
+    },
+    {
+      "id": "OR-J24-S91",
+      "journey": "J24",
+      "name": "An upgrade keeps every usage receipt an earlier build wrote: each line takes its receipt's period and its share of what the receipt forgave, by the amounts of its lines of that sign, to the largest remainder"
+    },
+    {
+      "id": "OR-J25-S47",
+      "journey": "J25",
+      "name": "Usage that leaves a balance at its low amount sends balance.low once"
+    },
+    {
+      "id": "OR-J25-S48",
+      "journey": "J25",
+      "name": "A running charge's balance is low at its amount, at the exact instant the fixed rate brings it there, never a runway of spend ahead"
+    },
+    {
+      "id": "OR-J25-S49",
+      "journey": "J25",
+      "name": "With no low amount set no balance.low is sent: a running charge is told only when depleted, at its exact instant"
+    },
+    {
+      "id": "OR-J06-S87",
+      "journey": "J06",
+      "name": "An unresolved undeclared account alerts its operator once: later billing passes alert it no more and its finding stays open"
+    },
+    {
+      "id": "OR-J08-S72",
+      "journey": "J08",
+      "name": "A merchant invoice never expires: well past 30 days it is open, has no expiry and its customer pays it"
+    },
+    {
+      "id": "OR-J08-S73",
+      "journey": "J08",
+      "name": "A merchant cancels its own invoice well past 30 days: no expiry closed it first"
+    },
+    {
+      "id": "OR-J08-S74",
+      "journey": "J08",
+      "name": "A purchase that expired unpaid leaves the customer's own invoice list, before and after the pass writes it; read by its id it answers, and the merchant's list keeps it"
     }
   ]
 }

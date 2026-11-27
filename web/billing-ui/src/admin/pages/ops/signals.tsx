@@ -73,21 +73,6 @@ export const SIGNAL_CHARTS: Widget[] = [
     by: ["time"],
     grain: "auto",
   }),
-  // NMI's history is kept 25 months and dated by month.
-  {
-    ...chart("nmi-history", "NMI's own authorizations by outcome", "bar", {
-      measures: ["nmi_history_authorizations"],
-      by: ["time", "outcome"],
-      grain: "month",
-    }),
-    query: {
-      measures: ["nmi_history_authorizations"],
-      by: ["time", "outcome"],
-      grain: "month",
-      range: { last: "25m" },
-    },
-    fixed_range: true,
-  },
   chart("verification-trend", "Verification pressure", "line", {
     measures: ["verification_pressure"],
     by: ["time"],

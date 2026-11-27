@@ -8,7 +8,7 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 )
 
-type UserIdentity struct {
+type CustomerIdentity struct {
 	ID       string
 	Email    *string
 	Username string

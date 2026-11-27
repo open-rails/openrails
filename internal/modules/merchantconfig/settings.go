@@ -342,13 +342,6 @@ func nonEmpty(v string) *string {
 // NormalizeBalanceNotices validates a merchant's default low-balance lines.
 func NormalizeBalanceNotices(in billing.BalanceNoticeSettings) (models.BalanceNoticeConfiguration, error) {
 	var out models.BalanceNoticeConfiguration
-	if h := in.RunwayHours; h != nil {
-		if *h < 0 || *h > billing.MaxLowBalanceRunwayHours {
-			return out, fmt.Errorf("balance_notices.runway_hours must be 0 to %d", billing.MaxLowBalanceRunwayHours)
-		}
-		hours := *h
-		out.RunwayHours = &hours
-	}
 	for i, line := range in.LowAmounts {
 		currency := moneyutil.NormalizeCurrency(string(line.Currency))
 		if err := moneyutil.ValidateCurrency(currency); err != nil {

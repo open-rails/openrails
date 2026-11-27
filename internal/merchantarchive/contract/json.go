@@ -436,9 +436,10 @@ var jsonRules = map[string]jsonRule{
 	// An invoice line's credit benefit per unit, frozen when the invoice was made.
 	"invoice_lines.credit_grant":    nullable(object(map[string]jsonRule{"amount": moneyStringValue, "currency": textValue, "expires_after_days": integerValue})),
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
-	"grants.spec_snapshot":           nullable(object(map[string]jsonRule{"entitlements": array(textValue)})),
-	"usage_receipts.lines":           array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "print": textValue, "requests": integerValue, "quantity": integerValue, "stated": integerValue, "amount": integerValue})),
-	"usage_receipts.forgiven_lines":  nullable(array(object(map[string]jsonRule{"invoker": textValue, "event_type": textValue, "meter_key": textValue, "cell": textValue, "amount": integerValue}))),
+	"grants.spec_snapshot": nullable(object(map[string]jsonRule{"entitlements": array(textValue)})),
+	"usage_receipts.lines": array(object(map[string]jsonRule{"period_starts_at": textValue, "period_ends_at": textValue, "meter_key": textValue, "cell": textValue, "print": textValue,
+		"requests": integerValue, "quantity": integerValue, "stated": integerValue, "amount": integerValue, "forgiven": integerValue})),
+	"usage_receipts.charges":         array(object(map[string]jsonRule{"running_charge_id": uuidValue, "starts_at": textValue, "ends_at": textValue, "amount": integerValue})),
 	"usage_card_prints.card":         metadataJSON,
 	"event_store.usage_events.event": metadataJSON,
 	"invoice_attempts.metadata":      metadataJSON,
@@ -455,7 +456,7 @@ var jsonRules = map[string]jsonRule{
 		"status": textValue, "payment_status": textValue, "number": integerValue, "payment_id": uuidValue, "reason": textValue, "settlement_source": textValue,
 		// A balance event: the balance as its crossing was seen.
 		"available_amount": moneyStringValue, "owed_amount": moneyStringValue, "accrual_rate_per_hour": moneyStringValue, "as_of": textValue, "depletes_at": nullable(textValue),
-		"usage_rate_per_hour": moneyStringValue, "low_balance_amount": moneyStringValue, "runway_ends_at": nullable(textValue)}),
+		"low_balance_amount": moneyStringValue}),
 	"provider_intents.solana_pull.payload": object(map[string]jsonRule{"subscription_pda": textValue, "row_id": uuidValue, "next_pull_at": textValue}),
 	"provider_intents.payload":             nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
 	"provider_intents.result_evidence":     nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),

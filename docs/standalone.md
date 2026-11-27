@@ -647,7 +647,7 @@ Besides the hosts you configure (database, Redis, Vault, SMTP, trusted issuers' 
 
 ## Event store
 
-Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage item is a raw event there (kept 90 days: what was reported, its identity and its priced meter cells), with the rollups limits and history read (limit windows, and history by UTC quarter hour, kept with no TTL and grouped into the merchant's `accounting.timezone` days as it is read). PostgreSQL keeps what usage settled, per pricing period and meter (`usage_totals`: its provisional price, which the balance deducts at once, until a posting takes it), each posting's receipt (`usage_receipts`) and the rate cards usage was priced under (`usage_card_prints`). Usage posts once a day, after the day ends in the merchant's `accounting.timezone` (UTC by default), in the billing pass (`openrails.usage_posting`), before a usage invoice and before a credit lot's expiry, revocation or refund. A posting prices each period's total from PostgreSQL alone; ClickHouse holds the usage history and limit counts: back it up nightly ([backup and restore](#backup-and-restore)).
+Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage item is a raw event there (kept 90 days: what was reported, its identity and its priced meter cells), with the rollups limits and history read (limit windows, and history by UTC quarter hour, kept with no TTL and grouped into the merchant's `accounting.timezone` days as it is read). PostgreSQL keeps what usage settled, per pricing period and meter (`usage_totals`: its provisional price, which the balance deducts at once, until a posting takes it), each posting's receipt (`usage_receipts`) and the rate cards usage was priced under (`usage_card_prints`). Usage and running charges post once a day, after the day ends in the merchant's `accounting.timezone` (UTC by default), in the billing pass (`openrails.usage_posting`), before a usage invoice and before a credit lot's expiry, revocation or refund. A posting prices each period's total from PostgreSQL alone; ClickHouse holds the usage history and limit counts: back it up nightly ([backup and restore](#backup-and-restore)).
 
 Without an event store (`clickhouse.url` empty, or the default one unreachable at boot) the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage invoices, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken starts without ClickHouse: that usage is PostgreSQL's, so it reads, posts and bills as before. Replicas starting together take turns migrating ClickHouse under a PostgreSQL advisory lock.
 
@@ -674,7 +674,7 @@ count, primary or sticky session.
 - **Background work:** every instance with workers takes River jobs, each job on
   one instance. River's leader alone schedules periodic work; a crashed leader
   is replaced within about 20 seconds. Each instance works up to 20 billing
-  jobs at once, plus the `psp_import`, `provider_refresh` and `nmi_history` queues. Outside
+  jobs at once, plus the `psp_import` and `provider_refresh` queues. Outside
   River every instance runs the Solana Pay poller (leased claims) and checks its
   PSP credentials at start, on change and before a write once its verdict is an
   hour old.
@@ -969,7 +969,7 @@ Periods are constants, the same for every merchant. Each table's comment states 
 
 | Table | Deleted |
 |---|---|
-| `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
+| `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles` | 25 months |
 | `provider_intents` | instruction-only intents 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
 | `invoice_attempts`; `invoices`, `invoice_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed invoices with no attempt, 397 days |
@@ -979,7 +979,7 @@ Periods are constants, the same for every merchant. Each table's comment states 
 | `webhook_events` | 90 days after completion |
 | `customer_messages` | two years (731 days) after created |
 | `idempotency_keys`, `solana_pay_references` | at expiry, after the 7-day watch |
-| `user_destructive_reservations` | 24 hours |
+| `customer_destructive_reservations` | 24 hours |
 | `limit_windows` | a day after `window_ends_at`, 61 days once it reached capacity; a lifetime or rate limit's row stays |
 | `leases` (with their in-flight reports), `limit_adjustments` | 61 days after the last sync, or after the adjustment |
 | `webhook_health_daily` | 13 months |

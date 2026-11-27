@@ -592,13 +592,14 @@ ON CONFLICT (merchant_id, source_domain) DO UPDATE SET
 RETURNING *;
 
 -- CROSS-MERCHANT: merchants holding an active provider-billed subscription
--- whose paid period ended before overdue_before with no renewal payment (see
--- ListOverdueRenewals), ids in order after a cursor.
+-- past its rail's deadline with no renewal payment (see ListOverdueRenewals),
+-- ids in order after a cursor.
 -- name: ListOverdueRenewalMerchants :many
 SELECT DISTINCT s.merchant_id
 FROM billing.subscriptions s
 WHERE s.status = 'active'
-  AND s.current_period_ends_at < sqlc.arg(overdue_before)::timestamptz
+  AND ((s.rail = 'nmi' AND s.current_period_ends_at < sqlc.arg(nmi_overdue_before)::timestamptz)
+       OR (s.rail <> 'nmi' AND s.current_period_ends_at < sqlc.arg(overdue_before)::timestamptz))
   AND s.collection_policy <> 'engine'
   AND s.deleted_at IS NULL
   AND s.merchant_id > sqlc.arg(after_merchant_id)::uuid
@@ -611,8 +612,9 @@ WHERE s.status = 'active'
 ORDER BY s.merchant_id
 LIMIT sqlc.arg(merchant_limit)::int;
 
--- An active provider-billed subscription whose paid period ended before
--- overdue_before with no renewal payment. A clock reading only: the due pass
+-- An active provider-billed subscription with no renewal payment whose paid
+-- period ended before its rail's cutoff: nmi_overdue_before for an NMI
+-- schedule, overdue_before for the rest. A clock reading only: the due pass
 -- asks the provider (RenewalOverdue -> unverified). Oldest lapse first, a page
 -- after the (period end, id) cursor.
 -- name: ListOverdueRenewals :many
@@ -622,7 +624,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.deleted_at IS NULL
   AND s.status = 'active'
   AND s.collection_policy <> 'engine'
-  AND s.current_period_ends_at < sqlc.arg(overdue_before)::timestamptz
+  AND ((s.rail = 'nmi' AND s.current_period_ends_at < sqlc.arg(nmi_overdue_before)::timestamptz)
+       OR (s.rail <> 'nmi' AND s.current_period_ends_at < sqlc.arg(overdue_before)::timestamptz))
   AND (s.current_period_ends_at, s.id) > (sqlc.arg(after_due_at)::timestamptz, sqlc.arg(after_id)::uuid)
   AND NOT EXISTS (
       SELECT 1 FROM billing.payments p

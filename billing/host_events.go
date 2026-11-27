@@ -64,23 +64,19 @@ const (
 
 // BalanceHostEvent is balance.low or balance.depleted: the customer's balance
 // in one currency as the crossing was seen, at AsOf. LowBalanceAmount is the
-// effective line it was judged at: the larger of the amount line and the burn
-// rate (AccrualRatePerHour + UsageRatePerHour) times the runway line.
-// DepletesAt is exact (running charges and credit lot lapses), null when
-// neither moves the balance; RunwayEndsAt is when capacity reaches zero at the
-// burn rate, null at rate zero. On balance.depleted, stop what the customer's
-// running charges pay for.
+// line it was judged at, 0 with none. AccrualRatePerHour is its running
+// charges' rate; DepletesAt is exact (running charges and credit lot lapses),
+// null when neither moves the balance. On balance.depleted, stop what the
+// customer's running charges pay for.
 type BalanceHostEvent struct {
 	CustomerID         CustomerID       `json:"customer_id"`
 	Currency           catalog.Currency `json:"currency"`
 	AvailableAmount    int64            `json:"available_amount,string"`
 	OwedAmount         int64            `json:"owed_amount,string"`
 	AccrualRatePerHour int64            `json:"accrual_rate_per_hour,string"`
-	UsageRatePerHour   int64            `json:"usage_rate_per_hour,string"`
 	LowBalanceAmount   int64            `json:"low_balance_amount,string"`
 	AsOf               time.Time        `json:"as_of"`
 	DepletesAt         *time.Time       `json:"depletes_at"`
-	RunwayEndsAt       *time.Time       `json:"runway_ends_at"`
 }
 
 // InvoiceHostEvent is one invoice transition: the invoice's status and its

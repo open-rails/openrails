@@ -47,7 +47,7 @@ func (q *Queries) DeleteBalanceWatch(ctx context.Context, arg DeleteBalanceWatch
 }
 
 const getBalanceWatch = `-- name: GetBalanceWatch :one
-SELECT merchant_id, customer_id, currency, next_check_at, depletes_at, low_notified_at, depleted_at, updated_at, funded_at, usage_rate_per_hour, rate_sampled_at, low_line_amount, floor_amount, look_each_change FROM billing.balance_watches
+SELECT merchant_id, customer_id, currency, next_check_at, depletes_at, low_notified_at, depleted_at, updated_at, funded_at, low_line_amount, floor_amount, look_each_change FROM billing.balance_watches
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND currency = $3::text
 `
@@ -71,8 +71,6 @@ func (q *Queries) GetBalanceWatch(ctx context.Context, arg GetBalanceWatchParams
 		&i.DepletedAt,
 		&i.UpdatedAt,
 		&i.FundedAt,
-		&i.UsageRatePerHour,
-		&i.RateSampledAt,
 		&i.LowLineAmount,
 		&i.FloorAmount,
 		&i.LookEachChange,
@@ -81,8 +79,8 @@ func (q *Queries) GetBalanceWatch(ctx context.Context, arg GetBalanceWatchParams
 }
 
 const insertPrepaidBalanceWatch = `-- name: InsertPrepaidBalanceWatch :exec
-INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, look_each_change)
-SELECT $1::uuid, $2::uuid, $3::text, NULL::timestamptz, 0, true
+INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, look_each_change)
+SELECT $1::uuid, $2::uuid, $3::text, NULL::timestamptz, true
 WHERE NOT EXISTS (
     SELECT 1 FROM billing.money_settings s
     WHERE s.merchant_id = $1::uuid AND s.customer_id = $2::uuid
@@ -163,7 +161,7 @@ func (q *Queries) ListDueBalanceWatches(ctx context.Context, arg ListDueBalanceW
 }
 
 const lockBalanceWatch = `-- name: LockBalanceWatch :one
-SELECT merchant_id, customer_id, currency, next_check_at, depletes_at, low_notified_at, depleted_at, updated_at, funded_at, usage_rate_per_hour, rate_sampled_at, low_line_amount, floor_amount, look_each_change FROM billing.balance_watches
+SELECT merchant_id, customer_id, currency, next_check_at, depletes_at, low_notified_at, depleted_at, updated_at, funded_at, low_line_amount, floor_amount, look_each_change FROM billing.balance_watches
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND currency = $3::text
 FOR UPDATE
@@ -189,8 +187,6 @@ func (q *Queries) LockBalanceWatch(ctx context.Context, arg LockBalanceWatchPara
 		&i.DepletedAt,
 		&i.UpdatedAt,
 		&i.FundedAt,
-		&i.UsageRatePerHour,
-		&i.RateSampledAt,
 		&i.LowLineAmount,
 		&i.FloorAmount,
 		&i.LookEachChange,
@@ -232,9 +228,9 @@ func (q *Queries) MarkBalanceWatchDue(ctx context.Context, arg MarkBalanceWatchD
 }
 
 const rebuildBalanceWatches = `-- name: RebuildBalanceWatches :exec
-INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, updated_at, look_each_change)
+INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, updated_at, look_each_change)
 SELECT w.merchant_id, w.customer_id, w.currency,
-       CASE WHEN bool_or(w.due) THEN $1::timestamptz END, 0, $1::timestamptz, true
+       CASE WHEN bool_or(w.due) THEN $1::timestamptz END, $1::timestamptz, true
 FROM (
     SELECT rc.merchant_id, rc.customer_id, rc.currency, true AS due
     FROM billing.running_charges rc
@@ -275,32 +271,29 @@ SET next_check_at = $1::timestamptz, depletes_at = $2::timestamptz,
     low_line_amount = $3::bigint, floor_amount = $4::bigint,
     look_each_change = $5::boolean,
     low_notified_at = $6::timestamptz, depleted_at = $7::timestamptz,
-    funded_at = $8::timestamptz, usage_rate_per_hour = $9::bigint,
-    rate_sampled_at = $10::timestamptz, updated_at = $11::timestamptz
-WHERE merchant_id = $12::uuid AND customer_id = $13::uuid
-  AND currency = $14::text
+    funded_at = $8::timestamptz, updated_at = $9::timestamptz
+WHERE merchant_id = $10::uuid AND customer_id = $11::uuid
+  AND currency = $12::text
 `
 
 type SetBalanceWatchParams struct {
-	NextCheckAt      *time.Time
-	DepletesAt       *time.Time
-	LowLineAmount    *int64
-	FloorAmount      *int64
-	LookEachChange   bool
-	LowNotifiedAt    *time.Time
-	DepletedAt       *time.Time
-	FundedAt         *time.Time
-	UsageRatePerHour int64
-	RateSampledAt    *time.Time
-	Now              time.Time
-	MerchantID       uuid.UUID
-	CustomerID       uuid.UUID
-	Currency         string
+	NextCheckAt    *time.Time
+	DepletesAt     *time.Time
+	LowLineAmount  *int64
+	FloorAmount    *int64
+	LookEachChange bool
+	LowNotifiedAt  *time.Time
+	DepletedAt     *time.Time
+	FundedAt       *time.Time
+	Now            time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
 }
 
 // What a look found: when to look next, the notices of the crossings it is
-// in, whether a funding is still to re-arm one, the usage rate, and the lines
-// a change is judged against.
+// in, whether a funding is still to re-arm one, and the lines a change is
+// judged against.
 func (q *Queries) SetBalanceWatch(ctx context.Context, arg SetBalanceWatchParams) error {
 	_, err := q.db.Exec(ctx, setBalanceWatch,
 		arg.NextCheckAt,
@@ -311,8 +304,6 @@ func (q *Queries) SetBalanceWatch(ctx context.Context, arg SetBalanceWatchParams
 		arg.LowNotifiedAt,
 		arg.DepletedAt,
 		arg.FundedAt,
-		arg.UsageRatePerHour,
-		arg.RateSampledAt,
 		arg.Now,
 		arg.MerchantID,
 		arg.CustomerID,
@@ -322,7 +313,7 @@ func (q *Queries) SetBalanceWatch(ctx context.Context, arg SetBalanceWatchParams
 }
 
 const shareBalanceWatches = `-- name: ShareBalanceWatches :many
-SELECT merchant_id, customer_id, currency, next_check_at, depletes_at, low_notified_at, depleted_at, updated_at, funded_at, usage_rate_per_hour, rate_sampled_at, low_line_amount, floor_amount, look_each_change FROM billing.balance_watches
+SELECT merchant_id, customer_id, currency, next_check_at, depletes_at, low_notified_at, depleted_at, updated_at, funded_at, low_line_amount, floor_amount, look_each_change FROM billing.balance_watches
 WHERE merchant_id = $1::uuid AND currency = $2::text
   AND customer_id = ANY($3::uuid[])
 ORDER BY customer_id
@@ -358,8 +349,6 @@ func (q *Queries) ShareBalanceWatches(ctx context.Context, arg ShareBalanceWatch
 			&i.DepletedAt,
 			&i.UpdatedAt,
 			&i.FundedAt,
-			&i.UsageRatePerHour,
-			&i.RateSampledAt,
 			&i.LowLineAmount,
 			&i.FloorAmount,
 			&i.LookEachChange,
@@ -400,10 +389,10 @@ func (q *Queries) StampBalanceWatchFunded(ctx context.Context, arg StampBalanceW
 
 const upsertBalanceWatch = `-- name: UpsertBalanceWatch :exec
 
-INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, depletes_at, usage_rate_per_hour, updated_at,
+INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, depletes_at, updated_at,
                                      low_line_amount, floor_amount, look_each_change)
 VALUES ($1::uuid, $2::uuid, $3::text,
-        $4::timestamptz, $5::timestamptz, 0, $6::timestamptz,
+        $4::timestamptz, $5::timestamptz, $6::timestamptz,
         $7::bigint, $8::bigint, $9::boolean)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     next_check_at = CASE WHEN billing.balance_watches.next_check_at <= EXCLUDED.updated_at
@@ -429,7 +418,7 @@ type UpsertBalanceWatchParams struct {
 // is next looked at, and what the last look found. Every instant is the
 // caller's clock.
 // A running charge started or stopped: when to look next. A watch already due
-// stays due; the notices of a crossing and the usage rate stay.
+// stays due; the notices of a crossing stay.
 func (q *Queries) UpsertBalanceWatch(ctx context.Context, arg UpsertBalanceWatchParams) error {
 	_, err := q.db.Exec(ctx, upsertBalanceWatch,
 		arg.MerchantID,
@@ -446,8 +435,8 @@ func (q *Queries) UpsertBalanceWatch(ctx context.Context, arg UpsertBalanceWatch
 }
 
 const watchCustomerBalance = `-- name: WatchCustomerBalance :execrows
-INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, updated_at, look_each_change)
-SELECT a.merchant_id, a.customer_id::uuid, a.currency, to_timestamp(0), 0, $1::timestamptz, true
+INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, updated_at, look_each_change)
+SELECT a.merchant_id, a.customer_id::uuid, a.currency, to_timestamp(0), $1::timestamptz, true
 FROM billing.ledger_accounts a
 WHERE a.merchant_id = $2::uuid AND a.account_type = 'customer_units'
   AND a.currency = $3::text AND a.customer_id = $4::uuid
@@ -488,8 +477,8 @@ func (q *Queries) WatchCustomerBalance(ctx context.Context, arg WatchCustomerBal
 }
 
 const watchLapsingCredit = `-- name: WatchLapsingCredit :execrows
-INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, updated_at, look_each_change)
-VALUES ($1::uuid, $2::uuid, $3::text, to_timestamp(0), 0, $4::timestamptz, true)
+INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, updated_at, look_each_change)
+VALUES ($1::uuid, $2::uuid, $3::text, to_timestamp(0), $4::timestamptz, true)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     next_check_at = to_timestamp(0), look_each_change = true, updated_at = EXCLUDED.updated_at
 `

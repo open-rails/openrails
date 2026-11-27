@@ -172,7 +172,6 @@ export type BalanceNoticeAmount = {
 }
 
 export type BalanceNoticeSettings = {
-  runway_hours?: number
   low_amounts?: BalanceNoticeAmount[]
 }
 
@@ -187,7 +186,7 @@ export type BalanceTransaction = {
   resource: string | null
   source: string
   source_id: string
-  usage: UsageDeduction | null
+  usage: UsageReceipt | null
   created_at: string
 }
 
@@ -422,7 +421,6 @@ export type CreateCreditGrantParams = {
 export type CreateInvoiceParams = {
   customer_id?: string
   lines?: InvoiceLineParams[]
-  expires_at?: string
   pay_url?: InvoicePayURLParams
   attribution?: InvoiceAttribution
 }
@@ -703,7 +701,7 @@ export type CustomerMessage = {
   event_id: string
   event_type: string
   channel: "email"
-  status: "disabled" | "failed" | "no_contact" | "pending" | "queued" | "rate_limited" | "sending" | "sent" | "test_environment"
+  status: "disabled" | "failed" | "no_contact" | "queued" | "rate_limited" | "sending" | "sent" | "test_environment"
   attempts: number
   last_error: "event_missing" | "event_unreadable" | "invalid_recipient" | "no_sender" | "refused" | "render_failed" | "send_failed" | "unavailable" | null
   recipient: string | null
@@ -1029,8 +1027,7 @@ export type DunningTier = {
 export type EffectiveLowBalanceLine = {
   currency: string
   amount: string
-  runway_hours: number
-  source: "customer" | "default" | "merchant"
+  source: "customer" | "merchant" | "none"
 }
 
 export type EffectiveTrustLevel = {
@@ -1476,7 +1473,6 @@ export type LogEntry = {
 export type LowBalanceLine = {
   currency: string
   amount: string | null
-  runway_hours: number | null
 }
 
 export type MRRRisk = {
@@ -2464,7 +2460,6 @@ export type SetLimitParams = {
 
 export type SetLowBalanceLineParams = {
   amount?: string | null
-  runway_hours?: number | null
 }
 
 export type SetMeterParams = {
@@ -2898,15 +2893,25 @@ export type UsageBucket = {
   discount: string
 }
 
-export type UsageDeduction = {
-  period_starts_at: string
-  period_ends_at: string
+export type UsageReceipt = {
   through: string
   amount: string
-  lines: UsageDeductionLine[]
+  lines: UsageReceiptLine[]
+  charges: UsageReceiptCharge[]
 }
 
-export type UsageDeductionLine = {
+export type UsageReceiptCharge = {
+  running_charge_id: string
+  reference: string
+  resource: string | null
+  starts_at: string
+  ends_at: string
+  amount: string
+}
+
+export type UsageReceiptLine = {
+  period_starts_at: string
+  period_ends_at: string
   meter_key: string
   cell: string | null
   requests: number

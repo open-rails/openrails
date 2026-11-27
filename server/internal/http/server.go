@@ -170,7 +170,7 @@ func New(logger *slog.Logger, deps Dependencies) (*Server, error) {
 	if deps.Runtime.SubscriptionService == nil {
 		return nil, fmt.Errorf("server runtime subscription service is required")
 	}
-	if deps.Runtime.UserSubscriptionService == nil {
+	if deps.Runtime.CustomerSubscriptionService == nil {
 		return nil, fmt.Errorf("server runtime user subscription service is required")
 	}
 	if deps.Runtime.AdminSubscriptionService == nil {

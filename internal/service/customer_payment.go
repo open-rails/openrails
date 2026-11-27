@@ -39,7 +39,7 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, customer identity.Cu
 			id := request.PaymentMethodID.UUID()
 			method = &id
 		}
-		owned, err := rt.UserSubscriptionService.GetUserSubscriptionByID(ctx, customer.UUID().String(), subscription.UUID())
+		owned, err := rt.CustomerSubscriptionService.GetCustomerSubscriptionByID(ctx, customer.UUID().String(), subscription.UUID())
 		if err != nil {
 			return err
 		}
@@ -65,7 +65,7 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, customer identity.Cu
 		if err := customerPaymentRefusal(result); err != nil {
 			return err
 		}
-		sub, err := rt.UserSubscriptionService.GetUserSubscriptionByID(ctx, customer.UUID().String(), subscription.UUID())
+		sub, err := rt.CustomerSubscriptionService.GetCustomerSubscriptionByID(ctx, customer.UUID().String(), subscription.UUID())
 		if err != nil {
 			return err
 		}

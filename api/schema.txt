@@ -7,6 +7,12 @@ migration 0003_transfer_types.up.sql sha256:e995e170597775acff551d82f2f7cff698bc
 migration 0004_customer_paid_totals.up.sql sha256:4b9a2facc723bab9d8579e3955f6c2cbe4f16e9f6df45b2f19d080be61007dbd
 migration 0005_usage_quarter_hours.up.sql sha256:289f968ac3d0bbce937f66f71f850c8a9d5a0ffc96b52c23ee45a504b50ae07a
 migration 0006_usage_receipts.up.sql sha256:73fca1d59b23e1c17080b6a429b13e59232a6a2e745fd6b8035808402f8dc677
+migration 0007_retired_jobs.up.sql sha256:ba9b17805a8b793bc4eb5f96a22a72e8af1df696ea9071564a58b1c8143d0540
+migration 0008_rebill_watch_dropped.up.sql sha256:7d1008c1f618110cd1418a1c66e1dc8b4cd79fee7523e7b9548360000276ae98
+migration 0009_usage_receipt_per_posting.up.sql sha256:d384be58251eea8f5c1270889cc3204e538673039c0c67c517fa1ade287a060e
+migration 0010_amount_low_balance.up.sql sha256:a3c81f7e13cf137c8381c00c235485c03041fa2e0f8ae781f827f52e55a94b55
+migration 0011_customer_destructive_reservations.up.sql sha256:0636ae0008ee371fcb4f6fb70538caa58f5a11d77fc47af876266c6c2e576437
+migration 0012_merchant_invoices_open.up.sql sha256:1ca31e90c5bd5808fd46a2cd85058b1fa907cde8819f09d6b7866000cec8a579
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -18,8 +24,6 @@ table billing.balance_watches
   column depleted_at timestamp with time zone
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   column funded_at timestamp with time zone
-  column usage_rate_per_hour bigint NOT NULL
-  column rate_sampled_at timestamp with time zone
   column low_line_amount bigint
   column floor_amount bigint
   column look_each_change boolean NOT NULL DEFAULT true
@@ -27,7 +31,6 @@ table billing.balance_watches
   constraint balance_watches_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT
   constraint balance_watches_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint balance_watches_pkey PRIMARY KEY (merchant_id, customer_id, currency)
-  constraint balance_watches_usage_rate_per_hour_check CHECK ((usage_rate_per_hour >= 0))
   index CREATE INDEX balance_watches_depletes_at_idx ON billing.balance_watches USING btree (merchant_id, depletes_at)
   index CREATE INDEX balance_watches_next_check_at_idx ON billing.balance_watches USING btree (next_check_at, merchant_id, customer_id, currency) WHERE (next_check_at IS NOT NULL)
   index CREATE UNIQUE INDEX balance_watches_pkey ON billing.balance_watches USING btree (merchant_id, customer_id, currency)
@@ -404,6 +407,20 @@ table billing.customer_delinquency
   index CREATE UNIQUE INDEX customer_delinquency_pkey ON billing.customer_delinquency USING btree (merchant_id, customer_id, currency)
   trigger CREATE TRIGGER customer_delinquency_track_mrr_risk AFTER INSERT OR UPDATE OF state ON billing.customer_delinquency FOR EACH ROW EXECUTE FUNCTION billing.customer_delinquency_track_mrr_risk()
 
+table billing.customer_destructive_reservations
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column action_key text NOT NULL
+  column kind text NOT NULL
+  column reserved_at timestamp with time zone NOT NULL
+  constraint customer_destructive_reservations_action_key_check CHECK (((action_key <> ''::text) AND (octet_length(action_key) <= 512)))
+  constraint customer_destructive_reservations_kind_check CHECK ((kind = ANY (ARRAY['delete_payment_method'::text, 'cancel_subscription'::text])))
+  constraint customer_destructive_reservations_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
+  constraint customer_destructive_reservations_pkey PRIMARY KEY (merchant_id, action_key)
+  index CREATE INDEX customer_destructive_reservations_expiry_idx ON billing.customer_destructive_reservations USING btree (reserved_at, merchant_id, action_key)
+  index CREATE UNIQUE INDEX customer_destructive_reservations_pkey ON billing.customer_destructive_reservations USING btree (merchant_id, action_key)
+  index CREATE INDEX customer_destructive_reservations_window_idx ON billing.customer_destructive_reservations USING btree (merchant_id, reserved_at) INCLUDE (customer_id)
+
 table billing.customer_invoice_profiles
   column merchant_id uuid NOT NULL
   column customer_id uuid NOT NULL
@@ -441,16 +458,13 @@ table billing.customer_low_balance_lines
   column merchant_id uuid NOT NULL
   column customer_id uuid NOT NULL
   column currency text NOT NULL
-  column amount bigint
-  column runway_hours integer
+  column amount bigint NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   constraint customer_low_balance_lines_amount_check CHECK ((amount >= 0))
   constraint customer_low_balance_lines_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint customer_low_balance_lines_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
   constraint customer_low_balance_lines_pkey PRIMARY KEY (merchant_id, customer_id, currency)
-  constraint customer_low_balance_lines_runway_hours_check CHECK (((runway_hours >= 0) AND (runway_hours <= 8760)))
-  constraint customer_low_balance_lines_set_check CHECK (((amount IS NOT NULL) OR (runway_hours IS NOT NULL)))
   index CREATE UNIQUE INDEX customer_low_balance_lines_pkey ON billing.customer_low_balance_lines USING btree (merchant_id, customer_id, currency)
 
 table billing.customer_messages
@@ -478,11 +492,10 @@ table billing.customer_messages
   constraint customer_messages_pkey PRIMARY KEY (merchant_id, id)
   constraint customer_messages_recipient_check CHECK (((octet_length(recipient) >= 3) AND (octet_length(recipient) <= 320)))
   constraint customer_messages_sent_check CHECK (((status = 'sent'::text) = (sent_at IS NOT NULL)))
-  constraint customer_messages_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'queued'::text, 'sending'::text, 'sent'::text, 'disabled'::text, 'test_environment'::text, 'no_contact'::text, 'rate_limited'::text, 'failed'::text])))
+  constraint customer_messages_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'sending'::text, 'sent'::text, 'disabled'::text, 'test_environment'::text, 'no_contact'::text, 'rate_limited'::text, 'failed'::text])))
   index CREATE INDEX customer_messages_created_at_idx ON billing.customer_messages USING btree (merchant_id, created_at, id)
   index CREATE INDEX customer_messages_customer_idx ON billing.customer_messages USING btree (merchant_id, customer_id, created_at, id)
   index CREATE UNIQUE INDEX customer_messages_event_id_channel_key ON billing.customer_messages USING btree (merchant_id, event_id, channel)
-  index CREATE INDEX customer_messages_pending_idx ON billing.customer_messages USING btree (created_at, merchant_id, id) WHERE (status = 'pending'::text)
   index CREATE UNIQUE INDEX customer_messages_pkey ON billing.customer_messages USING btree (merchant_id, id)
 
 table billing.customer_mrr
@@ -1123,11 +1136,11 @@ table billing.invoices
   constraint invoices_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint invoices_number_check CHECK ((number >= 1))
   constraint invoices_origin_check CHECK ((origin = ANY (ARRAY['customer'::text, 'merchant'::text, 'subscription'::text, 'usage'::text])))
-  constraint invoices_pay_url_check CHECK ((((pay_url_secret_hash IS NULL) = (pay_url_expires_at IS NULL)) AND ((pay_url_secret_hash IS NULL) = (saved_payment_methods IS NULL)) AND ((pay_url_secret_hash IS NULL) = (embedded IS NULL)) AND ((success_url IS NULL) OR (pay_url_secret_hash IS NOT NULL)) AND ((cancel_url IS NULL) OR (pay_url_secret_hash IS NOT NULL)) AND ((pay_url_secret_hash IS NULL) OR ((octet_length(pay_url_secret_hash) = 32) AND (pay_url_expires_at <= expires_at) AND (((origin = 'merchant'::text) AND (success_url IS NOT NULL)) OR ((origin = 'customer'::text) AND (success_url IS NULL) AND (cancel_url IS NULL) AND embedded))))))
+  constraint invoices_pay_url_check CHECK ((((pay_url_secret_hash IS NULL) = (pay_url_expires_at IS NULL)) AND ((pay_url_secret_hash IS NULL) = (saved_payment_methods IS NULL)) AND ((pay_url_secret_hash IS NULL) = (embedded IS NULL)) AND ((success_url IS NULL) OR (pay_url_secret_hash IS NOT NULL)) AND ((cancel_url IS NULL) OR (pay_url_secret_hash IS NOT NULL)) AND ((pay_url_secret_hash IS NULL) OR ((octet_length(pay_url_secret_hash) = 32) AND (((origin = 'merchant'::text) AND (success_url IS NOT NULL)) OR ((origin = 'customer'::text) AND (pay_url_expires_at <= expires_at) AND (success_url IS NULL) AND (cancel_url IS NULL) AND embedded))))))
   constraint invoices_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES billing.payments(merchant_id, customer_id, id) DEFERRABLE INITIALLY DEFERRED
   constraint invoices_payment_method_id_fkey FOREIGN KEY (merchant_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, id)
   constraint invoices_payment_status_check CHECK ( CASE status WHEN 'open'::text THEN (payment_status = ANY (ARRAY['requires_payment_method'::text, 'requires_action'::text])) WHEN 'processing'::text THEN (payment_status = 'processing'::text) WHEN 'complete'::text THEN (payment_status = 'succeeded'::text) ELSE (payment_status = ANY (ARRAY['requires_payment_method'::text, 'succeeded'::text])) END)
-  constraint invoices_period_check CHECK ((((origin = ANY (ARRAY['subscription'::text, 'usage'::text])) = ((period_starts_at IS NOT NULL) AND (period_ends_at IS NOT NULL) AND (due_at IS NOT NULL))) AND ((origin = 'subscription'::text) = (subscription_id IS NOT NULL)) AND ((collection_owner <> 'engine'::text) OR ((origin = ANY (ARRAY['subscription'::text, 'usage'::text])) = (expires_at IS NULL))) AND ((period_ends_at IS NULL) OR (period_ends_at > period_starts_at))))
+  constraint invoices_period_check CHECK ((((origin = ANY (ARRAY['subscription'::text, 'usage'::text])) = ((period_starts_at IS NOT NULL) AND (period_ends_at IS NOT NULL) AND (due_at IS NOT NULL))) AND ((origin = 'subscription'::text) = (subscription_id IS NOT NULL)) AND ((collection_owner <> 'engine'::text) OR ((origin = 'customer'::text) = (expires_at IS NOT NULL))) AND ((period_ends_at IS NULL) OR (period_ends_at > period_starts_at))))
   constraint invoices_pkey PRIMARY KEY (merchant_id, id)
   constraint invoices_po_number_check CHECK ((po_number <> ''::text))
   constraint invoices_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id)
@@ -1895,36 +1908,6 @@ table billing.nmi_bulk_checkpoints
   constraint nmi_bulk_checkpoints_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
   index CREATE UNIQUE INDEX nmi_bulk_checkpoints_pkey ON billing.nmi_bulk_checkpoints USING btree (merchant_id, psp_id)
 
-table billing.nmi_history_months
-  column merchant_id uuid NOT NULL
-  column psp_id uuid NOT NULL
-  column month_at timestamp with time zone NOT NULL
-  column kind text NOT NULL
-  column reason text NOT NULL
-  column authorizations bigint NOT NULL
-  column outcome text NOT NULL
-  column decline_cause text
-  constraint nmi_history_months_authorizations_check CHECK ((authorizations > 0))
-  constraint nmi_history_months_decline_cause_check CHECK ((decline_cause = ANY (ARRAY['customer'::text, 'issuer'::text, 'fraud'::text, 'merchant'::text, 'processing'::text, 'unknown'::text])))
-  constraint nmi_history_months_kind_check CHECK ((kind = ANY (ARRAY['verification'::text, 'one_off_sale'::text, 'scheduled_rebill'::text])))
-  constraint nmi_history_months_month_at_check CHECK ((month_at = date_trunc('month'::text, month_at, 'UTC'::text)))
-  constraint nmi_history_months_outcome_check CHECK ((outcome = ANY (ARRAY['approved'::text, 'declined'::text, 'refused'::text, 'error'::text])))
-  constraint nmi_history_months_pkey PRIMARY KEY (merchant_id, psp_id, month_at, kind, reason)
-  constraint nmi_history_months_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
-  constraint nmi_history_months_reason_check CHECK ((((outcome = 'approved'::text) = (reason = ''::text)) AND ((outcome = 'approved'::text) = (decline_cause IS NULL)) AND ((decline_cause = 'merchant'::text) = (outcome = 'refused'::text)) AND ((decline_cause = 'processing'::text) = (outcome = 'error'::text))))
-  index CREATE INDEX nmi_history_months_month_at_idx ON billing.nmi_history_months USING btree (merchant_id, month_at)
-  index CREATE UNIQUE INDEX nmi_history_months_pkey ON billing.nmi_history_months USING btree (merchant_id, psp_id, month_at, kind, reason)
-
-table billing.nmi_history_reads
-  column merchant_id uuid NOT NULL
-  column psp_id uuid NOT NULL
-  column read_at timestamp with time zone
-  column due_at timestamp with time zone NOT NULL
-  constraint nmi_history_reads_pkey PRIMARY KEY (merchant_id, psp_id)
-  constraint nmi_history_reads_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
-  index CREATE INDEX nmi_history_reads_due_at_idx ON billing.nmi_history_reads USING btree (due_at, merchant_id, psp_id)
-  index CREATE UNIQUE INDEX nmi_history_reads_pkey ON billing.nmi_history_reads USING btree (merchant_id, psp_id)
-
 table billing.notification_channel_state
   column merchant_id uuid NOT NULL
   column restore_required boolean NOT NULL DEFAULT false
@@ -1947,7 +1930,6 @@ table billing.notification_events
   index CREATE INDEX notification_events_delivery_idx ON billing.notification_events USING btree (inserted_at, merchant_id, id)
   index CREATE INDEX notification_events_ended_idx ON billing.notification_events USING btree (merchant_id, customer_id, created_at) WHERE (event_type = 'premium_ended'::text)
   index CREATE UNIQUE INDEX notification_events_pkey ON billing.notification_events USING btree (merchant_id, id)
-  trigger CREATE TRIGGER notification_event_customer_message AFTER INSERT ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.queue_customer_message()
   trigger CREATE TRIGGER notification_event_immutable BEFORE UPDATE ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.guard_notification_event()
   trigger CREATE TRIGGER notification_event_log_capture AFTER INSERT ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.capture_notification_event_log()
 
@@ -3013,8 +2995,6 @@ table billing.rebill_cycles
   column missed_at timestamp with time zone
   column miss_reason text
   column quantity integer
-  column probe_failed_at timestamp with time zone
-  column next_probe_at timestamp with time zone
   constraint rebill_cycles_amount_check CHECK ((amount >= 0))
   constraint rebill_cycles_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint rebill_cycles_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
@@ -3023,7 +3003,6 @@ table billing.rebill_cycles
   constraint rebill_cycles_missed_check CHECK (((missed_at IS NULL) = (miss_reason IS NULL)))
   constraint rebill_cycles_owner_check CHECK ((owner = ANY (ARRAY['engine'::text, 'nmi_schedule'::text, 'provider'::text])))
   constraint rebill_cycles_pkey PRIMARY KEY (merchant_id, id)
-  constraint rebill_cycles_probe_check CHECK (((probe_failed_at IS NULL) = (next_probe_at IS NULL)))
   constraint rebill_cycles_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint rebill_cycles_quantity_check CHECK (((quantity IS NULL) OR (quantity >= 1)))
   constraint rebill_cycles_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE CASCADE
@@ -3174,10 +3153,11 @@ table billing.running_charges
   constraint running_charges_reference_check CHECK (((reference <> ''::text) AND (reference = btrim(reference)) AND (octet_length(reference) <= 255)))
   constraint running_charges_reference_key UNIQUE (merchant_id, reference)
   constraint running_charges_resource_check CHECK (((resource <> ''::text) AND (octet_length(resource) <= 255)))
-  constraint running_charges_stopped_at_check CHECK (((stopped_at IS NULL) OR (stopped_at = posted_through_at)))
+  constraint running_charges_stopped_at_check CHECK (((stopped_at IS NULL) OR (posted_through_at <= stopped_at)))
   index CREATE INDEX running_charges_customer_id_currency_idx ON billing.running_charges USING btree (merchant_id, customer_id, currency) WHERE (stopped_at IS NULL)
   index CREATE UNIQUE INDEX running_charges_pkey ON billing.running_charges USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX running_charges_reference_key ON billing.running_charges USING btree (merchant_id, reference)
+  index CREATE INDEX running_charges_unposted_idx ON billing.running_charges USING btree (merchant_id, customer_id, currency) WHERE (stopped_at IS DISTINCT FROM posted_through_at)
   trigger CREATE TRIGGER immutable_running_charge_facts BEFORE DELETE OR UPDATE ON billing.running_charges FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('stopped_at', 'posted_through_at', 'posted_amount', 'updated_at')
 
 table billing.scheduled_changes
@@ -3515,7 +3495,6 @@ table billing.subscriptions
   column quantity integer
   column provider_access_default_snapshot boolean NOT NULL DEFAULT false
   column facts_authority text NOT NULL DEFAULT 'provider'::text
-  column due_recheck_at timestamp with time zone
   column rail_subscription_key text GENERATED ALWAYS AS (billing.rail_subscription_key(rail, rail_subscription_id)) STORED
   column retry_advised_at timestamp with time zone
   column checkout_invoice_id uuid
@@ -3558,7 +3537,6 @@ table billing.subscriptions
   index CREATE INDEX subscriptions_current_period_ends_at_id_idx ON billing.subscriptions USING btree (merchant_id, current_period_ends_at, id) WHERE ((deleted_at IS NULL) AND (current_period_ends_at IS NOT NULL))
   index CREATE INDEX subscriptions_current_period_ends_at_next_retry_at_idx ON billing.subscriptions USING btree (merchant_id, current_period_ends_at, next_retry_at) WHERE ((collection_policy = 'engine'::text) AND (status = ANY (ARRAY['active'::text, 'past_due'::text])) AND (deleted_at IS NULL))
   index CREATE INDEX subscriptions_current_period_ends_at_period_overdue_idx ON billing.subscriptions USING btree (current_period_ends_at) WHERE (status = 'active'::text)
-  index CREATE INDEX subscriptions_current_period_ends_at_rebill_watch_idx ON billing.subscriptions USING btree (merchant_id, current_period_ends_at) WHERE ((status = ANY (ARRAY['active'::text, 'unverified'::text, 'awaiting_method'::text])) AND (collection_policy = ANY (ARRAY['engine'::text, 'nmi_schedule'::text])) AND (deleted_at IS NULL))
   index CREATE INDEX subscriptions_customer_id_created_at_id_idx ON billing.subscriptions USING btree (merchant_id, customer_id, created_at DESC, id DESC) WHERE (deleted_at IS NULL)
   index CREATE UNIQUE INDEX subscriptions_customer_id_id_key ON billing.subscriptions USING btree (merchant_id, customer_id, id)
   index CREATE UNIQUE INDEX subscriptions_customer_id_product_id_key ON billing.subscriptions USING btree (merchant_id, customer_id, product_id) WHERE ((deleted_at IS NULL) AND ((status = ANY (ARRAY['active'::text, 'pending'::text, 'past_due'::text, 'awaiting_method'::text, 'unverified'::text])) OR (deletion_scheduled_at IS NOT NULL)))
@@ -3622,27 +3600,24 @@ table billing.usage_receipts
   column id uuid NOT NULL DEFAULT uuidv7()
   column customer_id uuid NOT NULL
   column currency text NOT NULL
-  column period_starts_at timestamp with time zone NOT NULL
-  column period_ends_at timestamp with time zone NOT NULL
   column cut_at timestamp with time zone NOT NULL
   column reason text NOT NULL
   column amount bigint NOT NULL
   column lines jsonb NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column forgiven bigint NOT NULL
-  column forgiven_lines jsonb
-  constraint usage_receipts_amount_check CHECK (((amount <> 0) AND ((reason = 'reversal'::text) = (amount < 0))))
+  column charges jsonb NOT NULL
+  constraint usage_receipts_charges_check CHECK ((jsonb_typeof(charges) = 'array'::text))
   constraint usage_receipts_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint usage_receipts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint usage_receipts_forgiven_check CHECK (((forgiven = 0) OR ((currency <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text])) AND (((reason <> 'reversal'::text) AND (forgiven > 0) AND (forgiven <= amount)) OR ((reason = 'reversal'::text) AND (forgiven < 0) AND (forgiven >= amount))))))
-  constraint usage_receipts_forgiven_lines_check CHECK ((((forgiven = 0) = (forgiven_lines IS NULL)) AND ((forgiven_lines IS NULL) OR ((jsonb_typeof(forgiven_lines) = 'array'::text) AND (octet_length((forgiven_lines)::text) <= 262144)))))
-  constraint usage_receipts_lines_check CHECK (((jsonb_typeof(lines) = 'array'::text) AND (octet_length((lines)::text) <= 262144)))
+  constraint usage_receipts_forgiven_check CHECK (((forgiven = 0) OR (currency <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
+  constraint usage_receipts_lines_check CHECK ((jsonb_typeof(lines) = 'array'::text))
   constraint usage_receipts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint usage_receipts_period_ends_at_check CHECK ((period_ends_at > period_starts_at))
   constraint usage_receipts_pkey PRIMARY KEY (merchant_id, id)
-  constraint usage_receipts_reason_check CHECK ((reason = ANY (ARRAY['daily'::text, 'billing'::text, 'credit'::text, 'purge'::text, 'reversal'::text])))
-  index CREATE INDEX usage_receipts_forgiven_idx ON billing.usage_receipts USING btree (merchant_id, cut_at) WHERE (forgiven <> 0)
-  index CREATE INDEX usage_receipts_period_idx ON billing.usage_receipts USING btree (merchant_id, customer_id, currency, period_starts_at)
+  constraint usage_receipts_reason_check CHECK ((reason = ANY (ARRAY['daily'::text, 'billing'::text, 'credit'::text, 'purge'::text])))
+  constraint usage_receipts_taken_check CHECK (((jsonb_array_length(lines) + jsonb_array_length(charges)) > 0))
+  index CREATE INDEX usage_receipts_customer_idx ON billing.usage_receipts USING btree (merchant_id, customer_id, currency, cut_at)
+  index CREATE INDEX usage_receipts_forgiven_idx ON billing.usage_receipts USING btree (merchant_id, cut_at) WHERE jsonb_path_exists(lines, '$[*]?(@."forgiven" != 0)'::jsonpath)
   index CREATE UNIQUE INDEX usage_receipts_pkey ON billing.usage_receipts USING btree (merchant_id, id)
 
 table billing.usage_totals
@@ -3674,20 +3649,6 @@ table billing.usage_totals
   constraint usage_totals_stated_check CHECK ((stated >= 0))
   index CREATE INDEX usage_totals_closed_idx ON billing.usage_totals USING btree (merchant_id, period_ends_at) WHERE (lease_id = '00000000-0000-0000-0000-000000000000'::uuid)
   index CREATE UNIQUE INDEX usage_totals_pkey ON billing.usage_totals USING btree (merchant_id, customer_id, currency, period_starts_at, meter_key, cell, print, lapse_at, lease_id)
-
-table billing.user_destructive_reservations
-  column merchant_id uuid NOT NULL
-  column customer_id uuid NOT NULL
-  column action_key text NOT NULL
-  column kind text NOT NULL
-  column reserved_at timestamp with time zone NOT NULL
-  constraint user_destructive_reservations_action_key_check CHECK (((action_key <> ''::text) AND (octet_length(action_key) <= 512)))
-  constraint user_destructive_reservations_kind_check CHECK ((kind = ANY (ARRAY['delete_payment_method'::text, 'cancel_subscription'::text])))
-  constraint user_destructive_reservations_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
-  constraint user_destructive_reservations_pkey PRIMARY KEY (merchant_id, action_key)
-  index CREATE INDEX user_destructive_reservations_expiry_idx ON billing.user_destructive_reservations USING btree (reserved_at, merchant_id, action_key)
-  index CREATE UNIQUE INDEX user_destructive_reservations_pkey ON billing.user_destructive_reservations USING btree (merchant_id, action_key)
-  index CREATE INDEX user_destructive_reservations_window_idx ON billing.user_destructive_reservations USING btree (merchant_id, reserved_at) INCLUDE (customer_id)
 
 table billing.webhook_events
   column merchant_id uuid NOT NULL
@@ -4517,7 +4478,7 @@ function billing.event_log_data(jsonb)
       -- Keep monetary integers lossless for JavaScript consumers, just like the
       -- existing typed billing API. Do not reinterpret arbitrary payload fields.
       FOREACH key IN ARRAY ARRAY['amount','total','overdue_amount','amount_floor',
-        'available_amount','owed_amount','accrual_rate_per_hour','usage_rate_per_hour',
+        'available_amount','owed_amount','accrual_rate_per_hour',
         'low_balance_amount','old_amount','new_amount','amount_due'] LOOP
           IF jsonb_typeof(value->key)='number' THEN
               value:=jsonb_set(value,ARRAY[key],to_jsonb(value->>key));
@@ -4759,8 +4720,6 @@ function billing.guard_billing_restore_receipt()
                     'mrr_streak_flows',
                     'mrr_totals',
                     'nmi_bulk_checkpoints',
-                    'nmi_history_months',
-                    'nmi_history_reads',
                     'notification_events',
                     'operation_log',
                     'owed_items',
@@ -5607,24 +5566,6 @@ function billing.products_propagate_tier_group()
           WHERE merchant_id = NEW.merchant_id AND product_id = NEW.id AND deleted_at IS NULL;
       END IF;
       RETURN NULL;
-  END;
-  $function$
-
-function billing.queue_customer_message()
-  CREATE OR REPLACE FUNCTION billing.queue_customer_message()
-   RETURNS trigger
-   LANGUAGE plpgsql
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-  AS $function$
-  BEGIN
-      IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
-      INSERT INTO billing.customer_messages (merchant_id, customer_id, event_id, event_type, channel, status, attempts)
-      VALUES (NEW.merchant_id, NEW.customer_id, NEW.id, NEW.event_type, 'email', 'pending', 0)
-      ON CONFLICT (merchant_id, event_id, channel) DO NOTHING;
-      IF FOUND THEN
-          PERFORM pg_notify('openrails_customer_messages', TG_TABLE_SCHEMA);
-      END IF;
-      RETURN NEW;
   END;
   $function$
 
@@ -6724,7 +6665,6 @@ function billing.subscriptions_row_version()
   DECLARE
       unchanged billing.subscriptions := NEW;
   BEGIN
-      unchanged.due_recheck_at := OLD.due_recheck_at;
       unchanged.facts_authority := OLD.facts_authority;
       unchanged.row_version := OLD.row_version;
       unchanged.destructive_run_class := OLD.destructive_run_class;

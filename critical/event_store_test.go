@@ -189,7 +189,7 @@ func noStorePurchases(t *testing.T) {
 	stopped, err := a.alpha.StopRunningCharge(ctx, charge.Reference, billing.StopRunningChargeParams{StoppedAt: ptr(a.clock.Now())})
 	require.NoError(t, err)
 	require.EqualValues(t, 900, stopped.ChargedAmount)
-	require.EqualValues(t, 900, stopped.PostedAmount)
+	require.Zero(t, stopped.PostedAmount, "a stop posts nothing; the daily posting takes it")
 }
 
 // A running charge leaves owed what the balance does not cover, and a usage
@@ -203,7 +203,8 @@ func noStoreUsageInvoices(t *testing.T) {
 	a.clock.Advance(2 * time.Hour)
 	stopped, err := a.alpha.StopRunningCharge(ctx, charge.Reference, billing.StopRunningChargeParams{StoppedAt: ptr(a.clock.Now())})
 	require.NoError(t, err)
-	require.EqualValues(t, 20_000_000, stopped.PostedAmount)
+	require.EqualValues(t, 20_000_000, stopped.ChargedAmount)
+	require.Zero(t, stopped.PostedAmount, "the bill's posting takes it")
 	fleet := startFleet(t, a.world)
 	a.clock.Advance(12 * time.Hour)
 	runUsageDue(t, fleet)

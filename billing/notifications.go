@@ -136,13 +136,11 @@ type NotificationData struct {
 	RecoveryAction   NotificationRecoveryAction `json:"recovery_action,omitempty"`
 
 	// A watched balance went low or ran out (balance_low, balance_depleted):
-	// what was available and owed in Currency as the crossing was seen, the
-	// effective low line, and when capacity reaches zero at the customer's
-	// burn rate (absent at rate zero).
-	AvailableAmount  *int64     `json:"available_amount,omitempty,string"`
-	OwedAmount       *int64     `json:"owed_amount,omitempty,string"`
-	LowBalanceAmount *int64     `json:"low_balance_amount,omitempty,string"`
-	RunwayEndsAt     *time.Time `json:"runway_ends_at,omitempty"`
+	// what was available and owed in Currency as the crossing was seen, and
+	// the low line it was judged at.
+	AvailableAmount  *int64 `json:"available_amount,omitempty,string"`
+	OwedAmount       *int64 `json:"owed_amount,omitempty,string"`
+	LowBalanceAmount *int64 `json:"low_balance_amount,omitempty,string"`
 
 	// Rail context on payment_method_failed. PSPID is the account a decline
 	// came from when the fact names no payment, invoice or subscription that

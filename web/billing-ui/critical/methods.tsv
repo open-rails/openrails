@@ -8,7 +8,7 @@ createInvoice	OR-UI-01,OR-UI-02,OR-UI-05	Exact unpaid invoice, real challenge-re
 getInvoice	OR-UI-01,OR-UI-05	Own invoice retains ID and frozen amount; other customer gets404.
 payInvoice	OR-UI-01	Real provider payment completes the original invoice at29970000 native units.
 getEntitlements	OR-UI-01	Paid purchase exposes only the selected library key under the requested prefix.
-setLowBalanceLine	OR-UI-01	Currency normalization and literal amount/runway persist into the real account read.
+setLowBalanceLine	OR-UI-01	Currency normalization and the literal amount persist into the real account read.
 getUsage	OR-UI-01	One real metered event returns20 native units and the authenticated customer identity.
 addPaymentMethod	OR-UI-02	External bank challenge yields a pending saved card; independent simple card can also be saved.
 listPaymentMethods	OR-UI-02,OR-UI-07	Saved IDs appear; unsupported Stripe deletion preserves them; NMI deletion removes its exact card.

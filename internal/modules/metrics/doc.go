@@ -29,7 +29,5 @@
 // succeeds. Each measure is
 // in the business or the ops group and says which way a change is good.
 // Funnels (attempts, purchases, rebills, payments) are one measure with an
-// outcome or kind dimension and rates over its slices. nmi_history_authorizations
-// comes from nmi_history_months and cannot separate first one-off sales from
-// retried rebills.
+// outcome or kind dimension and rates over its slices.
 package metrics

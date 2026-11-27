@@ -11,20 +11,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/destructive"
 	"io"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/destructive"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
@@ -1035,7 +1034,7 @@ func TestDeclaredAdminGrantImport(t *testing.T) {
 		native, err := a.alpha.CreateProductAccess(t.Context(), "native-staff", []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Reason: billing.GrantReasonStaff}})
 		require.NoError(t, err)
 		require.Len(t, native, 1)
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		// Purchase/subscription sources can share a textual id with a comp.

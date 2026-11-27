@@ -6,12 +6,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/alerting/alertjob"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -25,24 +22,6 @@ type (
 	HoldAlert    = alertjob.HoldAlert
 	FindingAlert = alertjob.FindingAlert
 )
-
-func queueFindingAlert(ctx context.Context, database *db.DB, tx pgx.Tx, merchantID, findingID uuid.UUID, severity reconcile.Severity, notifiedAt time.Time) error {
-	return alertjob.Queue(ctx, database, tx, merchantID, findingID, string(severity), notifiedAt)
-}
-
-// QueueRealerts commits the alerts of findings whose notification tx re-armed
-// and claimed.
-func (s *Service) QueueRealerts(ctx context.Context, tx pgx.Tx, claimed []gen.BillingReconciliationFinding) error {
-	for _, f := range claimed {
-		if f.NotifiedAt == nil {
-			return fmt.Errorf("re-alert of finding %s claimed no episode", f.ID)
-		}
-		if err := queueFindingAlert(ctx, s.db, tx, f.MerchantID, f.ID, reconcile.Severity(f.Severity), *f.NotifiedAt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 // Channels snapshots the destinations of a's alert: the alert email, and the
 // enabled alert webhooks. A finding's severity selects among them; one whose

@@ -64,15 +64,19 @@ func newStripeAccounts(t *testing.T, w *world, secrets ...string) *stripeAccount
 	return s
 }
 
-func (s *stripeAccounts) read(secret, path string) bool {
+func (s *stripeAccounts) read(secret, path string) bool { return s.count(secret, path) > 0 }
+
+// count is how often the account was asked for path.
+func (s *stripeAccounts) count(secret, path string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	n := 0
 	for _, p := range s.reads[secret] {
 		if p == path {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
 
 func stripePSP(account, secret string, archived bool) billing.PSPConfig {

@@ -17,11 +17,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// lowAt600 is a merchant amount line of 6.00 USD-units and no runway line:
-// a balance is low at or under 599.
+// lowAt600 is a merchant amount line of 600 USD-units: a balance is low at or
+// under 600.
 func lowAt600(w *world) {
 	m := cfgMerchant(w.cfg, "alpha")
-	m.MerchantSettings.BalanceNotices = &billing.BalanceNoticeSettings{RunwayHours: ptr(0), LowAmounts: []billing.BalanceNoticeAmount{{Currency: "USD", Amount: 600}}}
+	m.MerchantSettings.BalanceNotices = &billing.BalanceNoticeSettings{LowAmounts: []billing.BalanceNoticeAmount{{Currency: "USD", Amount: 600}}}
 	setCfgMerchant(&w.cfg, "alpha", m)
 }
 
@@ -154,9 +154,9 @@ func TestBalanceLooks(t *testing.T) {
 		w, fleet := setup(t)
 		customer, _ := watchedCustomer(t, w, fleet, 1000, nil)
 		require.Eventually(t, func() bool { return lowEvents(t, w, customer) == 0 && looks(t, fleet, customer) == 1 }, 5*time.Second, 20*time.Millisecond)
-		spend(t, w.alpha, customer, "above-the-line", 400)
-		require.Equal(t, 1, looks(t, fleet, customer), "usage leaving 600 crosses nothing")
-		balance(t, w.alpha, customer, 600, 400, 1000)
+		spend(t, w.alpha, customer, "above-the-line", 399)
+		require.Equal(t, 1, looks(t, fleet, customer), "usage leaving 601 crosses nothing")
+		balance(t, w.alpha, customer, 601, 399, 1000)
 		require.Zero(t, lowEvents(t, w, customer))
 	})
 	t.Run("OR-J25-S42/a-look-that-fails-is-taken-by-the-next-billing-pass", func(t *testing.T) {
@@ -243,41 +243,4 @@ func TestBalanceLooks(t *testing.T) {
 		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT next_check_at FROM "+watches+" WHERE customer_id = $1", customer.UUID()).Scan(&stored))
 		require.True(t, next.Equal(stored), "the pass looks no further at a watch no longer due: %s", stored)
 	})
-	t.Run("OR-J25-S44/the-burn-rate-reads-each-ended-quarter-hour-of-usage-history-once", func(t *testing.T) {
-		w, fleet := setup(t)
-		quarter := w.clock.Now().UTC().Truncate(15 * time.Minute).Add(15 * time.Minute)
-		advanceTo(w, quarter.Add(time.Minute))
-		customer, _ := watchedCustomer(t, w, fleet, 1000, nil)
-		spend(t, w.alpha, customer, "in-the-quarter", 300)
-		settled(t, fleet, customer)
-		// Low at 500, two minutes on: the quarter hour is still running.
-		advanceTo(w, quarter.Add(3*time.Minute))
-		spend(t, w.alpha, customer, "crossing-low", 200)
-		notified(t, w, customer)
-		settled(t, fleet, customer)
-		require.Equal(t, "0", balanceEventRate(t, w, customer, "balance.low"), "a quarter hour still running is not in the rate")
-		// Depleted once it ended: the rate takes all of it, once.
-		advanceTo(w, quarter.Add(16*time.Minute))
-		spend(t, w.alpha, customer, "crossing-depleted", 600)
-		require.Eventually(t, func() bool { return balanceEventRate(t, w, customer, "balance.depleted") != "" }, 5*time.Second, 20*time.Millisecond)
-		require.Equal(t, "500", balanceEventRate(t, w, customer, "balance.depleted"))
-	})
-}
-
-// balanceEventRate is the usage rate the customer's balance event of type
-// carried; "" before there is one.
-func balanceEventRate(t *testing.T, w *world, customer billing.CustomerID, eventType string) string {
-	t.Helper()
-	events, err := w.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{eventType}, Limit: 100})
-	require.NoError(t, err)
-	for _, e := range events.Events {
-		var body struct {
-			CustomerID string `json:"customer_id"`
-			Rate       string `json:"usage_rate_per_hour"`
-		}
-		if json.Unmarshal(e.Data, &body) == nil && body.CustomerID == customer.String() {
-			return body.Rate
-		}
-	}
-	return ""
 }

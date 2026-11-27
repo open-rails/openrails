@@ -11,8 +11,8 @@
 //   - state: one row per thing that exists.
 //
 // Row periods: subscription_status_transitions,
-// subscription_billing_changes, operation_log, payment_attempts,
-// rebill_cycles and nmi_history_months 25 months; instruction-only
+// subscription_billing_changes, operation_log, payment_attempts and
+// rebill_cycles 25 months; instruction-only
 // provider_intents 25 months after they last changed (the rest are
 // permanent); resolved reconciliation_findings 12 months; invoice_attempts that
 // never reached a provider 90 days, and unpaid closed invoices with none 397
@@ -21,7 +21,7 @@
 // notification_events, host_outbox and the event log 90 days; webhook_events
 // 90 days after completion; idempotency_keys and
 // solana_pay_references at expiry (after the 7-day watch);
-// user_destructive_reservations 24 hours; limit_windows a day after
+// customer_destructive_reservations 24 hours; limit_windows a day after
 // window_ends_at, 61 days once reached_at is set (lifetime and rate limits
 // stay; usage settled after a window ended counts toward none); leases with
 // their in-flight reports, and limit_adjustments, 61 days after the last

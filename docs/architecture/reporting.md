@@ -10,7 +10,7 @@ Reporting is the metrics engine and the merchant dashboard. The engine answers a
 - **Dimension**: a group-by and filter axis: a closed `Values` list, a `Parse` for typed ids (`product_id`, `price_id`, `customer`), or free text. A family may give a dimension its own values (`DimValues`): `outcome` and `kind` differ by measure, and `/schema` lists them per measure as `dim_values`. `time` groups by the query's `grain`.
 - **Family**: the source a leaf measure reads, such as `payments`, `mrr`, `mrr_flows`, `attempts`, `rebill_cycles`, `usage_charged` or `findings`. One statement runs per family a query touches.
 - **Range**: `{from, to}` as inclusive days in the merchant's accounting timezone or RFC 3339 `[from, to)`, `{last: "7d"}` (`Nd|Nw|Nm|Ny`, ending today there) or `{next: "12w"}` (starting today, for what is scheduled).
-- **Calendar**: days, weeks, months, quarters and years start at midnight in the merchant's `accounting.timezone` (UTC when unset). Every family groups its rows there (`date_trunc` with the zone), so a change of zone regroups the past too. Where clocks change at midnight, a day starts at its first instant (the transition), as PostgreSQL resolves it; the engine computes each period from its date (`calendarutil.DayStart`), never by moving a wall clock. A time cell is the bucket's start as a UTC instant and the result names the zone (`timezone`). Usage history is kept by UTC quarter hour; ClickHouse groups the quarter hours into the zone's days as it reads them, so a change of zone regroups it too, exactly in any zone (every UTC offset is a whole number of quarter hours). A family read from a daily rollup kept per UTC date (`Calendar`: network activity, webhook health, NMI history) groups each row as its own date, and the measure catalogue marks the measures reading one `utc_days`; the console says so on their titles. A zone PostgreSQL's zone database lacks opens `consistency.merchant_config.accounting_timezone` when the configuration loads, and the merchant's days are UTC's until it knows it.
+- **Calendar**: days, weeks, months, quarters and years start at midnight in the merchant's `accounting.timezone` (UTC when unset). Every family groups its rows there (`date_trunc` with the zone), so a change of zone regroups the past too. Where clocks change at midnight, a day starts at its first instant (the transition), as PostgreSQL resolves it; the engine computes each period from its date (`calendarutil.DayStart`), never by moving a wall clock. A time cell is the bucket's start as a UTC instant and the result names the zone (`timezone`). Usage history is kept by UTC quarter hour; ClickHouse groups the quarter hours into the zone's days as it reads them, so a change of zone regroups it too, exactly in any zone (every UTC offset is a whole number of quarter hours). A family read from a daily rollup kept per UTC date (`Calendar`: network activity, webhook health) groups each row as its own date, and the measure catalogue marks the measures reading one `utc_days`; the console says so on their titles. A zone PostgreSQL's zone database lacks opens `consistency.merchant_config.accounting_timezone` when the configuration loads, and the merchant's days are UTC's until it knows it.
 - **Grain**: `day`, `week`, `month`, `quarter`, `year`, or `auto`: day up to 45 days, week up to 26 weeks, then month. The result names the grain used.
 - **Plan**: a validated, compilable query (`metrics.Plan`).
 - **Compare**: `previous_period` runs the same plan over the preceding window of equal length, `previous_year` over the same window a year before.
@@ -51,7 +51,7 @@ Recurring measures read the MRR rollups ([MRR](mrr.md)), never `mrr_movements` o
 
 ## Ops view
 
-The `ops` group is operator signals, queryable but off the health overview, each with a finding at its threshold: `open_findings` (by `finding_group`: orphaned, freeloader, duplicate_coverage, other), `verification_pressure`, `verification_pressure_age_seconds`, `webhook_silence_age_seconds`, `webhook_rejects`, `webhook_drift_events`, `nmi_history_authorizations` (by `outcome`) and `entitled_customers`. The console's Ops › Signals page lays them out with missed renewals by `miss_reason`, and Ops › Findings counts open findings by group.
+The `ops` group is operator signals, queryable but off the health overview, each with a finding at its threshold: `open_findings` (by `finding_group`: orphaned, freeloader, duplicate_coverage, other), `verification_pressure`, `verification_pressure_age_seconds`, `webhook_silence_age_seconds`, `webhook_rejects`, `webhook_drift_events` and `entitled_customers`. The console's Ops › Signals page lays them out with missed renewals by `miss_reason`, and Ops › Findings counts open findings by group.
 
 ## Health overview
 
@@ -84,9 +84,9 @@ The engine owns no table and runs no job. It reads `payments`, `invoice_lines`,
 `limit_windows`, `product_access`, `product_entitlements`,
 `ledger_transfers`, `ledger_accounts`, `webhook_health`, `webhook_health_daily`,
 `psps`, `custodians`, `payment_attempts`, `payment_method_versions`,
-`provider_intents`, `rebill_cycles`, `nmi_history_months`,
+`provider_intents`, `rebill_cycles`,
 `reconciliation_findings`, `disputes`, `fraud_reports` and `network_activity_daily`; the usage families read the event store's usage history, priced as usage reports price it (`metrics.Service.runUsage`). A measure sees only what those tables still retain:
-payment attempts, status transitions, rebill cycles and NMI history 25 months;
+payment attempts, status transitions and rebill cycles 25 months;
 usage history for good (by UTC quarter hour); webhook health days 13 months; resolved
 findings 12 months.
 

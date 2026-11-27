@@ -451,7 +451,8 @@ func TestLimitDecisions(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, false, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.BillingPolicies = []billing.BillingPolicy{{Name: "team", OutstandingCapAmount: 20_000_000,
-				SpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 15_000_000, Currency: "USD"}}}}
+				SpendWindows:    []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 15_000_000, Currency: "USD"}},
+				BadSpendWindows: []billing.BudgetWindow{{Key: "grace", WindowSeconds: 3600, Limit: 1, Currency: "USD"}}}}
 			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "team"}}
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})
@@ -473,18 +474,18 @@ func TestLimitDecisions(t *testing.T) {
 		require.Equal(t, billing.DenyInsufficientCredit, set.BalanceDenyCode)
 		require.EqualValues(t, 15_000_000, window.Remaining)
 
-		// $20 owed takes the whole line.
-		_, err := a.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "owed", CustomerID: customer, Currency: "USD", RatePerHour: 20_000_000})
-		require.NoError(t, err)
-		a.clock.Advance(time.Hour)
-		_, err = a.alpha.StopRunningCharge(t.Context(), "owed", billing.StopRunningChargeParams{})
-		require.NoError(t, err)
+		// $20 owed takes the whole line: a failure past its grace is owed at
+		// once.
+		failed := usageInput(customer, "owed", 0)
+		failed.Outcome, failed.Amount = billing.UsageFailed, ptr(int64(20_000_001))
+		settleUsage(t, a.alpha, newLease(), numbered(1, failed)...)
+		require.EqualValues(t, 20_000_000, owed(t, a.alpha, customer))
 		set, _ = view()
 		require.Zero(t, set.CreditLine)
 		require.Equal(t, billing.DenyOutstandingCapReached, set.BalanceDenyCode)
 
 		// The customer's own $40 overrides the cap.
-		_, err = a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 40_000_000}}})
+		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 40_000_000}}})
 		require.NoError(t, err)
 		set, window = view()
 		require.EqualValues(t, 20_000_000, set.CreditLine, "$40 less the $20 owed")

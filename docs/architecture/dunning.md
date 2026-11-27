@@ -91,9 +91,11 @@ admitted ([subscriptions](subscriptions.md)); an expired wait ends
 (`ExpireAwaitingMethod`), and so does a case the advice deferred to its renewal
 (`EndAdviceDeferred`); a stale row parks `unverified` (`ApplyLocalUnknown`);
 or the provider is asked by id (`AskProviderPastGrace`). A second scan asks about
-provider-billed renewals 48 hours overdue (`AskProviderOverdueRenewal`). A row
-whose processing fails raises `life.due_pass.refused`; every row left unchanged
-gets `due_recheck_at` from `deferDue`.
+provider-billed renewals unpaid past their rail's deadline, 24 hours for an NMI
+schedule and 48 for Stripe and CCBill (`AskProviderOverdueRenewal`). A row
+whose processing fails raises `life.due_pass.refused`; a row left unchanged is
+due again at the next pass, and one still due a day past its due day is in the
+pass's overdue report (`openrails_job_progress`).
 
 **Customer retries.** `POST /v1/me/subscriptions/{id}/retry-now` (NMI
 schedules) and paying an engine renewal invoice with the subscription's card pass
@@ -117,7 +119,7 @@ customer. Admission refuses `delinquent_unpaid_invoice` only if `IsDelinquent`'s
 live recompute agrees. Nothing is revoked or canceled.
 
 Tables: `subscriptions` (`retry_attempts`, `transient_retries`,
-`next_retry_at`, `grace_ends_at`, `dunning_policy`, `due_recheck_at`), `invoices`
+`next_retry_at`, `grace_ends_at`, `dunning_policy`), `invoices`
 (`next_collection_attempt_at`), `payment_attempts`, `rebill_cycles`,
 `customer_delinquency`, `provider_intents` and `reconciliation_findings`.
 
@@ -173,7 +175,7 @@ Staff reads need `merchant:customer:read`, write-offs
 `merchant:customer:manage`, policy settings `merchant:config:manage`
 (`Route.Needs`). `retry-now` needs the customer acting in person
 (`actionCustomer`) and finds only that customer's subscription
-(`GetUserSubscriptionByID`).
+(`GetCustomerSubscriptionByID`).
 
 Checks:
 - `ListDueDunningMerchants`, `ListOverdueRenewalMerchants`, `ListDueDelinquency`
@@ -207,11 +209,12 @@ Due work reads partial indexes in bounded cursor pages:
 `subscriptions_grace_ends_at_idx`, `subscriptions_next_retry_at_rail_idx`,
 `subscriptions_current_period_ends_at_engine_due_global_idx`,
 `invoices_usage_collection_due_idx` and `customer_delinquency_due_idx`. A row left
-unchanged leaves the due set until `due_recheck_at`.
+unchanged stays due: the hourly pass takes it again, and a day past its due day
+the pass reports it overdue.
 
 Checks:
-- `deferDue` waits half the overdue age, clamped to 1 minute to 1 hour.
-- Scenarios: OR-J26-S02, OR-J26-S40 and OR-J04-S45.
+- Scenarios: OR-J26-S02, OR-J26-S40, OR-J04-S45 and OR-J16-S31 (a held row is
+  taken again by every pass and reported a day overdue).
 
 ### 8. Abuse protection
 `retry-now` is in the `subscriptions` rate-limit bucket (`subscribe` limit, 20
@@ -233,7 +236,7 @@ Checks:
 ## Tests
 
 Journeys:
-- OR-J16-S01 to S05 (schedule), S30 to S32, S70, S71 (provider-seen declines, due work), S40 to S43 (do-not-retry), S50 to S53 (policy limits), S54, S55 (a failure's window is its own policy's, for its cycle).
+- OR-J16-S01 to S05 (schedule), S30 to S32, S70 to S72 (provider-seen declines, due work), S40 to S43 (do-not-retry), S50 to S53 (policy limits), S54, S55 (a failure's window is its own policy's, for its cycle).
 - OR-J26-S01 to S04, S30, S40, S50, S51, S53, S55, S59 (usage collection, delinquency); the rest of J26 is in [usage billing](usage-billing.md).
 - Related: OR-J04-S42 (`access_while_renewal_held: suspend`), OR-J04-S43, S45,
   S70, and OR-J12-S08 to S11 (expired-card refresh).

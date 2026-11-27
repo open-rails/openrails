@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/billingfact"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -179,7 +180,7 @@ func EvaluateTx(ctx context.Context, d *db.DB, customerID uuid.UUID, currency st
 	if err != nil {
 		return Transition{}, false, err
 	}
-	if err := q.NotifyOverdueInvoices(ctx, gen.NotifyOverdueInvoicesParams{MerchantID: tid.UUID(), CustomerID: customerID, Currency: currency, Now: now}); err != nil {
+	if err := notifyOverdue(ctx, q, tid.UUID(), customerID, currency, now); err != nil {
 		return Transition{}, false, fmt.Errorf("notify overdue invoices: %w", err)
 	}
 	// "" = no row before: a first sighting already current is not a transition.
@@ -311,6 +312,30 @@ func notify(ctx context.Context, database *db.DB, t Transition, exposure Exposur
 		CreatedAt:  now,
 	}); err != nil {
 		return fmt.Errorf("record delinquency notification: %w", err)
+	}
+	return nil
+}
+
+// notifyOverdue tells the customer once about each of its open usage invoices
+// in the currency past its due date: the notice's id derives from the
+// invoice's, so a later evaluation records none.
+func notifyOverdue(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string, now time.Time) error {
+	overdue, err := q.ListOverdueUsageInvoices(ctx, gen.ListOverdueUsageInvoicesParams{MerchantID: merchantID, CustomerID: customerID, Currency: currency, Now: now})
+	if err != nil {
+		return err
+	}
+	for _, o := range overdue {
+		due, dueAt := o.AmountDue, o.DueAt.UTC()
+		data, err := json.Marshal(billing.NotificationData{InvoiceID: billing.InvoiceID(o.ID), AmountDue: &due, Currency: catalog.Currency(currency), DueAt: &dueAt})
+		if err != nil {
+			return err
+		}
+		if _, err := billingfact.Record(ctx, q, billingfact.Fact{
+			ID: uuidutil.ChildV7(o.ID, string(models.NotificationInvoiceOverdue)), MerchantID: merchantID, CustomerID: customerID,
+			EventType: string(models.NotificationInvoiceOverdue), Data: data, CreatedAt: now,
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -324,7 +324,7 @@ A card checkout can keep CCBill back as a fallback ([invoices](#invoices-and-che
 
 Solana is self-custody: `treasury` is the wallet every payment lands in, and OpenRails never holds its key. One-time payments use Solana Pay; subscriptions use the on-chain Subscriptions Delegation Program, pulled each period by the deployment's crankers (`solana.crankers`, or `Config.Solana`), which pay the fees and never receive money. Without a cranker, one-time payments work and recurring Solana prices are refused. `rpc_url`, a secret, is tried before the network's public endpoint. Prices are in USD and quoted in the merchant's accepted tokens at purchase; devnet and testnet fall back to $1.00 parity when the price feed is unavailable.
 
-**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout` (`embed_origins`, and `billing_fields`, [what a card form asks for](#invoices-and-checkout)), `provider_refund_access`, `fraud_warning_refund`, `delegated_invoker_wasted_spend_limits`, `currencies` and `accounting.timezone` (the IANA zone whose days and months MRR reports and usage history group in, and where usage posts at the end of each day; default UTC). Rollups and usage history are kept in UTC quarter hours, so a change regroups every day and month, past ones too, exactly in any zone. Posted books keep their effective instants and never change. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
+**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices` (`low_amounts`: the default low-balance amount per currency), `checkout` (`embed_origins`, and `billing_fields`, [what a card form asks for](#invoices-and-checkout)), `provider_refund_access`, `fraud_warning_refund`, `delegated_invoker_wasted_spend_limits`, `currencies` and `accounting.timezone` (the IANA zone whose days and months MRR reports and usage history group in, and where usage posts at the end of each day; default UTC). Rollups and usage history are kept in UTC quarter hours, so a change regroups every day and month, past ones too, exactly in any zone. Posted books keep their effective instants and never change. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
 
 `psp_routing` picks one PSP before a purchase is attempted: ordered rules (`currency`, `product`, `price`, `mode`), first match wins, and its `prefer` list ranks the only PSPs it allows. Without a matching rule: the merchant's `charge_psps` (else stripe, nmi), then ccbill, solana, the first that can serve the price; a provider price always uses its own PSP. Fallback is pre-charge only: a decline never moves to a second processor.
 
@@ -424,7 +424,7 @@ A price id is `product-key:price-key:v1` (`billing.ParsePriceID`). Edits are mer
 
 ## Invoices and checkout
 
-Every bill is an invoice: a purchase, a renewal OpenRails or a provider runs, a usage bill. An invoice's lines are priced and frozen; its payments are the money that moved. `status` is `open`, `processing`, `complete`, `canceled`, `expired`, `void` (a renewal left unowed, or a voided usage invoice) or `uncollectible` (a usage invoice written off); `collection_owner` says who collects (`engine`, `nmi_schedule`, `provider`).
+Every bill is an invoice: a purchase, a renewal OpenRails or a provider runs, a usage bill. An invoice's lines are priced and frozen; its payments are the money that moved. `status` is `open`, `processing`, `complete`, `canceled`, `expired`, `void` (a renewal left unowed, or a voided usage invoice) or `uncollectible` (a usage invoice written off); `collection_owner` says who collects (`engine`, `nmi_schedule`, `provider`). Only a customer's own purchase (`origin: customer`) expires, a day after it is made, as a Stripe Checkout session does; a merchant invoice, a renewal and a usage bill never do. The customer's `GET /v1/me/invoices` leaves out purchases that expired unpaid; the merchant's list keeps them.
 
 **In the browser** the signed-in customer buys with billing-ui. Your server reads
 the products it sells (`ListProducts`, `billing.BuyerPrices`) into its page:
@@ -493,8 +493,7 @@ or the redirect to `success_url`.
   [standalone.md](standalone.md#configuration-reference)).
 - `success_url` and `cancel_url` may name any https site; `{INVOICE_ID}` becomes the
   invoice's id. The URL lasts an hour (30 minutes to 24 hours with `ExpiresAt`);
-  an invoice with no expiry of its own expires with it. Ordinary invoice reads show
-  `pay_url: null`.
+  the invoice stays open after it. Ordinary invoice reads show `pay_url: null`.
 - `SavedPaymentMethods` offers the customer's saved cards; set it only when your
   site signed them in. `Embedded: true` makes a URL your registered sites frame.
 - The page takes cards in the PSP's own fields, runs a bank's challenge in place,
@@ -508,7 +507,7 @@ Paying in the customer's own API (`POST /v1/me/invoices` with `payment`, or `/{i
 | Method | Use it to |
 |---|---|
 | `PreviewInvoice` | price lines, with refusals and the `payment_options` that can take them |
-| `CreateInvoice` | an unpaid invoice for a customer, open 30 days unless `ExpiresAt`; only that customer pays it, signed in or through `pay_url`; takes `idempotencyKey` |
+| `CreateInvoice` | a bill for a customer: open until paid or canceled, it never expires; only that customer pays it, signed in or through `pay_url`; takes `idempotencyKey` |
 | `GetInvoice`, `ListInvoices` | read invoices: filter by customer, price, subscription, `origin` (`customer`, `merchant`, `subscription`, `usage`), status, overdue |
 | `GetInvoicePaymentAttempt` | the outcome of one pay attempt by its idempotency key, after a lost response |
 | `CancelInvoice` | withdraw an open invoice `CreateInvoice` made (settle an unresolved payment first) |
@@ -842,7 +841,7 @@ Usage needs the deployment's event store (ClickHouse). Without one `GET /v1/conf
 
 Each item is one event in the event store, written once the sync commits and before it answers: once it answers, every view and limit reads it, and the balance holds its price as pending. A resend inserts nothing twice. While the store is out of reach a sync answers `503 service_unavailable` and settles nothing; resend it. Should the store fail after the commit, the usage is still charged but missing from history and limits.
 
-Until it posts, usage is pending: `GetBalance`'s `PendingAmount` at the prices it was taken at, already off `AvailableAmount`, so gates refuse as if it had posted. It posts to the ledger once a day, after the day ends in the merchant's `accounting.timezone`, before a usage invoice, before a credit lot's expiry, revocation or refund, and before an invoice is paid from the balance; a top-up or grant posts nothing. A posting takes, per pricing period, the price of the period's whole usage before it, less what earlier postings took: one deduction per credit lot drawn, then owed for the rest. So a tiered price is the price of the period's total however its usage arrived, and late usage posts with the next posting. A volume price that falls as the period grows credits the difference back at the posting that takes the usage. Read what was used with `GET /v1/me/usage` (staff: `GetUsage`), the posting on `ListBalanceTransactions` (its period, `through`, and what it added per meter), or `QueryMetrics`.
+Until it posts, usage is pending: `GetBalance`'s `PendingAmount` at the prices it was taken at, already off `AvailableAmount`, so gates refuse as if it had posted. It posts to the ledger once a day, after the day ends in the merchant's `accounting.timezone`, before a usage invoice, before a credit lot's expiry, revocation or refund, and before an invoice is paid from the balance; a top-up or grant posts nothing. A posting takes, per pricing period, the price of the period's whole usage before it, less what earlier postings took, and what running charges accrued since they last posted, as one receipt: one deduction per credit lot drawn, then owed for the rest. So a tiered price is the price of the period's total however its usage arrived, and late usage posts with the next posting. A volume price that falls as the period grows credits the difference back at the posting that takes the usage. Read what was used with `GET /v1/me/usage` (staff: `GetUsage`), the posting's receipt on `ListBalanceTransactions` (`usage`: `through`, its `lines` per period and meter, its running `charges`), or `QueryMetrics`.
 
 **Usage over time.** `GET /v1/me/usage` totals a window by event type, invoker or meter (`group_by`), on the days of `timezone` (any IANA zone; the merchant's `accounting.timezone` when absent). `GET /v1/me/usage/series` answers the same groups per bucket: `interval` is `hour`, `day`, `week` (from Monday) or `month`, and the window widens to whole buckets of the zone, each named by its local start as a UTC instant (`starts_at`), empty ones included. Buckets start at each day's first instant, so a day the clocks change has 23 or 25 hours. A series of more than 1,000 buckets (`billing.MaxUsageBuckets`; a month by hour fits) is `400 too_many_buckets`. Staff read both with `GetUsage` and `GetUsageSeries`. Each item counts at the price it was taken at, failed usage's charge included; where a volume tier's price falls as the period grows, the fall is the `discount` of the report and of its bucket, so amounts less discounts are what posts. History is kept by event type and meter for as long as the deployment runs; it does not keep the invoker, so `group_by=invoker` reads the raw events, kept 90 days, and a window that starts before them is `400 usage_events_expired`.
 
@@ -857,11 +856,17 @@ Declined collection follows the renewal retry schedule; `send_invoice` invoices
 are never charged.
 
 A **running charge** bills a rate per hour from start to stop: a rented machine, a
-reserved seat. The `reference` owns replay. Nothing is written while it runs: the
-accrued amount is computed on read and posts when it stops and once a day.
+reserved seat. The `reference` owns replay. Nothing is written while it runs, and a
+stop only records its instant: the accrued amount is computed on read
+(`GetBalance`'s `AccruedAmount`, the charge's `charged_amount`) and posts with the
+day's usage, after the day ends in the merchant's `accounting.timezone`, or with
+an earlier posting; `posted_amount` is what posted.
 `GetBalance` answers `AvailableAmount`, the accrual rate and `DepletesAt`, so a
-page can count down without reading again; `balance_notices` and per-customer
-low-balance lines tell you when a balance runs low.
+page can count down without reading again. `balance.low` is sent once what the
+customer may spend is at or under its line: its own amount (`low_balance_lines`,
+or `PUT /v1/me/low-balance-lines/{currency}`), else the merchant's
+`balance_notices.low_amounts` for the currency, else none. `balance.depleted`
+is always sent at zero capacity, exactly when a running charge brings it there.
 
 | Method | Use it to |
 |---|---|

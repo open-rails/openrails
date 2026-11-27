@@ -12,52 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const claimPendingCustomerMessages = `-- name: ClaimPendingCustomerMessages :many
-UPDATE billing.customer_messages m
-SET status = 'queued', updated_at = $1::timestamptz
-FROM (
-    SELECT p.merchant_id, p.id FROM billing.customer_messages p
-    WHERE p.status = 'pending'
-    ORDER BY p.created_at, p.merchant_id, p.id
-    LIMIT $2::int
-    FOR UPDATE SKIP LOCKED
-) due
-WHERE m.merchant_id = due.merchant_id AND m.id = due.id
-RETURNING m.merchant_id, m.id
-`
-
-type ClaimPendingCustomerMessagesParams struct {
-	Now   time.Time
-	Batch int32
-}
-
-type ClaimPendingCustomerMessagesRow struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-// CROSS-MERCHANT: the oldest pending messages, marked queued. SKIP LOCKED
-// hands each to one dispatcher, whose transaction queues its send job.
-func (q *Queries) ClaimPendingCustomerMessages(ctx context.Context, arg ClaimPendingCustomerMessagesParams) ([]ClaimPendingCustomerMessagesRow, error) {
-	rows, err := q.db.Query(ctx, claimPendingCustomerMessages, arg.Now, arg.Batch)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ClaimPendingCustomerMessagesRow
-	for rows.Next() {
-		var i ClaimPendingCustomerMessagesRow
-		if err := rows.Scan(&i.MerchantID, &i.ID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const countCustomerMessagesSince = `-- name: CountCustomerMessagesSince :one
 SELECT count(*) FROM billing.customer_messages
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND id <> $3::uuid

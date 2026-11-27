@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/billingfact"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -102,7 +103,7 @@ func (s *Service) agreements(ctx context.Context, customer billing.CustomerID, r
 	}
 	subs := map[uuid.UUID]billing.Subscription{}
 	if len(subIDs) > 0 {
-		page, err := s.rt.UserSubscriptionService.ListUserSubscriptions(ctx, customer.String(), subscriptions.GetSubscriptionsFilters{IDs: subIDs}, billing.PageRequest{Limit: len(subIDs)})
+		page, err := s.rt.CustomerSubscriptionService.ListCustomerSubscriptions(ctx, customer.String(), subscriptions.GetSubscriptionsFilters{IDs: subIDs}, billing.PageRequest{Limit: len(subIDs)})
 		if err != nil {
 			return nil, err
 		}
@@ -227,7 +228,7 @@ func (s *Service) revokeRecurring(ctx context.Context, customer billing.Customer
 			return nil, err
 		}
 	}
-	page, err := s.rt.UserSubscriptionService.ListUserSubscriptions(ctx, customer.String(), subscriptions.GetSubscriptionsFilters{IDs: []uuid.UUID{sub.ID}}, billing.PageRequest{Limit: 1})
+	page, err := s.rt.CustomerSubscriptionService.ListCustomerSubscriptions(ctx, customer.String(), subscriptions.GetSubscriptionsFilters{IDs: []uuid.UUID{sub.ID}}, billing.PageRequest{Limit: 1})
 	if err != nil || len(page.Items) == 0 {
 		return nil, errors.Join(err, errors.New("revoked agreement: subscription not found"))
 	}
@@ -308,10 +309,11 @@ func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.Custom
 		if err != nil {
 			return err
 		}
-		return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
+		_, err = billingfact.Record(ctx, q, billingfact.Fact{
 			ID:         uuidutil.DerivedV7(uuidutil.TimeOf(m.ID), uuidutil.DeterministicNamespace, uuidutil.Name(string(models.NotificationAgreementRevoked), mid.String(), m.ID.String())),
 			MerchantID: mid.UUID(), CustomerID: customer.UUID(), EventType: string(models.NotificationAgreementRevoked), Data: raw, CreatedAt: now,
 		})
+		return err
 	})
 	if err != nil || billed == nil {
 		return nil, err
@@ -392,10 +394,10 @@ func (s *Service) CancelSubscriptionForCustomer(ctx context.Context, customer bi
 // expiry when the rail supports a cancellation undo window.
 func (s *Service) cancelForCustomer(ctx context.Context, customer billing.CustomerID, sub *models.Subscription, reason string) error {
 	if sub.CollectionPolicy != models.CollectionPolicyEngine {
-		if s.rt.UserSubscriptionService == nil {
+		if s.rt.CustomerSubscriptionService == nil {
 			return fmt.Errorf("user subscription service unavailable")
 		}
-		return s.rt.UserSubscriptionService.CancelUserSubscription(ctx, customer.String(), sub.ID, reason)
+		return s.rt.CustomerSubscriptionService.CancelCustomerSubscription(ctx, customer.String(), sub.ID, reason)
 	}
 	if s.rt.SubscriptionLifecycleService == nil {
 		return fmt.Errorf("subscription lifecycle service unavailable")

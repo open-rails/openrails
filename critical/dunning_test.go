@@ -3,6 +3,7 @@
 package critical_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -300,7 +301,7 @@ func TestDunning(t *testing.T) {
 		require.NotNil(t, dunned.Dunning)
 		require.NotNil(t, dunned.Dunning.NextRetryAt, "a dunned decline schedules its retry")
 	})
-	t.Run("OR-J16-S31/held-awaiting-method-expiry-waits-for-its-recheck", func(t *testing.T) {
+	t.Run("OR-J16-S31/held-awaiting-method-expiry-is-taken-by-every-pass-and-a-day-held-is-overdue", func(t *testing.T) {
 		a, p, sub := purchasedMembership(t, 7*24)
 		due := *sub.CurrentPeriodEndsAt
 		p.core.SetDecline("4242", "lost_card")
@@ -309,25 +310,42 @@ func TestDunning(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
+		var progress func(context.Context) error
+		for _, probe := range a.engine.Probes() {
+			if probe.Name == "openrails_job_progress" {
+				progress = probe.Check
+			}
+		}
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		waiting := subscriptionState(t, a, sub.ID, "awaiting_method")
-		a.clock.Advance(waiting.Dunning.FinalRetryAt.Sub(a.clock.Now()))
+		expires := *waiting.Dunning.FinalRetryAt
 		held := func() billing.Finding {
 			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.terminal_outcome.held"})
 			require.NoError(t, err)
 			require.Len(t, findings.Items, 1)
 			return findings.Items[0]
 		}
-		// The kill switch is off: the expiry is held, and not retried every pass.
+		// The kill switch is off: the expiry is held, and every pass takes it
+		// again, however soon after the last.
+		a.clock.Advance(expires.Add(2 * time.Hour).Sub(a.clock.Now()))
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		seen := held().LastSeenAt
+		a.clock.Advance(30 * time.Minute)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		require.Equal(t, seen, held().LastSeenAt, "a held expiry leaves the due pass until its recheck")
+		require.True(t, held().LastSeenAt.After(seen), "the next pass takes the held expiry again")
 		subscriptionState(t, a, sub.ID, "awaiting_method")
+		// Held a day past its due day, it is the pass's overdue work.
+		a.clock.Advance(expires.Truncate(24 * time.Hour).Add(49 * time.Hour).Sub(a.clock.Now()))
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		err := progress(t.Context())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "a day overdue")
+		require.Contains(t, err.Error(), "openrails.dunning")
 		enableLifecycleMaintenance(t, a)
 		a.clock.Advance(time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		subscriptionState(t, a, sub.ID, "canceled")
+		require.NotContains(t, fmt.Sprint(progress(t.Context())), "openrails.dunning", "the clean pass clears it")
 	})
 	t.Run("OR-J16-S32/due-pass-queues-an-nmi-retry-without-waiting-on-the-gateway", func(t *testing.T) {
 		a, p, sub := nmiMembership(t)
@@ -339,6 +357,8 @@ func TestDunning(t *testing.T) {
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		// The verifier reads the overdue renewal NMI skipped and collects it.
+		subscriptionState(t, a, sub.ID, "past_due")
 		hold := p.core.Hold(func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/transact.php") }, nmimock.HoldRequest)
 		defer hold.Release()
 		runRegistered(t, fleet, "openrails.billing_pass", 1)

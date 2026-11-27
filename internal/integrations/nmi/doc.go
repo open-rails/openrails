@@ -50,9 +50,9 @@
 // convergence, which re-reads NMI. An unknown live schedule is adopted
 // through the billing import or parked (price_unmapped, customer_unlinked,
 // product_held, import_owned). Unverified schedules are read in batches of 50;
-// an operator refresh reads in bulk above 200. nmi_history_months holds a
-// daily read of 25 months of transaction reports, the source of `openrails nmi
-// decline-report`.
+// an operator refresh reads in bulk above 200. `openrails nmi decline-report`
+// reads an account's transaction reports for the window an operator names
+// (DeclineHistory).
 //
 // The Query API's start_date and end_date select a transaction by its last
 // change, which a settlement, refund or void moves, not by when it was made.

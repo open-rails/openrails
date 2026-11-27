@@ -60,8 +60,7 @@ func Attach(ctx context.Context, q *gen.Queries, origin string, mid billing.Merc
 // than replaying a cached response, and ordinary invoice reads never call it.
 func ReplayURL(ctx context.Context, q *gen.Queries, origin string, invoice gen.BillingInvoice, now time.Time) (string, error) {
 	if origin == "" || invoice.Origin != string(billing.InvoiceOriginMerchant) || invoice.Status != string(billing.InvoiceOpen) ||
-		invoice.PayUrlExpiresAt == nil || !invoice.PayUrlExpiresAt.After(now) ||
-		invoice.ExpiresAt != nil && !invoice.ExpiresAt.After(now) {
+		invoice.PayUrlExpiresAt == nil || !invoice.PayUrlExpiresAt.After(now) {
 		return "", nil
 	}
 

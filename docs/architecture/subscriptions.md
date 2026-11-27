@@ -49,13 +49,7 @@ while nothing is sent. An NMI charge sent but still unresolved keeps access
 under either policy. Payment supersedes that grace; a decline follows
 `access_during_dunning`; proven nonexecution restores the held-renewal allowance.
 
-**Provider-owned renewal.** Webhooks wake `openrails.subscription_converge`,
-which applies the provider's state. `openrails.rebill_watch` reads NMI schedules
-past `NMIRebillDeadline` and collects a proven skip (`CollectSkippedRenewal`).
-The due pass moves a provider-billed renewal still unpaid 48 hours
-(`reconcile.PeriodGrace`) past its period to `unverified` and reads it by id
-(`AskProviderOverdueRenewal`). Solana renewals are the cranker's pulls
-([payment providers](payment-providers.md)).
+**Provider-owned renewal.** Webhooks wake `openrails.subscription_converge`, which applies the provider's state. The due pass moves a provider-billed renewal still unpaid past its rail's deadline to `unverified`, access kept (`AskProviderOverdueRenewal`): 24 hours for an NMI schedule (`reconcile.NMIRebillDeadline`), 48 for Stripe and CCBill (`reconcile.PeriodGrace`). The `Verifier` reads it by id; an NMI cycle that read leaves with no attempt is decided from NMI's records of it, and a proven skip is collected (`CollectSkippedRenewal`). Solana renewals are the cranker's pulls ([payment providers](payment-providers.md)).
 
 **Cancel and resume.** Customers cancel at period end with a 4–500 character reason (`Service.CancelSubscriptionForCustomer`); staff use `AdminSubscriptionService.CancelSubscription` (`revoke_access`, `account_deletion`). Access runs to the boundary unless immediate or a chargeback; any provider stop is an operation. An NMI delete waits until 48 hours before the rebill (`NMIDeferredDeleteAt`), a system cancel 24 hours, never later than 48 hours before the rebill (`SystemDeleteCoolingOff`); a card renewal in flight does not block cancellation. A later successful charge grants its paid period while the subscription stays canceled; an immediate access revoke refunds the charge instead. A submitted Solana renewal still refuses cancellation (`payment_in_progress`). `Resumable` allows undoing a non-merchant cancel (engine, Solana: the customer's own; never a provider's or an abandoned start) on a reversible rail in the paid period; a Stripe resume is a `stripe_resume_subscription` operation committed with it, refused before anything commits when Stripe cannot be told now (provider writes off, Stripe not configured, or a key that cannot write). A Stripe cancel or resume supersedes the opposite one not yet sent, and waits, unattempted, while an earlier one of its subscription is in flight or unresolved; each is ordered by when it was inserted under the subscription's row lock, so Stripe ends as the last one committed. A pending resume keeps a pull from reading Stripe's standing `cancel_at_period_end` as a new portal cancel, and a pending cancel keeps one from reading its absence as a portal resume.
 
@@ -151,7 +145,7 @@ Checks:
 
 ### 7. Work scales with activity
 
-The due pass reads partial indexes on due instants ([dunning](dunning.md)), pages 500 merchants and defers an unchanged row (`due_recheck_at`). Operations wake at `next_attempt_at`; webhooks coalesce.
+The due pass reads partial indexes on due instants ([dunning](dunning.md)) and pages 500 merchants; a row it leaves unchanged is due again at the next hourly pass. Operations wake at `next_attempt_at`; webhooks coalesce.
 
 Checks:
 - `ListDueDunningMerchants` and `ListDueDunningSubscriptions` read due instants.
@@ -161,7 +155,7 @@ Checks:
 
 `/v1/me/subscriptions` writes share the `subscribe` bucket (20 per minute, 64
 KiB, captcha when configured; [limits](../standalone.md#abuse-limits)). Customer cancels spend
-the merchant-wide budget (`destructive.NewUserActionLimiter`). `retry-now` passes
+the merchant-wide budget (`destructive.NewCustomerActionLimiter`). `retry-now` passes
 the card-testing ledger; `AdminOperationOffChannel` caps staff changes.
 
 Checks:

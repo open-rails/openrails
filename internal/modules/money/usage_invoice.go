@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/billingfact"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -89,10 +90,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, customer i
 		}
 		// Usage is owed as it accrued, and running charges through the
 		// window's end as far as it has come, before the window is billed.
-		if _, err := s.WithDatabase(d).at(now).postEverything(ctx, q, merchantID, customerID, cur, usagePostingBilling); err != nil {
-			return err
-		}
-		if _, err := postRunningChargesThrough(ctx, q, merchantID, customerID, cur, earlier(pto, now), now); err != nil {
+		if _, err := s.WithDatabase(d).at(now).postEverything(ctx, q, merchantID, customerID, cur, earlier(pto, now), usagePostingBilling); err != nil {
 			return err
 		}
 		// The invoice bills the window's owed items; its period runs from where
@@ -173,7 +171,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, customer i
 			if err != nil {
 				return err
 			}
-			if err := q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
+			if _, err := billingfact.Record(ctx, q, billingfact.Fact{
 				ID:         uuidutil.DerivedV7(uuidutil.TimeOf(invoice.ID), uuidutil.DeterministicNamespace, uuidutil.Name("order_due", merchantID.String(), invoice.ID.String())),
 				MerchantID: merchantID, CustomerID: customerID,
 				EventType: string(models.NotificationInvoiceDue), Data: data, CreatedAt: now,

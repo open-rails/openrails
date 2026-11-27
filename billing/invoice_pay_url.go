@@ -16,9 +16,8 @@ type InvoicePayURLParams struct {
 	SuccessURL string `json:"success_url"`
 	// CancelURL is the page's back link; without one the page shows none.
 	CancelURL *string `json:"cancel_url,omitempty"`
-	// ExpiresAt is 30 minutes to 24 hours away and no later than the invoice;
-	// omitted is an hour. An invoice created with no ExpiresAt of its own
-	// expires with its pay URL.
+	// ExpiresAt is 30 minutes to 24 hours away; omitted is an hour. The
+	// invoice stays open after it.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// SavedPaymentMethods offers the customer's saved cards they allowed to
 	// be shown again. Set it only when your site signed the customer in.

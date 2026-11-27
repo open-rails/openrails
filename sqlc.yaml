@@ -9,6 +9,12 @@ sql:
       - "internal/migrate/postgres/0004_customer_paid_totals.up.sql"
       - "internal/migrate/postgres/0005_usage_quarter_hours.up.sql"
       - "internal/migrate/postgres/0006_usage_receipts.up.sql"
+      - "internal/migrate/postgres/0007_retired_jobs.up.sql"
+      - "internal/migrate/postgres/0008_rebill_watch_dropped.up.sql"
+      - "internal/migrate/postgres/0009_usage_receipt_per_posting.up.sql"
+      - "internal/migrate/postgres/0010_amount_low_balance.up.sql"
+      - "internal/migrate/postgres/0011_customer_destructive_reservations.up.sql"
+      - "internal/migrate/postgres/0012_merchant_invoices_open.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

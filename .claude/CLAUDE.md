@@ -205,8 +205,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Instants end in `_at`. A surrogate id defaults to `uuidv7()`; `created_at`, `updated_at`
   and a table's own creation instant to `now()`. No other column defaults to a value every
   writer supplies (one stated exception: `payments.money_movement` fails closed to `'none'`).
-- Absent text is NULL, and a CHECK refuses `''`; `''` is stored only as part of a key
-  (`payment_attempts.step`, `nmi_history_months.reason`). No `varchar`.
+- Absent text is NULL, and a CHECK refuses `''`; `''` is stored only as part of a key (`payment_attempts.step`). No `varchar`.
 - Text + CHECK, never Postgres enums. SQL lives in sqlc queries, and `sqlc vet` prepares
   every one against PostgreSQL.
 - Every table has a retention class (`internal/retention`: permanent, rows, state),
@@ -218,7 +217,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   charges its own metered price with a `running_charges` row.
 - Spellings matched against stored or provider records keep their old words: NMI's `orderid` and order references, Stripe metadata `order_id`/`order_attempt_id`, intent payload keys, the `waive_order` destructive kind, idempotency and derived-id namespaces, ledger and books sources (`order`, `order_line`), and the spend scope value `payer` (hashed into spend window keys). Never rename them; River kinds and Go names are free to rename.
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
-- Usage events live in ClickHouse (`Deps.ClickHouse`, `internal/eventstore`, its own embedded migrations): raw events for 90 days, the 15-minute history and limit counters. Money stays in PostgreSQL: intake prices each item once into `usage_totals`, which is the balance's pending; a posting (daily once its day ends in `accounting.timezone`, and before any other movement of the balance) books the period's total price less what its earlier receipts took, as ledger transfers and one immutable `usage_receipts` row. No posting reads ClickHouse. Whether `Deps.ClickHouse` is set decides usage: without it the event-backed routes (`Route.EventStore`), catalog declarations and settings answer 409 `event_store_required`.
+- Usage events live in ClickHouse (`Deps.ClickHouse`, `internal/eventstore`, its own embedded migrations): raw events for 90 days, the 15-minute history and limit counters. Money stays in PostgreSQL: intake prices each item once into `usage_totals`, which is the balance's pending; a posting (daily at midnight in `accounting.timezone`, and before any other movement of the balance) books usage and running charges together: each period's total price less what it already posted (its posted `usage_totals` row), as ledger transfers and one immutable `usage_receipts` row per posting. A running charge's stop posts nothing; the next posting takes it. No posting reads ClickHouse. Whether `Deps.ClickHouse` is set decides usage: without it the event-backed routes (`Route.EventStore`), catalog declarations and settings answer 409 `event_store_required`.
 - User-facing records soft-delete: `deleted_at`, and reads filter `deleted_at IS NULL`.
   Hard deletes only for privacy erasure and derived or short-lived rows.
 - Abuse state (rate limits, lockouts, captcha, card-testing counts, replay ids) and

@@ -22,6 +22,10 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/adapters/smtpmail"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db/models"
+	embedded "github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -47,7 +51,6 @@ func TestCustomerMessages(t *testing.T) {
 		require.Eventually(t, func() bool { return len(mail.to(a.alice.Email)) == 1 }, 30*time.Second, 20*time.Millisecond,
 			"the job retries the send the mailbox refused")
 		require.Equal(t, 1, mail.refusals())
-		runRegistered(t, fleet, "openrails.customer_messages_dispatch", 2)
 		messagesSettled(t, fleet)
 		sent := mail.to(a.alice.Email)
 		require.Len(t, sent, 1, "one receipt, however often its fact and job repeat")
@@ -64,34 +67,43 @@ func TestCustomerMessages(t *testing.T) {
 	t.Run("OR-J39-S02/a-fact-a-billing-restore-writes-queues-no-message", func(t *testing.T) {
 		source := newWorld(t)
 		target, _ := archiveTarget(t, source)
-		merchantID := source.alpha.MerchantID().UUID()
-		table := func(name string) string { return pgx.Identifier{target.schema, name}.Sanitize() }
-		// written records a customer and a fact about her in one transaction,
+		merchantID := source.alpha.MerchantID()
+		database := embedded.Graph(target.engine).Runtime.DB
+		jobs := pgx.Identifier{target.schema + "_river", "river_job"}.Sanitize()
+		// written records a fact about a new customer in one transaction,
 		// inside a billing restore as an import begins one when restoring,
-		// and counts the messages it queued.
-		written := func(restoring bool) int {
-			ctx := t.Context()
-			tx, err := target.pool.Begin(ctx)
-			require.NoError(t, err)
-			defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-			_, err = tx.Exec(ctx, "SELECT set_config('openrails.merchant_id', $1, true)", merchantID.String())
-			require.NoError(t, err)
-			if restoring {
-				_, err = tx.Exec(ctx, "SELECT "+table("begin_billing_restore")+"($1)", merchantID)
-				require.NoError(t, err)
-			}
-			customer := uuid.New()
-			_, err = tx.Exec(ctx, "INSERT INTO "+table("customers")+" (merchant_id, id) VALUES ($1, $2)", merchantID, customer)
-			require.NoError(t, err)
-			_, err = tx.Exec(ctx, "INSERT INTO "+table("notification_events")+" (merchant_id, id, customer_id, event_type, data) VALUES ($1, $2, $3, $4, '{}')",
-				merchantID, uuid.New(), customer, receiptEvent)
-			require.NoError(t, err)
-			var queued int
-			require.NoError(t, tx.QueryRow(ctx, "SELECT count(*) FROM "+table("customer_messages")+" WHERE merchant_id = $1", merchantID).Scan(&queued))
-			return queued
+		// and counts the messages and send jobs it queued.
+		written := func(restoring bool) (messages, sends int) {
+			rolledBack := errors.New("rolled back")
+			err := database.MerchantTx(merchant.WithID(t.Context(), merchantID), func(ctx context.Context, tx pgx.Tx) error {
+				if restoring {
+					if _, err := tx.Exec(ctx, "SELECT billing.begin_billing_restore($1)", merchantID.UUID()); err != nil {
+						return err
+					}
+				}
+				customer := uuid.New()
+				if err := subscriptions.NewNotificationService(database.NewWithPgxTx(tx)).CreateIfAbsent(ctx, &models.NotificationEvent{
+					ID: uuid.New(), CustomerID: customer, EventType: receiptEvent,
+				}); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, "SELECT count(*) FROM billing.customer_messages WHERE merchant_id = $1", merchantID.UUID()).Scan(&messages); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, "SELECT count(*) FROM "+jobs+" WHERE kind = 'openrails.customer_message'").Scan(&sends); err != nil {
+					return err
+				}
+				return rolledBack
+			})
+			require.ErrorIs(t, err, rolledBack)
+			return messages, sends
 		}
-		require.Zero(t, written(true), "a fact a restore writes queues no message")
-		require.Equal(t, 1, written(false), "the same fact outside a restore queues one")
+		messages, sends := written(true)
+		require.Zero(t, messages, "a fact a restore writes queues no message")
+		require.Zero(t, sends, "and no send job")
+		messages, sends = written(false)
+		require.Equal(t, 1, messages, "the same fact outside a restore queues one")
+		require.Equal(t, 1, sends, "with its send job")
 	})
 	t.Run("OR-J39-S03/a-customer-without-an-address-is-no-contact-and-the-fact-is-emitted", func(t *testing.T) {
 		mail := &alertMailbox{}
@@ -251,16 +263,15 @@ func TestCustomerMessages(t *testing.T) {
 			p.core.SetDecline("4242", "252")
 			oneUsage(t, a.alpha, usageInput(customer, "stolen-card-usage", 3))
 			a.clock.Advance(time.Hour)
-			// The collection's message waits for the dispatch below, once
-			// the PSP is live.
-			fleet := undispatchedFleet(t, a.world)
+			// The collection's message is held until the PSP is live.
+			fleet, held := heldFleet(t, a.world)
 			runUsageDue(t, fleet)
 			require.Eventually(t, func() bool {
 				log, err := customerMessages(t, a.alpha, customer)
 				return err == nil && len(ofType(log, "invoice_collection_stopped")) == 1
 			}, 30*time.Second, 20*time.Millisecond, "the stopped collection queues its message")
 			liveMoney(t, a.world)
-			dispatchMessages(t, fleet)
+			held.send(t, fleet)
 			confirmation := sentAbout(t, a, mail, "invoice_collection_stopped", "We stopped charging your card for Alpha")
 			require.Contains(t, confirmation.Text, "Your bank told us your card can no longer be charged, so we have stopped trying to collect the 30.00 USD you owe.")
 			require.Contains(t, confirmation.Text, "Pay it or add another payment method: https://alpha.example/billing")
@@ -381,16 +392,16 @@ func TestCustomerMessages(t *testing.T) {
 		mail := &alertMailbox{}
 		a, p, sub := purchasedMembershipWith(t, 7*24, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
 		enableLifecycleMaintenance(t, a)
-		// The purchase's messages end on the test PSP; the decline's wait for
-		// the dispatch after it, once the PSP is live.
-		fleet := undispatchedFleet(t, a.world)
-		dispatchMessages(t, fleet)
+		// The purchase's messages end on the test PSP; the decline's are held
+		// until the PSP is live.
+		fleet, held := heldFleet(t, a.world)
+		held.send(t, fleet)
 		p.core.SetDecline("4242", "stolen_card")
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
 		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		subscriptionState(t, a, sub.ID, "canceled")
 		liveMoney(t, a.world)
-		dispatchMessages(t, fleet)
+		held.send(t, fleet)
 		confirmation := sentAbout(t, a, mail, "premium_ended", "Your subscription to Alpha has ended")
 		require.Contains(t, confirmation.Text, "Your bank told us your card can no longer be charged, so your subscription to Membership has ended.")
 		require.Contains(t, confirmation.Text, "You won't be charged again.")
@@ -636,8 +647,6 @@ func TestCustomerMessages(t *testing.T) {
 		alice := customerOf(a.alice)
 		paidExternally(t, a, alice, messageSale(t, a), "stalled-receipt")
 		fleet := promptFleet(t, a.world)
-		_, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.customer_messages_dispatch"}, &river.InsertOpts{Queue: openrails.QueueBilling})
-		require.NoError(t, err)
 		select {
 		case <-mail.stalled:
 		case <-time.After(30 * time.Second):
@@ -705,7 +714,7 @@ func TestCustomerMessages(t *testing.T) {
 			}
 			require.NotEmpty(t, charge)
 			merchant := a.alpha.MerchantID().UUID()
-			fleet := undispatchedFleet(t, a.world)
+			fleet, held := heldFleet(t, a.world)
 			refreshMerchant(t, fleet, merchant)
 			var read int
 			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "psp_refresh_watermarks"}.Sanitize()+" w JOIN "+
@@ -722,7 +731,7 @@ func TestCustomerMessages(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, paid.Refunds, 1, "the refresh records the refund")
 			liveMoney(t, a.world)
-			dispatchMessages(t, fleet)
+			held.send(t, fleet)
 			return a, mail
 		}
 		t.Run("minutes-late", func(t *testing.T) {
@@ -792,7 +801,7 @@ func TestCustomerMessages(t *testing.T) {
 		p.lostRefundResponse = false
 		p.mu.Unlock()
 		a.clock.Advance(8 * 24 * time.Hour)
-		fleet := undispatchedFleet(t, a.world)
+		fleet, held := heldFleet(t, a.world)
 		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
 		require.NoError(t, err)
 		for _, job := range jobs.Jobs {
@@ -806,9 +815,44 @@ func TestCustomerMessages(t *testing.T) {
 			return err == nil && read.AmountRefunded == 10_000_000
 		}, 30*time.Second, 20*time.Millisecond, "recovery completes the staff refund")
 		liveMoney(t, a.world)
-		dispatchMessages(t, fleet)
+		held.send(t, fleet)
 		receipt := sentAbout(t, a, mail, "refund_completed", "Your refund from Alpha")
 		require.Contains(t, receipt.Text, "We refunded 10.00 USD")
+	})
+	t.Run("OR-J39-S26/a-facts-message-is-sent-with-no-dispatcher-running", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a, _ := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
+		alice := customerOf(a.alice)
+		paidExternally(t, a, alice, messageSale(t, a), "undispatched-receipt")
+		// A fleet the engine never started: nothing listens for the fact's
+		// commit, and no periodic pass runs.
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, fleet.Start(t.Context()))
+		log := settledMessages(t, a.world, alice, 1)
+		require.Equal(t, receiptEvent, log[0].EventType)
+		require.Equal(t, billing.MessageSent, log[0].Status, "the fact's commit queued its send job")
+		require.Len(t, mail.to(a.alice.Email), 1)
+	})
+	t.Run("OR-J39-S27/a-fact-recorded-twice-queues-one-message-and-one-send-job", func(t *testing.T) {
+		a, _ := newPaymentWorld(t)
+		alice := customerOf(a.alice)
+		database := embedded.Graph(a.engine).Runtime.DB
+		fact := models.NotificationEvent{ID: uuid.New(), CustomerID: alice.UUID(), EventType: receiptEvent}
+		for range 2 {
+			again := fact
+			require.NoError(t, database.MerchantTx(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context, tx pgx.Tx) error {
+				return subscriptions.NewNotificationService(database.NewWithPgxTx(tx)).CreateIfAbsent(ctx, &again)
+			}))
+		}
+		log, err := customerMessages(t, a.alpha, alice)
+		require.NoError(t, err)
+		require.Len(t, log, 1, "one message for the fact")
+		require.Equal(t, billing.MessageQueued, log[0].Status, "queued with its send job")
+		fleet := hostFleet(t, a.world)
+		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.customer_message"))
+		require.NoError(t, err)
+		require.Len(t, jobs.Jobs, 1, "one send job, queued in the fact's transaction")
 	})
 }
 
@@ -829,7 +873,7 @@ func alphaProfile(w *world) {
 // liveMoney declares alpha's PSPs live, as a live merchant's are, so the
 // messages of facts on them send: a world with test seams has test PSPs
 // only. A scenario calls it once its business is done and before its
-// messages are dispatched, so only the send job reads it.
+// messages' jobs run, so only the send job reads it.
 func liveMoney(t *testing.T, w *world) {
 	t.Helper()
 	_, err := w.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{w.schema, "psps"}.Sanitize()+" SET environment = 'live' WHERE merchant_id = $1", w.alpha.MerchantID().UUID())
@@ -878,7 +922,7 @@ func ofType(log []billing.CustomerMessage, eventType string) []billing.CustomerM
 // ended reports whether every message of the log has ended.
 func ended(log []billing.CustomerMessage) bool {
 	for _, m := range log {
-		if m.Status == billing.MessagePending || m.Status == billing.MessageQueued || m.Status == billing.MessageSending {
+		if m.Status == billing.MessageQueued || m.Status == billing.MessageSending {
 			return false
 		}
 	}
@@ -937,23 +981,65 @@ func settledMessages(t *testing.T, w *world, customer billing.CustomerID, n int)
 	return log
 }
 
-// undispatchedFleet starts a fleet with no dispatcher, listening or
-// periodic, and no periodic pass: a scenario's messages wait for the
-// dispatch it runs (dispatchMessages).
-func undispatchedFleet(t *testing.T, w *world) *river.Client[pgx.Tx] {
+// heldFleet starts a fleet that holds customer message sends until the
+// scenario sends them (heldMessages.send), and runs no periodic pass: a
+// message queued with its fact waits, its job snoozed, until its PSP is live.
+func heldFleet(t *testing.T, w *world) (*river.Client[pgx.Tx], *heldMessages) {
 	t.Helper()
-	fleet := hostFleet(t, w)
+	held := &heldMessages{}
+	fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema + "_river", Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},
+		Middleware: []rivertype.Middleware{held}}, w.engine.RiverJobs())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = fleet.StopAndCancel(ctx)
+	})
 	fleet.PeriodicJobs().Clear()
 	require.NoError(t, fleet.Start(t.Context()))
-	return fleet
+	return fleet, held
 }
 
-// dispatchMessages runs one dispatch pass and waits for the send jobs it
-// queued.
-func dispatchMessages(t *testing.T, fleet *river.Client[pgx.Tx]) {
+// heldMessages snoozes customer message jobs while closed.
+type heldMessages struct {
+	river.MiddlewareDefaults
+	mu   sync.Mutex
+	open bool
+}
+
+func (h *heldMessages) Work(ctx context.Context, job *rivertype.JobRow, doInner func(context.Context) error) error {
+	h.mu.Lock()
+	open := h.open
+	h.mu.Unlock()
+	if job.Kind == "openrails.customer_message" && !open {
+		return river.JobSnooze(time.Hour)
+	}
+	return doInner(ctx)
+}
+
+// send runs every held message's job and waits for each to settle, then
+// holds the next ones.
+func (h *heldMessages) send(t *testing.T, fleet *river.Client[pgx.Tx]) {
 	t.Helper()
-	runRegistered(t, fleet, "openrails.customer_messages_dispatch", 1)
-	messagesSettled(t, fleet)
+	h.mu.Lock()
+	h.open = true
+	h.mu.Unlock()
+	require.Eventually(t, func() bool {
+		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.customer_message").States(rivertype.JobStateAvailable,
+			rivertype.JobStatePending, rivertype.JobStateRetryable, rivertype.JobStateRunning, rivertype.JobStateScheduled))
+		if err != nil {
+			return false
+		}
+		for _, job := range jobs.Jobs {
+			if job.State == rivertype.JobStateScheduled {
+				_, _ = fleet.JobRetry(t.Context(), job.ID)
+			}
+		}
+		return len(jobs.Jobs) == 0
+	}, 30*time.Second, 20*time.Millisecond, "every held customer message job settles")
+	h.mu.Lock()
+	h.open = false
+	h.mu.Unlock()
 }
 
 // messagesSettled waits until no customer message job is outstanding.
@@ -1068,9 +1154,8 @@ func (m *stalledMailbox) Send(ctx context.Context, _ openrails.Email) error {
 
 func (m *stalledMailbox) CheckHealth(context.Context) error { return nil }
 
-// promptFleet is a fleet that retries a failed job at once and dispatches
-// nothing by itself, so a message reaches its last attempt within a
-// scenario.
+// promptFleet is a fleet that retries a failed job at once and runs no
+// periodic pass, so a message reaches its last attempt within a scenario.
 func promptFleet(t *testing.T, w *world) *river.Client[pgx.Tx] {
 	t.Helper()
 	fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema + "_river", Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},

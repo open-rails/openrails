@@ -29,46 +29,39 @@ type CustomerSettings struct {
 	InvoiceProfile  *InvoiceProfile       `json:"invoice_profile"`
 }
 
-// MaxLowBalanceRunwayHours bounds a runway line: one year.
-const MaxLowBalanceRunwayHours = 8760
-
-// LowBalanceLine is a customer's own low-balance line in one currency. The
-// customer counts as low when what it may spend is under the larger of Amount
-// and its burn rate times RunwayHours. 0 turns that part off; null inherits
-// the merchant's settings.balance_notices, and RunwayHours then 24.
+// LowBalanceLine is a customer's own low-balance line in one currency: its
+// balance is low once what it may spend is at or under Amount. 0 turns it off;
+// null inherits the merchant's settings.balance_notices.
 type LowBalanceLine struct {
-	Currency    catalog.Currency `json:"currency"`
-	Amount      *int64           `json:"amount,string"`
-	RunwayHours *int             `json:"runway_hours"`
+	Currency catalog.Currency `json:"currency"`
+	Amount   *int64           `json:"amount,string"`
 }
 
 // SetLowBalanceLineParams sets the signed-in customer's low-balance line in
 // one currency; null inherits the merchant's.
 type SetLowBalanceLineParams struct {
-	Amount      *int64 `json:"amount,string"`
-	RunwayHours *int   `json:"runway_hours"`
+	Amount *int64 `json:"amount,string"`
 }
 
 // LowBalanceLineSource is where an effective low-balance line comes from.
 type LowBalanceLineSource string
 
 const (
-	// LowBalanceLineCustomer: the customer set part of it.
+	// LowBalanceLineCustomer: the customer's own line.
 	LowBalanceLineCustomer LowBalanceLineSource = "customer"
 	// LowBalanceLineMerchant: the merchant's settings.balance_notices.
 	LowBalanceLineMerchant LowBalanceLineSource = "merchant"
-	// LowBalanceLineDefault: neither; a 24-hour runway and no amount line.
-	LowBalanceLineDefault LowBalanceLineSource = "default"
+	// LowBalanceLineNone: neither sets one; no balance.low is sent.
+	LowBalanceLineNone LowBalanceLineSource = "none"
 )
 
 // EffectiveLowBalanceLine is the low-balance line a customer's balance in
-// one currency is judged at, each part resolved customer, merchant, built in.
-// Source is the most specific that set a part.
+// one currency is judged at: the customer's own, else the merchant's, else
+// none. Amount 0 is no line.
 type EffectiveLowBalanceLine struct {
-	Currency    catalog.Currency     `json:"currency"`
-	Amount      int64                `json:"amount,string"`
-	RunwayHours int                  `json:"runway_hours"`
-	Source      LowBalanceLineSource `json:"source"`
+	Currency catalog.Currency     `json:"currency"`
+	Amount   int64                `json:"amount,string"`
+	Source   LowBalanceLineSource `json:"source"`
 }
 
 // CreditLimit is how much a customer may owe in arrears in one currency;

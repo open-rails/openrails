@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -19,7 +18,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
@@ -610,17 +608,16 @@ func unitOverrun(t *testing.T) {
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT sum(amount), sum(forgiven) FROM "+pgx.Identifier{a.schema, "usage_receipts"}.Sanitize()+
 		" WHERE merchant_id = $1 AND customer_id = $2", a.alpha.MerchantID().UUID(), s.alice.UUID()).Scan(&posted, &forgiven))
 	require.Equal(t, [2]int64{28, 8}, [2]int64{posted, forgiven}, "the posting records what it forgave")
-	require.ElementsMatch(t, []forgivenShare{{Invoker: s.alice.String(), EventType: "image", MeterKey: "images", Amount: 6}, {Invoker: "alice-phone", EventType: "image", MeterKey: "images", Amount: 2}},
-		forgivenShares(t, a, s.alice)[0], "and how it shared it, as it posted")
+	require.Equal(t, [][]lineForgiveness{{{"images", 28, 8}}}, receiptForgiveness(t, a, s.alice), "and on which line")
 	var owed int
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+
 		" WHERE merchant_id = $1 AND customer_id = $2 AND transfer_type = 'owed_accrual'", a.alpha.MerchantID().UUID(), s.alice.UUID()).Scan(&owed))
 	require.Zero(t, owed, "nothing is owed in a unit")
 
 	require.Equal(t, map[string]int64{"charged": 20, "forgiven": 8}, usageChargedBetween(t, a, s.alice, used, a.clock.Now()), "the overrun shows as forgiven usage")
-	// Each invoker's charge gives up its share of the 8, 20:8 to the largest
-	// remainder: what each charged and had forgiven adds up to its usage.
-	require.Equal(t, map[string]int64{s.alice.String() + "/charged": 14, s.alice.String() + "/forgiven": 6, "alice-phone/charged": 6, "alice-phone/forgiven": 2},
+	// A posting knows no invoker: each invoker's usage is what it charged,
+	// and the forgiveness moves out of charged with none.
+	require.Equal(t, map[string]int64{s.alice.String() + "/charged": 20, "alice-phone/charged": 8, "/charged": -8, "/forgiven": 8},
 		usageChargedBetween(t, a, s.alice, used, a.clock.Now(), "invoker"))
 
 	status, raw := a.request(t, http.MethodGet, "/v1/me/usage?currency=GOLD", a.aliceToken, nil)
@@ -963,8 +960,8 @@ func unitPriceFalls(t *testing.T) {
 	// beyond its price: the 10 forgiven are taken back first, and only the 4
 	// the lots paid beyond it comes back.
 	require.Equal(t, []posting{{20, 10}, {-14, -10}}, postings(), "the fall is credited at the posting that takes it")
-	require.Equal(t, [][]forgivenShare{{{Invoker: s.alice.String(), EventType: "image", MeterKey: "images", Amount: 10}}, {{Invoker: s.alice.String(), EventType: "image", MeterKey: "images", Amount: -10}}},
-		forgivenShares(t, a, s.alice), "the reversal takes back from the shares the receipt stored")
+	require.Equal(t, [][]lineForgiveness{{{"images", 20, 10}}, {{"images", -14, -10}}}, receiptForgiveness(t, a, s.alice),
+		"the falling line takes back what its period forgave")
 	unitBalance(t, a.alpha, s.alice, "GOLD", 5, 0, 5)
 	// Its late window closing changes nothing.
 	a.clock.Advance(70 * 24 * time.Hour)
@@ -1050,31 +1047,24 @@ func unitFirstBalance(t *testing.T) {
 	unitBalance(t, a.alpha, s.alice, "GOLD", 20, 0, 20)
 }
 
-type forgivenShare struct {
-	Invoker   string `json:"invoker"`
-	EventType string `json:"event_type"`
-	MeterKey  string `json:"meter_key"`
-	Cell      string `json:"cell"`
-	Amount    int64  `json:"amount"`
+// lineForgiveness is one receipt line's meter, amount and forgiveness.
+type lineForgiveness struct {
+	meter            string
+	amount, forgiven int64
 }
 
-// forgivenShares are how each of customer's usage receipts that forgave
-// shared it, in posting order.
-func forgivenShares(t *testing.T, a *authorityWorld, customer billing.CustomerID) [][]forgivenShare {
+// receiptForgiveness is what each of customer's usage receipts forgave, by
+// line, in posting order.
+func receiptForgiveness(t *testing.T, a *authorityWorld, customer billing.CustomerID) [][]lineForgiveness {
 	t.Helper()
-	rows, err := a.pool.Query(t.Context(), "SELECT forgiven_lines FROM "+pgx.Identifier{a.schema, "usage_receipts"}.Sanitize()+
-		" WHERE merchant_id = $1 AND customer_id = $2 AND forgiven <> 0 ORDER BY created_at, id", a.alpha.MerchantID().UUID(), customer.UUID())
-	require.NoError(t, err)
-	defer rows.Close()
-	var out [][]forgivenShare
-	for rows.Next() {
-		var raw []byte
-		require.NoError(t, rows.Scan(&raw))
-		var shares []forgivenShare
-		require.NoError(t, json.Unmarshal(raw, &shares))
-		out = append(out, shares)
+	var out [][]lineForgiveness
+	for _, r := range usageReceiptRows(t, a.world, customer) {
+		lines := []lineForgiveness{}
+		for _, l := range r.lines {
+			lines = append(lines, lineForgiveness{l.MeterKey, l.Amount, l.Forgiven})
+		}
+		out = append(out, lines)
 	}
-	require.NoError(t, rows.Err())
 	return out
 }
 
@@ -1178,7 +1168,7 @@ func unitInvoiceRevenue(t *testing.T) {
 func reapplyInvoice(t *testing.T, a *authorityWorld, invoice billing.InvoiceID) {
 	t.Helper()
 	require.NoError(t, booksRawTx(t, a.world, func(ctx context.Context, tx pgx.Tx, _ *gen.Queries) error {
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		if err != nil {
 			return err
 		}
