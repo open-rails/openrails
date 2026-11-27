@@ -7,70 +7,23 @@ VALUES (sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_i
 ON CONFLICT (merchant_id, subscription_id, due_at) DO UPDATE SET due_at = EXCLUDED.due_at
 RETURNING id;
 
--- name: ListOverdueRebillMerchants :many
--- CROSS-MERCHANT: merchants holding an NMI schedule whose period ended before
--- the cutoff with neither an attempt nor a recorded miss for that cycle, and
--- no failed probe waiting out its backoff. Ids in order after a cursor, so a
--- pass reaches every merchant.
-SELECT DISTINCT s.merchant_id
-FROM billing.subscriptions s
-WHERE s.status IN ('active', 'unverified', 'awaiting_method') AND s.deleted_at IS NULL
-  AND s.merchant_id > sqlc.arg(after_merchant_id)::uuid
-  AND s.collection_policy = 'nmi_schedule' AND s.current_period_ends_at <= sqlc.arg(cutoff)::timestamptz
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.rebill_cycles c
-       WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at
-         AND (c.missed_at IS NOT NULL OR c.next_probe_at > sqlc.arg(now)::timestamptz))
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.rebill_cycles c
-        JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
-       WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at)
-ORDER BY s.merchant_id
-LIMIT sqlc.arg(merchant_limit)::int;
-
--- name: ListOverdueRebills :many
--- NMI schedules whose period ended before the cutoff with neither an attempt
--- nor a recorded miss for that cycle, and no failed probe waiting out its
--- backoff: a page after the (period end, id) cursor.
-SELECT sub.* FROM billing.subscriptions sub
-WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND sub.status IN ('active', 'unverified', 'awaiting_method') AND sub.deleted_at IS NULL
-  AND sub.collection_policy = 'nmi_schedule' AND sub.current_period_ends_at <= sqlc.arg(cutoff)::timestamptz
-  AND (sub.current_period_ends_at, sub.id) > (sqlc.arg(after_due_at)::timestamptz, sqlc.arg(after_id)::uuid)
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.rebill_cycles c
-       WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at
-         AND (c.missed_at IS NOT NULL OR c.next_probe_at > sqlc.arg(now)::timestamptz))
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.rebill_cycles c
-        JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
-       WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at)
-ORDER BY sub.current_period_ends_at, sub.id
-LIMIT sqlc.arg(row_limit)::int;
-
--- name: RecordRebillProbeFailure :one
--- A failed look at an overdue cycle: it is looked at again after a backoff
--- that doubles from 15 minutes, at most a day.
-INSERT INTO billing.rebill_cycles (id, merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency, quantity, probe_failed_at, next_probe_at)
-VALUES (sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_id)::uuid, sqlc.arg(customer_id)::uuid,
-    sqlc.arg(psp_id)::uuid, sqlc.arg(rail)::text, sqlc.arg(owner)::text, sqlc.arg(due_at)::timestamptz,
-    sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.narg(quantity)::int,
-    sqlc.arg(failed_at)::timestamptz, sqlc.arg(failed_at)::timestamptz + interval '15 minutes')
-ON CONFLICT (merchant_id, subscription_id, due_at) DO UPDATE SET
-    probe_failed_at = COALESCE(billing.rebill_cycles.probe_failed_at, EXCLUDED.probe_failed_at),
-    next_probe_at = EXCLUDED.probe_failed_at + LEAST(interval '24 hours', GREATEST(interval '15 minutes',
-        EXCLUDED.probe_failed_at - COALESCE(billing.rebill_cycles.probe_failed_at, EXCLUDED.probe_failed_at)))
-RETURNING next_probe_at;
-
 -- name: CycleHasAttempt :one
 SELECT EXISTS (
     SELECT 1 FROM billing.rebill_cycles c JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
      WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid AND c.subscription_id = sqlc.arg(subscription_id)::uuid AND c.due_at = sqlc.arg(due_at)::timestamptz
 )::boolean AS attempted;
 
+-- name: RebillCycleSettled :one
+-- Whether the cycle due at due_at is decided: an attempt or a recorded miss.
+SELECT EXISTS (
+    SELECT 1 FROM billing.rebill_cycles c
+     WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid AND c.subscription_id = sqlc.arg(subscription_id)::uuid AND c.due_at = sqlc.arg(due_at)::timestamptz
+       AND (c.missed_at IS NOT NULL
+            OR EXISTS (SELECT 1 FROM billing.payment_attempts a WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id))
+)::boolean AS settled;
+
 -- name: MarkRebillCycleMissed :execrows
-UPDATE billing.rebill_cycles SET missed_at = sqlc.arg(missed_at)::timestamptz, miss_reason = sqlc.arg(miss_reason)::text,
-    probe_failed_at = NULL, next_probe_at = NULL
+UPDATE billing.rebill_cycles SET missed_at = sqlc.arg(missed_at)::timestamptz, miss_reason = sqlc.arg(miss_reason)::text
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND missed_at IS NULL;
 
 -- name: ListRebillCycles :many

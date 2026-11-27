@@ -7,6 +7,7 @@ migration 0003_transfer_types.up.sql sha256:e995e170597775acff551d82f2f7cff698bc
 migration 0004_customer_paid_totals.up.sql sha256:4b9a2facc723bab9d8579e3955f6c2cbe4f16e9f6df45b2f19d080be61007dbd
 migration 0005_usage_quarter_hours.up.sql sha256:289f968ac3d0bbce937f66f71f850c8a9d5a0ffc96b52c23ee45a504b50ae07a
 migration 0006_usage_receipts.up.sql sha256:73fca1d59b23e1c17080b6a429b13e59232a6a2e745fd6b8035808402f8dc677
+migration 0007_rebill_watch_dropped.up.sql sha256:7d1008c1f618110cd1418a1c66e1dc8b4cd79fee7523e7b9548360000276ae98
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -3013,8 +3014,6 @@ table billing.rebill_cycles
   column missed_at timestamp with time zone
   column miss_reason text
   column quantity integer
-  column probe_failed_at timestamp with time zone
-  column next_probe_at timestamp with time zone
   constraint rebill_cycles_amount_check CHECK ((amount >= 0))
   constraint rebill_cycles_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint rebill_cycles_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
@@ -3023,7 +3022,6 @@ table billing.rebill_cycles
   constraint rebill_cycles_missed_check CHECK (((missed_at IS NULL) = (miss_reason IS NULL)))
   constraint rebill_cycles_owner_check CHECK ((owner = ANY (ARRAY['engine'::text, 'nmi_schedule'::text, 'provider'::text])))
   constraint rebill_cycles_pkey PRIMARY KEY (merchant_id, id)
-  constraint rebill_cycles_probe_check CHECK (((probe_failed_at IS NULL) = (next_probe_at IS NULL)))
   constraint rebill_cycles_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint rebill_cycles_quantity_check CHECK (((quantity IS NULL) OR (quantity >= 1)))
   constraint rebill_cycles_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE CASCADE
@@ -3558,7 +3556,6 @@ table billing.subscriptions
   index CREATE INDEX subscriptions_current_period_ends_at_id_idx ON billing.subscriptions USING btree (merchant_id, current_period_ends_at, id) WHERE ((deleted_at IS NULL) AND (current_period_ends_at IS NOT NULL))
   index CREATE INDEX subscriptions_current_period_ends_at_next_retry_at_idx ON billing.subscriptions USING btree (merchant_id, current_period_ends_at, next_retry_at) WHERE ((collection_policy = 'engine'::text) AND (status = ANY (ARRAY['active'::text, 'past_due'::text])) AND (deleted_at IS NULL))
   index CREATE INDEX subscriptions_current_period_ends_at_period_overdue_idx ON billing.subscriptions USING btree (current_period_ends_at) WHERE (status = 'active'::text)
-  index CREATE INDEX subscriptions_current_period_ends_at_rebill_watch_idx ON billing.subscriptions USING btree (merchant_id, current_period_ends_at) WHERE ((status = ANY (ARRAY['active'::text, 'unverified'::text, 'awaiting_method'::text])) AND (collection_policy = ANY (ARRAY['engine'::text, 'nmi_schedule'::text])) AND (deleted_at IS NULL))
   index CREATE INDEX subscriptions_customer_id_created_at_id_idx ON billing.subscriptions USING btree (merchant_id, customer_id, created_at DESC, id DESC) WHERE (deleted_at IS NULL)
   index CREATE UNIQUE INDEX subscriptions_customer_id_id_key ON billing.subscriptions USING btree (merchant_id, customer_id, id)
   index CREATE UNIQUE INDEX subscriptions_customer_id_product_id_key ON billing.subscriptions USING btree (merchant_id, customer_id, product_id) WHERE ((deleted_at IS NULL) AND ((status = ANY (ARRAY['active'::text, 'pending'::text, 'past_due'::text, 'awaiting_method'::text, 'unverified'::text])) OR (deletion_scheduled_at IS NOT NULL)))

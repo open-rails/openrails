@@ -116,12 +116,14 @@ func resolveNMIChunk(ctx context.Context, database *db.DB, lc *subscriptions.Sub
 		}
 		snaps[sub.ID] = snap
 	}
-	return errors.Join(errs, applyVerified(ctx, database, lc, ProviderNMI, psp, subs, snaps, now))
+	return errors.Join(errs, applyVerified(ctx, database, lc, ProviderNMI, psp, subs, snaps, now, client))
 }
 
 // applyVerified decides every read row of one PSP, passes the batch's
-// cancellations through the cancel gate once, and applies them.
-func applyVerified(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, provider Provider, psp uuid.UUID, subs []*models.Subscription, snaps map[uuid.UUID]*RemoteSnapshot, now time.Time) error {
+// cancellations through the cancel gate once, and applies them. With NMI's
+// client, each schedule read past NMIRebillDeadline then settles its cycle
+// (settleNMICycle).
+func applyVerified(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, provider Provider, psp uuid.UUID, subs []*models.Subscription, snaps map[uuid.UUID]*RemoteSnapshot, now time.Time, nmiClient *nmi.NMIClient) error {
 	if len(snaps) == 0 {
 		return nil
 	}
@@ -149,12 +151,18 @@ func applyVerified(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		if snap == nil {
 			continue
 		}
+		read := *sub // the row as read: its converge may move it
 		res, err := ConvergeSubscriptionFromSnapshot(ctx, database.Log, database, lc, sub, snap, now, 0)
 		if err != nil {
 			errs = errors.Join(errs, fmt.Errorf("verify %s: %w", sub.ID, err))
 			continue
 		}
 		database.Log.DebugContext(ctx, "verify: decided from the provider read", "subscription_id", sub.ID, "transition", res.Decision.Kind.String(), "reason", res.Decision.Reason, "applied", res.Applied)
+		if nmiClient != nil && overdueNMICycle(&read, now) {
+			if err := settleNMICycle(ctx, database, lc, nmiClient, &read, snap, now); err != nil {
+				errs = errors.Join(errs, fmt.Errorf("verify %s: rebill cycle: %w", sub.ID, err))
+			}
+		}
 	}
 	return errs
 }
@@ -444,7 +452,7 @@ func (v *Verifier) bulkReadPSP(ctx context.Context, mid billing.MerchantID, psp 
 		snaps[sub.ID] = snap
 	}
 	lc := v.lifecycle()
-	errs := applyVerified(ctx, v.DB, lc, ProviderNMI, psp, subs, snaps, now)
+	errs := applyVerified(ctx, v.DB, lc, ProviderNMI, psp, subs, snaps, now, client)
 	errs = errors.Join(errs, resolveNMIBatch(ctx, v.DB, lc, client, psp, fallback, now))
 	recordReads(ctx, v.DB, mid, subs, now, errs)
 	if errs != nil {

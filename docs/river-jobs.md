@@ -58,14 +58,13 @@ Each `openrails.billing_pass` job runs these scans in order within its own River
 | Scan | What it looks for |
 | --- | --- |
 | `openrails.usage_posting` | The daily posting: once the accounting-zone day of a customer's oldest pending usage ends, posts all of it to the ledger, one usage receipt per pricing period, priced from the period's settled total in PostgreSQL (`usage_totals`) less what its earlier receipts took, never from the event store; a period whose volume price fell is credited in the same posting. The read is indexed on when each customer is due (`usage_pending.due_at`). [Source](../internal/river/jobs_usage_posting.go) |
-| `openrails.dunning` | Due subscription renewals and collection retries. [Source](../internal/river/jobs_dunning.go) |
-| `openrails.subscription_verification_retry` | Flagged `unverified` subscriptions that still need a targeted provider check after a missed notification or failed read. [Source](../internal/reconcile/verify.go) |
+| `openrails.dunning` | Due subscription renewals and collection retries; then provider-billed renewals unpaid past their rail's deadline (24 hours for an NMI schedule, 48 for Stripe and CCBill), each moved to `unverified` with access kept, which the `Verifier` reads at once. [Source](../internal/river/jobs_dunning.go) |
+| `openrails.subscription_verification_retry` | Flagged `unverified` subscriptions not read for an hour: a missed notification, a failed read, or a decision still held or inconclusive. [Source](../internal/reconcile/verify.go) |
 | `openrails.balance_watch` | Due balance checks and failed or missed balance looks. [Source](../internal/river/jobs_balance_watch.go) |
 | `openrails.delinquency` | Usage arrears due for evaluation after a payment or grace deadline. [Source](../internal/river/jobs_delinquency.go) |
 | `openrails.invoice_expiry` | Expired invoices and attempts, including abandoned card saves. [Source](../internal/river/jobs_invoice_expiry.go) |
 | `openrails.revenue_recognition` | Revenue schedules due: a month boundary reached in the merchant's accounting timezone, a schedule's end or an early end. The read is indexed on the due instant. [Source](../internal/river/jobs_revenue_recognition.go) |
 | `openrails.usage_invoices` | Due usage bills and collections. [Source](../internal/river/jobs_usage_invoices.go) |
-| `openrails.rebill_watch` | Overdue NMI schedule rebills with no recorded attempt, checked against NMI's Query API. [Source](../internal/river/jobs_rebill_watch.go) |
 | `openrails.config_realerts` | Unresolved undeclared-account findings due for another operator alert. [Source](../internal/river/jobs_config_realerts.go) |
 | `openrails.stored_card_refresh_due` | Stored cards due for account updater checks before renewal. [Source](../internal/river/jobs_stored_card_refresh.go) |
 | `openrails.operation_wakes` | Live provider operations more than an hour overdue that need another wake. [Source](../internal/river/jobs_operation_wakes.go) |

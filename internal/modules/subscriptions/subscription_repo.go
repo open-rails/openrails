@@ -882,25 +882,6 @@ func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rail
 	return out, nil
 }
 
-// ListOverdueRebills returns a page, after the (period end, id) cursor, of
-// NMI schedules whose period ended before cutoff with neither an attempt nor a
-// recorded miss for that cycle, and no failed look waiting out its backoff at
-// now.
-func (r *SubscriptionRepo) ListOverdueRebills(ctx context.Context, cutoff, now time.Time, after DueDunningCursor) ([]*models.Subscription, error) {
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	rows, err := r.db.Gen(ctx).ListOverdueRebills(ctx, gen.ListOverdueRebillsParams{
-		MerchantID: scopeMerchantID.UUID(), Cutoff: cutoff, Now: now,
-		AfterDueAt: after.DueAt, AfterID: after.ID, RowLimit: DueDunningBatch,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return r.manyWithDetails(ctx, rows)
-}
-
 // GetLatestResumableCanceled returns the customer's most recent canceled
 // subscription whose paid period has not elapsed (resume candidate), or
 // pgx.ErrNoRows.
