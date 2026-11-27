@@ -31,12 +31,12 @@ type inferredSale struct {
 // inferSchedules stages the NMI schedules a pull's history holds but NMI no
 // longer lists: NMI lists only live schedules and its reports name none, so a
 // run of approved recurring sales on one vault, order and amount that no
-// listed schedule claims is the closest fact of a deleted one. A run breaks
-// where a gap passes half again its cadence (the median gap). Each lands
-// ended only, with its sales as its payments; a run no provider price prices
-// stays history without a subscription.
+// listed schedule claims, and OpenRails holds none of, is the closest fact of
+// a deleted one. A run breaks where a gap passes half again its cadence (the
+// median gap). Each lands ended only, with its sales as its payments; a run
+// no provider price prices stays history without a subscription.
 func (im *Importer) inferSchedules(ctx context.Context, row gen.BillingPspImport) error {
-	groups := map[string][]inferredSale{}
+	var candidates []inferredSale
 	if err := im.eachRecord(ctx, row, billing.PSPImportTransaction, func(r gen.BillingPspImportRecord) error {
 		if r.SubscriptionRef != nil || r.CustomerRef == nil {
 			return nil
@@ -52,15 +52,38 @@ func (im *Importer) inferSchedules(ctx context.Context, row gen.BillingPspImport
 		if err := json.Unmarshal(r.Facts, &f); err != nil {
 			return err
 		}
-		order := ""
-		if ids := f[FactOrderID]; len(ids) > 0 {
-			order = ids[0]
-		}
-		key := strings.Join([]string{*r.CustomerRef, order, data.Currency, strconv.FormatInt(data.Amount, 10)}, "\x1f")
-		groups[key] = append(groups[key], inferredSale{record: r, data: data, facts: f})
+		candidates = append(candidates, inferredSale{record: r, data: data, facts: f})
 		return nil
 	}); err != nil {
 		return err
+	}
+	// A sale OpenRails holds is of a schedule it knows: nothing to infer.
+	held := map[string]bool{}
+	for start := 0; start < len(candidates); start += stageBatch {
+		chunk := candidates[start:min(start+stageBatch, len(candidates))]
+		ids := make([]string, 0, len(chunk))
+		for _, c := range chunk {
+			ids = append(ids, c.data.TransactionID)
+		}
+		rows, err := im.DB.Gen(ctx).ListPSPHeldTransactions(ctx, gen.ListPSPHeldTransactionsParams{MerchantID: row.MerchantID, PspID: row.PspID, Refs: ids})
+		if err != nil {
+			return err
+		}
+		for _, h := range rows {
+			held[h.Ref] = true
+		}
+	}
+	groups := map[string][]inferredSale{}
+	for _, c := range candidates {
+		if held[c.data.TransactionID] {
+			continue
+		}
+		order := ""
+		if ids := c.facts[FactOrderID]; len(ids) > 0 {
+			order = ids[0]
+		}
+		key := strings.Join([]string{*c.record.CustomerRef, order, c.data.Currency, strconv.FormatInt(c.data.Amount, 10)}, "\x1f")
+		groups[key] = append(groups[key], c)
 	}
 	keys := make([]string, 0, len(groups))
 	for k := range groups {
