@@ -228,10 +228,6 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 	if lockTimedOut(err) {
 		return nil, errLockBudget
 	}
-	var pg *pgconn.PgError
-	if errors.As(err, &pg) && pg.Code == "25P04" {
-		return nil, errSyncTimeout
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -251,9 +247,6 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 // errLockBudget answers a sync that could not take its locks within
 // lockBudget: it committed nothing and is sent again.
 var errLockBudget = apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "the sync could not take its locks in time; retry it")
-
-// errSyncTimeout answers a sync that outlasted its transaction budget.
-var errSyncTimeout = apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "the sync ran too long to commit; retry it")
 
 // lockTimedOut reports a statement that waited out lock_timeout, or was
 // chosen to break a deadlock: chunks of two syncs may take the same
@@ -276,7 +269,7 @@ func (r *syncRun) withinTimeout() error {
 		return err
 	}
 	if time.Duration(elapsed)*time.Microsecond > limits.SyncTimeout-commitMargin {
-		return errSyncTimeout
+		return apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "the sync ran too long to commit; retry it")
 	}
 	return nil
 }
