@@ -81,14 +81,17 @@ const (
 	MaxUsagePageLimit     = 1000
 )
 
-// GetUsageParams selects a usage report: one currency over the days of the
-// merchant's accounting zone overlapping [From, To), grouped by GroupBy (event_type when empty), a page
+// GetUsageParams selects a usage report: one currency over the days of
+// Timezone (an IANA zone; the merchant's accounting zone when empty)
+// overlapping [From, To), grouped by GroupBy (event_type when empty; by
+// invoker the window reaches back 90 days, CodeUsageEventsExpired), a page
 // of at most Limit groups (DefaultUsagePageLimit when zero) after Cursor. A
 // zero From or To is the cursor's, or without a cursor the month before now.
-// A cursor reads only the report it came from: the same currency, window and
-// grouping.
+// A cursor reads only the report it came from: the same currency, zone,
+// window and grouping.
 type GetUsageParams struct {
 	Currency catalog.Currency `form:"currency"`
+	Timezone string           `form:"timezone"`
 	From     time.Time        `form:"from"`
 	To       time.Time        `form:"to"`
 	GroupBy  UsageGroupBy     `form:"group_by"`
@@ -96,8 +99,9 @@ type GetUsageParams struct {
 }
 
 // UsageRow is one group of a usage report: EventCount usage items and Amount
-// what they cost at their rate cards; in a merchant's own unit that includes
-// any part a posting forgave. Grouped by meter, Key is the meter key, Cell its
+// what they cost at their rate cards when taken, failed usage's charges
+// included; in a merchant's own unit that includes any part a posting
+// forgave. Grouped by meter, Key is the meter key, Cell its
 // matrix cell (null without a matrix), EventCount the items it priced,
 // Quantity the summed quantity and Amount what it cost; Quantity is null in
 // other groupings.
@@ -109,17 +113,77 @@ type UsageRow struct {
 	Quantity   *int64  `json:"quantity"`
 }
 
-// Usage is one page of a customer's usage over a window: its groups by total
-// amount, largest first, then by key. NextCursor reads the next page; nil on
-// the last.
+// Usage is one page of a customer's usage over a window, on Timezone's days:
+// its groups by total amount, largest first, then by key. Amounts are the
+// prices usage was taken at; Discount is what volume tiers took off the
+// window's usage as its quantity grew, so every group's amount less it is
+// what posts. NextCursor reads the next page; nil on the last.
 type Usage struct {
 	CustomerID CustomerID       `json:"customer_id"`
 	Currency   catalog.Currency `json:"currency"`
+	Timezone   string           `json:"timezone"`
 	From       time.Time        `json:"from"`
 	To         time.Time        `json:"to"`
 	GroupBy    UsageGroupBy     `json:"group_by"`
 	Rows       []UsageRow       `json:"rows"`
+	Discount   int64            `json:"discount,string"`
 	NextCursor *string          `json:"next_cursor"`
+}
+
+// UsageInterval is the length of a usage series' buckets on its zone's
+// calendar.
+type UsageInterval string
+
+const (
+	// UsageByHour counts hours from each day's first instant: a day of 23 or
+	// 25 hours has as many.
+	UsageByHour  UsageInterval = "hour"
+	UsageByDay   UsageInterval = "day"
+	UsageByWeek  UsageInterval = "week" // from Monday
+	UsageByMonth UsageInterval = "month"
+)
+
+// MaxUsageBuckets is the most buckets a usage series answers: a month by
+// hour fits.
+const MaxUsageBuckets = 1000
+
+// GetUsageSeriesParams selects a usage series: one currency over the
+// buckets of Interval on Timezone's calendar (an IANA zone; the merchant's
+// accounting zone when empty) that overlap [From, To), each grouped by
+// GroupBy (event_type when empty; by invoker the window reaches back 90
+// days). A zero From or To is the month before now.
+// More than MaxUsageBuckets buckets is refused, CodeTooManyBuckets.
+type GetUsageSeriesParams struct {
+	Currency catalog.Currency `form:"currency"`
+	Interval UsageInterval    `form:"interval"`
+	Timezone string           `form:"timezone"`
+	From     time.Time        `form:"from"`
+	To       time.Time        `form:"to"`
+	GroupBy  UsageGroupBy     `form:"group_by"`
+}
+
+// UsageSeries is a customer's usage over time: one bucket per Interval of
+// Timezone's calendar from From to To (the window snapped out to whole
+// buckets), empty ones included, each with its groups as a usage report
+// orders them. The buckets sum to the report of the same window.
+type UsageSeries struct {
+	CustomerID CustomerID       `json:"customer_id"`
+	Currency   catalog.Currency `json:"currency"`
+	Interval   UsageInterval    `json:"interval"`
+	Timezone   string           `json:"timezone"`
+	From       time.Time        `json:"from"`
+	To         time.Time        `json:"to"`
+	GroupBy    UsageGroupBy     `json:"group_by"`
+	Buckets    []UsageBucket    `json:"buckets"`
+}
+
+// UsageBucket is one bucket of a usage series: StartsAt is its local start
+// as a UTC instant; it ends where the next starts, the last at the series'
+// To. Discount is what volume tiers took off its usage, as on Usage.
+type UsageBucket struct {
+	StartsAt time.Time  `json:"starts_at"`
+	Rows     []UsageRow `json:"rows"`
+	Discount int64      `json:"discount,string"`
 }
 
 // UsageDeduction is what one posting of a customer's usage was for: the

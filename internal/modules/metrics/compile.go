@@ -296,7 +296,7 @@ func compileSnapshot(plan *Plan, merchantID uuid.UUID, fam Family, spec familySp
 }
 
 // bucketExpr is the start of a row's bucket at grain, on the calendar of
-// zone, as an instant: what bucketLabels gives. A calendar family's day is
+// zone, as an instant: what calendarutil.Buckets gives. A calendar family's day is
 // its date wherever the zone is.
 func bucketExpr(spec familySpec, grain, zone string) string {
 	if spec.Calendar {

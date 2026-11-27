@@ -254,6 +254,23 @@ export const de: BillingUiMessageBundle = {
       stripe: "Karte",
     },
   },
+  usage: {
+    title: "Nutzung",
+    description: "Was Ihre Nutzung im Zeitverlauf gekostet hat.",
+    intervalLabel: "Intervall",
+    interval: {
+      hour: "Stündlich",
+      day: "Täglich",
+      week: "Wöchentlich",
+      month: "Monatlich",
+    },
+    timezone: "Zeitzone",
+    total: "Gesamt",
+    requests: "Anfragen",
+    discount: "Mengenrabatt",
+    empty: "Keine Nutzung in diesem Zeitraum",
+    emptyDescription: "Nutzung erscheint hier, sobald sie erfasst wird.",
+  },
   errors: {
     generic: "Etwas ist schiefgelaufen. Bitte versuche es erneut.",
     network_error:

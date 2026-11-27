@@ -19,66 +19,45 @@ import (
 	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
-// UsageHistoryRow is a bucket of usage history with what it cost: a charge
-// row's share of its bucket's price, a failed event row what it charged.
-type UsageHistoryRow struct {
-	eventstore.UsageBucket
-	Amount int64
+// UsageHistory reads the usage history a filter selects, by day of f.Zone,
+// the merchant's accounting zone when nil (ClickHouse groups the quarter
+// hours as it reads, so a zone change regroups all of it). Each charge row
+// is at the price intake took it at; a volume tier's fall is its Discount.
+func (s *MoneyService) UsageHistory(ctx context.Context, f eventstore.HistoryFilter) ([]eventstore.UsageBucket, error) {
+	if f.Zone == nil {
+		zone, err := s.AccountingZone(ctx)
+		if err != nil {
+			return nil, err
+		}
+		f.Zone = zone
+	}
+	return s.history(ctx, false, f)
 }
 
-// UsageHistory reads the usage history a filter selects, by day of the
-// merchant's accounting zone (ClickHouse groups the hours as it reads, so a
-// zone change regroups all of it), and prices it from the event store. A
-// day's price of a meter cell is the price of its period through the day less
-// the price through the day before, so the days sum to what the period posts;
-// it is shared across the day's rows by quantity. A row priced under a card
-// print not yet recorded is left out.
-func (s *MoneyService) UsageHistory(ctx context.Context, f eventstore.HistoryFilter) ([]UsageHistoryRow, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
+// UsageBuckets is UsageHistory by the history's own quarter hours.
+func (s *MoneyService) UsageBuckets(ctx context.Context, f eventstore.HistoryFilter) ([]eventstore.UsageBucket, error) {
+	f.Zone = nil
+	return s.history(ctx, false, f)
+}
+
+// UsageEvents reads raw usage by invoker as UsageHistory reads history, by
+// f.Zone's days or by quarter hour when nil: back eventstore.EventsKept.
+func (s *MoneyService) UsageEvents(ctx context.Context, f eventstore.HistoryFilter) ([]eventstore.UsageBucket, error) {
+	return s.history(ctx, true, f)
+}
+
+func (s *MoneyService) history(ctx context.Context, events bool, f eventstore.HistoryFilter) ([]eventstore.UsageBucket, error) {
+	if _, err := merchant.Require(ctx); err != nil {
 		return nil, err
 	}
 	store := s.db.EventStore()
 	if store == nil {
 		return nil, eventstore.Required("usage history")
 	}
-	if f.Zone, err = s.accountingZone(ctx); err != nil {
-		return nil, err
+	if events {
+		return store.UsageEvents(ctx, f)
 	}
-	return usageHistory(ctx, s.db.Gen(ctx), store, mid.UUID(), f)
-}
-
-func usageHistory(ctx context.Context, q *gen.Queries, store *eventstore.Store, merchantID uuid.UUID, f eventstore.HistoryFilter) ([]UsageHistoryRow, error) {
-	buckets, err := store.UsageHistory(ctx, f)
-	if err != nil {
-		return nil, err
-	}
-	var periods *time.Time
-	var prints []string
-	for _, b := range buckets {
-		if b.Meter == "" {
-			continue
-		}
-		prints = append(prints, b.Print)
-		if periods == nil || b.PeriodStartsAt.Before(*periods) {
-			p := b.PeriodStartsAt
-			periods = &p
-		}
-	}
-	var prior []eventstore.UsageBucket
-	if periods != nil && periods.Before(f.From) {
-		if prior, err = store.UsageHistory(ctx, eventstore.HistoryFilter{CustomerID: f.CustomerID, Currency: f.Currency, From: periods.Truncate(eventstore.HistoryBucket), To: f.From, PeriodsFrom: periods, Zone: f.Zone}); err != nil {
-			return nil, err
-		}
-		for _, b := range prior {
-			prints = append(prints, b.Print)
-		}
-	}
-	cards, err := loadPrints(ctx, q, merchantID, prints)
-	if err != nil {
-		return nil, err
-	}
-	return cards.priceHistory(buckets, prior)
+	return store.UsageHistory(ctx, f)
 }
 
 // UsageForgiveness is what postings cut in (from, to] forgave of usage in a
@@ -86,7 +65,7 @@ func usageHistory(ctx context.Context, q *gen.Queries, store *eventstore.Store, 
 // stored (usage_postings.forgiven_lines): Forgiven, and the same taken out of
 // Amount, what was charged. A reversal that takes forgiveness back is
 // negative.
-func (s *MoneyService) UsageForgiveness(ctx context.Context, from, to time.Time) ([]UsageHistoryRow, error) {
+func (s *MoneyService) UsageForgiveness(ctx context.Context, from, to time.Time) ([]eventstore.UsageBucket, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -95,7 +74,7 @@ func (s *MoneyService) UsageForgiveness(ctx context.Context, from, to time.Time)
 	if err != nil {
 		return nil, err
 	}
-	var out []UsageHistoryRow
+	var out []eventstore.UsageBucket
 	for _, p := range postings {
 		lines, err := decodeForgivenLines(p.ForgivenLines)
 		if err != nil {
@@ -103,11 +82,8 @@ func (s *MoneyService) UsageForgiveness(ctx context.Context, from, to time.Time)
 		}
 		bucket := p.CutAt.Add(-time.Microsecond).UTC().Truncate(eventstore.HistoryBucket)
 		for _, l := range lines {
-			row := UsageHistoryRow{UsageBucket: eventstore.UsageBucket{CustomerID: billing.CustomerID(p.CustomerID), BucketAt: bucket, Currency: p.Currency,
-				EventType: l.EventType, Meter: l.MeterKey, Cell: l.Cell, PeriodStartsAt: p.PeriodStartsAt.UTC(), Invoker: l.Invoker,
-				Outcome: eventstore.UsageSucceeded}, Amount: -l.Amount}
-			row.Forgiven = l.Amount
-			out = append(out, row)
+			out = append(out, eventstore.UsageBucket{CustomerID: billing.CustomerID(p.CustomerID), BucketAt: bucket, Currency: p.Currency,
+				EventType: l.EventType, Meter: l.MeterKey, Cell: l.Cell, Invoker: l.Invoker, Amount: -l.Amount, Forgiven: l.Amount})
 		}
 	}
 	return out, nil
@@ -158,31 +134,29 @@ func shareForgiven(amount int64, keys []forgivenKey, weights []int64) []Forgiven
 }
 
 // forgivenLines shares what a posting forgives across what its period charged
-// before the cut, per invoker, event type and meter cell, from the event
-// store's history, as it posts: the split is stored with the posting.
-func (s *MoneyService) forgivenLines(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, period, cut time.Time, amount int64) ([]ForgivenLine, error) {
+// before the cut, per invoker, event type and meter cell, from the store's
+// raw events at intake's prices, as it posts: the split is stored with the
+// posting.
+func (s *MoneyService) forgivenLines(ctx context.Context, q *gen.Queries, customer uuid.UUID, currency string, period, cut time.Time, amount int64) ([]ForgivenLine, error) {
 	store := s.eventStore(q)
 	if store == nil {
 		return nil, eventstore.Required("forgiving usage")
 	}
-	period = period.UTC()
-	bucket := cut.Add(-time.Microsecond).UTC().Truncate(eventstore.HistoryBucket)
-	history, err := usageHistory(ctx, q, store, merchantID, eventstore.HistoryFilter{CustomerID: billing.CustomerID(customer), Currency: currency,
-		From: period.Truncate(eventstore.HistoryBucket), To: bucket.Add(eventstore.HistoryBucket), PeriodsFrom: &period})
+	charges, err := store.PeriodCharges(ctx, billing.CustomerID(customer), currency, period.UTC(), cut)
 	if err != nil {
 		return nil, err
 	}
 	charged := map[forgivenKey]int64{}
 	var keys []forgivenKey
-	for _, r := range history {
-		if r.Meter == "" || !r.PeriodStartsAt.Equal(period) || r.BucketAt.After(bucket) || r.Amount <= 0 {
+	for _, c := range charges {
+		if c.Amount <= 0 {
 			continue
 		}
-		k := forgivenKey{r.Invoker, r.EventType, r.Meter, r.Cell}
+		k := forgivenKey{c.Invoker, c.EventType, c.Meter, c.Cell}
 		if _, ok := charged[k]; !ok {
 			keys = append(keys, k)
 		}
-		charged[k] = addSat(charged[k], r.Amount)
+		charged[k] = addSat(charged[k], c.Amount)
 	}
 	if len(keys) == 0 {
 		keys, charged = []forgivenKey{{}}, map[forgivenKey]int64{{}: 1}
@@ -248,93 +222,10 @@ func largestRemainder(amount int64, weights []int64) []int64 {
 	return out
 }
 
-// UsageDays are the instants that bound the days of the merchant's
-// accounting zone overlapping [from, to): history read between them is the
-// hours that start in those days.
-func (s *MoneyService) UsageDays(ctx context.Context, from, to time.Time) (time.Time, time.Time, error) {
-	zone, err := s.accountingZone(ctx)
-	if err != nil {
-		return time.Time{}, time.Time{}, err
-	}
-	start, end := LocalDays(zone, from, to)
-	return start, end, nil
-}
-
 // LocalDays are the instants that bound zone's days overlapping [from, to),
 // each day from its first instant (the transition where clocks skip its
-// midnight).
+// midnight): history read between them is the quarter hours of those days.
 func LocalDays(zone *time.Location, from, to time.Time) (time.Time, time.Time) {
 	l := to.Add(-time.Microsecond).In(zone)
 	return calendarutil.DateStart(from, zone).UTC(), calendarutil.DayStart(l.Year(), l.Month(), l.Day()+1, zone).UTC()
-}
-
-// historyCell names one customer's meter cell in a pricing period.
-type historyCell struct {
-	customer billing.CustomerID
-	currency string
-	cellKey
-}
-
-// priceHistory prices history rows (buckets) given the rows of the same
-// periods' earlier buckets (prior).
-func (p usagePrints) priceHistory(buckets, prior []eventstore.UsageBucket) ([]UsageHistoryRow, error) {
-	cellOf := func(b eventstore.UsageBucket) historyCell {
-		return historyCell{b.CustomerID, b.Currency, cellKey{b.PeriodStartsAt, b.Meter, b.Cell}}
-	}
-	before := map[historyCell][]printQuantity{}
-	for _, b := range prior {
-		if _, ok := p[b.Print]; ok && b.Meter != "" {
-			before[cellOf(b)] = append(before[cellOf(b)], printQuantity{print: b.Print, quantity: b.Quantity, stated: b.Stated})
-		}
-	}
-	out := make([]UsageHistoryRow, 0, len(buckets))
-	byCell := map[historyCell][]int{}
-	for _, b := range buckets {
-		if b.Meter == "" {
-			out = append(out, UsageHistoryRow{UsageBucket: b, Amount: b.Charged})
-			continue
-		}
-		if _, ok := p[b.Print]; !ok {
-			continue
-		}
-		byCell[cellOf(b)] = append(byCell[cellOf(b)], len(out))
-		out = append(out, UsageHistoryRow{UsageBucket: b})
-	}
-	for cell, rows := range byCell {
-		quantities := make([]bucketQuantity, 0, len(rows))
-		for _, i := range rows {
-			b := out[i]
-			quantities = append(quantities, bucketQuantity{bucket: b.BucketAt, printQuantity: printQuantity{print: b.Print, quantity: b.Quantity, stated: b.Stated}})
-		}
-		prices, err := p.bucketPrices(cell.cell, before[cell], quantities)
-		if err != nil {
-			return nil, err
-		}
-		inBucket := map[time.Time][]int{}
-		for _, i := range rows {
-			inBucket[out[i].BucketAt] = append(inBucket[out[i].BucketAt], i)
-		}
-		for bucket, idx := range inBucket {
-			weights := make([]int64, len(idx))
-			for j, i := range idx {
-				weights[j] = out[i].Quantity
-			}
-			for j, amount := range shareSigned(prices[bucket], weights) {
-				out[idx[j]].Amount = amount
-			}
-		}
-	}
-	return out, nil
-}
-
-// shareSigned is share for an amount of either sign.
-func shareSigned(amount int64, weights []int64) []int64 {
-	if amount >= 0 {
-		return share(amount, weights)
-	}
-	out := share(-amount, weights)
-	for i := range out {
-		out[i] = -out[i]
-	}
-	return out
 }

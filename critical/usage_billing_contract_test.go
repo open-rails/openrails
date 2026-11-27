@@ -506,7 +506,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.False(t, invoice.Usage.PeriodStartsAt.After(occurred), "the period %s..%s covers the usage at %s",
 			invoice.Usage.PeriodStartsAt, invoice.Usage.PeriodEndsAt, occurred)
 		require.True(t, occurred.Before(invoice.Usage.PeriodEndsAt))
-		require.False(t, invoice.Usage.PeriodEndsAt.Before(a.clock.Now()), "and runs to its bill")
+		require.False(t, invoice.Usage.PeriodEndsAt.Before(a.clock.Now()), "and runs to its bill: %s, now %s", invoice.Usage.PeriodEndsAt, a.clock.Now())
 	})
 	t.Run("OR-J26-S58/revoking-the-agreement-bills-todays-usage", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, false)

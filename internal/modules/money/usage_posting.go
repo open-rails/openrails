@@ -59,10 +59,10 @@ const (
 // zones caches loaded zones by name.
 var zones sync.Map
 
-// accountingZone is the zone the merchant's months close in: its
+// AccountingZone is the zone the merchant's months close in: its
 // accounting.timezone, UTC when it names none or no configuration is bound.
 // A configuration it cannot read is an error, never UTC.
-func (s *MoneyService) accountingZone(ctx context.Context) (*time.Location, error) {
+func (s *MoneyService) AccountingZone(ctx context.Context) (*time.Location, error) {
 	cfg, _, err := merchantconfig.NewStore(s.db).Get(ctx)
 	switch {
 	case errors.Is(err, merchantconfig.ErrNoSettings):
@@ -266,7 +266,7 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 	}
 	first, hasLater := earliestLater(rows)
 	if hasLater {
-		zone, err := s.accountingZone(ctx)
+		zone, err := s.AccountingZone(ctx)
 		if err != nil {
 			return false, err
 		}
@@ -532,7 +532,7 @@ func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantI
 			return err
 		}
 		if forgiven = max(amount-covered, 0); forgiven > 0 {
-			lines, err := s.forgivenLines(ctx, q, merchantID, customer, currency, period, cut, forgiven)
+			lines, err := s.forgivenLines(ctx, q, customer, currency, period, cut, forgiven)
 			if err != nil {
 				return err
 			}

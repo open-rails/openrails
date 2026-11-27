@@ -23,6 +23,7 @@ const EXTERNAL = [
   "cn",
   "react",
   "react-dom",
+  "recharts",
   "zod",
 ]
 

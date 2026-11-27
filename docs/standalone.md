@@ -970,14 +970,14 @@ Periods are constants, the same for every merchant. Each table's comment states 
 | `customer_messages` | two years (731 days) after created |
 | `idempotency_keys`, `solana_pay_references` | at expiry, after the 7-day watch |
 | `user_destructive_reservations` | 24 hours |
-| `limit_windows` | 61 days after `window_ends_at`; a lifetime or rate limit's row stays |
+| `limit_windows` | a day after `window_ends_at`, 61 days once it reached capacity; a lifetime or rate limit's row stays |
 | `leases` (with their in-flight reports), `limit_adjustments` | 61 days after the last sync, or after the adjustment |
 | `webhook_health_daily` | 13 months |
 | `periodic_leases` | a kind unscheduled for 30 days |
 
-The event store's tables expire by their own TTLs: raw usage events 90 days after they occurred, a pricing period's quantities 100 days after it starts, minutes after 2 days, and a limit window's usage 61 days after it ends (a lifetime limit's stays). Usage history, by UTC hour, has no TTL; a merchant purge deletes its rows.
+The event store's tables expire by their own TTLs: raw usage events 90 days after they occurred, a pricing period's quantities 100 days after it starts, and a limit window's usage a day after it ends (a lifetime limit's stays). Usage history, by UTC quarter hour, event type and meter, has no TTL; a merchant purge deletes its rows.
 
-The hourly cleanup deletes 1,000 rows per statement and at most 50,000 per merchant per pass. `subscription_status_transitions` and `subscription_billing_changes` refuse other deletes (`billing.guard_retention_delete`). What integrators see: usage may be dated up to 35 days back; a lease answers resends for 61 days after its last sync; usage reports reach back about 26 months.
+The hourly cleanup deletes 1,000 rows per statement and at most 50,000 per merchant per pass. `subscription_status_transitions` and `subscription_billing_changes` refuse other deletes (`billing.guard_retention_delete`). What integrators see: usage may be dated up to 35 days back; a lease answers resends for 61 days after its last sync, and usage settled after its limit window ended counts toward none; usage reports and series read all of history, and by invoker the raw events' 90 days.
 
 ## Backup and restore
 
