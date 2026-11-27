@@ -161,8 +161,9 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 			return result, err
 		}
 		terminal := models.CancelType(models.DerefStr(sub.CancelType)).Terminal()
-		// A historical charge made before the cancellation is not after it.
-		before := bill.SourceKind == SourceHistory && sub.CanceledAt != nil && !result.Payment.PurchasedAt.After(*sub.CanceledAt)
+		// A charge made before the cancellation is not after it, whichever
+		// bill holds it (imported history included).
+		before := sub.CanceledAt != nil && !result.Payment.PurchasedAt.After(*sub.CanceledAt)
 		if sub.Status == "canceled" && !before && (bill.Owner == OwnerEngine || terminal) {
 			evidence, _ := json.Marshal(map[string]any{"invoice_id": billing.InvoiceID(result.Invoice.ID).String(), "payment_id": billing.PaymentID(result.Payment.ID).String(), "subscription_id": billing.SubscriptionID(*bill.SubscriptionID).String()})
 			action := "Review this confirmed charge after cancellation and refund it if appropriate; billing and access remain canceled."

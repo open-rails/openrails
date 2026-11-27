@@ -1017,6 +1017,15 @@
     "OR-J38-S13": [
       "TestPSPImport/OR-J38-S13/unreadable-answer-fails-visibly"
     ],
+    "OR-J38-S14": [
+      "TestPSPImportHistory/OR-J38-S14/stripe-ended-subscriptions-land-at-their-own-dates-for-their-reason"
+    ],
+    "OR-J38-S15": [
+      "TestPSPImportHistory/OR-J38-S15/ccbill-members-who-left-land-from-signup-to-expiry-with-their-rebills"
+    ],
+    "OR-J38-S16": [
+      "TestPSPImportHistory/OR-J38-S16/an-nmi-schedule-paused-long-ago-ends-where-its-paid-time-ended"
+    ],
     "OR-J38-S42": [
       "TestPSPImport/OR-J38-S42/nmi-amounts-land-in-the-mapped-price-currency"
     ],
