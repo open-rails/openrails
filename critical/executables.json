@@ -2764,8 +2764,8 @@
     "OR-J38-S97": [
       "TestCCBillIdentity/OR-J38-S97/a-second-rebill-past-the-cycles-billing-day-is-an-extra-capture"
     ],
-    "OR-J38-S98": [
-      "TestMerchantConsole/OR-J38-S98/console-overview-asks-for-a-payment-provider-until-one-is-armed"
+    "OR-J38-S99": [
+      "TestMerchantConsole/OR-J38-S99/console-overview-asks-for-a-payment-provider-until-one-is-armed"
     ],
     "OR-J24-S76": [
       "TestUsageSeries/OR-J24-S76/an-hourly-series-across-a-clock-change-has-each-of-the-days-hours"
@@ -2850,6 +2850,9 @@
     ],
     "OR-J04-S96": [
       "TestSubmittedRenewalGrace/OR-J04-S96/keep-policy-verification-does-not-lock-the-membership"
+    ],
+    "OR-J38-S98": [
+      "TestPSPImport/OR-J38-S98/nmi-plan-declared-terms-stand-in-until-nmi-answers"
     ]
   }
 }

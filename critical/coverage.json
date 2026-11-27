@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 879,
+  "scenario_count": 880,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -4255,6 +4255,11 @@
     },
     {
       "id": "OR-J38-S98",
+      "journey": "J38",
+      "name": "An NMI provider price declaring its plan's terms takes them, unconfirmed, while NMI does not answer and is confirmed when it does; NMI's terms win over a declaration that differs, which the receipt reports; a plan stating no terms is still refused, and none states a trial"
+    },
+    {
+      "id": "OR-J38-S99",
       "journey": "J38",
       "name": "The console's overview of a merchant none of whose PSPs is armed shows the setup step Connect a payment provider to take payments, which leads to its PSPs page where Vault holds configuration; once a PSP is armed (its list answers armed) the step is gone and the PSP reads active"
     },

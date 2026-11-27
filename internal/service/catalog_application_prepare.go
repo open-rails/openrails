@@ -254,8 +254,8 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 		if err != nil {
 			return nil, fmt.Errorf("provider price %q of product %q: %w", check.key, check.product.Key, err)
 		}
-		if p.cached != "" {
-			prepared.warn(check.product.Key, check.key, false, "provider price %q of product %q keeps its cached terms: %s", check.key, check.product.Key, p.cached)
+		if p.notice != "" {
+			prepared.warn(check.product.Key, check.key, false, "provider price %q of product %q %s", check.key, check.product.Key, p.notice)
 		}
 		prepared.providers[[2]string{check.product.Key, check.key}] = p
 		prepared.accounts[p.account.ID] = p.account

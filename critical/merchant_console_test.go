@@ -551,7 +551,7 @@ func TestMerchantConsole(t *testing.T) {
 		require.NotZero(t, counts["GET /v1/merchant/configuration"], "the dashboard reads the declared units")
 	})
 
-	t.Run("OR-J38-S98/console-overview-asks-for-a-payment-provider-until-one-is-armed", func(t *testing.T) {
+	t.Run("OR-J38-S99/console-overview-asks-for-a-payment-provider-until-one-is-armed", func(t *testing.T) {
 		a, _ := newPSPWorld(t)
 		staff := consoleStaff(t, a, "console-setup", billing.MerchantMetricsRead, billing.MerchantConfigRead, billing.MerchantConfigManage)
 		counts := consoleBrowser(t, a, map[string]any{"tokens": map[string]string{"staff": staff}},
