@@ -943,7 +943,7 @@ func duplicateOwnershipFinding(d *gen.ConDuplicateOwnershipGrantsRow) (ConvergeF
 		Provider:          "self",
 		Evidence:          ev,
 		RecommendedAction: prose,
-		// surface-only: cancelling/refunding a purchase is an operator decision.
+		// surface-only: canceling/refunding a purchase is an operator decision.
 	}, nil
 }
 

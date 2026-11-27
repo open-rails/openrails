@@ -69,7 +69,7 @@ func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnap
 		return nil, fmt.Errorf("nmi subscription roster: %w", err)
 	}
 	snap.Subscriptions = subs
-	// "Exhaustive" is an absence proof: it authorizes cancelling every local
+	// "Exhaustive" is an absence proof: it authorizes canceling every local
 	// subscription missing from this list. An empty GET /v5/subscriptions is
 	// indistinguishable from an empty gateway (misdeclared account_id,
 	// credential rotated onto a sibling account, incident), so a roster proves

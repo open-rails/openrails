@@ -600,7 +600,7 @@ return nil
 return shop.RefundPayment(ctx, key, payment, billing.RefundPaymentParams{
 	Full:         true,
 	RefundReason: billing.RefundRequestedByCustomer,
-	Reason:       "cancelled within the first day",
+	Reason:       "canceled within the first day",
 	RevokeAccess: true,
 })
 ```

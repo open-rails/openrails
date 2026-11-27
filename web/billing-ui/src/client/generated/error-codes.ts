@@ -348,7 +348,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   product_not_found: { status: 404, type: "invalid_request_error", meaning: "The product does not exist." },
   product_tier_group_conflict: { status: 409, type: "invalid_request_error", meaning: "A customer holds live subscriptions to more than one product of the tier group." },
   product_tier_group_in_use: { status: 409, type: "invalid_request_error", meaning: "The tier group cannot change while a subscription has a plan change in flight." },
-  provider_cancel_held: { status: 409, type: "invalid_request_error", meaning: "Cancelling needs a destructive provider action that is not armed for this merchant." },
+  provider_cancel_held: { status: 409, type: "invalid_request_error", meaning: "Canceling needs a destructive provider action that is not armed for this merchant." },
   provider_outcome_unknown: { status: 409, type: "api_error", meaning: "The provider did not confirm the outcome; read the resource before retrying." },
   provider_price_unreadable: { status: 502, type: "api_error", meaning: "The provider did not answer for the provider price's terms; retry." },
   provider_writes_disabled: { status: 503, type: "api_error", meaning: "Provider writes are off for the merchant, so it takes no payment; the message names why (the merchant's write posture)." },

@@ -33,13 +33,13 @@ var ErrPaymentMethodSameVault = apperr.New(http.StatusConflict, billing.CodePaym
 // one per subscription.
 const ProviderCancelHeldFindingType = "life.provider_cancel.held"
 
-// NeedsProviderScheduleDelete reports whether cancelling sub must delete a
+// NeedsProviderScheduleDelete reports whether canceling sub must delete a
 // provider-owned NMI billing schedule.
 func NeedsProviderScheduleDelete(sub *models.Subscription) bool {
 	return sub != nil && sub.CollectionPolicy != models.CollectionPolicyEngine && rails.IsNMI(sub.Rail) && sub.RailSubscriptionID != ""
 }
 
-// needsArmedProviderStop reports whether cancelling sub queues a destructive
+// needsArmedProviderStop reports whether canceling sub queues a destructive
 // stop of a schedule the provider bills on its own (an NMI delete or a CCBill
 // cancel).
 func needsArmedProviderStop(sub *models.Subscription) bool {

@@ -328,7 +328,7 @@ func runPass(ctx context.Context, fleet *river.Client[pgx.Tx]) *PassResult {
 			out.State = "unfinished"
 			return out
 		case <-ctx.Done():
-			out.State = "cancelled"
+			out.State = "canceled"
 			return out
 		}
 	}

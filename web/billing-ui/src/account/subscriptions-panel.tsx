@@ -63,7 +63,7 @@ export function SubscriptionsPanel({
   const { locale, navigate } = useUiSettings()
   const state = useSubscriptions(options)
   const scales = useCurrencyScales()
-  const [cancelling, setCancelling] = React.useState<Subscription | null>(null)
+  const [canceling, setCanceling] = React.useState<Subscription | null>(null)
   const [resuming, setResuming] = React.useState<Subscription | null>(null)
   const [changingCard, setChangingCard] = React.useState<Subscription | null>(
     null
@@ -93,7 +93,7 @@ export function SubscriptionsPanel({
     return error
   }
 
-  const onChain = cancelling?.rail === "solana"
+  const onChain = canceling?.rail === "solana"
 
   let body: React.ReactNode
   if (state.subscriptions === null && state.error) {
@@ -297,11 +297,11 @@ export function SubscriptionsPanel({
                     aria-label={t("subscriptions.cancelLabel", { name })}
                     onClick={() => {
                       setRowError(null)
-                      setCancelling(s)
+                      setCanceling(s)
                     }}
                   >
                     {pending === "cancel" ||
-                    (cancelling?.id === s.id && !!pending) ? (
+                    (canceling?.id === s.id && !!pending) ? (
                       <Spinner />
                     ) : null}
                     {t("subscriptions.cancel")}
@@ -413,17 +413,17 @@ export function SubscriptionsPanel({
         appearance={appearance}
       />
       <CancelSubscriptionDialog
-        key={cancelling?.id ?? "closed"}
-        open={cancelling !== null}
-        onOpenChange={(open) => !open && setCancelling(null)}
-        name={cancelling ? subscriptionName(cancelling, m) : ""}
+        key={canceling?.id ?? "closed"}
+        open={canceling !== null}
+        onOpenChange={(open) => !open && setCanceling(null)}
+        name={canceling ? subscriptionName(canceling, m) : ""}
         onChain={onChain && !!sendSolanaTransaction}
         appearance={appearance}
-        pending={cancelling ? state.pending[cancelling.id] : undefined}
+        pending={canceling ? state.pending[canceling.id] : undefined}
         onConfirm={async (reason, revokeOnChain) => {
-          if (!cancelling) return null
+          if (!canceling) return null
           const error = await state.cancel(
-            cancelling.id,
+            canceling.id,
             reason,
             sendSolanaTransaction,
             revokeOnChain

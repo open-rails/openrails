@@ -29923,7 +29923,7 @@
     "provider_cancel_held": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "Cancelling needs a destructive provider action that is not armed for this merchant."
+      "meaning": "Canceling needs a destructive provider action that is not armed for this merchant."
     },
     "provider_outcome_unknown": {
       "status": 409,

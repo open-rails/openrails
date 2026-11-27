@@ -194,7 +194,7 @@ func (h *Handler) crankOne(ctx context.Context, repo *solanasubs.SolanaSubscript
 				return crankOutcome{kind: crankNotDue, reason: "a plan change of this subscription awaits its chain outcome",
 					retryAt: h.now().Add(pendingChangeRecheck)}, nil
 			}
-			llog.WarnContext(ctx, "Solana cranker: terminal pull failure (canceled on-chain); cancelling subscription (no dunning)")
+			llog.WarnContext(ctx, "Solana cranker: terminal pull failure (canceled on-chain); canceling subscription (no dunning)")
 			if err := h.recordPullAttempt(ctx, row, plan, memoLocalID, string(cf.Code), crankErr.Error()); err != nil {
 				return crankOutcome{}, err
 			}
