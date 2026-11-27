@@ -3468,6 +3468,7 @@
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
+      "logx": "github.com/open-rails/openrails/internal/logx",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",

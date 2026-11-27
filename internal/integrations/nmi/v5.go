@@ -244,21 +244,26 @@ type v5TxnAction struct {
 
 func (t *v5Transaction) approved() bool { return strings.TrimSpace(t.Response) == "1" }
 
-// newV5TransactionError maps a v5 decline (response=2, 2xx code) onto the
-// classic CustomerVaultError shape; any other outcome is ambiguous.
+// newV5TransactionError maps declines and unprocessed gateway refusals onto
+// CustomerVaultError; refusals remain ambiguous for callers that must verify.
 func newV5TransactionError(prefix string, txn *v5Transaction) error {
 	code, _ := strconv.Atoi(strings.TrimSpace(txn.ResponseCode))
-	if strings.TrimSpace(txn.Response) != "2" || code < 200 || code >= 300 {
+	refused := strings.TrimSpace(txn.Response) == "3" && IsSaleRefusalCode(code) && !duplicateRefusal(code, txn.ResponseText)
+	if !refused && (strings.TrimSpace(txn.Response) != "2" || code < 200 || code >= 300) {
 		return ambiguous(fmt.Errorf("NMI outcome requires verification (response code %d)", code))
 	}
 	rawResponse, _ := json.Marshal(txn)
-	return &CustomerVaultError{
+	rejection := &CustomerVaultError{
 		Message:        prefix,
 		ResponseCode:   code,
 		LocalizationID: decline.NMILocalizationID(code),
 		Detail:         decline.NMIMessage(code),
 		RawResponse:    string(rawResponse),
 	}
+	if refused {
+		return errors.Join(ErrSaleRefused, ambiguous(rejection))
+	}
+	return rejection
 }
 
 type v5CustomerBillingRequest struct {
