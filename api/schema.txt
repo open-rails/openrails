@@ -9,7 +9,7 @@ migration 0005_usage_quarter_hours.up.sql sha256:289f968ac3d0bbce937f66f71f850c8
 migration 0006_usage_receipts.up.sql sha256:73fca1d59b23e1c17080b6a429b13e59232a6a2e745fd6b8035808402f8dc677
 migration 0007_retired_jobs.up.sql sha256:ba9b17805a8b793bc4eb5f96a22a72e8af1df696ea9071564a58b1c8143d0540
 migration 0008_rebill_watch_dropped.up.sql sha256:7d1008c1f618110cd1418a1c66e1dc8b4cd79fee7523e7b9548360000276ae98
-migration 0009_usage_receipt_per_posting.up.sql sha256:3907a99e55b5c8d174fba2a63b06f5bfbf24e1d0b36559a7df1f9d5afad71e1e
+migration 0009_usage_receipt_per_posting.up.sql sha256:d384be58251eea8f5c1270889cc3204e538673039c0c67c517fa1ade287a060e
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -3596,11 +3596,11 @@ table billing.usage_receipts
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column forgiven bigint NOT NULL
   column charges jsonb NOT NULL
-  constraint usage_receipts_charges_check CHECK (((jsonb_typeof(charges) = 'array'::text) AND (octet_length((charges)::text) <= 1048576)))
+  constraint usage_receipts_charges_check CHECK ((jsonb_typeof(charges) = 'array'::text))
   constraint usage_receipts_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint usage_receipts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint usage_receipts_forgiven_check CHECK (((forgiven = 0) OR (currency <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
-  constraint usage_receipts_lines_check CHECK (((jsonb_typeof(lines) = 'array'::text) AND (octet_length((lines)::text) <= 1048576)))
+  constraint usage_receipts_lines_check CHECK ((jsonb_typeof(lines) = 'array'::text))
   constraint usage_receipts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint usage_receipts_pkey PRIMARY KEY (merchant_id, id)
   constraint usage_receipts_reason_check CHECK ((reason = ANY (ARRAY['daily'::text, 'billing'::text, 'credit'::text, 'purge'::text])))

@@ -52,10 +52,9 @@ ALTER TABLE billing.usage_receipts DROP COLUMN forgiven_lines;
 
 ALTER TABLE billing.usage_receipts
     ADD CONSTRAINT usage_receipts_reason_check CHECK (reason IN ('daily', 'billing', 'credit', 'purge')),
-    -- One posting's lines and charges, up to 1 MiB each: a receipt never
-    -- fails for its size.
-    ADD CONSTRAINT usage_receipts_lines_check CHECK (jsonb_typeof(lines) = 'array' AND octet_length(lines::text) <= 1048576),
-    ADD CONSTRAINT usage_receipts_charges_check CHECK (jsonb_typeof(charges) = 'array' AND octet_length(charges::text) <= 1048576),
+    -- A posting never fails for its size: lines and charges have no cap.
+    ADD CONSTRAINT usage_receipts_lines_check CHECK (jsonb_typeof(lines) = 'array'),
+    ADD CONSTRAINT usage_receipts_charges_check CHECK (jsonb_typeof(charges) = 'array'),
     -- A receipt takes something; its lines may net to zero.
     ADD CONSTRAINT usage_receipts_taken_check CHECK (jsonb_array_length(lines) + jsonb_array_length(charges) > 0),
     -- Only a merchant's unit forgives: it is never owed.
