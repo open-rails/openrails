@@ -90,7 +90,7 @@ adds `RiverJobs` to its fleet.
 
 ### Console
 
-`registerAdminConsoleRoutes` serves the SPA and its `config.json` (AuthKit base and the token exchange for `ConsoleClientID`) under `adminconsole.Path` (`/admin`). Staff sign in with the server's own accounts only. Readiness also runs `ControlPlane.SecondFactor`. `GET /admin/merchants` (`consoleMerchants`) is the selector's directory: it needs an explicit `Authorization` header and lists only merchants the credential's permissions reach. The SPA calls `/v1` with the staff token. `AdminConsole.Disabled` removes the subtree.
+`registerAdminConsoleRoutes` serves the SPA and its `config.json` (AuthKit base and the token exchange for `ConsoleClientID`) under `adminconsole.Path` (`/admin`). Staff sign in with the server's own accounts only. Readiness also runs `ControlPlane.SecondFactor`. `GET /admin/merchants` (`consoleMerchants`) is the selector's directory: it needs an explicit `Authorization` header and lists only merchants the credential's permissions reach. `POST /admin/merchants` (`consoleCreateMerchant`) is New merchant: a person's own, unbound session at this server holding `billing.RootMerchantsCreate` in the root scope, no step-up; it calls the operator's `ProvisionMerchant` with the person as owner, refuses a display name where a file holds configuration before creating anything, and answers the name held as `resource_conflict`. Both are the standalone product's routes, mounted with the console; the engine's route catalog registers no merchant. After the owner's setup (`OwnerSetup`'s `fallbackPath`) the SPA opens `setup/merchant`, the first merchant, when the directory is empty. The SPA calls `/v1` with the staff token. `AdminConsole.Disabled` removes the subtree.
 
 ### Binary, image and chart
 
@@ -133,17 +133,19 @@ Checks:
 
 ### 4. Access control and tenant isolation
 AuthKit's Authenticator decides who every request is, and a merchant's authority is
-its group: a credential acts only in the group it is bound to. No route provisions or
+its group: a credential acts only in the group it is bound to. No engine route provisions or
 deletes merchants or manages teams and keys; those are Go methods whose caller
 authorizes and audits (`server/merchants.go`). The console's `GET /admin/merchants`
-lists only the merchants a credential reaches. Fleet analytics read across merchants
+lists only the merchants a credential reaches; its `POST /admin/merchants` creates
+one for a root operator's own session holding `billing.RootMerchantsCreate` and logs who. Fleet analytics read across merchants
 by design and are Go-only.
 
 Checks:
 - `server.New` refuses `Engine.Merchants[…].Issuer` and `Engine.UserInfo`.
 - `MerchantScope` answers `ErrMerchantUnresolved` for a merchant that is not live or
   has no group.
-- `consoleMerchants` refuses a request without an `Authorization` header.
+- `consoleMerchants` and `consoleCreateMerchant` refuse a request without an `Authorization` header.
+- OR-J01-S39 and OR-J01-S40: a root operator holding `billing.RootMerchantsCreate` creates and owns a merchant; a merchant's staff and an operator without it are refused.
 - OR-J32-S03: deleting a merchant closes its credentials' authority.
 
 ### 5. Contracts match the code
@@ -202,12 +204,13 @@ Checks:
 - **CLI.** The built binary (`OPENRAILS_CRITICAL_CLI_BINARY`, `hostCLI`) runs
   OR-J04-S41, OR-J22-S04, OR-J31-S03, OR-J31-S10, OR-J32-S05, OR-J38-S21 and
   OR-J38-S72, OR-J06-S84, OR-J06-S85, and the archive tests' `billing prepare-target`.
+- **Console.** `run-server` with the console serves the staff scenarios over HTTP (OR-J01-S34 to S40), and `web/console/critical` drives the built console in Chromium against it (OR-J01-S41: setup link, owner, first merchant, payment provider step), its public URL the loopback address it listens on.
 - **Image smoke** (`smoke-image` in `.github/workflows/docker-publish.yaml`): CVE scan,
   arm64 build, `version`, `migrate pg`, then `run-server` from environment only until
   `/health/ready` passes and `/admin/` serves the console.
 - **Chart.** `scripts/check.sh chart` lints and renders it with `values.yaml` and
   `ci/full-values.yaml`.
 - Gaps: no test runs `run-server` with a merchant manifest, or
-  `hostconfig.Load` beyond the smoke's environment; no browser test drives the
-  console (the smoke only fetches `/admin/`), and `/admin/merchants` has no scenario; `server/ci/paymentpage` is run by no script or
+  `hostconfig.Load` beyond the smoke's environment; the console's browser case covers
+  its first run alone; `server/ci/paymentpage` is run by no script or
   workflow.

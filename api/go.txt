@@ -993,6 +993,7 @@ pkg openrails/billing, const RootCustomerRead Permission = "root:customer:read"
 pkg openrails/billing, const RootEntitlementsRead Permission = "root:entitlements:read"
 pkg openrails/billing, const RootEventsRead Permission = "root:events:read"
 pkg openrails/billing, const RootInvoicesManage Permission = "root:invoices:manage"
+pkg openrails/billing, const RootMerchantsCreate Permission = "root:merchants:create"
 pkg openrails/billing, const RootMerchantsDelete Permission = "root:merchants:delete"
 pkg openrails/billing, const RootMerchantsRead Permission = "root:merchants:read"
 pkg openrails/billing, const RootMerchantsRestore Permission = "root:merchants:restore"
@@ -3087,6 +3088,7 @@ pkg openrails/billing, type OutboxItem struct, LeaseID LeaseID `json:"lease_id"`
 pkg openrails/billing, type OutboxItem struct, Usage LeaseUsage `json:"usage"`
 pkg openrails/billing, type PSP struct
 pkg openrails/billing, type PSP struct, Archived bool `json:"archived"`
+pkg openrails/billing, type PSP struct, Armed bool `json:"armed"`
 pkg openrails/billing, type PSP struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type PSP struct, Credentials map[string]PSPCredential `json:"credentials"`
 pkg openrails/billing, type PSP struct, Environment Environment `json:"environment"`

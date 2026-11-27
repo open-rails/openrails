@@ -145,3 +145,35 @@ select {
   max-width: min(24rem, 80vw);
   font: inherit;
 }
+.console-form form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 28rem;
+}
+.console-form label {
+  display: grid;
+  gap: 0.25rem;
+  font-weight: 600;
+}
+.console-form small {
+  color: #62646a;
+}
+.console-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.console-steps {
+  display: flex;
+  gap: 1.5rem;
+  padding: 0;
+  list-style: none;
+  color: #62646a;
+}
+.console-steps [aria-current="step"] {
+  color: inherit;
+  font-weight: 600;
+}
+.console-steps [data-done="true"]::before {
+  content: "✓ ";
+}

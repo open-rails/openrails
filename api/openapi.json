@@ -2525,7 +2525,7 @@
           "catalog"
         ],
         "operationId": "CreateProviderPrice",
-        "description": "CreateProviderPrice links a price a provider owns and runs to a product (a legacy NMI plan, a Stripe price, a CCBill FlexForm). Its terms are read from the provider, declared for CCBill; nothing is written to the provider.",
+        "description": "CreateProviderPrice links a price a provider owns and runs to a product (a legacy NMI plan, a Stripe price, a CCBill FlexForm). Its terms are read from the provider, declared for CCBill, and for an NMI plan NMI does not answer for until it does; nothing is written to the provider.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -13963,6 +13963,7 @@
                 "root:entitlements:read",
                 "root:events:read",
                 "root:invoices:manage",
+                "root:merchants:create",
                 "root:merchants:delete",
                 "root:merchants:read",
                 "root:merchants:restore",
@@ -22269,6 +22270,9 @@
           "open_obligations": {
             "type": "integer"
           },
+          "armed": {
+            "type": "boolean"
+          },
           "gateway_id": {
             "type": "string"
           },
@@ -22335,6 +22339,7 @@
           "environment",
           "archived",
           "open_obligations",
+          "armed",
           "credentials",
           "revision",
           "created_at",

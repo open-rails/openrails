@@ -88,9 +88,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   own pages (`billing.BuyerPrices`). Customer-support permissions
   are `merchant:customer:read` and `merchant:customer:manage` (or their `root:` twins); catalog, config
   and metrics remain separate capabilities. There are no legacy-path aliases.
-  No route registers a merchant or manages a
-  team, API keys or the merchant directory: those are `server` Go methods and
-  the `openrails` CLI; a hosted product builds its own routes on them.
+  No engine route registers a merchant or manages a team, API keys or the merchant directory: those are `server` Go methods and the `openrails` CLI; a hosted product builds its own routes on them, as the standalone console does for a root operator's New merchant (`POST /admin/merchants`, `root:merchants:create`).
 - A merchant route acts on the merchant its credential is bound to: its group, the
   declared `Issuer`, or an OpenRails object. The request names none; anything else is
   403 `merchant_unresolved`.

@@ -52,7 +52,7 @@ var (
 	// The root owner holds root:* and covers both.
 	RootMerchantDirectoryViewer = Roles.Root.Role("merchant-directory-viewer", declared(billing.RootMerchantsRead))
 	RootMerchantDirectoryAdmin  = Roles.Root.Role("merchant-directory-admin",
-		declared(billing.RootMerchantsRead), declared(billing.RootMerchantsDelete), declared(billing.RootMerchantsRestore))
+		declared(billing.RootMerchantsRead), declared(billing.RootMerchantsCreate), declared(billing.RootMerchantsDelete), declared(billing.RootMerchantsRestore))
 )
 
 // catalogPerms registers every OpenRails permission, each on its persona:
@@ -62,7 +62,7 @@ var (
 var catalogPerms = func() map[billing.Permission]iam.Perm {
 	out := map[billing.Permission]iam.Perm{}
 	for _, perm := range append(billing.Permissions(),
-		billing.RootMerchantsRead, billing.RootMerchantsDelete, billing.RootMerchantsRestore,
+		billing.RootMerchantsRead, billing.RootMerchantsCreate, billing.RootMerchantsDelete, billing.RootMerchantsRestore,
 		billing.RootWorkerHealthRead) {
 		persona := Roles.Root.PersonaDef
 		if perm.Persona() == billing.MerchantGroupPersona {

@@ -125,7 +125,7 @@ openrails catalog apply catalog.yaml --config config.yaml --merchant onlydemo
 https://billing.example.com/admin/setup#token=…
 ```
 
-Open it, create the owner account (email, username and password) and enroll the second factor its first sign-in asks for. The link is valid 24 hours and only its hash is stored; a restart while it lives logs only its expiry, a start after it expires logs a new one, and once anyone holds a root role it creates nobody. The process that runs the workers logs it (`run-server`, or `run-worker` beside `run-server --no-workers`). From the server's shell, `openrails setup-link` issues a fresh one that replaces a live link and creates an owner even while operators exist: the break-glass. Both need the console, whose `/admin/setup` page opens them.
+Open it, create the owner account (email, username and password) and enroll the second factor its first sign-in asks for. Signed in, the console asks for the first merchant's name (and, where Vault holds configuration, its display name; you can skip it) and creates it owned by you, then its overview asks you to connect a payment provider: no customer can pay until a PSP is armed. Where Vault holds configuration the step leads to its PSPs page; from a file, declare the PSP in the manifest ([below](#the-merchant-manifest)) and restart. A server whose manifest already declares merchants skips the merchant step. The link is valid 24 hours and only its hash is stored; a restart while it lives logs only its expiry, a start after it expires logs a new one, and once anyone holds a root role it creates nobody. The process that runs the workers logs it (`run-server`, or `run-worker` beside `run-server --no-workers`). From the server's shell, `openrails setup-link` issues a fresh one that replaces a live link and creates an owner even while operators exist: the break-glass. Both need the console, whose `/admin/setup` page opens them.
 
 An init job can seed operators instead, then no link is logged: a bootstrap manifest user holding a root role, with a password they reset through the console (which needs `email_smtp`), as a deployment with `admin_console.disabled` must:
 
@@ -555,9 +555,9 @@ prefix `openrails_st_<key_id>` identifies it. Grant a backend only what it needs
 | read or act on customers | `merchant:customer:read`, `merchant:customer:manage` |
 
 Root operators hold the `root:` names, plus `billing.RootMerchantsRead`,
-`billing.RootMerchantsDelete`, `billing.RootMerchantsRestore` and
-`billing.RootWorkerHealthRead` for the server's merchant directory and worker
-health. A person's token is
+`billing.RootMerchantsCreate`, `billing.RootMerchantsDelete`,
+`billing.RootMerchantsRestore` and `billing.RootWorkerHealthRead` for the
+server's merchant directory and worker health. A person's token is
 refused on `/v1/app` (`403 application_required`).
 
 ### The console
@@ -565,6 +565,8 @@ refused on `/v1/app` (`403 application_required`).
 `/admin` is the staff console. Staff sign in with the server's own accounts, AuthKit's sign-in form, and with nothing else. A merchant's own staff can instead use the admin screens in its own site, signed in there ([below](#admin-screens-in-your-own-site)).
 
 The console exchanges the session's token for one bound to the chosen merchant (RFC 8693 through the server's `openrails-console` client), refused where the person holds no role there and no root role. The session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in; a revoked session answers `401 credential_revoked` at once.
+
+A root operator holding `billing.RootMerchantsCreate` (the owner and the `merchant-directory-admin` role) creates a merchant with **New merchant** (`/admin/merchants/new`) and owns its team. A merchant's overview asks to connect a payment provider while none of its PSPs is armed (`armed` in `GET /v1/merchant/psps`).
 
 Operators invite operators on **Team** (`/admin/team`): root's people, an invitation by email with a root role. The invitee opens its link at `/admin/invite` and registers, or accepts it into the account they hold. With `email_smtp` the link is emailed, and registering the invited address with it proves the address. Without it nothing is sent and Team shows the link: it is the credential, so hand it over privately (whoever uses it first gets the role); the invitee registers at once and the address stays unverified. The console shows `/admin/setup`, `/admin/invite` and Team only where the server's AuthKit serves its people and groups (`GET /auth/v1/capabilities` `route_groups` names `groups`).
 
