@@ -49,9 +49,12 @@ metrics and dashboard types are hand-written in `src/admin/lib/api/metrics.ts`. 
 header bell lists open `requires_review` findings, its count a metrics query
 refreshed every 30 seconds. Destructive acts use `TypedConfirmDialog` or a
 counted, typed confirmation. `AdminConsole` adds AuthKit's account administration
-(optional peer `@openrails/auth-ui`) around `BillingAdmin`.
+(optional peer `@openrails/auth-ui`) around `BillingAdmin`. The dashboard shows a
+setup step while none of the merchant's PSPs is `armed`: to its PSPs page where
+Vault holds configuration, else what to declare in the file. `newMerchantHref` is
+the host's New merchant page outside `basePath`, opened through `navigation`.
 
-**Consumers in this repository.** `web/console` composes `BillingAdmin` with AuthKit's members, roles, API keys and account panels into the `/admin` console; `task admin-build` builds it into `web/console/dist`, which the binary embeds. `web/pay` (`@openrails/payment-page`) wraps `InvoicePayment` in the hosted pay page; its build in `web/pay/dist` is embedded by `web/pay/embed.go` (`pay.FS`) and served by `Engine.CheckoutPage` from `Deps.CheckoutAssets`. Its `captchaFetch` resends a pay refused `403 captcha_required` once with the solved token.
+**Consumers in this repository.** `web/console` composes `BillingAdmin` with AuthKit's members, roles, API keys and account panels into the `/admin` console, and adds the first run's merchant step and root operators' New merchant (`POST /admin/merchants`); `task admin-build` builds it into `web/console/dist`, which the binary embeds. `web/pay` (`@openrails/payment-page`) wraps `InvoicePayment` in the hosted pay page; its build in `web/pay/dist` is embedded by `web/pay/embed.go` (`pay.FS`) and served by `Engine.CheckoutPage` from `Deps.CheckoutAssets`. Its `captchaFetch` resends a pay refused `403 captcha_required` once with the solved token.
 
 **Build checks.** `pnpm build` runs `tooling/check-admin-entry.mjs`, which fails
 when the customer entry pulls in admin modules or styles.

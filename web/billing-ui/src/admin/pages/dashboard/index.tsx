@@ -33,6 +33,7 @@ import { useRegistry } from "./registry"
 import { useDashboardView } from "./use-range"
 import { WidgetEditor, type WidgetDraft } from "./widget-editor"
 import { isTile, WidgetTile } from "./widget-tile"
+import { PaymentSetup } from "./payment-setup"
 
 const COLS = 12
 const ROW_HEIGHT = 56
@@ -399,6 +400,7 @@ function MetricsDashboard() {
     return (
       <div className="flex flex-col gap-4">
         {header}
+        <PaymentSetup />
         <div className={TILE_FLOW}>
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-[164px]" />
@@ -411,7 +413,13 @@ function MetricsDashboard() {
       </div>
     )
   }
-  if (!widgets) return null
+  if (!widgets)
+    return (
+      <div className="flex flex-col gap-4">
+        {header}
+        <PaymentSetup />
+      </div>
+    )
 
   // The saved grid needs room for each tile label; the reflow also keeps
   // room for a four-digit amount, and never less than the widest label.
@@ -448,6 +456,7 @@ function MetricsDashboard() {
   return (
     <div className="flex flex-col gap-4">
       {header}
+      <PaymentSetup />
       {empty ? (
         <p className="text-sm text-muted-foreground">
           <AdminMessage id={"Nothing to show yet. Add products in "} />

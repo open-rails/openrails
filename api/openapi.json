@@ -13963,6 +13963,7 @@
                 "root:entitlements:read",
                 "root:events:read",
                 "root:invoices:manage",
+                "root:merchants:create",
                 "root:merchants:delete",
                 "root:merchants:read",
                 "root:merchants:restore",
@@ -22270,6 +22271,9 @@
           "open_obligations": {
             "type": "integer"
           },
+          "armed": {
+            "type": "boolean"
+          },
           "gateway_id": {
             "type": "string"
           },
@@ -22336,6 +22340,7 @@
           "environment",
           "archived",
           "open_obligations",
+          "armed",
           "credentials",
           "revision",
           "created_at",

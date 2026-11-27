@@ -361,6 +361,14 @@ func TestStandaloneAuthSurface(t *testing.T) {
 // AuthKit and River schemas it made.
 func runServer(t *testing.T, w *world, keys string, extra ...map[string]any) (string, *lockedBuffer, *exec.Cmd) {
 	t.Helper()
+	return runServerAt(t, w, keys, false, extra...)
+}
+
+// runServerAt is runServer whose public URL is, when loopback, the address it
+// listens on: a browser's requests name the URL DPoP proofs are checked
+// against.
+func runServerAt(t *testing.T, w *world, keys string, loopback bool, extra ...map[string]any) (string, *lockedBuffer, *exec.Cmd) {
+	t.Helper()
 	t.Cleanup(func() {
 		for _, schema := range []string{w.schema + "_auth", w.schema + "_river"} {
 			_, _ = w.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
@@ -371,6 +379,9 @@ func runServer(t *testing.T, w *world, keys string, extra ...map[string]any) (st
 	port := listener.Addr().(*net.TCPAddr).Port
 	require.NoError(t, listener.Close())
 	settings := map[string]any{"port": port, "public_url": criticalPublicURL, "auth": map[string]any{"keys": map[string]any{"path": keys}}}
+	if loopback {
+		settings["public_url"] = fmt.Sprintf("http://localhost:%d", port)
+	}
 	for _, more := range extra {
 		maps.Copy(settings, more)
 	}
@@ -379,6 +390,9 @@ func runServer(t *testing.T, w *world, keys string, extra ...map[string]any) (st
 	cmd.Stdout, cmd.Stderr = log, log
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	if loopback {
+		return fmt.Sprintf("http://localhost:%d", port), log, cmd
+	}
 	return fmt.Sprintf("http://127.0.0.1:%d", port), log, cmd
 }
 

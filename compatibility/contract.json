@@ -346,7 +346,7 @@
       "const (\n\tRailNMI    Rail = \"nmi\"\n\tRailCCBill Rail = \"ccbill\"\n\tRailStripe Rail = \"stripe\"\n\tRailSolana Rail = \"solana\"\n)",
       "const (\n\tReadCatalog Read = \"catalog\"\n\n\tReadMeters Read = \"meters\"\n\n\tReadPublicConfig Read = \"public_config\"\n\n\tReadMerchantConfiguration Read = \"merchant_configuration\"\n)",
       "const (\n\tRefundRequestedByCustomer RefundReason = \"requested_by_customer\"\n\tRefundDuplicate           RefundReason = \"duplicate\"\n\tRefundFraudulent          RefundReason = \"fraudulent\"\n\n\tRefundFraudWarning RefundReason = \"fraud_warning\"\n\n\tRefundDisputePrevention RefundReason = \"dispute_prevention\"\n\n\tRefundChargedAfterCancel RefundReason = \"charged_after_cancel\"\n\tRefundOther              RefundReason = \"other\"\n\n\tRefundUnknown RefundReason = \"unknown\"\n)",
-      "const (\n\tRootMerchantsRead    Permission = \"root:merchants:read\"\n\tRootMerchantsDelete  Permission = \"root:merchants:delete\"\n\tRootMerchantsRestore Permission = \"root:merchants:restore\"\n\n\tRootWorkerHealthRead      Permission = \"root:worker-health:read\"\n\tRootAdminRateLimitsUnlock Permission = \"root:admin-rate-limits:unlock\"\n)",
+      "const (\n\tRootMerchantsRead    Permission = \"root:merchants:read\"\n\tRootMerchantsCreate  Permission = \"root:merchants:create\"\n\tRootMerchantsDelete  Permission = \"root:merchants:delete\"\n\tRootMerchantsRestore Permission = \"root:merchants:restore\"\n\n\tRootWorkerHealthRead      Permission = \"root:worker-health:read\"\n\tRootAdminRateLimitsUnlock Permission = \"root:admin-rate-limits:unlock\"\n)",
       "const (\n\tRunningChargeRunning RunningChargeState = \"running\"\n\tRunningChargeStopped RunningChargeState = \"stopped\"\n)",
       "const (\n\tScheduledChangeChange ScheduledChangeSource = \"change\"\n\n\tScheduledChangeMigration ScheduledChangeSource = \"migration\"\n)",
       "const (\n\tScheduledMRRChurn ScheduledMRRKind = \"churn\"\n\n\tScheduledMRRContraction ScheduledMRRKind = \"contraction\"\n\n\tScheduledMRRExpansion ScheduledMRRKind = \"expansion\"\n)",
@@ -980,7 +980,7 @@
       "type NotificationRecoveryAction string",
       "type NotificationRetryStatus string",
       "type OutboxItem struct {\n\tLeaseID LeaseID    `json:\"lease_id\"`\n\tUsage   LeaseUsage `json:\"usage\"`\n}",
-      "type PSP struct {\n\tID PSPID `json:\"id\"`\n\n\tKey  string `json:\"key\"`\n\tRail Rail   `json:\"rail\"`\n\n\tEnvironment Environment `json:\"environment\"`\n\n\tArchived bool `json:\"archived\"`\n\n\tOpenObligations int64 `json:\"open_obligations\"`\n\tPSPFields\n\tCredentials map[string]PSPCredential `json:\"credentials\"`\n\n\tRevision  int64     `json:\"revision\"`\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}",
+      "type PSP struct {\n\tID PSPID `json:\"id\"`\n\n\tKey  string `json:\"key\"`\n\tRail Rail   `json:\"rail\"`\n\n\tEnvironment Environment `json:\"environment\"`\n\n\tArchived bool `json:\"archived\"`\n\n\tOpenObligations int64 `json:\"open_obligations\"`\n\n\tArmed bool `json:\"armed\"`\n\tPSPFields\n\tCredentials map[string]PSPCredential `json:\"credentials\"`\n\n\tRevision  int64     `json:\"revision\"`\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}",
       "type PSPAccount struct {\n\tGatewayID string `json:\"gateway_id,omitempty\"`\n\n\tAccountID string `json:\"account_id,omitempty\"`\n\n\tClientAccnum string `json:\"client_accnum,omitempty\"`\n\tClientSubacc string `json:\"client_subacc,omitempty\"`\n\n\tTreasury string `json:\"treasury,omitempty\"`\n}",
       "type PSPConfig struct {\n\tRail Rail `yaml:\"rail\"`\n\n\tEnvironment Environment `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
       "type PSPCredential struct {\n\tConfigured bool `json:\"configured\"`\n\n\tValidatedAt *time.Time `json:\"validated_at\"`\n}",
@@ -2042,7 +2042,8 @@
       "type Merchant struct {\n\tID          string `json:\"id\"`\n\tSlug        string `json:\"slug\"`\n\tDisplayName string `json:\"display_name,omitempty\"`\n\tRole        string `json:\"role,omitempty\"`\n}"
     ],
     "server/internal/http": [
-      "type consoleMerchantPage struct {\n\tData []adminconsole.Merchant `json:\"data\"`\n\tNext *string                 `json:\"next_cursor\"`\n\tRoot bool                    `json:\"root\"`\n}"
+      "type consoleMerchantPage struct {\n\tData []adminconsole.Merchant `json:\"data\"`\n\tNext *string                 `json:\"next_cursor\"`\n\tRoot bool                    `json:\"root\"`\n}",
+      "type consoleNewMerchant struct {\n\tName        string `json:\"name\"`\n\tDisplayName string `json:\"display_name\"`\n}"
     ]
   },
   "declaring_file_imports": {
@@ -5399,13 +5400,16 @@
     },
     "server/internal/http/console_merchants.go": {
       "adminconsole": "github.com/open-rails/openrails/server/internal/adminconsole",
+      "api": "github.com/open-rails/openrails/internal/api",
       "auth": "github.com/open-rails/authkit/auth",
       "billing": "github.com/open-rails/openrails/billing",
       "billingauth": "github.com/open-rails/openrails/internal/billingauth",
       "context": "context",
       "errors": "errors",
+      "history": "github.com/open-rails/openrails/internal/history",
       "http": "net/http",
       "json": "encoding/json",
+      "logx": "github.com/open-rails/openrails/internal/logx",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
       "strings": "strings"
     },

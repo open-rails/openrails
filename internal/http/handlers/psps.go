@@ -27,6 +27,9 @@ func ListPSPs(r *httprequest.Request) {
 		return
 	}
 	out, err := svc.ListPSPs(r.Request.Context(), id, params)
+	if err == nil {
+		err = markArmed(r, svc, id, out.Items)
+	}
 	if err != nil {
 		writePSPError(r, err)
 		return
@@ -41,6 +44,9 @@ func GetPSP(r *httprequest.Request) {
 		return
 	}
 	out, err := svc.GetPSP(r.Request.Context(), id, pspID)
+	if err == nil {
+		out, err = markArmedOne(r, svc, id, out)
+	}
 	if err != nil {
 		writePSPError(r, err)
 		return
@@ -59,6 +65,9 @@ func CreatePSP(r *httprequest.Request) {
 		return
 	}
 	out, err := svc.CreatePSP(r.Request.Context(), id, req)
+	if err == nil {
+		out, err = markArmedOne(r, svc, id, out)
+	}
 	if err != nil {
 		writePSPError(r, err)
 		return
@@ -77,11 +86,36 @@ func UpdatePSP(r *httprequest.Request) {
 		return
 	}
 	out, err := svc.UpdatePSP(r.Request.Context(), id, pspID, req)
+	if err == nil {
+		out, err = markArmedOne(r, svc, id, out)
+	}
 	if err != nil {
 		writePSPError(r, err)
 		return
 	}
 	r.JSON(http.StatusOK, out)
+}
+
+// markArmed sets each PSP's Armed as the payment page decides it.
+func markArmed(r *httprequest.Request, svc *merchants.Service, id billing.MerchantID, psps []billing.PSP) error {
+	ids := make([]billing.PSPID, 0, len(psps))
+	for _, p := range psps {
+		ids = append(ids, p.ID)
+	}
+	armed, err := svc.ArmedPSPs(r.Request.Context(), id, ids, pspArmed(r.State.RailConfigs))
+	if err != nil {
+		return err
+	}
+	for i := range psps {
+		psps[i].Armed = armed[psps[i].ID]
+	}
+	return nil
+}
+
+func markArmedOne(r *httprequest.Request, svc *merchants.Service, id billing.MerchantID, psp billing.PSP) (billing.PSP, error) {
+	one := []billing.PSP{psp}
+	err := markArmed(r, svc, id, one)
+	return one[0], err
 }
 
 func pspPathContext(r *httprequest.Request) (*merchants.Service, billing.MerchantID, billing.PSPID, bool) {

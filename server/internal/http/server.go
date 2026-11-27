@@ -45,6 +45,9 @@ type Dependencies struct {
 	RouteGroups config.RouteGroups
 	// ConsoleDisabled omits the console.
 	ConsoleDisabled bool
+	// ProvisionMerchant is the operator's provisioning (server.ProvisionMerchant):
+	// the console's New merchant.
+	ProvisionMerchant func(context.Context, billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error)
 	// CheckoutOrigin serves CheckoutHandler, the engine's payment page,
 	// there (by Host); empty serves none.
 	CheckoutOrigin  string
@@ -67,6 +70,7 @@ type Server struct {
 	// consoleAssets is the host/binary-supplied admin console build (#754).
 	consoleAssets fs.FS
 	consoleOff    bool
+	provision     func(context.Context, billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error)
 	// groups are the route groups the server mounts.
 	groups config.RouteGroups
 
@@ -190,6 +194,9 @@ func New(logger *slog.Logger, deps Dependencies) (*Server, error) {
 	if deps.ControlPlane.Pool() == nil {
 		return nil, fmt.Errorf("control plane pool is required")
 	}
+	if !deps.ConsoleDisabled && deps.ProvisionMerchant == nil {
+		return nil, fmt.Errorf("the console's merchant provisioning is required")
+	}
 
 	s := &Server{
 		customerAdmissionPolicy: deps.CustomerAdmissionPolicy,
@@ -202,6 +209,7 @@ func New(logger *slog.Logger, deps Dependencies) (*Server, error) {
 		adminLimiter:            middleware.NewAdminOperationLimiter(logger, deps.Runtime.AbuseState),
 		consoleAssets:           deps.ConsoleAssets,
 		consoleOff:              deps.ConsoleDisabled,
+		provision:               deps.ProvisionMerchant,
 		groups:                  deps.RouteGroups,
 		browserTierRoutes:       middleware.NewBrowserTierRoutes(),
 		Log:                     logger,

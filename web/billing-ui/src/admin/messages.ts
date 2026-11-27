@@ -1119,4 +1119,18 @@ export const billingAdminMessages = {
   Warning: "Warning",
   Excessive: "Excessive",
   "High excessive": "High excessive",
+  "Connect a payment provider to take payments":
+    "Connect a payment provider to take payments",
+  "Connect a payment provider": "Connect a payment provider",
+  "No PSP is armed, so no customer can pay yet. ":
+    "No PSP is armed, so no customer can pay yet. ",
+  "Add one with its credentials: OpenRails checks them with the provider before it arms it.":
+    "Add one with its credentials: OpenRails checks them with the provider before it arms it.",
+  "This merchant's configuration is read from a file: declare a PSP in it under ":
+    "This merchant's configuration is read from a file: declare a PSP in it under ",
+  " (its rail, environment, account and secrets), then restart the server.":
+    " (its rail, environment, account and secrets), then restart the server.",
+  "not armed": "not armed",
+  "No new payment uses it: its credentials are incomplete or do not resolve.":
+    "No new payment uses it: its credentials are incomplete or do not resolve.",
 } as const

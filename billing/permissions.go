@@ -98,11 +98,14 @@ func Permissions() []Permission {
 }
 
 // Platform-operator (root) permissions of the standalone server's accounts.
-// No route checks them, so Permissions leaves them out; a hosted product
-// gates its own operator pages with them. RootAdminRateLimitsUnlock is the
-// exception: clearing a destructive hold checks it, so Permissions lists it.
+// No catalog route checks them, so Permissions leaves them out; a hosted
+// product gates its own operator pages with them, as the standalone console
+// gates New merchant with RootMerchantsCreate. RootAdminRateLimitsUnlock is
+// the exception: clearing a destructive hold checks it, so Permissions lists
+// it.
 const (
 	RootMerchantsRead    Permission = "root:merchants:read"
+	RootMerchantsCreate  Permission = "root:merchants:create"
 	RootMerchantsDelete  Permission = "root:merchants:delete"
 	RootMerchantsRestore Permission = "root:merchants:restore"
 	// RootWorkerHealthRead is for a worker-health view, whose last_error

@@ -516,3 +516,38 @@ test("console-dashboard-shows-merchant-units", async ({ page }) => {
     await expect(page.getByText("unregistered currency")).toHaveCount(0)
   }
 })
+
+test("console-overview-asks-for-a-payment-provider-until-one-is-armed", async ({
+  page,
+}) => {
+  // Vault holds the merchant's configuration and none of its PSPs is armed:
+  // the overview leads to the PSPs page.
+  await open(page, "/")
+  const setup = page.locator('[data-setup="psp"]')
+  await expect(setup).toContainText(
+    "Connect a payment provider to take payments"
+  )
+  await setup
+    .getByRole("button", { name: "Connect a payment provider" })
+    .click()
+  await expect(page).toHaveURL(/\/console\/settings\?tab=psps$/)
+  await expect(page.getByText("No PSPs configured.")).toBeVisible()
+
+  // A PSP is armed (as another staff member adds one): the step is gone.
+  await act(page, "arm")
+  const listed = page.waitForResponse(
+    (r) => r.url().includes("/v1/merchant/psps") && r.ok()
+  )
+  await open(page, "/")
+  await listed
+  await expect(
+    page.getByRole("heading", { name: "Dashboard", level: 1 })
+  ).toBeVisible()
+  // Settled on the armed list, the overview shows no step.
+  await page.waitForLoadState("networkidle")
+  await expect(setup).toHaveCount(0)
+  await open(page, "/settings?tab=psps")
+  await expect(page.locator("tbody tr", { hasText: "acct_e2e" })).toContainText(
+    "active"
+  )
+})

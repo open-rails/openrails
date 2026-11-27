@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 876,
+  "scenario_count": 880,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1422,6 +1422,21 @@
       "id": "OR-J01-S38",
       "journey": "J01",
       "name": "A server whose AuthKit mounts sign-in alone (a hosted product's staff sign in elsewhere) advertises neither groups, invitations nor setup in /capabilities route_groups and serves none of their routes; without the console the server's own accounts keep their groups and no setup route is mounted"
+    },
+    {
+      "id": "OR-J01-S39",
+      "journey": "J01",
+      "name": "A root operator's own session holding root:merchants:create creates a merchant through the console's POST /admin/merchants, the operator's provisioning: it answers 201 with the merchant and role owner, the operator holds merchant:owner in its team, the directory lists it, and where Vault holds configuration its display name is written; a name held (resource_conflict), a malformed one (invalid_param) and an unknown field (unknown_field) create nothing"
+    },
+    {
+      "id": "OR-J01-S40",
+      "journey": "J01",
+      "name": "Only a root operator holding root:merchants:create creates a merchant from the console: the merchant's own staff and an operator who reads the directory alone are refused (permission_required), a call without a credential is unauthenticated, and where a file holds configuration a display name is refused before anything is created (merchant_config_read_only)"
+    },
+    {
+      "id": "OR-J01-S41",
+      "journey": "J01",
+      "name": "In the console the openrails binary serves, a fresh server's setup link creates the owner, who enrolls a second factor and is asked to name the first merchant (skippable, no display name where a file holds configuration); the merchant is created owned by them, and its overview asks to connect a payment provider, saying where the file declares one"
     },
     {
       "id": "OR-J22-S05",
@@ -4242,6 +4257,11 @@
       "id": "OR-J38-S98",
       "journey": "J38",
       "name": "An NMI provider price declaring its plan's terms takes them, unconfirmed, while NMI does not answer and is confirmed when it does; NMI's terms win over a declaration that differs, which the receipt reports; a plan stating no terms is still refused, and none states a trial"
+    },
+    {
+      "id": "OR-J38-S99",
+      "journey": "J38",
+      "name": "The console's overview of a merchant none of whose PSPs is armed shows the setup step Connect a payment provider to take payments, which leads to its PSPs page where Vault holds configuration; once a PSP is armed (its list answers armed) the step is gone and the PSP reads active"
     },
     {
       "id": "OR-J24-S76",
