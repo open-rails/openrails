@@ -157,7 +157,7 @@ func (h *InvoiceCollectionHandler) recoverBeforeDispatch(ctx context.Context, in
 // verified provider receipt of its full remaining amount. It never creates an
 // accepted charge, infers its initiator, establishes a stored-card agreement,
 // or calls the provider. A smaller payment does not authorize collection of
-// a possibly lost remainder. Canonical writers share the payer/invoice locks
+// a possibly lost remainder. Canonical writers share the customer/invoice locks
 // below. Restore and trusted manual imports must be coordinated with active
 // writers; the cross-table receipt checks do not establish global database
 // uniqueness.
@@ -216,7 +216,7 @@ func (s *MoneyService) RecoverObservedUsagePayment(ctx context.Context, receipt 
 			return err
 		}
 		if len(customers) != 1 || customers[0] != invoice.CustomerID {
-			return fmt.Errorf("%w: vault does not identify the invoice's payer", ErrUsageRecoveryHeld)
+			return fmt.Errorf("%w: vault does not identify the invoice's customer", ErrUsageRecoveryHeld)
 		}
 		other, err := q.UsageRecoveryHasOtherPayment(ctx, gen.UsageRecoveryHasOtherPaymentParams{MerchantID: mid.UUID(), PspID: receipt.psp, TransactionID: facts.Sale.TransactionID})
 		if err != nil {
@@ -285,10 +285,10 @@ func (s *MoneyService) RecoverObservedUsagePayment(ctx context.Context, receipt 
 		}
 		var change *models.MoneyTransaction
 		if surplus := charged - due; surplus > 0 {
-			payer := identity.CustomerID(invoice.CustomerID)
+			customer := identity.CustomerID(invoice.CustomerID)
 			roundingKey := "invoice-observed-rounding:" + key
 			description := "Rounding credit from recovered invoice " + billing.InvoiceID(invoiceID).String()
-			if change, err = s.depositTx(ctx, s.db.NewWithPgxTx(tx), DepositParams{CustomerID: &payer, Invoker: payer.String(), Currency: invoice.Currency, Amount: surplus,
+			if change, err = s.depositTx(ctx, s.db.NewWithPgxTx(tx), DepositParams{CustomerID: &customer, Invoker: customer.String(), Currency: invoice.Currency, Amount: surplus,
 				Source: "invoice_rounding_purchase", SourceID: &roundingKey, Description: &description, Funding: credits.Purchase}); err != nil {
 				return err
 			}

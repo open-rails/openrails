@@ -156,7 +156,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	}
 
 	// The maintenance kill switch gates convergence/operator destruction. A
-	// canonical authenticated payer delete is their own stored-card decision,
+	// canonical authenticated customer delete is their own stored-card decision,
 	// and a customer's accepted cancel their own billing decision; both still
 	// pass provider mode. Only card removals spend the customer budget.
 	if IsDestructiveIntentType(intent.IntentType) && !requestedPaymentMethodDelete(ctx, intent) && !isAcceptedCustomerCancel(intent) {

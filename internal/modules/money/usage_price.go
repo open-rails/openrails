@@ -28,8 +28,8 @@ import (
 
 // printCard is a card print's terms and when it was first written.
 type printCard struct {
-	card    ratingCard
-	invoice time.Time
+	card  ratingCard
+	order time.Time
 }
 
 // usagePrints are the merchant's card prints, by print.
@@ -72,7 +72,7 @@ func loadPrints(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, print
 		if err := json.Unmarshal(r.Card, &card); err != nil {
 			return nil, fmt.Errorf("decode card print %s: %w", r.Print, err)
 		}
-		out[r.Print] = printCard{card: card, invoice: r.CreatedAt}
+		out[r.Print] = printCard{card: card, order: r.CreatedAt}
 	}
 	return out, nil
 }
@@ -89,7 +89,7 @@ type printQuantity struct {
 // A print with no card is an error.
 func (p usagePrints) cellPrice(cell string, qs []printQuantity) ([]int64, error) {
 	slices.SortFunc(qs, func(a, b printQuantity) int {
-		return cmp.Or(p[a.print].invoice.Compare(p[b.print].invoice), strings.Compare(a.print, b.print))
+		return cmp.Or(p[a.print].order.Compare(p[b.print].order), strings.Compare(a.print, b.print))
 	})
 	out := make([]int64, len(qs))
 	var before int64

@@ -99,12 +99,12 @@ type GetOverdueInvoiceAggregateRow struct {
 	AmountFloor      int64
 }
 
-// One payer's usage invoices in a currency against now: how much is overdue and
+// One customer's usage invoices in a currency against now: how much is overdue and
 // since when, and when the next one falls due. Every evaluation and the
 // admission gate's live recompute read it, so the stored state and the gate
 // agree. grace_days and amount_floor are the bound billing policy's overrides,
 // -1 for none; its floor is in its policy_currency, and overrides only there. policies is the merchant's settings, {policies: {name: body},
-// tiers: {tier: name}, default: name, trust}; the payer's policy is its own
+// tiers: {tier: name}, default: name, trust}; the customer's policy is its own
 // assignment while the settings still declare it, else its trust tier's
 // (billing.trust_tier), else the default.
 //
@@ -211,7 +211,7 @@ type ListDueDelinquencyRow struct {
 
 // Arrears delinquency: the state projection, its due work, and the durable
 // host-lifecycle signal feed.
-// CROSS-MERCHANT: the payers whose delinquency time alone changes now (a usage
+// CROSS-MERCHANT: the customers whose delinquency time alone changes now (a usage
 // invoice fell due, a grace window ran out), in due order. Strictly before now:
 // an invoice is overdue only once its due_at has passed. An idle pass reads no
 // row.
@@ -259,7 +259,7 @@ type MarkDelinquencyDueParams struct {
 	MerchantID uuid.UUID
 }
 
-// The merchant's delinquency policy may have changed: every payer it holds
+// The merchant's delinquency policy may have changed: every customer it holds
 // in grace or delinquent is evaluated again on the next pass.
 func (q *Queries) MarkDelinquencyDue(ctx context.Context, arg MarkDelinquencyDueParams) error {
 	_, err := q.db.Exec(ctx, markDelinquencyDue, arg.Now, arg.MerchantID)
@@ -289,7 +289,7 @@ type NotifyOverdueInvoicesParams struct {
 	Currency   string
 }
 
-// Tells the payer once about each of its open usage invoices in the currency
+// Tells the customer once about each of its open usage invoices in the currency
 // past its due date; the notice id derives from the invoice's (uuidutil.ChildV7
 // of "invoice_overdue": its timestamp, then SHA-256 of the invoice id and name),
 // so a later evaluation adds none. One with a collection in flight waits for
@@ -320,7 +320,7 @@ type RebuildDelinquencyDueParams struct {
 	MerchantID uuid.UUID
 }
 
-// A restored merchant's payers with an open usage invoice are evaluated again
+// A restored merchant's customers with an open usage invoice are evaluated again
 // at once; MarkDelinquencyDue covers the ones in grace or delinquent.
 func (q *Queries) RebuildDelinquencyDue(ctx context.Context, arg RebuildDelinquencyDueParams) error {
 	_, err := q.db.Exec(ctx, rebuildDelinquencyDue, arg.Now, arg.MerchantID)
@@ -343,7 +343,7 @@ type ScheduleDelinquencyParams struct {
 	Now        time.Time
 }
 
-// The payer is evaluated on the next pass: its policy could not be read when
+// The customer is evaluated on the next pass: its policy could not be read when
 // one of its usage invoices changed.
 func (q *Queries) ScheduleDelinquency(ctx context.Context, arg ScheduleDelinquencyParams) error {
 	_, err := q.db.Exec(ctx, scheduleDelinquency,

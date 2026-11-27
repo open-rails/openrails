@@ -140,7 +140,7 @@ func (g *CardAbuseGuard) RecordInvoiceDecline(ctx context.Context, merchantID, o
 	if !g.enabled() || len(subjects) == 0 {
 		return
 	}
-	count, _ := g.state.Count(ctx, "order_card_decline:"+merchantID.String()+":"+operationID.String(), 1, 24*time.Hour)
+	count, _ := g.state.Count(ctx, "invoice_card_decline:"+merchantID.String()+":"+operationID.String(), 1, 24*time.Hour)
 	if count == 1 {
 		g.RecordChargeFailure(ctx, merchantID, subjects, attack)
 	}

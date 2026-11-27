@@ -55,18 +55,18 @@ func (s *Service) invokerWastedSpendPolicy(ctx context.Context) ([]abuse.WastedW
 	return out, nil
 }
 
-// payerWastedWindows resolves the PAYER's wasted-spend budget windows from the
-// bound billing policy's bad_spend windows (#488) at the payer's current tier;
+// customerWastedWindows resolves the customer's wasted-spend budget windows from the
+// bound billing policy's bad_spend windows (#488) at the customer's current tier;
 // a window that names no currency is in the policy's policy_currency.
-func (s *Service) payerWastedWindows(ctx context.Context, payer identity.CustomerID, currency, trustLevel string) ([]abuse.WastedWindow, error) {
+func (s *Service) customerWastedWindows(ctx context.Context, customer identity.CustomerID, currency, trustLevel string) ([]abuse.WastedWindow, error) {
 	if trustLevel == "" {
-		level, err := s.moneyService().TrustLevel(ctx, payer, currency)
+		level, err := s.moneyService().TrustLevel(ctx, customer, currency)
 		if err != nil {
 			return nil, err
 		}
 		trustLevel = level.TrustLevel
 	}
-	pol, err := admission.NewBillingPolicyStore(s.rt.DB).Resolve(ctx, payer, trustLevel)
+	pol, err := admission.NewBillingPolicyStore(s.rt.DB).Resolve(ctx, customer, trustLevel)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (s *Service) failedUsageWindows(ctx context.Context, customer identity.Cust
 	if invokerType == billing.InvokerTypeDelegated {
 		windows, err = s.invokerWastedSpendPolicy(ctx)
 	} else {
-		windows, err = s.payerWastedWindows(ctx, customer, currency, "")
+		windows, err = s.customerWastedWindows(ctx, customer, currency, "")
 	}
 	if err != nil {
 		return nil, err

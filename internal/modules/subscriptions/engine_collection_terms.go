@@ -122,7 +122,7 @@ func DecodeSubscriptionCollectionPayload(in gen.BillingProviderIntent) (Subscrip
 	key := SubscriptionCollectionKey(p.Renewal.SubscriptionID, p.PreviousPeriodEnd, p.Attempt)
 	if p.Initiator == charge.InitiatorCustomer {
 		if in.Origin != "user" || in.Actor == nil || *in.Actor != p.Renewal.CustomerID.String() || !charge.CustomerPaymentKeyValid(TypeManualRebill, p.Renewal.CustomerID, in.IdempotencyKey) {
-			return p, errors.New("engine customer retry lacks its accepted payer action")
+			return p, errors.New("engine customer retry lacks its accepted customer action")
 		}
 		key = in.IdempotencyKey
 		if p.RequestedPaymentMethodID != nil && *p.RequestedPaymentMethodID != p.PaymentMethodID {

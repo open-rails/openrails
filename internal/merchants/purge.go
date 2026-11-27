@@ -28,7 +28,7 @@ const DestructiveRunKindMerchantPurge = "merchant_purge"
 // merchantOwnedTables are the openrails.* tables that carry the persisted
 // merchant_id column, IN PURGE ORDER: children before the rows they reference.
 //
-// The invoice is load-bearing, not cosmetic. prices→products, subscriptions→prices
+// The order is load-bearing, not cosmetic. prices→products, subscriptions→prices
 // and invoice_attempts→payments are all RESTRICT or NO ACTION, so the previous alphabetical-ish order aborted the
 // whole purge (SQLSTATE 23001) for any merchant that owned a product with a
 // price — i.e. every real one. Nothing caught it because the only test seeded a

@@ -79,7 +79,7 @@ func NormalizeBillingPolicy(name string, p models.BillingPolicy) (models.Billing
 
 	if strings.TrimSpace(p.CollectionCycleBoundary) != "" {
 		return models.BillingPolicy{}, fmt.Errorf(
-			"%s: collection_cycle_boundary cannot be per-policy — a payer's statement periods must tile its lifetime with no gap or overlap, and rebinding is a live runtime lever, so a mid-cycle change would bill a stretch twice or never. Set invoice.billing_period_boundary on the merchant instead", label)
+			"%s: collection_cycle_boundary cannot be per-policy — a customer's statement periods must tile its lifetime with no gap or overlap, and rebinding is a live runtime lever, so a mid-cycle change would bill a stretch twice or never. Set invoice.billing_period_boundary on the merchant instead", label)
 	}
 	if p.CollectionThresholdAmount != nil {
 		if *p.CollectionThresholdAmount < 0 {

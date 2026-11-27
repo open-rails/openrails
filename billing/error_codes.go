@@ -425,7 +425,7 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeSubscriptionNotFound, 404, invalid, "The subscription does not exist."},
 	{CodeSubscriptionNotActive, 409, invalid, "The subscription is not active."},
 	{CodeCancelUnsupportedOnRail, 400, invalid, "This rail has no cancel operation."},
-	{CodeProviderCancelHeld, 409, invalid, "Cancelling needs a destructive provider action that is not armed for this merchant."},
+	{CodeProviderCancelHeld, 409, invalid, "Canceling needs a destructive provider action that is not armed for this merchant."},
 	{CodeSubscriptionResumable, 409, invalid, "A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again."},
 	{CodeSubscriptionPaidThrough, 409, invalid, "A canceled subscription to this product is still paid; buy again once its paid period ends."},
 	{CodeRebillTermsCommitted, 409, invalid, "An accepted recurring payment owns the pending price terms."},

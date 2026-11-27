@@ -4,7 +4,7 @@ SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));
 
 -- name: CountCustodianMethodAliases :one
 SELECT count(*) AS total,
-       count(*) FILTER (WHERE customer_id <> sqlc.arg(customer_id)::uuid) AS foreign_payers
+       count(*) FILTER (WHERE customer_id <> sqlc.arg(customer_id)::uuid) AS foreign_customers
 FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND custodian_id = sqlc.arg(custodian_id)::uuid

@@ -273,8 +273,8 @@ type registeredJob struct {
 
 func (j registeredJob) Kind() string { return j.KindName }
 
-// billingPass queues the server's hourly billing pass now (the month-end
-// close and lot expiry run in it) and waits for it.
+// billingPass queues the server's hourly billing pass now (the daily
+// posting and lot expiry run in it) and waits for it.
 func (e *env) billingPass(ctx context.Context, schema string) *PassResult {
 	out := &PassResult{EnqueuedAt: time.Now().UTC()}
 	client, err := river.NewClient(riverpgxv5.New(e.pool), &river.Config{Schema: schema})

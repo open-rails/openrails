@@ -1,6 +1,6 @@
 // Package delinquency owns the arrears delinquency state (current → grace →
-// delinquent per merchant, payer and currency), admission refusal for
-// delinquent payers, and a host-lifecycle event on every transition.
+// delinquent per merchant, customer and currency), admission refusal for
+// delinquent customers, and a host-lifecycle event on every transition.
 //
 // Delinquency is how long a debt has gone unpaid, independent of why any
 // charge failed (the decline bucket); neither is inferred from the other. It
@@ -16,7 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/currency"
 )
 
-// State is the delinquency level for one (merchant, payer, currency).
+// State is the delinquency level for one (merchant, customer, currency).
 type State string
 
 const (
@@ -58,7 +58,7 @@ func ParseState(v string) State {
 // was going to pay.
 const DefaultGraceDays = 14
 
-// DefaultAmountFloor is the smallest overdue balance that can make a payer
+// DefaultAmountFloor is the smallest overdue balance that can make a customer
 // delinquent in a currency whose floor the merchant did not declare: one unit
 // of it, in its native units.
 func DefaultAmountFloor(code string) int64 {
@@ -75,11 +75,11 @@ func DefaultAmountFloor(code string) int64 {
 
 // Policy is the merchant's declared delinquency policy.
 type Policy struct {
-	// GraceDays is how long past a usage invoice's due_at the payer keeps grace.
+	// GraceDays is how long past a usage invoice's due_at the customer keeps grace.
 	// Zero is a valid explicit choice: delinquent the moment it is overdue.
 	GraceDays int
 	// AmountFloor (native units of the debt's currency) is the smallest
-	// overdue balance that can escalate to delinquent; below it the payer
+	// overdue balance that can escalate to delinquent; below it the customer
 	// stays in grace.
 	AmountFloor int64
 }
@@ -100,7 +100,7 @@ func (p Policy) Validate() error {
 }
 
 // Exposure is the usage-invoice-derived input to a delinquency decision: how much a
-// payer owes past its due date, since when, and across how many usage invoices.
+// customer owes past its due date, since when, and across how many usage invoices.
 type Exposure struct {
 	OverdueStartedAt time.Time
 	OverdueAmount    int64
@@ -127,7 +127,7 @@ func Classify(p Policy, e Exposure, now time.Time) State {
 	return StateDelinquent
 }
 
-// withOverrides applies a bound billing policy's per-payer overrides on top of
+// withOverrides applies a bound billing policy's per-customer overrides on top of
 // the merchant-wide policy. -1 is the query's no-override sentinel; 0 is a
 // real "delinquent as soon as overdue".
 func (p Policy) withOverrides(graceDays int, amountFloor int64) (Policy, error) {

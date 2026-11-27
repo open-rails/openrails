@@ -121,7 +121,7 @@ func collectionBinding(in gen.BillingProviderIntent) (receiptBinding, error) {
 	return receiptBinding{in.ID, in.MerchantID, *in.PspID, in.IntentType, hex.EncodeToString(digest[:])}, nil
 }
 
-// ReadNMICollectionReceipt resolves the accepted PSP and reads the actual invoice
+// ReadNMICollectionReceipt resolves the accepted PSP and reads the actual order
 // match and exact transaction from that account. Terms are never caller inputs.
 func ReadNMICollectionReceipt(ctx context.Context, in gen.BillingProviderIntent, resolver railresolve.NMIClientResolver, reference string) (CollectedReceipt, bool, error) {
 	binding, err := collectionBinding(in)
@@ -239,7 +239,7 @@ func (r CollectedReceipt) Validate(in gen.BillingProviderIntent) error {
 }
 
 // NMICard is the brand and last four of the card an NMI sale charged, as
-// its invoice search reported them.
+// its order search reported them.
 func (r CollectedReceipt) NMICard() models.Card {
 	if r.data.NMI == nil {
 		return models.Card{}

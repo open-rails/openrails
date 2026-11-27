@@ -901,7 +901,7 @@ func (r *SubscriptionRepo) ListOverdueRebills(ctx context.Context, cutoff, now t
 	return r.manyWithDetails(ctx, rows)
 }
 
-// GetLatestResumableCanceled returns the payer's most recent canceled
+// GetLatestResumableCanceled returns the customer's most recent canceled
 // subscription whose paid period has not elapsed (resume candidate), or
 // pgx.ErrNoRows.
 func (r *SubscriptionRepo) GetLatestResumableCanceled(ctx context.Context, tenantSubjectID uuid.UUID, now time.Time) (*models.Subscription, error) {

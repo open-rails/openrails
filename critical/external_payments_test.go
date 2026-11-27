@@ -96,7 +96,7 @@ func TestImportedReceipt(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		input := saleInput(t, a, p)
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		providerCustomer := p.core.AddCustomer(a.alice.Email, "Imported payer", nil)
+		providerCustomer := p.core.AddCustomer(a.alice.Email, "Imported customer", nil)
 		form := url.Values{"amount": {"3000"}, "currency": {"usd"}, "customer": {providerCustomer}, "payment_method": {input.Payment.Token}, "confirm": {"true"}}
 		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, p.server.URL+"/v1/payment_intents", strings.NewReader(form.Encode()))
 		require.NoError(t, err)

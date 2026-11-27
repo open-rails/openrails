@@ -44,7 +44,7 @@ func (s *PurchaseService) ownedStripeEngineOperation(ctx context.Context, id uui
 }
 
 // stripeAuthentication reads an unresolved payment's client secret, for its
-// interactive payer only; zero when it waits on nothing. Credential scopes and
+// interactive customer only; zero when it waits on nothing. Credential scopes and
 // the immutable operation, not request fields, select the account and card.
 // The secret is read from Stripe on every answer and never stored.
 func (s *PurchaseService) stripeAuthentication(ctx context.Context, id uuid.UUID, principal billingauth.Payer, resolver intents.StripeEngineServiceResolver) (stripeAuthentication, error) {
@@ -88,7 +88,7 @@ func (s *PurchaseService) stripeAuthentication(ctx context.Context, id uuid.UUID
 }
 
 // authenticateAction is the next action of a Stripe engine payment awaiting
-// its payer's authentication; nil when none is outstanding.
+// its customer's authentication; nil when none is outstanding.
 func (s *PurchaseService) authenticateAction(ctx context.Context, in gen.BillingProviderIntent, principal billingauth.Payer, resolver intents.StripeEngineServiceResolver) (*billing.NextAction, error) {
 	auth, err := s.stripeAuthentication(ctx, in.ID, principal, resolver)
 	if err != nil || auth.ClientSecret == "" {

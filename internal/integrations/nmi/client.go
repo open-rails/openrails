@@ -178,7 +178,7 @@ func (c *NMIClient) client() *http.Client {
 // carries the caller's ctx under the mutation or read deadline. The noctx
 // linter forbids any other constructor.
 //
-// The caller must defer cancel until the body is fully read; cancelling
+// The caller must defer cancel until the body is fully read; canceling
 // earlier aborts the read.
 func (c *NMIClient) newRequest(ctx context.Context, method, url string, body io.Reader, mutating bool) (*http.Request, context.CancelFunc, error) {
 	if ctx == nil {

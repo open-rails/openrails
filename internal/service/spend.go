@@ -395,36 +395,36 @@ func usageGroups(rows []eventstore.UsageBucket, by billing.UsageGroupBy) []usage
 	return out
 }
 
-// SetCreditAccountSettings upserts a payer's spend policy in one currency.
-func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.CustomerID, currency string, in money.AccountSettingsInput) error {
-	if payer.IsZero() {
-		return fmt.Errorf("payer required")
+// SetCreditAccountSettings upserts a customer's spend policy in one currency.
+func (s *Service) SetCreditAccountSettings(ctx context.Context, customer identity.CustomerID, currency string, in money.AccountSettingsInput) error {
+	if customer.IsZero() {
+		return fmt.Errorf("customer required")
 	}
 	currency, err := s.registryCurrency(ctx, "currency", currency)
 	if err != nil {
 		return err
 	}
 	return s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		_, err := s.moneyService().UpsertAccountSettings(ctx, payer, currency, in)
+		_, err := s.moneyService().UpsertAccountSettings(ctx, customer, currency, in)
 		return err
 	})
 }
 
-// GetCreditAccountSettings returns a payer's stored account settings in one
+// GetCreditAccountSettings returns a customer's stored account settings in one
 // currency (billing mode, default card, credit limit).
-func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
+func (s *Service) GetCreditAccountSettings(ctx context.Context, customer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
 	}
 	defer release()
 
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
+	if customer.IsZero() {
+		return nil, fmt.Errorf("customer required")
 	}
 	currency, err := s.registryCurrency(ctx, "currency", currency)
 	if err != nil {
 		return nil, err
 	}
-	return s.moneyService().GetAccountSettingsForCustomer(ctx, payer, currency)
+	return s.moneyService().GetAccountSettingsForCustomer(ctx, customer, currency)
 }

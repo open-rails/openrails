@@ -11,7 +11,7 @@ import (
 )
 
 // followMoneyPolicy marks the due work a change to a merchant's settings may
-// move: its payers in grace or delinquent are evaluated again, and its usage
+// move: its customers in grace or delinquent are evaluated again, and its usage
 // accounts the new terms put due to bill are checked. A first load counts as
 // a change, since the settings may have changed while no process served the
 // merchant.

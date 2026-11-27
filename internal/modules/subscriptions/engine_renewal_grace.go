@@ -47,7 +47,7 @@ func EngineRenewalGrace(period time.Duration) (time.Duration, error) {
 }
 
 // EngineAuthenticationWindow bounds how long a first payment may wait on an
-// issuer authentication challenge the payer started. After it the engine
+// issuer authentication challenge the customer started. After it the engine
 // closes the payment and the enrollment fails, releasing the product for a
 // new attempt. A renewal's challenge waits at most EngineRenewalGrace of the
 // renewal's period, the same bound as its access.

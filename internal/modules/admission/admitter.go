@@ -1,5 +1,5 @@
 // Package admission resolves what a gate's view decides a customer's
-// requests against: the payer's money policy and its spend windows, the
+// requests against: the customer's money policy and its spend windows, the
 // usage limits a request claims, and the checks made whatever a request
 // costs (delegated invokers, failed-usage cutoffs, delinquency). Nothing is
 // held: gates decide locally.
@@ -64,7 +64,7 @@ type AdmitRequest struct {
 	CustomerID  identity.CustomerID // the merchant subject
 	Invoker     string              // canonical invoker: user:<id> / apiKey:<key_id> / <issuer>:<sub>
 	InvokerType string              // "customer" for the customer's own credential; empty/other = delegated
-	TrustLevel  string              // optional payer trust level; empty resolves from OpenRails money state
+	TrustLevel  string              // optional customer trust level; empty resolves from OpenRails money state
 	Resource    string              // caller-supplied resource string for host-side attribution only
 	Roles       []uuid.UUID         // immutable role UUIDs the invoker holds (#473)
 	Currency    string
@@ -97,9 +97,9 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 	}
 	trusted := gated{trust: trust}
 
-	// Delegated-invoker failed-usage cutoff (#497): direct payer credentials are
+	// Delegated-invoker failed-usage cutoff (#497): direct customer credentials are
 	// not cut off here (their failures past grace are charged when recorded).
-	if a.failedCutoff != nil && !identity.IsDirectPayerInvoker(req.InvokerType) && req.Invoker != "" {
+	if a.failedCutoff != nil && !identity.IsCustomerInvoker(req.InvokerType) && req.Invoker != "" {
 		over, werr := a.failedCutoff.CutoffReached(ctx, req.CustomerID, req.Invoker, money.NormalizeCurrency(req.Currency))
 		if werr != nil {
 			return gated{}, nil, werr
@@ -109,9 +109,9 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 		}
 	}
 
-	// or#878, the TIME axis. The amount cap below asks "can this payer afford
-	// one more request"; this asks "has this payer's existing debt outlived the
-	// merchant's grace window". A payer can pass either and fail the other, so
+	// or#878, the TIME axis. The amount cap below asks "can this customer afford
+	// one more request"; this asks "has this customer's existing debt outlived the
+	// merchant's grace window". A customer can pass either and fail the other, so
 	// both gates run and each has its own deny code.
 	//
 	// This is the ONE enforcement lever OpenRails is authoritative over, and for
@@ -132,7 +132,7 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 		}
 	}
 
-	// or#897: the merchant chose which policy binds to this payer; OpenRails
+	// or#897: the merchant chose which policy binds to this customer; OpenRails
 	// measures and enforces its spend windows from the transaction's locked
 	// merchant settings snapshot.
 	sgReq, policy, err := a.policyOf(ctx, req, trust.TrustLevel)
@@ -142,7 +142,7 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 
 	// Only the customer's own credential spends its balance: nothing grants a
 	// delegated invoker spend.
-	if !identity.IsDirectPayerInvoker(req.InvokerType) {
+	if !identity.IsCustomerInvoker(req.InvokerType) {
 		return trusted, &AdmitDecision{BlockedBy: "budget", DenyCode: billing.DenyDelegatedSpendNotAllowed}, nil
 	}
 

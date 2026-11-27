@@ -26,7 +26,7 @@ import (
 
 // Changed runs in the transaction of every change to what a usage invoice has
 // due or whether it is open, with the invoice as it now stands and d bound to
-// that transaction: delinquency evaluates the invoice's payer there. The
+// that transaction: delinquency evaluates the invoice's customer there. The
 // delinquency module installs it.
 var Changed func(ctx context.Context, d *db.DB, invoice gen.BillingInvoice, now time.Time) error
 

@@ -16,7 +16,7 @@ import (
 var ErrNotInvoiceReceipt = errors.New("NMI transaction does not identify an invoice")
 
 // InvoiceSaleEvidence is read from the authenticated account, never a request's
-// proposed amount or payer. The MoneyService seals it before local recovery.
+// proposed amount or customer. The MoneyService seals it before local recovery.
 type InvoiceSaleEvidence struct {
 	InvoiceID uuid.UUID
 	Sale      SaleEvidence

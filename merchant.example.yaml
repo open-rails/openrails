@@ -268,15 +268,15 @@ billing_policies:
         limit: "0"
         # Currency is the window's; empty is the request's.
         currency: ""
-    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for payers bound here; nil defers to it.
+    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for customers bound here; nil defers to it.
     collection_threshold_amount: "0"
-    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for payers bound here; nil defers to it.
+    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for customers bound here; nil defers to it.
     delinquency_grace_days: 0
-    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for payers bound here; nil defers to it.
+    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for customers bound here; nil defers to it.
     delinquency_amount_floor: "0"
-    # CollectionCycleBoundary is declarable and REFUSED: statement periods must tile a payer's lifetime, and rebinding is a live lever, so the boundary stays merchant-wide.
+    # CollectionCycleBoundary is declarable and REFUSED: statement periods must tile a customer's lifetime, and rebinding is a live lever, so the boundary stays merchant-wide.
     collection_cycle_boundary: ""
-    # BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace windows: at most Limit of host-reported wasted spend is forgiven per window; direct-payer overage is charged.
+    # BadSpendWindows are the #497 per-CUSTOMER direct-credential wasted-spend grace windows: at most Limit of host-reported wasted spend is forgiven per window; direct-customer overage is charged.
     bad_spend_windows:
         # Key names the window.
       - key: ""

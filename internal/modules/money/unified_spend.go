@@ -25,14 +25,14 @@ import (
 // balance and accrued to owed (either may be 0).
 //
 // preAuthorized selects the gating contract:
-//   - false: the remainder is gated by the credit line; a payer
+//   - false: the remainder is gated by the credit line; a customer
 //     without one, or a spend past it, gets ErrInsufficientCredits and nothing
 //     is debited.
 //   - true (capture of an admitted request): never re-gates; the remainder is
 //     recorded as owed/overdraft even without a credit line. Admission was the
 //     gate; capture records reality.
 func (s *MoneyService) spendBalanceThenOwedTx(
-	ctx context.Context, q *gen.Queries, payer identity.CustomerID,
+	ctx context.Context, q *gen.Queries, customer identity.CustomerID,
 	userID, currency string, key IdempotencyKey, amount int64, preAuthorized bool,
 ) (balanceSpent, owedAccrued int64, applied bool, err error) {
 	if amount <= 0 {
@@ -51,9 +51,9 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		return 0, 0, false, err
 	}
 	tenantID := tid.UUID()
-	payerID := payer.UUID()
+	customerID := customer.UUID()
 
-	bal, err := s.lockBalance(ctx, q, payer, userID, cur)
+	bal, err := s.lockBalance(ctx, q, customer, userID, cur)
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -61,7 +61,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	// The ledger balance holds a lapsed lot until its expiry posts, and a
 	// spend never draws it: cap the balance leg at the live lots.
 	lots, lerr := q.ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now, LiveAt: s.lotsLiveAt(),
+		MerchantID: tenantID, CustomerID: customerID, Currency: cur, AsOf: now, LiveAt: s.lotsLiveAt(),
 	})
 	if lerr != nil {
 		return 0, 0, false, lerr
@@ -93,14 +93,14 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			// owed/overdraft regardless of the credit line. An involuntary
 			// overdraft leaves a prepaid customer prepaid: the owed blocks new
 			// holds until funding repays it.
-			if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModePrepaid, now); err != nil {
+			if err := s.ensureSettingsRowTx(ctx, q, tenantID, customerID, cur, BillingModePrepaid, now); err != nil {
 				return 0, 0, false, err
 			}
 		} else {
 			// Immediate spend: the remainder can only go to owed when the account
 			// has a credit line, and only up to that line.
 			settingsRow, serr := q.LockMoneyAccountSettings(ctx, gen.LockMoneyAccountSettingsParams{
-				MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+				MerchantID: tenantID, CustomerID: customerID, Currency: cur,
 			})
 			if errors.Is(serr, pgx.ErrNoRows) {
 				// No settings row => prepaid default => no credit line.
@@ -109,14 +109,14 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			if serr != nil {
 				return 0, 0, false, serr
 			}
-			capacity, err := s.usageAdmissionCapacity(ctx, q, payer, cur, AdmissionCapacity{BillingMode: settingsRow.BillingMode, CreditLimit: settingsRow.CreditLimitAmount})
+			capacity, err := s.usageAdmissionCapacity(ctx, q, customer, cur, AdmissionCapacity{BillingMode: settingsRow.BillingMode, CreditLimit: settingsRow.CreditLimitAmount})
 			if err != nil {
 				return 0, 0, false, err
 			}
 			if capacity.BillingMode != BillingModeArrears || capacity.CreditLimit <= 0 {
 				return 0, 0, false, ErrInsufficientCredits
 			}
-			exposure, err := s.moneyLedger(q, tenantID).OutstandingOwed(ctx, payerID, cur)
+			exposure, err := s.moneyLedger(q, tenantID).OutstandingOwed(ctx, customerID, cur)
 			if err != nil {
 				return 0, 0, false, err
 			}
@@ -128,7 +128,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	}
 
 	if fromBalance > 0 {
-		_, balanceApplied, werr := s.withdrawBalanceAndBlocks(ctx, q, payer, userID, cur, key, s.postingResource(), fromBalance)
+		_, balanceApplied, werr := s.withdrawBalanceAndBlocks(ctx, q, customer, userID, cur, key, s.postingResource(), fromBalance)
 		if werr != nil {
 			return 0, 0, false, werr
 		}
@@ -138,7 +138,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 
 	if fromOwed > 0 {
 		ml := s.moneyLedger(q, tenantID)
-		_, owedApplied, aerr := ml.AccrueOwedIdempotent(ctx, payerID, cur, fromOwed, key.Coord(), nil)
+		_, owedApplied, aerr := ml.AccrueOwedIdempotent(ctx, customerID, cur, fromOwed, key.Coord(), nil)
 		if aerr != nil {
 			return 0, 0, false, aerr
 		}
@@ -150,14 +150,14 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			if s.posting != nil && !s.posting.owedAt.IsZero() {
 				at = s.posting.owedAt
 			}
-			if err := books.New(q, tenantID).AccrueUsage(ctx, payerID, cur, fromOwed, key.Coord(), at, nil); err != nil {
+			if err := books.New(q, tenantID).AccrueUsage(ctx, customerID, cur, fromOwed, key.Coord(), at, nil); err != nil {
 				return 0, 0, false, err
 			}
 		}
-		if err := s.insertOwedItemsTx(ctx, q, tenantID, payerID, cur, key, fromOwed, now); err != nil {
+		if err := s.insertOwedItemsTx(ctx, q, tenantID, customerID, cur, key, fromOwed, now); err != nil {
 			return 0, 0, false, err
 		}
-		if err := s.queueUsageBilling(ctx, q, payerID, cur); err != nil {
+		if err := s.queueUsageBilling(ctx, q, customerID, cur); err != nil {
 			return 0, 0, false, err
 		}
 		owedAccrued = fromOwed

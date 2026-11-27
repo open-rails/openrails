@@ -24,8 +24,7 @@ import (
 )
 
 // KindUsageInvoices bills the due usage accounts and queues the due collections.
-// It keeps the kind, and UsageInvoiceKey its key, that queued jobs carry.
-const KindUsageInvoices = "openrails.usage_orders"
+const KindUsageInvoices = "openrails.usage_invoices"
 
 // UsageInvoicesInterval is the pass's cadence: how long a bill date or a due
 // collection waits. A threshold crossing queues a pass at once.
@@ -59,7 +58,7 @@ type UsageAccountKey struct {
 type UsageInvoiceKey struct {
 	DueAt      time.Time `json:"due_at"`
 	MerchantID uuid.UUID `json:"merchant_id"`
-	InvoiceID  uuid.UUID `json:"order_id"`
+	InvoiceID  uuid.UUID `json:"invoice_id"`
 }
 
 func (UsageInvoiceArgs) Kind() string { return KindUsageInvoices }
@@ -451,7 +450,7 @@ func (s *MoneyService) usageAdmissionBillingMode(ctx context.Context, row gen.Bi
 }
 
 // GetAdmissionBillingMode returns the billing mode the spend gate admits under.
-func (s *MoneyService) GetAdmissionBillingMode(ctx context.Context, payer identity.CustomerID, currency string) (string, error) {
+func (s *MoneyService) GetAdmissionBillingMode(ctx context.Context, customer identity.CustomerID, currency string) (string, error) {
 	cur := normalizeCurrency(currency)
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -464,10 +463,10 @@ func (s *MoneyService) GetAdmissionBillingMode(ctx context.Context, payer identi
 		return "", err
 	}
 	row, err := s.db.Gen(ctx).GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{
-		MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: cur,
+		MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: cur,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		row = gen.BillingMoneySetting{MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: cur, BillingMode: BillingModePrepaid}
+		row = gen.BillingMoneySetting{MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: cur, BillingMode: BillingModePrepaid}
 	} else if err != nil {
 		return "", err
 	}
@@ -478,7 +477,7 @@ func (s *MoneyService) GetAdmissionBillingMode(ctx context.Context, payer identi
 // under the merchant's usage_billing terms, its billing mode: arrears while
 // the customer can be collected from, else prepaid. Without terms the
 // customer's own mode stands, and a prepaid customer's line is unread.
-func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Queries, payer identity.CustomerID, currency string, capacity AdmissionCapacity) (AdmissionCapacity, error) {
+func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Queries, customer identity.CustomerID, currency string, capacity AdmissionCapacity) (AdmissionCapacity, error) {
 	cfg, cur, err := s.usageBillingConfig(ctx, currency)
 	if err != nil {
 		return capacity, err
@@ -495,9 +494,9 @@ func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Querie
 	if err != nil {
 		return capacity, err
 	}
-	row, err := q.GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: currency})
+	row, err := q.GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: currency})
 	if errors.Is(err, pgx.ErrNoRows) {
-		row = gen.BillingMoneySetting{MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: currency}
+		row = gen.BillingMoneySetting{MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: currency}
 	} else if err != nil {
 		return capacity, err
 	}

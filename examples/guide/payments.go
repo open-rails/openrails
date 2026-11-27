@@ -14,7 +14,7 @@ func RefundInFull(ctx context.Context, shop *openrails.Client, payment billing.P
 	return shop.RefundPayment(ctx, key, payment, billing.RefundPaymentParams{
 		Full:         true,
 		RefundReason: billing.RefundRequestedByCustomer,
-		Reason:       "cancelled within the first day",
+		Reason:       "canceled within the first day",
 		RevokeAccess: true,
 	})
 	// guide:end

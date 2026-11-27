@@ -1802,7 +1802,7 @@
       "type PostingLine struct {\n\tMeterKey string `json:\"meter_key\"`\n\tCell     string `json:\"cell\"`\n\tPrint    string `json:\"print\"`\n\tRequests int64  `json:\"requests\"`\n\tQuantity int64  `json:\"quantity\"`\n\tStated   int64  `json:\"stated\"`\n\tAmount   int64  `json:\"amount\"`\n}",
       "type UsageAccountKey struct {\n\tDueAt      time.Time `json:\"due_at\"`\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tCustomerID uuid.UUID `json:\"customer_id\"`\n\tCurrency   string    `json:\"currency\"`\n}",
       "type UsageInvoiceArgs struct {\n\tBill    *UsageAccountKey `json:\"bill,omitempty\"`\n\tCollect *UsageInvoiceKey `json:\"collect,omitempty\"`\n}",
-      "type UsageInvoiceKey struct {\n\tDueAt      time.Time `json:\"due_at\"`\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tInvoiceID  uuid.UUID `json:\"order_id\"`\n}",
+      "type UsageInvoiceKey struct {\n\tDueAt      time.Time `json:\"due_at\"`\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tInvoiceID  uuid.UUID `json:\"invoice_id\"`\n}",
       "type meterKeyPosition struct {\n\tKey string `json:\"k\"`\n}",
       "type ratingCard struct {\n\tMeterKey    string              `json:\"meter_key\"`\n\tEventType   string              `json:\"event_type,omitempty\"`\n\tValueKey    string              `json:\"value_property\"`\n\tAggregation catalog.Aggregation `json:\"aggregation\"`\n\tGroupBy     map[string]string   `json:\"group_by,omitempty\"`\n\tFilter      map[string][]string `json:\"filter,omitempty\"`\n\tAllowance   *catalog.Allowance  `json:\"allowance,omitempty\"`\n\tPrice       catalog.RatePrice   `json:\"price\"`\n}",
       "type runningChargeCursor struct {\n\tID uuid.UUID `json:\"i\"`\n}"

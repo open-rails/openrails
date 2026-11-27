@@ -1816,6 +1816,9 @@
     "OR-J53-S07": [
       "TestReportingMRR/OR-J53-S07/the-chargeback-ratio-tile-and-charts-carry-the-dispute-programs-levels"
     ],
+    "OR-J53-S08": [
+      "TestReporting/OR-J53-S08/a-sort-term-the-query-cannot-order-by-is-refused-on-its-order-param"
+    ],
     "OR-J43-S01": [
       "TestConfigurationHistory/OR-J43-S01/an-edit-and-its-entry-commit-and-roll-back-together"
     ],

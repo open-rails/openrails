@@ -12,10 +12,10 @@ import (
 type Scope string
 
 const (
-	ScopePayer      Scope = "payer"       // the customer overall
+	ScopeCustomer   Scope = "payer"       // the customer overall; the value is in every window's hashed key
 	ScopeInvoker    Scope = "invoker"     // a specific API key / principal
 	ScopeRole       Scope = "role"        // per-invoker cap selected by a role the invoker holds
-	ScopeTrustLevel Scope = "trust_level" // the payer's trust level
+	ScopeTrustLevel Scope = "trust_level" // the customer's trust level
 )
 
 // Window is one {scope, duration, limit} cap. Limit and all reserved amounts are
@@ -30,14 +30,14 @@ type Window struct {
 }
 
 // ScopedWindows is the cap config for one concrete scope identity (e.g. invoker
-// "svc:abc", or trust level "gold"). ScopeID is "" for the payer-wide scope.
+// "svc:abc", or trust level "gold"). ScopeID is "" for the customer-wide scope.
 type ScopedWindows struct {
 	Scope   Scope    `json:"scope"`
 	ScopeID string   `json:"scope_id"`
 	Windows []Window `json:"windows"`
 }
 
-// Policy is the transactionally loaded cap configuration for one payer and unit.
+// Policy is the transactionally loaded cap configuration for one customer and unit.
 type Policy struct {
 	Scopes []ScopedWindows `json:"scopes"`
 }
@@ -58,7 +58,7 @@ type resolvedWindow struct {
 	invoker string
 }
 
-// EffectiveWindows returns every window that applies to req: all payer
+// EffectiveWindows returns every window that applies to req: all customer
 // windows plus the invoker, role and trust-level windows req matches. A role
 // window is metered separately for each invoker holding the role. Admission
 // denies if any window is over its limit.
@@ -71,7 +71,7 @@ func (p Policy) EffectiveWindows(req Request) []resolvedWindow {
 	for _, sw := range p.Scopes {
 		match := false
 		switch sw.Scope {
-		case ScopePayer:
+		case ScopeCustomer:
 			match = true
 		case ScopeInvoker:
 			match = req.Invoker != "" && sw.ScopeID == req.Invoker

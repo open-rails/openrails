@@ -15,7 +15,7 @@ import (
 // OrderAttempts describes the visible transactions for one accepted attempt.
 // Any approved or unresolved transaction under the shared obligation order
 // prevents another submission. Renewal declines bind the exact attempt, not
-// timestamps which can overlap when a payer retries immediately.
+// timestamps which can overlap when a customer retries immediately.
 type OrderAttempts struct {
 	Transactions int
 	// Declined is set when the attempt's only transaction is one refused sale

@@ -268,7 +268,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		}
 		return fmt.Errorf("load subscription: %w", err)
 	}
-	if payer := identity.CustomerIDFromString(userID); payer.IsZero() || subscription.CustomerID != payer.UUID() {
+	if customer := identity.CustomerIDFromString(userID); customer.IsZero() || subscription.CustomerID != customer.UUID() {
 		return ErrSubscriptionNotFound
 	}
 	if !providerCancellable(subscription.Status) {

@@ -142,20 +142,20 @@ func (s *Service) usageAction(ctx context.Context, id billing.InvoiceID, act fun
 
 // FinalizeUsage bills one customer's owed usage of [from, to) in currency
 // as a usage invoice. Idempotent per period.
-func (s *Service) FinalizeUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*billing.Invoice, error) {
+func (s *Service) FinalizeUsage(ctx context.Context, customer identity.CustomerID, currency string, from, to time.Time) (*billing.Invoice, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
+	if customer.IsZero() {
+		return nil, fmt.Errorf("customer required")
 	}
 	cur, err := s.registryCurrency(ctx, "currency", currency)
 	if err != nil {
 		return nil, err
 	}
-	invoice, err := s.moneyService().FinalizeUsage(ctx, payer, cur, from, to, s.now())
+	invoice, err := s.moneyService().FinalizeUsage(ctx, customer, cur, from, to, s.now())
 	if err != nil {
 		return nil, err
 	}

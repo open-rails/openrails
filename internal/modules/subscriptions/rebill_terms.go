@@ -44,7 +44,7 @@ func ManualRebillIdempotencyKey(subscriptionID uuid.UUID, periodEnd time.Time, r
 
 // ObligationOrderReference is the NMI order id of one obligation: every
 // attempt to pay the period that starts at boundary shares it, so a read by
-// invoice answers "was this period paid?" across attempts.
+// order answers "was this period paid?" across attempts.
 func ObligationOrderReference(subscriptionID uuid.UUID, boundary time.Time) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("obligation:"+subscriptionID.String()+":"+boundary.UTC().Format(time.RFC3339Nano))).String()
 }

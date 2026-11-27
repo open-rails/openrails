@@ -115,7 +115,7 @@ func IsInvoiceCollectionKey(key string) bool {
 }
 
 // InvoiceCollectionKeyValid reports whether key is a collection key of the
-// payer's invoice: the customer's own payment or a merchant retry.
-func InvoiceCollectionKeyValid(payer, invoice uuid.UUID, key string) bool {
-	return payer != uuid.Nil && (charge.CustomerPaymentKeyValid(TypeInvoiceCollection, payer, key) || InvoiceCollectionRetryKeyValid(invoice, key))
+// customer's invoice: the customer's own payment or a merchant retry.
+func InvoiceCollectionKeyValid(customer, invoice uuid.UUID, key string) bool {
+	return customer != uuid.Nil && (charge.CustomerPaymentKeyValid(TypeInvoiceCollection, customer, key) || InvoiceCollectionRetryKeyValid(invoice, key))
 }

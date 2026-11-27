@@ -12,7 +12,7 @@ import (
 
 // LocalClient holds a merchant's operations that need the engine in this
 // process: the ones inside a host transaction and the notification
-// adoption pair. Client is the merchant's handle for everything else.
+// ordering pair. Client is the merchant's handle for everything else.
 // Engine.LocalMerchant makes one; a zero LocalClient refuses every call.
 type LocalClient struct{ client *Client }
 

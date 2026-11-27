@@ -27,7 +27,7 @@ import (
 // RetrySubscriptionNow charges a provider-scheduled subscription's missed
 // renewal now, in the customer's presence. An engine-owned one's renewal is
 // an invoice the customer pays instead.
-func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.CustomerID, subscription billing.SubscriptionID, idempotencyKey string, request billing.RetrySubscriptionNowParams, principal billingauth.Payer) (*billing.SubscriptionRetryNowResult, error) {
+func (s *Service) RetrySubscriptionNow(ctx context.Context, customer identity.CustomerID, subscription billing.SubscriptionID, idempotencyKey string, request billing.RetrySubscriptionNowParams, principal billingauth.Payer) (*billing.SubscriptionRetryNowResult, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 			id := request.PaymentMethodID.UUID()
 			method = &id
 		}
-		owned, err := rt.UserSubscriptionService.GetUserSubscriptionByID(ctx, payer.UUID().String(), subscription.UUID())
+		owned, err := rt.UserSubscriptionService.GetUserSubscriptionByID(ctx, customer.UUID().String(), subscription.UUID())
 		if err != nil {
 			return err
 		}
@@ -49,7 +49,7 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 		}
 		h := intents.NewManualRebillHandler(rt.DB, rt.Config, rt.CollectionResolver, rt.Clock)
 		h.DeferDelete = rt.DeferredDeletes
-		accepted, replayed, err := h.EnqueueCustomer(ctx, subscription.UUID(), payer.UUID(), idempotencyKey, method)
+		accepted, replayed, err := h.EnqueueCustomer(ctx, subscription.UUID(), customer.UUID(), idempotencyKey, method)
 		if err != nil {
 			return err
 		}
@@ -65,7 +65,7 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 		if err := customerPaymentRefusal(result); err != nil {
 			return err
 		}
-		sub, err := rt.UserSubscriptionService.GetUserSubscriptionByID(ctx, payer.UUID().String(), subscription.UUID())
+		sub, err := rt.UserSubscriptionService.GetUserSubscriptionByID(ctx, customer.UUID().String(), subscription.UUID())
 		if err != nil {
 			return err
 		}
@@ -79,7 +79,7 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 	return out, err
 }
 
-func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*billing.PaymentRecovery, error) {
+func (s *Service) SubscriptionRecovery(ctx context.Context, customer identity.CustomerID, id uuid.UUID) (*billing.PaymentRecovery, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -89,7 +89,7 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 	if err != nil {
 		return nil, err
 	}
-	if sub.CustomerID != payer.UUID() {
+	if sub.CustomerID != customer.UUID() {
 		return nil, pgx.ErrNoRows
 	}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {

@@ -100,23 +100,23 @@ func ValidateValues(p Profile, values []*string) error {
 		}
 	}
 	// Canonical collection operations carry typed engine-encoded keys.
-	// Validate the accepted payer/authority/payload and retained custody before
+	// Validate the accepted customer/authority/payload and retained custody before
 	// treating that one coordinate as an identity rather than arbitrary text.
 	encodedKey, err := validateRetainedPayment(p, values)
 	if err != nil {
 		return err
 	}
 	if p.Name == "ledger_transfers" {
-		key, payer, invoice := value(p, values, "source_id"), value(p, values, "customer_id"), value(p, values, "invoice_id")
+		key, customer, invoice := value(p, values, "source_id"), value(p, values, "customer_id"), value(p, values, "invoice_id")
 		if key != nil && intents.IsInvoiceCollectionKey(*key) {
-			payerID, invoiceID := uuid.Nil, uuid.Nil
-			if payer != nil {
-				payerID, _ = uuid.Parse(*payer)
+			customerID, invoiceID := uuid.Nil, uuid.Nil
+			if customer != nil {
+				customerID, _ = uuid.Parse(*customer)
 			}
 			if invoice != nil {
 				invoiceID, _ = uuid.Parse(*invoice)
 			}
-			encodedKey = invoiceID != uuid.Nil && intents.InvoiceCollectionKeyValid(payerID, invoiceID, *key)
+			encodedKey = invoiceID != uuid.Nil && intents.InvoiceCollectionKeyValid(customerID, invoiceID, *key)
 			if encodedKey && p.Name == "ledger_transfers" {
 				for field, expected := range map[string]string{"source": "invoice_charge", "operation": "invoice_payment", "transfer_type": "owed_payment"} {
 					if actual := value(p, values, field); actual == nil || *actual != expected {

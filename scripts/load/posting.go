@@ -18,8 +18,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// PostingResult is the month-end close and the postings before balance
-// movements, on a clock the run moves.
+// PostingResult is the daily posting at a month's end and the postings
+// before balance movements, on a clock the run moves.
 type PostingResult struct {
 	Customers      int                   `json:"customers"`
 	Events         int                   `json:"events_per_customer"`
@@ -33,8 +33,8 @@ type PostingResult struct {
 	TopUpLight     *Hist                 `json:"top_up_light"`
 	TopUpHeavyMS   float64               `json:"top_up_heavy_ms"`
 	LotExpiry      *PassResult           `json:"lot_expiry_pass"`
-	Close          *PassResult           `json:"month_end_close"`
-	CloseCustomers int64                 `json:"close_postings"`
+	DailyPosting   *PassResult           `json:"daily_posting"`
+	DailyPostings  int64                 `json:"daily_postings"`
 	Rows           *RowStats             `json:"rows"`
 	Storage        []TableStorage        `json:"clickhouse_storage"`
 	Queries        map[string]QueryStats `json:"clickhouse_queries"`
@@ -55,7 +55,8 @@ func (p *PostingResult) check(name string, ok bool, format string, args ...any) 
 
 // runPosting reports usage as a batch reporter would (lease syncs), makes
 // one customer heavy by copying its event in ClickHouse, times postings
-// before top-ups, lets a lot lapse, and closes the month.
+// before top-ups, lets a lot lapse, and runs the daily posting at the
+// month's end.
 func (e *env) runPosting(ctx context.Context) *PostingResult {
 	plan := e.plan
 	const schema = "load_post"
@@ -200,19 +201,19 @@ func (e *env) runPosting(ctx context.Context) *PostingResult {
 			"lot of %d: spent %d (usage before the lapse %d), expired %d, remaining %d", lot.Amount, lot.SpentAmount, want, lot.ExpiredAmount, lot.RemainingAmount)
 	}
 
-	// The month ends: every customer's usage posts in one close.
+	// The month's last day ends: every customer's usage posts in one pass.
 	now := clock.Now().UTC()
 	clock.Advance(time.Date(now.Year(), now.Month()+1, 1, 0, 1, 0, 0, time.UTC).Sub(now))
 	var before int64
 	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_receipts").Scan(&before)
-	logf("[posting] closing the month for %d customers", plan.PostingCustomers+2)
-	r.Close = runPass(ctx, fleet)
-	logf("[posting] close: %s in %.1fs %s", r.Close.State, r.Close.Seconds, r.Close.Error)
-	var after2, unposted int64
+	logf("[posting] daily posting for %d customers", plan.PostingCustomers+2)
+	r.DailyPosting = runPass(ctx, fleet)
+	logf("[posting] daily posting: %s in %.1fs %s", r.DailyPosting.State, r.DailyPosting.Seconds, r.DailyPosting.Error)
+	var after2, pending int64
 	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_receipts").Scan(&after2)
-	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_pending WHERE due_at <= $1", clock.Now()).Scan(&unposted)
-	r.CloseCustomers = after2 - before
-	r.check("month-end-close-posts-everyone", r.Close.State == "completed" && unposted == 0, "%d postings by the close, %d customers still due", r.CloseCustomers, unposted)
+	_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".usage_pending WHERE due_at <= $1", clock.Now()).Scan(&pending)
+	r.DailyPostings = after2 - before
+	r.check("daily-posting-posts-everyone", r.DailyPosting.State == "completed" && pending == 0, "%d postings by the daily posting, %d customers still due", r.DailyPostings, pending)
 	e.checkPostedOnce(ctx, r, schema, id)
 
 	w := &WorldResult{Name: "posting"}
@@ -327,7 +328,7 @@ func runPass(ctx context.Context, fleet *river.Client[pgx.Tx]) *PassResult {
 			out.State = "unfinished"
 			return out
 		case <-ctx.Done():
-			out.State = "cancelled"
+			out.State = "canceled"
 			return out
 		}
 	}

@@ -201,7 +201,7 @@ Checks:
 ### 4. Access control and tenant isolation
 Refund and external-payment routes need `merchant:customer:manage`, reads
 `merchant:customer:read`; a customer lists only its own payments
-(`selfAccountPayer`). Every payment read requires the bound merchant
+(`selfAccountCustomer`). Every payment read requires the bound merchant
 (`merchant.Require`) and every query names it.
 
 Checks:

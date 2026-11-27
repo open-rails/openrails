@@ -406,8 +406,8 @@ func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantI
 	posting.posting = &runningChargePosting{through: liveAt, owed: owed, from: period,
 		owedAt: later(earlier(earlier(end, cut).Add(-time.Microsecond), now), billed)}
 	key := MustIdempotencyKey(OpUsagePosting, usageReceiptSourcePrefix+row.ID.String(), "1")
-	payer := identity.CustomerID(customer)
-	_, _, applied, err := posting.spendBalanceThenOwedTx(ctx, q, payer, customer.String(), currency, key, amount-forgiven, true)
+	customerID := identity.CustomerID(customer)
+	_, _, applied, err := posting.spendBalanceThenOwedTx(ctx, q, customerID, customer.String(), currency, key, amount-forgiven, true)
 	if err != nil {
 		return err
 	}

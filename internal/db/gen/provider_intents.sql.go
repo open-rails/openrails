@@ -2118,7 +2118,7 @@ type LockProviderIntentForCollectionCompletionParams struct {
 }
 
 // Call after acquiring the domain's customer/invoice locks, matching admission's
-// invoice-before-operation invoice.
+// invoice-before-operation order.
 func (q *Queries) LockProviderIntentForCollectionCompletion(ctx context.Context, arg LockProviderIntentForCollectionCompletionParams) (BillingProviderIntent, error) {
 	row := q.db.QueryRow(ctx, lockProviderIntentForCollectionCompletion, arg.ID, arg.MerchantID)
 	var i BillingProviderIntent

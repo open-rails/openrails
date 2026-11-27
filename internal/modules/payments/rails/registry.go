@@ -81,7 +81,7 @@ type Descriptor struct {
 	// never processes Stripe (OpenRailsDrivenDunning=false).
 	AutoBilled func(sub *models.Subscription) bool
 
-	// CancelMode classifies how cancelling a subscription on this rail
+	// CancelMode classifies how canceling a subscription on this rail
 	// behaves. It takes the subscription (never nil) because NMI is reversible
 	// only while its deferred delete is pending. Never nil.
 	CancelMode func(sub *models.Subscription, now time.Time) CancelMode

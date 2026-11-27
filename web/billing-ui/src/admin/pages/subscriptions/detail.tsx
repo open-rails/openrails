@@ -258,7 +258,7 @@ export function SubscriptionDetailPage() {
               {formatDate(sub.canceled_at)}
               {sub.cancel_type && (
                 <span className="block text-xs text-muted-foreground">
-                  {adminText(cancelledBy[sub.cancel_type] ?? sub.cancel_type)}
+                  {adminText(canceledBy[sub.cancel_type] ?? sub.cancel_type)}
                 </span>
               )}
             </>
@@ -334,8 +334,8 @@ export function SubscriptionDetailPage() {
   )
 }
 
-// cancelledBy says who ended a subscription, by its cancel_type.
-const cancelledBy: Record<string, string> = {
+// canceledBy says who ended a subscription, by its cancel_type.
+const canceledBy: Record<string, string> = {
   user: "By the customer",
   merchant: "By staff",
   expired: "Not renewed",

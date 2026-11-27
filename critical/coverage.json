@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 874,
+  "scenario_count": 875,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3237,6 +3237,11 @@
       "id": "OR-J53-S07",
       "journey": "J53",
       "name": "A card merchant's chargeback ratio tile is Visa's VAMP ratio, naming its program, and Payment health charts the VAMP and ECM ratios against their levels in force each month (VAMP's excessive level 2.2% before April 2026, 1.5% from); one chargeback under VAMP's minimum count reaches no level whatever its ratio"
+    },
+    {
+      "id": "OR-J53-S08",
+      "journey": "J53",
+      "name": "A metrics query's order term it cannot sort by is refused invalid_order on its own order[i] param: both a measure and a dimension, a direction other than asc or desc, a measure it does not ask for, a dimension it does not group by"
     },
     {
       "id": "OR-J43-S01",

@@ -192,7 +192,7 @@ type RecordSubscriptionOperationHoldParams struct {
 	ID         uuid.UUID
 }
 
-// Timestamp after acquiring the row lock: transaction start time could invoice
+// Timestamp after acquiring the row lock: transaction start time could order
 // a waiting transaction before the hold it followed.
 // The caller already updated (and therefore locked) the intent in this transaction.
 // Unknown readbacks do not end a hold. Only attempted execution or a terminal
