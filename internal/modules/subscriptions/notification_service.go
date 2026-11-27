@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/billingfact"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -20,57 +21,42 @@ type NotificationService struct {
 
 func NewNotificationService(d *db.DB) *NotificationService { return &NotificationService{db: d} }
 
-func (r *NotificationService) Create(ctx context.Context, notification *models.NotificationEvent) error {
-	return r.create(ctx, notification, false)
-}
-
-// CreateIfAbsent inserts notification once by its caller-supplied ID. An
-// existing ID is success, which lets retrying fan-out jobs converge without
-// duplicating deliveries that already succeeded.
+// CreateIfAbsent records notification once by its caller-supplied ID, with its
+// customer message (billingfact.Record). An existing ID is success, which lets
+// retrying fan-out jobs converge without duplicating deliveries that already
+// succeeded.
 func (r *NotificationService) CreateIfAbsent(ctx context.Context, notification *models.NotificationEvent) error {
-	return r.create(ctx, notification, true)
-}
-
-func (r *NotificationService) create(ctx context.Context, notification *models.NotificationEvent, ifAbsent bool) error {
 	return r.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := r.db.NewWithPgxTx(tx)
-		params, err := NewNotificationService(txdb).createParams(ctx, notification)
+		fact, err := NewNotificationService(txdb).fact(ctx, notification)
 		if err != nil {
 			return err
 		}
-		query := `INSERT INTO billing.notification_events (id,merchant_id,customer_id,event_type,data,created_at)
-VALUES($1,$2,$3,$4,$5,COALESCE(NULLIF($6::timestamptz,'0001-01-01 00:00:00+00'::timestamptz),now()))`
-		if ifAbsent {
-			query += ` ON CONFLICT(merchant_id,id) DO NOTHING`
+		at, err := billingfact.Record(ctx, txdb.Gen(ctx), fact)
+		if err != nil || at.IsZero() {
+			return err // An old fact cannot become a newer notification revision.
 		}
-		err = tx.QueryRow(ctx, query+` RETURNING created_at`, params.ID, params.MerchantID, params.CustomerID,
-			params.EventType, params.Data, params.CreatedAt).Scan(&notification.CreatedAt)
-		if ifAbsent && errors.Is(err, pgx.ErrNoRows) {
-			return nil // An old fact cannot become a newer notification revision.
-		}
-		if err != nil {
-			return err
-		}
+		notification.CreatedAt = at
 		return publishInbox(ctx, txdb, tx, notification)
 	})
 }
 
-func (r *NotificationService) createParams(ctx context.Context, notification *models.NotificationEvent) (gen.CreateNotificationParams, error) {
+func (r *NotificationService) fact(ctx context.Context, notification *models.NotificationEvent) (billingfact.Fact, error) {
 	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, notification.CustomerID); err != nil {
-		return gen.CreateNotificationParams{}, err
+		return billingfact.Fact{}, err
 	}
 	if err := r.membershipAccess(ctx, notification); err != nil {
-		return gen.CreateNotificationParams{}, err
+		return billingfact.Fact{}, err
 	}
 	data, err := notification.DataJSONB()
 	if err != nil {
-		return gen.CreateNotificationParams{}, err
+		return billingfact.Fact{}, err
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.CreateNotificationParams{}, err
+		return billingfact.Fact{}, err
 	}
-	return gen.CreateNotificationParams{
+	return billingfact.Fact{
 		ID:         notification.ID,
 		MerchantID: tid.UUID(),
 		CustomerID: notification.CustomerID,

@@ -363,7 +363,7 @@ type BillingCustomerMessage struct {
 	EventID   uuid.UUID
 	EventType string
 	Channel   string
-	// pending until a dispatcher queues its send job, queued until the job settles it, sending while the job hands it to the sender; then sent, or why not: disabled (the merchant does not send this event type), test_environment (its PSP moves no real money), no_contact (no address), rate_limited (the customer's hourly cap) or failed.
+	// queued with its fact and send job until the job settles it, sending while the job hands it to the sender; then sent, or why not: disabled (the merchant does not send this event type), test_environment (its PSP moves no real money), no_contact (no address), rate_limited (the customer's hourly cap) or failed.
 	Status string
 	// Send attempts the job has made.
 	Attempts int32

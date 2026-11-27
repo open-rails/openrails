@@ -1771,6 +1771,12 @@
     "OR-J39-S25": [
       "TestCustomerMessages/OR-J39-S25/a-staff-refund-completed-a-week-late-sends-its-receipt"
     ],
+    "OR-J39-S26": [
+      "TestCustomerMessages/OR-J39-S26/a-facts-message-is-sent-with-no-dispatcher-running"
+    ],
+    "OR-J39-S27": [
+      "TestCustomerMessages/OR-J39-S27/a-fact-recorded-twice-queues-one-message-and-one-send-job"
+    ],
     "OR-J28-S16": [
       "TestProviderTime/OR-J28-S16/access-restored-after-an-nmi-chargeback-survives-a-replayed-batch"
     ],

@@ -5,7 +5,6 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -17,7 +16,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
@@ -483,7 +481,7 @@ FROM `+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+` WHERE merchant_id 
 		// The queries the breaker and the runner run: an executor whose claim
 		// is gone marks nothing, and a park of the admitted attempt, as the
 		// runner parks one whose operation log is unavailable, clears the mark.
-		store, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		store, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		q := store.Gen(ctx)

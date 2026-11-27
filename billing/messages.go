@@ -190,14 +190,13 @@ func (id *CustomerMessageID) UnmarshalText(text []byte) error {
 	return err
 }
 
-// MessageStatus is where a customer message stands. Pending, queued and
-// sending are on the way; the others are where it ended.
+// MessageStatus is where a customer message stands. Queued and sending are
+// on the way; the others are where it ended.
 type MessageStatus string
 
 const (
-	// MessagePending: recorded with its fact; its send job is not queued yet.
-	MessagePending MessageStatus = "pending"
-	// MessageQueued: its send job is queued, or waits to retry.
+	// MessageQueued: recorded with its fact and its send job, or waiting to
+	// retry.
 	MessageQueued MessageStatus = "queued"
 	// MessageSending: its job is handing it to the sender.
 	MessageSending MessageStatus = "sending"

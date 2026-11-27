@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/billingfact"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -76,11 +77,12 @@ func (s *PaymentService) queueRefundReceipt(ctx context.Context, refund *models.
 	if err != nil {
 		return err
 	}
-	return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
+	_, err = billingfact.Record(ctx, q, billingfact.Fact{
 		ID:         uuidutil.ChildV7(refund.ID, string(models.NotificationRefundCompleted)),
 		MerchantID: mid.UUID(), CustomerID: refund.CustomerID, EventType: string(models.NotificationRefundCompleted),
 		Data: raw, CreatedAt: refund.PurchasedAt.UTC(),
 	})
+	return err
 }
 
 // InvoiceItems names what an invoice's lines bought, as its receipts do.

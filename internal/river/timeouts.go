@@ -10,12 +10,12 @@ import (
 
 	"github.com/open-rails/openrails/internal/balancelook"
 
+	"github.com/open-rails/openrails/internal/billingfact"
 	"github.com/open-rails/openrails/internal/convergejob"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents/wake"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
-	"github.com/open-rails/openrails/internal/modules/messages"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -45,8 +45,7 @@ var kinds = map[string]time.Duration{
 	disputejob.MonitorKind:               DefaultTimeout,
 	disputejob.ResponseKind:              DefaultTimeout,
 	alerting.DeliveryKind:                DefaultTimeout,
-	messages.KindSend:                    DefaultTimeout,
-	messages.KindDispatch:                DefaultTimeout,
+	billingfact.SendKind:                 DefaultTimeout,
 	wake.Kind:                            DefaultTimeout,
 	paymentmethods.KindStoredCardRefresh: DefaultTimeout,
 	merchants.SecretCleanupArgs{}.Kind(): DefaultTimeout,

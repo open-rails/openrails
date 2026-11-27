@@ -4,7 +4,6 @@ package critical_test
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"testing"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/stripemock"
@@ -195,7 +193,7 @@ func refundedPackRaisesNoGrantFinding(t *testing.T) {
 	require.Len(t, lots.Items, 1)
 	require.Equal(t, billing.CreditGrantRefunded, lotMatchesLedger(t, a.world, lots.Items[0].ID).State)
 
-	database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+	database, err := producerDB(a.pool, a.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 	customer := m.customer.UUID()
@@ -242,7 +240,7 @@ func unpostedDepositNotSpendable(t *testing.T) {
 	require.Zero(t, paid.RemainingAmount)
 	require.Equal(t, billing.CreditGrantSpent, paid.State)
 
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 	scope := converge.Scope{Merchant: w.alpha.MerchantID(), Customer: ptr(customer.UUID())}

@@ -17165,7 +17165,6 @@
               "disabled",
               "failed",
               "no_contact",
-              "pending",
               "queued",
               "rate_limited",
               "sending",

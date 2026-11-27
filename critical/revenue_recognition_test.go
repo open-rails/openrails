@@ -5,7 +5,6 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -21,7 +20,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -273,7 +271,7 @@ func TestRevenueRecognition(t *testing.T) {
 		// replayed.
 		_, err = w.pool.Exec(t.Context(), "UPDATE "+booksTable(w, "reconciliation_findings")+" SET status='fixed', resolution='auto_vanished', resolved_at=now() WHERE merchant_id=$1 AND finding_type='books.adjustment.unapplied'", mid)
 		require.NoError(t, err)
-		database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+		database, err := producerDB(w.pool, w.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -354,7 +352,7 @@ func TestRevenueRecognition(t *testing.T) {
 
 		// The rebuild's replay of the invoice posts nothing again.
 		count = scheduleLegCount(t, a.world)
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -412,7 +410,7 @@ func TestRevenueRecognition(t *testing.T) {
 
 		// A payment's applications never exceed what it brought.
 		first := customer.UUID()
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -668,7 +666,7 @@ func TestRevenueRecognition(t *testing.T) {
 
 		// Applied for good with no access granted: a finding, and the audit
 		// names the line.
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -748,7 +746,7 @@ func TestRevenueRecognition(t *testing.T) {
 		// The provider's complete record lacks both charges and the
 		// subscription.
 		since, until := now.Add(-time.Hour), now.Add(time.Hour)
-		database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+		database, err := producerDB(w.pool, w.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 		var pruned reconcile.PruneResult
@@ -876,7 +874,7 @@ func TestRevenueRecognition(t *testing.T) {
 		_, err := a.pool.Exec(t.Context(), "UPDATE "+booksTable(a.world, "invoices")+" SET payment_id=$3 WHERE merchant_id=$1 AND id=$2", a.alpha.MerchantID().UUID(), invoice, own)
 		require.NoError(t, err)
 		other := rawReceipt(t, a.world, customer, invoice, 15_000_000, now.Add(-time.Hour))
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -1252,7 +1250,7 @@ func railPSP(t *testing.T, w *world, rail string) uuid.UUID {
 // leave it: canceled and ended at ended when ended is set.
 func fixtureSubscription(t *testing.T, w *world, customer, product, price, psp uuid.UUID, rail, policy string, start, end time.Time, ended *time.Time) uuid.UUID {
 	t.Helper()
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 	var id uuid.UUID
@@ -1278,7 +1276,7 @@ func fixtureSubscription(t *testing.T, w *world, customer, product, price, psp u
 // recordBill records a verified provider bill as each rail's observer does.
 func recordBill(t *testing.T, w *world, bill observed.Bill, now time.Time) observed.Result {
 	t.Helper()
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 	var result observed.Result

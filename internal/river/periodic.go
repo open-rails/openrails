@@ -5,8 +5,6 @@ import (
 
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
-
-	"github.com/open-rails/openrails/internal/modules/messages"
 )
 
 // Periodic is one recurring pass, queued by its Args' InsertOpts. Its kind is
@@ -32,8 +30,6 @@ var Periodics = []Periodic{
 	// Queues every Stripe PSP's endpoint pass: Stripe disables or deletes an
 	// endpoint without telling us.
 	{Args: StripeWebhookReconcileArgs{}, Every: StripeWebhookReconcileInterval},
-	// Customer messages queued while no dispatcher listened.
-	{Args: messages.DispatchArgs{}, Every: messages.DispatchInterval},
 	// MRR risk changes queued while no drain was woken.
 	{Args: MRRRiskArgs{}, Every: MRRRiskInterval},
 }

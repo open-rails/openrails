@@ -156,7 +156,7 @@ and egress receipt. A separate rehearsal from a fresh snapshot gets its own ID.
 <details>
 <summary>Named SQL writes and owned billing tables</summary>
 
-The source scan found 523 named SQL statements in 95 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
+The source scan found 520 named SQL statements in 95 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
 
 | Query source | Statements with explicit writes | Targets |
 | --- | ---: | --- |
@@ -174,10 +174,10 @@ The source scan found 523 named SQL statements in 95 files with an explicit qual
 | [customer_contacts.sql](../internal/db/queries/customer_contacts.sql) | 3 | `customer_contacts` |
 | [customer_invoice_profiles.sql](../internal/db/queries/customer_invoice_profiles.sql) | 2 | `customer_invoice_profiles` |
 | [customer_low_balance_lines.sql](../internal/db/queries/customer_low_balance_lines.sql) | 2 | `customer_low_balance_lines` |
-| [customer_messages.sql](../internal/db/queries/customer_messages.sql) | 4 | `customer_messages` |
+| [customer_messages.sql](../internal/db/queries/customer_messages.sql) | 3 | `customer_messages` |
 | [customers.sql](../internal/db/queries/customers.sql) | 3 | `customers` |
 | [dashboard_configs.sql](../internal/db/queries/dashboard_configs.sql) | 1 | `dashboard_configs` |
-| [delinquency.sql](../internal/db/queries/delinquency.sql) | 5 | `customer_delinquency`, `notification_events` |
+| [delinquency.sql](../internal/db/queries/delinquency.sql) | 4 | `customer_delinquency` |
 | [destructive_actions.sql](../internal/db/queries/destructive_actions.sql) | 7 | `destructive_actions`, `destructive_holds`, `host_outbox`, `reconciliation_findings` |
 | [destructive_before_images.sql](../internal/db/queries/destructive_before_images.sql) | 8 | `destructive_run_before_images`, `product_access`, `provider_intents`, `reconciliation_state`, `subscriptions` |
 | [disputes.sql](../internal/db/queries/disputes.sql) | 11 | `disputes`, `fraud_reports`, `payment_methods` |
@@ -205,7 +205,7 @@ The source scan found 523 named SQL statements in 95 files with an explicit qual
 | [mrr.sql](../internal/db/queries/mrr.sql) | 2 | `mrr_risk_due` |
 | [nmi_history.sql](../internal/db/queries/nmi_history.sql) | 7 | `nmi_history_months`, `nmi_history_reads` |
 | [notification_events.sql](../internal/db/queries/notification_events.sql) | 3 | `notification_events` |
-| [notifications.sql](../internal/db/queries/notifications.sql) | 2 | `notification_events` |
+| [notifications.sql](../internal/db/queries/notifications.sql) | 1 | `customer_messages`, `notification_events` |
 | [operation_log.sql](../internal/db/queries/operation_log.sql) | 2 | `operation_log` |
 | [invoice_attempts.sql](../internal/db/queries/invoice_attempts.sql) | 4 | `invoice_attempts` |
 | [invoice_pay_url.sql](../internal/db/queries/invoice_pay_url.sql) | 3 | `idempotency_keys`, `invoices` |

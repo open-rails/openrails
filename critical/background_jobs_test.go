@@ -200,6 +200,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NotNil(t, health["openrails.billing_pass"].LastCompletedAt)
 		require.NotNil(t, health["openrails.billing_pass"].PeriodSeconds)
 		require.EqualValues(t, 3600, *health["openrails.billing_pass"].PeriodSeconds)
+		require.NotContains(t, health, "openrails.customer_messages_dispatch", "a fact queues its message's job; no pass dispatches")
 		require.Contains(t, health, "openrails.nmi_history", "NMI history is its own periodic job, off the billing pass")
 		require.NotNil(t, health["openrails.nmi_history"].PeriodSeconds)
 		require.EqualValues(t, 3600, *health["openrails.nmi_history"].PeriodSeconds)

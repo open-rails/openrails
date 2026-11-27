@@ -4,7 +4,6 @@ package critical_test
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"testing"
 
@@ -51,7 +50,7 @@ func TestRefunds(t *testing.T) {
 		require.Equal(t, billing.PaymentSucceeded, final.Status)
 		require.EqualValues(t, -20_000_000, final.Amount)
 		require.Nil(t, final.Card)
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := db.WithPSPID(merchant.WithID(t.Context(), a.alpha.MerchantID()), final.PSPID.UUID())
 		require.NoError(t, payments.SnapshotPaymentCard(ctx, database, []string{paid.TransactionID}, &models.Card{Brand: "visa", Last4: "4242"}))

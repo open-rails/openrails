@@ -205,7 +205,7 @@ func ghostCCBillMembership(t *testing.T, w *world, customer billing.CustomerID, 
 	var product, price uuid.UUID
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT product_id, id FROM "+pgx.Identifier{w.schema, "prices"}.Sanitize()+" WHERE merchant_id = $1",
 		w.alpha.MerchantID().UUID()).Scan(&product, &price))
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	database, err := producerDB(w.pool, w.schema)
 	require.NoError(t, err)
 	require.NoError(t, database.MerchantTx(merchant.WithID(t.Context(), w.alpha.MerchantID()), func(ctx context.Context, tx pgx.Tx) error {
 		if err := db.SetMRRCause(ctx, gen.New(tx), db.MRRCauseImport); err != nil {
@@ -690,7 +690,7 @@ func TestMRR(t *testing.T) {
 		require.Equal(t, [3]int64{2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, w.alpha, "USD"))
 
 		// CCBill's roster lists only the kept member: a prune removes the other.
-		database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+		database, err := producerDB(w.pool, w.schema)
 		require.NoError(t, err)
 		dl := ccbill.NewDataLinkClient(slog.Default(), &config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0001", Sandbox: true,
 			DataLinkUsername: "critical-datalink", DataLinkPassword: "critical-datalink-password"})

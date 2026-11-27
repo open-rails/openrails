@@ -180,9 +180,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}
 	// Customer messages: each pending one's job, queued by the dispatcher or
 	// its periodic backstop, and the job that sends it.
-	if err := addWorker(workers, &riverjobs.CustomerMessageDispatchWorker{Messages: r.Messages}); err != nil {
-		return fmt.Errorf("add customer message dispatch worker: %w", err)
-	}
 	if err := addWorker(workers, &riverjobs.CustomerMessageWorker{Messages: r.Messages}); err != nil {
 		return fmt.Errorf("add customer message worker: %w", err)
 	}

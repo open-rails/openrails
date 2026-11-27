@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/billingfact"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -173,7 +174,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, customer i
 			if err != nil {
 				return err
 			}
-			if err := q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
+			if _, err := billingfact.Record(ctx, q, billingfact.Fact{
 				ID:         uuidutil.DerivedV7(uuidutil.TimeOf(invoice.ID), uuidutil.DeterministicNamespace, uuidutil.Name("order_due", merchantID.String(), invoice.ID.String())),
 				MerchantID: merchantID, CustomerID: customerID,
 				EventType: string(models.NotificationInvoiceDue), Data: data, CreatedAt: now,

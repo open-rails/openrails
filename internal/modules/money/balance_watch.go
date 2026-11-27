@@ -18,6 +18,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/balancelook"
+	"github.com/open-rails/openrails/internal/billingfact"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -699,8 +700,9 @@ func notifyBalance(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, ki
 		return err
 	}
 	customer := event.CustomerID.UUID()
-	return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
+	_, err = billingfact.Record(ctx, q, billingfact.Fact{
 		ID:         uuidutil.DerivedV7(event.AsOf, customer, string(kind)+":"+string(event.Currency)+":"+event.AsOf.Format(runningChargeInstantLayout)),
 		MerchantID: merchantID, CustomerID: customer, EventType: string(kind), Data: data, CreatedAt: event.AsOf,
 	})
+	return err
 }
