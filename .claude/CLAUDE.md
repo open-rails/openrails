@@ -207,8 +207,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Instants end in `_at`. A surrogate id defaults to `uuidv7()`; `created_at`, `updated_at`
   and a table's own creation instant to `now()`. No other column defaults to a value every
   writer supplies (one stated exception: `payments.money_movement` fails closed to `'none'`).
-- Absent text is NULL, and a CHECK refuses `''`; `''` is stored only as part of a key
-  (`payment_attempts.step`, `nmi_history_months.reason`). No `varchar`.
+- Absent text is NULL, and a CHECK refuses `''`; `''` is stored only as part of a key (`payment_attempts.step`). No `varchar`.
 - Text + CHECK, never Postgres enums. SQL lives in sqlc queries, and `sqlc vet` prepares
   every one against PostgreSQL.
 - Every table has a retention class (`internal/retention`: permanent, rows, state),
