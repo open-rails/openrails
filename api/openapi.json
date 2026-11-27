@@ -14897,9 +14897,6 @@
       "BalanceNoticeSettings": {
         "type": "object",
         "properties": {
-          "runway_hours": {
-            "type": "integer"
-          },
           "low_amounts": {
             "type": "array",
             "items": {
@@ -18499,22 +18496,18 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
-          "runway_hours": {
-            "type": "integer"
-          },
           "source": {
             "type": "string",
             "enum": [
               "customer",
-              "default",
-              "merchant"
+              "merchant",
+              "none"
             ]
           }
         },
         "required": [
           "currency",
           "amount",
-          "runway_hours",
           "source"
         ]
       },
@@ -21192,22 +21185,11 @@
                 "type": "null"
               }
             ]
-          },
-          "runway_hours": {
-            "oneOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
           "currency",
-          "amount",
-          "runway_hours"
+          "amount"
         ]
       },
       "MRRRisk": {
@@ -26443,16 +26425,6 @@
               {
                 "type": "string",
                 "description": "A number as a decimal string."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "runway_hours": {
-            "oneOf": [
-              {
-                "type": "integer"
               },
               {
                 "type": "null"

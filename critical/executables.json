@@ -2811,9 +2811,6 @@
     "OR-J24-S87": [
       "TestUsageRecovery/OR-J24-S87/a-failed-items-grace-counts-each-failure-once"
     ],
-    "OR-J25-S44": [
-      "TestBalanceLooks/OR-J25-S44/the-burn-rate-reads-each-ended-quarter-hour-of-usage-history-once"
-    ],
     "OR-J14-S08": [
       "TestNMIEngineRenewalRecovery/OR-J14-S08/gateway-refusals-settle-through-dunning"
     ],
@@ -2887,6 +2884,15 @@
     ],
     "OR-J24-S91": [
       "TestReceiptMigration/OR-J24-S91/an-old-receipts-forgiveness-is-shared-over-its-lines-by-their-amounts"
+    ],
+    "OR-J25-S47": [
+      "TestLowBalanceAmounts/OR-J25-S47/usage-that-leaves-the-amount-is-low"
+    ],
+    "OR-J25-S48": [
+      "TestLowBalanceAmounts/OR-J25-S48/a-running-charge-is-low-at-the-amount-at-its-exact-instant-not-a-runway-ahead"
+    ],
+    "OR-J25-S49": [
+      "TestLowBalanceAmounts/OR-J25-S49/with-no-amount-set-a-running-charge-is-told-only-when-depleted-at-its-exact-instant"
     ]
   }
 }

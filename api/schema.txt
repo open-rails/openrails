@@ -10,6 +10,7 @@ migration 0006_usage_receipts.up.sql sha256:73fca1d59b23e1c17080b6a429b13e59232a
 migration 0007_retired_jobs.up.sql sha256:ba9b17805a8b793bc4eb5f96a22a72e8af1df696ea9071564a58b1c8143d0540
 migration 0008_rebill_watch_dropped.up.sql sha256:7d1008c1f618110cd1418a1c66e1dc8b4cd79fee7523e7b9548360000276ae98
 migration 0009_usage_receipt_per_posting.up.sql sha256:d384be58251eea8f5c1270889cc3204e538673039c0c67c517fa1ade287a060e
+migration 0010_amount_low_balance.up.sql sha256:a3c81f7e13cf137c8381c00c235485c03041fa2e0f8ae781f827f52e55a94b55
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -21,8 +22,6 @@ table billing.balance_watches
   column depleted_at timestamp with time zone
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   column funded_at timestamp with time zone
-  column usage_rate_per_hour bigint NOT NULL
-  column rate_sampled_at timestamp with time zone
   column low_line_amount bigint
   column floor_amount bigint
   column look_each_change boolean NOT NULL DEFAULT true
@@ -30,7 +29,6 @@ table billing.balance_watches
   constraint balance_watches_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT
   constraint balance_watches_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint balance_watches_pkey PRIMARY KEY (merchant_id, customer_id, currency)
-  constraint balance_watches_usage_rate_per_hour_check CHECK ((usage_rate_per_hour >= 0))
   index CREATE INDEX balance_watches_depletes_at_idx ON billing.balance_watches USING btree (merchant_id, depletes_at)
   index CREATE INDEX balance_watches_next_check_at_idx ON billing.balance_watches USING btree (next_check_at, merchant_id, customer_id, currency) WHERE (next_check_at IS NOT NULL)
   index CREATE UNIQUE INDEX balance_watches_pkey ON billing.balance_watches USING btree (merchant_id, customer_id, currency)
@@ -444,16 +442,13 @@ table billing.customer_low_balance_lines
   column merchant_id uuid NOT NULL
   column customer_id uuid NOT NULL
   column currency text NOT NULL
-  column amount bigint
-  column runway_hours integer
+  column amount bigint NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   constraint customer_low_balance_lines_amount_check CHECK ((amount >= 0))
   constraint customer_low_balance_lines_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint customer_low_balance_lines_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
   constraint customer_low_balance_lines_pkey PRIMARY KEY (merchant_id, customer_id, currency)
-  constraint customer_low_balance_lines_runway_hours_check CHECK (((runway_hours >= 0) AND (runway_hours <= 8760)))
-  constraint customer_low_balance_lines_set_check CHECK (((amount IS NOT NULL) OR (runway_hours IS NOT NULL)))
   index CREATE UNIQUE INDEX customer_low_balance_lines_pkey ON billing.customer_low_balance_lines USING btree (merchant_id, customer_id, currency)
 
 table billing.customer_messages
@@ -4481,7 +4476,7 @@ function billing.event_log_data(jsonb)
       -- Keep monetary integers lossless for JavaScript consumers, just like the
       -- existing typed billing API. Do not reinterpret arbitrary payload fields.
       FOREACH key IN ARRAY ARRAY['amount','total','overdue_amount','amount_floor',
-        'available_amount','owed_amount','accrual_rate_per_hour','usage_rate_per_hour',
+        'available_amount','owed_amount','accrual_rate_per_hour',
         'low_balance_amount','old_amount','new_amount','amount_due'] LOOP
           IF jsonb_typeof(value->key)='number' THEN
               value:=jsonb_set(value,ARRAY[key],to_jsonb(value->>key));

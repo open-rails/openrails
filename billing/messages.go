@@ -97,7 +97,6 @@ type MessageEvent struct {
 	PeriodEndsAt     string
 	DueAt            string
 	NextAttemptAt    string
-	RunwayEndsAt     string
 	OverdueStartedAt string
 	InvoiceNumber    string
 	OverdueInvoices  string

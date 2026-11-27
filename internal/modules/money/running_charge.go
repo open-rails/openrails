@@ -301,6 +301,13 @@ func earlier(a, b time.Time) time.Time {
 	return a
 }
 
+func later(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
+}
+
 // GetRunningCharge reads one charge by the host's reference.
 func (s *MoneyService) GetRunningCharge(ctx context.Context, reference string) (*billing.RunningCharge, error) {
 	if s == nil || s.db == nil {
@@ -483,6 +490,6 @@ func (s *MoneyService) PublicBalance(ctx context.Context, bal *models.MoneyBalan
 	if err != nil {
 		return out, err
 	}
-	out.AccrualRatePerHour, out.DepletesAt = view.accrualRate, view.project(lowBalanceLine{}, 0).depletesAt
+	out.AccrualRatePerHour, out.DepletesAt = view.accrualRate, view.exactAt(view.floor)
 	return out, nil
 }

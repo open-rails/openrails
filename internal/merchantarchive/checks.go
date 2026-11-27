@@ -120,7 +120,7 @@ var excludedColumns = map[string]string{
 	"price_keys":              "merchant_id product_id key revision created_at updated_at",
 	"customer_paid_totals":    "merchant_id customer_id currency net_paid_amount first_paid_at",
 	"network_activity_daily":  "merchant_id psp_id rail network currency day_at sales sales_amount refunds refund_amount chargebacks chargeback_amount fraud_chargebacks fraud_chargeback_amount fraud_reports fraud_report_amount",
-	"balance_watches":         "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
+	"balance_watches":         "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at",
 	"ledger_type_totals":      "merchant_id book currency account_type psp_id credits_posted debits_posted",
 	"ledger_daily":            "merchant_id book currency account_type bucket_at transfer_type psp_id product_id credits debits",
 	"ledger_rollup_pending":   "merchant_id transfer_id",

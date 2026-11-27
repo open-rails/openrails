@@ -27,10 +27,6 @@ type BillingBalanceWatch struct {
 	UpdatedAt  time.Time
 	// When the customer was funded (a deposit, a credit grant, a reinstatement or a payment of what it owes) since its last notice; only funding re-arms a notice, and a notice clears it.
 	FundedAt *time.Time
-	// Exponentially weighted rate of usage spend, one-hour time constant, in native units per hour: each look adds what the usage history's quarter hours that ended since rate_sampled_at cost.
-	UsageRatePerHour int64
-	// The instant usage_rate_per_hour was sampled at; quarter hours ended before it are not read again.
-	RateSampledAt *time.Time
 	// The available amount (balance less held) at or under which the balance is low, as the last look found the line; null with no line.
 	LowLineAmount *int64
 	// The available amount at or under which the balance is depleted, as the last look found it; null before a look.
@@ -343,15 +339,14 @@ type BillingCustomerLimitOverride struct {
 	UpdatedAt  time.Time
 }
 
-// A customer's own low-balance line per currency: the amount line and the runway line (hours of spend at its burn rate). A null part inherits the merchant's settings.balance_notices; a line with no part set has no row.
+// A customer's own low-balance amount per currency: its balance is low once what it may spend is at or under it; 0 turns the notice off. A customer with no row inherits the merchant's settings.balance_notices.
 type BillingCustomerLowBalanceLine struct {
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	Currency    string
-	Amount      *int64
-	RunwayHours *int32
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Amount     int64
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // One message to a customer about one billing fact (a notification_events row) on one channel, and what became of it. No body is kept: it is the delivery log a dispute response cites. A fact sends at most one message per channel. Retention: rows are deleted two years (731 days) after created_at.

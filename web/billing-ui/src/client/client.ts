@@ -839,13 +839,12 @@ export function createBillingClient(options: BillingClientOptions = {}) {
 
     /**
      * Sets the customer's own low-balance line in one currency and answers
-     * the line its balance is judged at. `null` inherits the merchant's; 0
-     * turns that part off.
+     * the line its balance is judged at. `null` inherits the merchant's; "0"
+     * turns it off.
      */
     setLowBalanceLine(input: {
       currency: string
       amount: string | null
-      runwayHours: number | null
     }): Promise<LowBalanceLine> {
       return json(
         lowBalanceLineSchema,
@@ -854,7 +853,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           method: "PUT",
           body: {
             amount: input.amount,
-            runway_hours: input.runwayHours,
           } satisfies wire.SetLowBalanceLineParams,
         }
       )

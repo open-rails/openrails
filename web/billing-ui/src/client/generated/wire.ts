@@ -172,7 +172,6 @@ export type BalanceNoticeAmount = {
 }
 
 export type BalanceNoticeSettings = {
-  runway_hours?: number
   low_amounts?: BalanceNoticeAmount[]
 }
 
@@ -1029,8 +1028,7 @@ export type DunningTier = {
 export type EffectiveLowBalanceLine = {
   currency: string
   amount: string
-  runway_hours: number
-  source: "customer" | "default" | "merchant"
+  source: "customer" | "merchant" | "none"
 }
 
 export type EffectiveTrustLevel = {
@@ -1476,7 +1474,6 @@ export type LogEntry = {
 export type LowBalanceLine = {
   currency: string
   amount: string | null
-  runway_hours: number | null
 }
 
 export type MRRRisk = {
@@ -2464,7 +2461,6 @@ export type SetLimitParams = {
 
 export type SetLowBalanceLineParams = {
   amount?: string | null
-  runway_hours?: number | null
 }
 
 export type SetMeterParams = {

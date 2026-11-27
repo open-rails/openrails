@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 890,
+  "scenario_count": 892,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -4339,11 +4339,6 @@
       "name": "A failed item's grace counts each failure once: the resend of a sync that failed reads no copy of its own failure, and a later chunk of one sync counts the failures of the chunks before it"
     },
     {
-      "id": "OR-J25-S44",
-      "journey": "J25",
-      "name": "The balance watch's burn rate reads usage history's quarter hours once each has ended: a look inside the quarter hour sees none of it, the next look all of it, once"
-    },
-    {
       "id": "OR-J14-S08",
       "journey": "J14",
       "name": "NMI engine renewal gateway refusals settle through dunning"
@@ -4452,6 +4447,21 @@
       "id": "OR-J24-S91",
       "journey": "J24",
       "name": "An upgrade keeps every usage receipt an earlier build wrote: each line takes its receipt's period and its share of what the receipt forgave, by the amounts of its lines of that sign, to the largest remainder"
+    },
+    {
+      "id": "OR-J25-S47",
+      "journey": "J25",
+      "name": "Usage that leaves a balance at its low amount sends balance.low once"
+    },
+    {
+      "id": "OR-J25-S48",
+      "journey": "J25",
+      "name": "A running charge's balance is low at its amount, at the exact instant the fixed rate brings it there, never a runway of spend ahead"
+    },
+    {
+      "id": "OR-J25-S49",
+      "journey": "J25",
+      "name": "With no low amount set no balance.low is sent: a running charge is told only when depleted, at its exact instant"
     }
   ]
 }
