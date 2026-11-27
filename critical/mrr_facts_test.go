@@ -49,48 +49,52 @@ func cancelCountsAtItsEnd(t *testing.T) {
 	alice := customerOf(a.alice)
 	end := *sub.CurrentPeriodEndsAt
 	began := a.clock.Now()
+	scheduledChurn := func() map[string]int64 {
+		t.Helper()
+		ahead := &billing.MetricsRange{From: a.clock.Now().Format(time.RFC3339), To: end.Add(time.Second).Format(time.RFC3339)}
+		return split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"scheduled_mrr"}, By: []string{"movement"}, Range: ahead, Filters: usdOnly}),
+			"movement", "scheduled_mrr")
+	}
 	customerCancel(t, a, sub.ID)
 
-	// The churn is written now, dated at the end; MRR holds until then, even
-	// read at an instant past it.
-	moves := mrrMoves(t, a.world, a.alpha, alice)
-	require.Equal(t, []string{mrrKind("USD", "new", dailyTenMRR), mrrKind("USD", "churn", -dailyTenMRR)}, mrrKinds(moves))
-	require.True(t, moves[1].Scheduled)
-	require.True(t, moves[1].OccurredAt.Equal(end), "dated at the end, %s", moves[1].OccurredAt)
-	require.Equal(t, -1, moves[1].Logo)
-	require.NotNil(t, moves[1].Voluntary)
-	require.True(t, *moves[1].Voluntary)
+	// MRR holds until the end, even read at an instant past it.
 	require.EqualValues(t, dailyTenMRR, mrrThrough(t, a, "mrr", a.clock.Now().Add(time.Second)))
-	require.EqualValues(t, dailyTenMRR, mrrThrough(t, a, "mrr", end.Add(time.Hour)), "a movement ahead counts once its date passes")
-	ahead := &billing.MetricsRange{From: a.clock.Now().Format(time.RFC3339), To: end.Add(time.Second).Format(time.RFC3339)}
-	scheduled := split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"scheduled_mrr"}, By: []string{"movement"}, Range: ahead, Filters: usdOnly}),
-		"movement", "scheduled_mrr")
-	require.Equal(t, map[string]int64{"churn": -dailyTenMRR}, scheduled)
+	require.EqualValues(t, dailyTenMRR, mrrThrough(t, a, "mrr", end.Add(time.Hour)), "a change ahead counts once its date passes")
+	require.Equal(t, map[string]int64{"churn": -dailyTenMRR}, scheduledChurn())
 
 	// A resume before the end removes it.
 	a.clock.Advance(time.Hour)
 	_, err := a.alpha.ResumeSubscription(t.Context(), sub.ID)
 	require.NoError(t, err)
-	require.Equal(t, []string{mrrKind("USD", "new", dailyTenMRR)}, mrrKinds(mrrMoves(t, a.world, a.alpha, alice)))
+	require.Empty(t, scheduledChurn())
 	require.EqualValues(t, dailyTenMRR, mrrThrough(t, a, "mrr", end.Add(2*time.Hour)))
 
 	// Canceled again, the end passes with nothing run: MRR and the customer
-	// are gone from that instant, while the subscription's row is as the
-	// cancel left it.
+	// are gone from that instant.
 	a.clock.Advance(time.Hour)
 	customerCancel(t, a, sub.ID)
 	a.clock.Advance(end.Sub(a.clock.Now()) + time.Hour)
-	level, ends := subscriptionMRRRow(t, a, sub.ID)
-	require.EqualValues(t, dailyTenMRR, level, "no job touched the subscription")
-	require.NotNil(t, ends)
-	require.True(t, ends.Equal(end))
-	require.Zero(t, mrrThrough(t, a, "mrr", a.clock.Now()))
+	require.Zero(t, mrrThrough(t, a, "mrr", a.clock.Now()), "the end counts with no job")
 	require.Zero(t, mrrThrough(t, a, "subscribers", a.clock.Now()))
 	require.EqualValues(t, dailyTenMRR, mrrThrough(t, a, "mrr", end), "MRR holds until the end")
 	require.Equal(t, billing.SubscriptionMRR{Amount: 0, Currency: "USD"}, mrrOf(t, a.alpha, sub.ID))
 	kinds := split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"mrr_movements"}, By: []string{"movement"},
 		Range: &billing.MetricsRange{From: began.Add(-time.Hour).Format(time.RFC3339), To: a.clock.Now().Format(time.RFC3339)}, Filters: usdOnly}), "movement", "mrr_movements")
 	require.Equal(t, map[string]int64{"new": dailyTenMRR, "churn": -dailyTenMRR}, kinds)
+
+	// The churn was written at the cancel, dated at the end, and the
+	// subscription's row is as the cancel left it: no job touched it.
+	moves := mrrMoves(t, a.world, a.alpha, alice)
+	require.Equal(t, []string{mrrKind("USD", "new", dailyTenMRR), mrrKind("USD", "churn", -dailyTenMRR)}, mrrKinds(moves), "the resumed churn is gone")
+	require.True(t, moves[1].Scheduled)
+	require.True(t, moves[1].OccurredAt.Equal(end), "dated at the end, %s", moves[1].OccurredAt)
+	require.Equal(t, -1, moves[1].Logo)
+	require.NotNil(t, moves[1].Voluntary)
+	require.True(t, *moves[1].Voluntary)
+	level, ends := subscriptionMRRRow(t, a, sub.ID)
+	require.EqualValues(t, dailyTenMRR, level)
+	require.NotNil(t, ends)
+	require.True(t, ends.Equal(end))
 }
 
 func addOnTurnsChurnIntoContraction(t *testing.T) {
@@ -99,16 +103,24 @@ func addOnTurnsChurnIntoContraction(t *testing.T) {
 	end := *sub.CurrentPeriodEndsAt
 	began := a.clock.Now()
 	weekly := mrrPlan(t, a.alpha, "s35-add-on", billing.CreatePriceParams{UnitAmount: 7_000_000, Currency: "USD", BillingIntervalHours: ptr(168), AccessDurationHours: ptr(168)})
-
 	customerCancel(t, a, sub.ID)
-	moves := mrrMoves(t, a.world, a.alpha, alice)
-	require.Equal(t, []string{mrrKind("USD", "new", dailyTenMRR), mrrKind("USD", "churn", -dailyTenMRR)}, mrrKinds(moves), "alone, its end is churn")
-	require.Equal(t, -1, moves[1].CustomerLogo)
 
 	// An add-on bought before the end: the customer keeps MRR past it.
 	a.clock.Advance(time.Hour)
 	buyMRRPlan(t, a, provider, weekly, 7_000_000, "s35-add-on")
-	moves = mrrMoves(t, a.world, a.alpha, alice)
+
+	// The end passes with nothing run: she stays a customer, at the add-on,
+	// and the plan's end is contraction, not churn.
+	a.clock.Advance(end.Sub(a.clock.Now()) + time.Hour)
+	require.EqualValues(t, weeklyMRR, mrrThrough(t, a, "mrr", a.clock.Now()), "the end counts with no job")
+	require.EqualValues(t, 1, mrrThrough(t, a, "subscribers", a.clock.Now()))
+	window := &billing.MetricsRange{From: began.Add(-time.Hour).Format(time.RFC3339), To: a.clock.Now().Format(time.RFC3339)}
+	kinds := split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"mrr_movements"}, By: []string{"movement"}, Range: window, Filters: usdOnly}),
+		"movement", "mrr_movements")
+	require.Equal(t, map[string]int64{"new": dailyTenMRR, "expansion": weeklyMRR, "contraction": -dailyTenMRR}, kinds, "no churn")
+
+	// Written when the add-on was bought, the end's movement is contraction.
+	moves := mrrMoves(t, a.world, a.alpha, alice)
 	require.Equal(t, []string{mrrKind("USD", "new", dailyTenMRR), mrrKind("USD", "expansion", weeklyMRR), mrrKind("USD", "contraction", -dailyTenMRR)},
 		mrrKinds(moves))
 	require.True(t, moves[2].Scheduled)
@@ -117,15 +129,6 @@ func addOnTurnsChurnIntoContraction(t *testing.T) {
 	require.Equal(t, 0, moves[2].CustomerLogo)
 	require.Nil(t, moves[2].Voluntary)
 	require.Equal(t, int64(weeklyMRR), moves[2].After)
-
-	// The end passes with nothing run: she stays a customer, at the add-on.
-	a.clock.Advance(end.Sub(a.clock.Now()) + time.Hour)
-	require.EqualValues(t, weeklyMRR, mrrThrough(t, a, "mrr", a.clock.Now()))
-	require.EqualValues(t, 1, mrrThrough(t, a, "subscribers", a.clock.Now()))
-	window := &billing.MetricsRange{From: began.Add(-time.Hour).Format(time.RFC3339), To: a.clock.Now().Format(time.RFC3339)}
-	kinds := split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"mrr_movements"}, By: []string{"movement"}, Range: window, Filters: usdOnly}),
-		"movement", "mrr_movements")
-	require.Equal(t, map[string]int64{"new": dailyTenMRR, "expansion": weeklyMRR, "contraction": -dailyTenMRR}, kinds, "no churn")
 }
 
 func atRiskFollowsAPriceChange(t *testing.T) {

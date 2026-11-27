@@ -321,41 +321,45 @@ func TestMRRRisk(t *testing.T) {
 	})
 
 	t.Run("OR-J42-S17/a-cancel-at-period-end-while-at-risk-closes-the-case-churned-at-its-end-when-written-a-resume-reopens-it", func(t *testing.T) {
-		tw := newTrailWorld(t, "stripe")
-		tw.stripe.AddProduct("prod_basic", "basic")
-		tw.stripe.AddPrice(stripemock.Price{ID: "price_basic", Product: "prod_basic", Amount: 900, Interval: "month"})
-		tw.mapStripe(t, tw.stripeProduct(t, "basic", "member:basic"), "stripe-basic", "price_basic")
-		began := tw.clock.Now()
-		start := began.Add(-24 * time.Hour)
-		customer := tw.stripe.AddCustomer(tw.alice.Email, "Alice", nil)
-		remote := tw.stripe.AddSubscription(customer, "pm_alice", "price_basic", 900, start, start.AddDate(0, 1, 0))
-		tw.stripe.TagSubscription(remote, "user_id", tw.alice.ID, start)
-		tw.invoicePaid(t, remote)
-		completedOnce(t, tw.fleet, kindConverge)
-		held := tw.subscriptions(t, customerOf(tw.alice))
-		require.Len(t, held, 1)
-		sub := held[0]
-
-		// Stripe's renewal fails: past due, at risk.
-		tw.send(t, "invoice.payment_failed", tw.stripe.RenewSubscription(remote, false))
-		completedOnce(t, tw.fleet, kindConverge)
-		due, err := tw.alpha.GetSubscription(t.Context(), sub.ID)
-		require.NoError(t, err)
-		require.Equal(t, billing.SubscriptionPastDue, due.Status)
-		require.NotNil(t, due.MRRRisk)
-		require.Equal(t, []billing.MRRRiskReason{billing.MRRRiskPastDue}, due.MRRRisk.Reasons)
-		end := *due.CurrentPeriodEndsAt
-		require.True(t, end.After(tw.clock.Now()))
+		// Alice's Stripe membership whose renewal Stripe failed: past due, at
+		// risk, its new period's end ahead.
+		pastDue := func(t *testing.T) (*trailWorld, billing.SubscriptionID, time.Time, time.Time) {
+			t.Helper()
+			tw := newTrailWorld(t, "stripe")
+			tw.stripe.AddProduct("prod_basic", "basic")
+			tw.stripe.AddPrice(stripemock.Price{ID: "price_basic", Product: "prod_basic", Amount: 900, Interval: "month"})
+			tw.mapStripe(t, tw.stripeProduct(t, "basic", "member:basic"), "stripe-basic", "price_basic")
+			began := tw.clock.Now()
+			start := began.Add(-24 * time.Hour)
+			customer := tw.stripe.AddCustomer(tw.alice.Email, "Alice", nil)
+			remote := tw.stripe.AddSubscription(customer, "pm_alice", "price_basic", 900, start, start.AddDate(0, 1, 0))
+			tw.stripe.TagSubscription(remote, "user_id", tw.alice.ID, start)
+			tw.invoicePaid(t, remote)
+			completedOnce(t, tw.fleet, kindConverge)
+			held := tw.subscriptions(t, customerOf(tw.alice))
+			require.Len(t, held, 1)
+			tw.send(t, "invoice.payment_failed", tw.stripe.RenewSubscription(remote, false))
+			completedOnce(t, tw.fleet, kindConverge)
+			due, err := tw.alpha.GetSubscription(t.Context(), held[0].ID)
+			require.NoError(t, err)
+			require.Equal(t, billing.SubscriptionPastDue, due.Status)
+			require.NotNil(t, due.MRRRisk)
+			require.Equal(t, []billing.MRRRiskReason{billing.MRRRiskPastDue}, due.MRRRisk.Reasons)
+			end := *due.CurrentPeriodEndsAt
+			require.True(t, end.After(tw.clock.Now()))
+			tw.clock.Advance(time.Hour)
+			return tw, due.ID, end, began
+		}
 
 		// Canceled at its period end, it adds its MRR until then and stays at
 		// risk; the case is written closed, churned, at the end.
-		tw.send(t, "customer.subscription.updated", tw.stripe.PortalCancelAtPeriodEnd(remote, true))
-		completedOnce(t, tw.fleet, kindConverge)
-		risk := mrrRiskOf(t, tw.alpha, sub.ID)
+		tw, sub, end, began := pastDue(t)
+		customerCancel(t, tw.authorityWorld, sub)
+		risk := mrrRiskOf(t, tw.alpha, sub)
 		require.NotNil(t, risk, "MRR still added is still at risk")
 		require.Equal(t, []billing.MRRRiskReason{billing.MRRRiskPastDue}, risk.Reasons)
-		require.Equal(t, []string{"past_due churned [past_due]"}, riskCases(t, tw.world, tw.alpha, sub.ID))
-		closed, outcome, voluntary := closedCase(t, tw.world, tw.alpha, sub.ID)
+		require.Equal(t, []string{"past_due churned [past_due]"}, riskCases(t, tw.world, tw.alpha, sub))
+		closed, outcome, voluntary := closedCase(t, tw.world, tw.alpha, sub)
 		require.Equal(t, "churned", outcome)
 		require.True(t, closed.Equal(end), "churned at the end, %s", closed)
 		require.NotNil(t, voluntary)
@@ -363,23 +367,24 @@ func TestMRRRisk(t *testing.T) {
 		require.Equal(t, map[string]int64{"USD": 9_000_000}, atRiskMRR(t, tw.alpha, riskWindow(began, tw.clock.Now().Add(time.Second))))
 		require.Empty(t, recoveryRate(t, tw.alpha, riskWindow(began, tw.clock.Now().Add(time.Second))), "no case has closed yet")
 
-		// A resume before the end reopens the same case.
-		tw.send(t, "customer.subscription.updated", tw.stripe.PortalCancelAtPeriodEnd(remote, false))
-		completedOnce(t, tw.fleet, kindConverge)
-		require.Equal(t, []string{"past_due open [past_due]"}, riskCases(t, tw.world, tw.alpha, sub.ID))
-
-		// Canceled again: nothing runs at the end, and the case reads churned
-		// there, once.
-		tw.send(t, "customer.subscription.updated", tw.stripe.PortalCancelAtPeriodEnd(remote, true))
-		completedOnce(t, tw.fleet, kindConverge)
+		// Nothing runs at the end: the case reads churned there, once.
 		tw.clock.Advance(end.Sub(tw.clock.Now()) + time.Hour)
-		require.Nil(t, mrrRiskOf(t, tw.alpha, sub.ID))
-		require.Equal(t, []string{"past_due churned [past_due]"}, riskCases(t, tw.world, tw.alpha, sub.ID))
-		closed, _, _ = closedCase(t, tw.world, tw.alpha, sub.ID)
-		require.True(t, closed.Equal(end), "churned at the end, %s", closed)
+		require.Nil(t, mrrRiskOf(t, tw.alpha, sub))
+		require.Equal(t, []string{"past_due churned [past_due]"}, riskCases(t, tw.world, tw.alpha, sub))
 		window := riskWindow(began, tw.clock.Now())
 		require.Empty(t, atRiskMRR(t, tw.alpha, window))
 		require.Equal(t, map[string]float64{"USD": 0}, recoveryRate(t, tw.alpha, window), "one case, churned")
+
+		// A resume before the end reopens the same case; the resume makes the
+		// subscription active, so the case is recovered.
+		tw, sub, _, _ = pastDue(t)
+		customerCancel(t, tw.authorityWorld, sub)
+		require.Equal(t, []string{"past_due churned [past_due]"}, riskCases(t, tw.world, tw.alpha, sub))
+		tw.clock.Advance(time.Hour)
+		status, raw := tw.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.String()+"/resume", tw.aliceToken, map[string]any{})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Nil(t, mrrRiskOf(t, tw.alpha, sub), "active again")
+		require.Equal(t, []string{"past_due recovered [past_due]"}, riskCases(t, tw.world, tw.alpha, sub), "the same case, reopened")
 	})
 
 	t.Run("OR-J42-S18/a-new-default-card-expiring-before-renewal-puts-a-subscription-following-it-at-risk-at-once-never-an-nmi-schedule", func(t *testing.T) {

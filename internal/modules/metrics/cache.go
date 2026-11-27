@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
@@ -159,7 +160,8 @@ const lockPoll = 50 * time.Millisecond
 
 // do answers key from the cache, or computes it once: a caller finding the
 // key computing in this process waits for it, and with Redis one finding it
-// computing elsewhere waits until it lands or the lock lapses.
+// computing elsewhere waits until it lands or the lock lapses. A waiter
+// whose computation's caller went away computes it itself.
 func (c *resultCache) do(ctx context.Context, key string, compute func(context.Context) (*Result, error)) (*Result, error) {
 	if res, ok := c.get(ctx, key); ok {
 		return res, nil
@@ -169,6 +171,9 @@ func (c *resultCache) do(ctx context.Context, key string, compute func(context.C
 		c.mu.Unlock()
 		select {
 		case <-f.done:
+			if f.err != nil && ctx.Err() == nil && (errors.Is(f.err, context.Canceled) || errors.Is(f.err, context.DeadlineExceeded)) {
+				return c.do(ctx, key, compute)
+			}
 			return f.res, f.err
 		case <-ctx.Done():
 			return nil, ctx.Err()

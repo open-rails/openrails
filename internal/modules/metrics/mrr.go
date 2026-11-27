@@ -45,13 +45,13 @@ type snapshotSource struct {
 }
 
 // snapshotSQL sums each leaf's expression over src's rows dated before each
-// edge: one range scan up to the last edge (never past as-of), its rows
+// edge and by the as-of instant: one range scan up to the last edge, its rows
 // numbered by the edges they precede (width_bucket) and summed per edge, so
 // the work is the rows read, not edges times rows. Dimensions of the source
 // group the rows; churn_type repeats every row for each type.
 func snapshotSQL(plan *Plan, b *binder, merchant string, src snapshotSource, leaves []*Measure, exprOf func(*Measure) string, edges []time.Time) (string, error) {
 	e := b.arg(edges)
-	where := []string{src.merchant + " = " + merchant, src.at + " < " + b.arg(plan.asOf(edges[len(edges)-1]))}
+	where := []string{src.merchant + " = " + merchant, src.at + " < " + b.arg(edges[len(edges)-1]), src.at + " <= " + b.arg(plan.AsOf)}
 	for _, d := range sortedFilterDims(plan.Filters) {
 		if d == "churn_type" {
 			continue
@@ -168,7 +168,7 @@ func compileMRRBase(plan *Plan, merchantID uuid.UUID, leaves []*Measure) (stmt, 
 		period = bucketExpr(families[FamMRRBase], b.arg(plan.Grain), b.arg(plan.zone().String()))
 		partition, start = partition+", "+period, plan.Buckets[0]
 	}
-	where := []string{"m.merchant_id = " + m, "m.occurred_at >= " + b.arg(start), "m.occurred_at < " + b.arg(plan.asOf(plan.To))}
+	where := []string{"m.merchant_id = " + m, "m.occurred_at >= " + b.arg(start), "m.occurred_at < " + b.arg(plan.To), "m.occurred_at <= " + b.arg(plan.AsOf)}
 	if f := plan.Filters["currency"]; f != nil {
 		where = append(where, "m.currency = ANY("+b.arg(f)+")")
 	}
@@ -238,9 +238,9 @@ func compileTrailing(plan *Plan, merchantID uuid.UUID, leaves []*Measure) (stmt,
 	}
 	b := &binder{}
 	m := b.arg(merchantID)
-	currency := ""
+	currency := " AND m.occurred_at <= " + b.arg(plan.AsOf)
 	if f := plan.Filters["currency"]; f != nil {
-		currency = " AND m.currency = ANY(" + b.arg(f) + ")"
+		currency += " AND m.currency = ANY(" + b.arg(f) + ")"
 	}
 	u := b.arg(uniq)
 	sel := []string{"w.bucket AS bucket"}
@@ -256,13 +256,13 @@ func compileTrailing(plan *Plan, merchantID uuid.UUID, leaves []*Measure) (stmt,
          max(m.occurred_at) FILTER (WHERE m.logo_delta = 1) OVER (PARTITION BY m.customer_id, m.currency ORDER BY m.occurred_at, m.id
            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS began
   FROM billing.mrr_movements m
-  WHERE m.merchant_id = ` + m + ` AND m.logo_delta <> 0 AND m.occurred_at >= ` + b.arg(uniq[0]) + ` AND m.occurred_at < ` + b.arg(plan.asOf(hi)) + currency + `
+  WHERE m.merchant_id = ` + m + ` AND m.logo_delta <> 0 AND m.occurred_at >= ` + b.arg(uniq[0]) + ` AND m.occurred_at < ` + b.arg(hi) + currency + `
 ), ev AS (
   SELECT mv.currency, mv.kind, mv.logo_delta, mv.occurred_at, mv.began FROM mv WHERE mv.kind IN ('churn', 'correction')
 ), g AS (
   SELECT m.currency, width_bucket(m.occurred_at, ` + u + `::timestamptz[]) AS k, sum(m.logo_delta) AS d
   FROM billing.mrr_movements m
-  WHERE m.merchant_id = ` + m + ` AND m.logo_delta <> 0 AND m.occurred_at < ` + b.arg(plan.asOf(uniq[len(uniq)-1])) + currency + `
+  WHERE m.merchant_id = ` + m + ` AND m.logo_delta <> 0 AND m.occurred_at < ` + b.arg(uniq[len(uniq)-1]) + currency + `
   GROUP BY 1, 2
 ), s AS (
   SELECT c.currency, uu.u, COALESCE(sum(g.d), 0) AS subs
@@ -372,7 +372,7 @@ func compileCohort(plan *Plan, merchantID uuid.UUID, leaves []*Measure) (stmt, e
 	SELECT m.currency, date_trunc('month', m.cohort_at, ` + zone + `) AS cohort, date_trunc('month', m.occurred_at, ` + zone + `) AS month,
 	       SUM(m.logo_delta)::bigint AS logos, SUM(m.delta)::bigint AS amount
 	FROM billing.mrr_movements m
-	WHERE m.merchant_id = ` + merchant + ` AND m.cohort_at >= ` + from + ` AND m.cohort_at < ` + to + ` AND m.occurred_at < ` + b.arg(plan.asOf(plan.To)) + `
+	WHERE m.merchant_id = ` + merchant + ` AND m.cohort_at >= ` + from + ` AND m.cohort_at < ` + to + ` AND m.occurred_at < ` + to + ` AND m.occurred_at <= ` + b.arg(plan.AsOf) + `
 	GROUP BY 1, 2, 3
 ), a AS (
 	SELECT m.currency, date_trunc('month', m.cohort_at, ` + zone + `) AS cohort, count(DISTINCT m.customer_id)::bigint AS members

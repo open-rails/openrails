@@ -87,6 +87,15 @@ func mrrKind(currency, kind string, delta int64) string {
 	return currency + " " + kind + " " + strconv.FormatInt(delta, 10)
 }
 
+// settledBy is an instant every write so far is dated by: the world's clock,
+// or the database's for an import, an undo or a raw write that dates itself.
+func settledBy(w *world) time.Time {
+	if now := time.Now(); now.After(w.clock.Now()) {
+		return now
+	}
+	return w.clock.Now()
+}
+
 // mrrKindCounts counts the merchant's movements in currency dated by at, by
 // kind, and the voluntary and chargeback churn apart: each movement once.
 func mrrKindCounts(t *testing.T, w *world, client *openrails.Client, currency string, at time.Time) map[string]int64 {
@@ -624,8 +633,7 @@ func TestMRR(t *testing.T) {
 		}
 		churnAtEnd := []string{mrrKind("USD", "churn", -ccbillMemberMRR) + " " + paid.UTC().Format(time.RFC3339)}
 		require.Equal(t, churnAtEnd, scheduledChurn(), "its churn is written, dated at its end")
-		now := w.clock.Now()
-		require.Equal(t, [3]int64{2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, w.alpha, "USD", now))
+		require.Equal(t, [3]int64{2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, w.alpha, "USD", settledBy(w)))
 
 		// CCBill's roster lists only the kept member: a prune removes the other.
 		database, err := producerDB(w.pool, w.schema)
@@ -649,7 +657,7 @@ func TestMRR(t *testing.T) {
 		require.Equal(t, -1, moves[1].Logo)
 		require.Nil(t, moves[1].Voluntary)
 		require.Empty(t, scheduledChurn(), "the churn it scheduled never happens")
-		require.Equal(t, [3]int64{ccbillMemberMRR, 1, 1}, mrrTotals(t, w, w.alpha, "USD", w.clock.Now()))
+		require.Equal(t, [3]int64{ccbillMemberMRR, 1, 1}, mrrTotals(t, w, w.alpha, "USD", settledBy(w)))
 
 		// Undoing the prune restores the row: a correction back, and its
 		// churn written again.
@@ -659,14 +667,14 @@ func TestMRR(t *testing.T) {
 		rows := regexp.MustCompile(`--expect-rows (\d+)`).FindStringSubmatch(undo())
 		require.Len(t, rows, 2)
 		undo("--apply", "--expect-rows", rows[1])
-		moves = mrrMovesBy(t, w, w.alpha, gone, w.clock.Now())
+		moves = mrrMovesBy(t, w, w.alpha, gone, settledBy(w))
 		require.Equal(t, []string{mrrKind("USD", "opening", ccbillMemberMRR), mrrKind("USD", "correction", -ccbillMemberMRR), mrrKind("USD", "correction", ccbillMemberMRR)},
 			mrrKinds(moves))
 		require.Equal(t, "undo", moves[2].Cause)
 		require.Equal(t, 1, moves[2].Logo)
 		require.Equal(t, churnAtEnd, scheduledChurn())
-		require.Equal(t, [3]int64{2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, w.alpha, "USD", w.clock.Now()))
-		require.Equal(t, map[string]int64{"opening": 2, "correction": 2}, mrrKindCounts(t, w, w.alpha, "USD", w.clock.Now()))
+		require.Equal(t, [3]int64{2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, w.alpha, "USD", settledBy(w)))
+		require.Equal(t, map[string]int64{"opening": 2, "correction": 2}, mrrKindCounts(t, w, w.alpha, "USD", settledBy(w)))
 	})
 
 	t.Run("OR-J42-S09/a-bulk-import-settles-once-its-reads-growing-with-the-book", func(t *testing.T) {
@@ -679,8 +687,8 @@ func TestMRR(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, res.Imported, members, "%v", res.Reasons)
 
-		require.Equal(t, [3]int64{members * ccbillMemberMRR, members, members}, mrrTotals(t, a.world, a.alpha, "USD", a.clock.Now()))
-		require.Equal(t, map[string]int64{"opening": members}, mrrKindCounts(t, a.world, a.alpha, "USD", a.clock.Now()), "one opening per customer")
+		require.Equal(t, [3]int64{members * ccbillMemberMRR, members, members}, mrrTotals(t, a.world, a.alpha, "USD", settledBy(a.world)))
+		require.Equal(t, map[string]int64{"opening": members}, mrrKindCounts(t, a.world, a.alpha, "USD", settledBy(a.world)), "one opening per customer")
 		// The commit settles once: every later row event probes its own row.
 		// The importing session reports its reads once idle.
 		var reads int64

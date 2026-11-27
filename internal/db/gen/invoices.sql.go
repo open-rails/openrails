@@ -398,11 +398,10 @@ SELECT
     EXISTS (SELECT 1 FROM billing.mrr_movements
             WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
               AND occurred_at <= $4::timestamptz)::boolean AS had_mrr,
-    EXISTS (SELECT 1 FROM (SELECT DISTINCT ON (v.currency) v.mrr_after FROM billing.mrr_movements v
-                            WHERE v.merchant_id = $1::uuid AND v.customer_id = $2::uuid
-                              AND v.occurred_at <= $4::timestamptz
-                            ORDER BY v.currency, v.occurred_at DESC, v.id DESC) latest
-            WHERE latest.mrr_after > 0)::boolean AS has_mrr
+    EXISTS (SELECT 1 FROM billing.mrr_movements v
+            WHERE v.merchant_id = $1::uuid AND v.customer_id = $2::uuid
+              AND v.occurred_at <= $4::timestamptz
+            GROUP BY v.currency HAVING sum(v.delta) > 0)::boolean AS has_mrr
 `
 
 type GetCheckoutCustomerParams struct {
@@ -420,8 +419,8 @@ type GetCheckoutCustomerRow struct {
 
 // Who a new checkout's customer is: their paid purchases (complete invoices in
 // money, never a merchant's unit, and observed initial enrollments), whether
-// they ever had MRR with the merchant, and whether they have any at at: each
-// currency's latest movement.
+// they ever had MRR with the merchant, and whether they have any at at: a
+// currency whose movements by then add up to more than none.
 func (q *Queries) GetCheckoutCustomer(ctx context.Context, arg GetCheckoutCustomerParams) (GetCheckoutCustomerRow, error) {
 	row := q.db.QueryRow(ctx, getCheckoutCustomer,
 		arg.MerchantID,

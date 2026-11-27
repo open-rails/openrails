@@ -208,6 +208,59 @@ UPDATE billing.mrr_movement_lines l SET occurred_at = v.occurred_at, currency = 
   FROM billing.mrr_movements v
  WHERE v.merchant_id = l.merchant_id AND v.id = l.movement_id;
 
+-- Lines become what the products' rollup counted. A subscription's move
+-- between products in one currency was one line on its new product: it
+-- leaves the product of its line before and enters the new one.
+WITH moved AS (
+    SELECT l.merchant_id, l.id, l.movement_id, l.subscription_id, l.mrr_before, l.mrr_after, l.cause, l.occurred_at, l.currency, x.from_product, x.from_price
+      FROM billing.mrr_movement_lines l
+      JOIN (SELECT merchant_id, id, lag(product_id) OVER w AS from_product, lag(price_id) OVER w AS from_price
+              FROM billing.mrr_movement_lines
+            WINDOW w AS (PARTITION BY merchant_id, subscription_id, currency ORDER BY occurred_at, id)) x
+        ON x.merchant_id = l.merchant_id AND x.id = l.id
+     WHERE l.mrr_before > 0 AND x.from_product <> l.product_id
+), leaving AS (
+    INSERT INTO billing.mrr_movement_lines (merchant_id, movement_id, subscription_id, product_id, price_id, delta, mrr_before, mrr_after,
+        subscriber_delta, cause, occurred_at, currency)
+    SELECT merchant_id, movement_id, subscription_id, from_product, from_price, -mrr_before, mrr_before, 0, -1, cause, occurred_at, currency
+      FROM moved WHERE mrr_after > 0
+)
+UPDATE billing.mrr_movement_lines l
+   SET product_id = CASE WHEN m.mrr_after > 0 THEN l.product_id ELSE m.from_product END,
+       price_id = CASE WHEN m.mrr_after > 0 THEN l.price_id ELSE m.from_price END,
+       mrr_before = CASE WHEN m.mrr_after > 0 THEN 0 ELSE l.mrr_before END,
+       delta = CASE WHEN m.mrr_after > 0 THEN m.mrr_after ELSE l.delta END,
+       subscriber_delta = CASE WHEN m.mrr_after > 0 THEN 1 ELSE -1 END
+  FROM moved m
+ WHERE l.merchant_id = m.merchant_id AND l.id = m.id;
+-- A settlement that left its customer's MRR unchanged (an upgrade at an
+-- equal MRR) wrote no lines: each subscription's lines are made to add up to
+-- what it adds now, by lines of their own at its last change.
+WITH have AS (
+    SELECT merchant_id, subscription_id, currency, product_id, sum(delta)::bigint AS mrr, sum(subscriber_delta)::integer AS subscribers,
+           (array_agg(price_id ORDER BY occurred_at DESC, id DESC))[1] AS price_id, max(occurred_at) AS at
+      FROM billing.mrr_movement_lines
+     GROUP BY merchant_id, subscription_id, currency, product_id
+), want AS (
+    SELECT merchant_id, subscription_id, recorded_currency AS currency, recorded_product_id AS product_id, recorded_price_id AS price_id,
+           recorded_mrr AS mrr, 1 AS subscribers
+      FROM billing.subscription_mrr
+     WHERE recorded_mrr > 0
+), owed AS (
+    SELECT COALESCE(w.merchant_id, h.merchant_id) AS merchant_id, COALESCE(w.subscription_id, h.subscription_id) AS subscription_id,
+           COALESCE(w.currency, h.currency) AS currency, COALESCE(w.product_id, h.product_id) AS product_id, COALESCE(w.price_id, h.price_id) AS price_id,
+           COALESCE(w.mrr, 0) - COALESCE(h.mrr, 0) AS delta, COALESCE(w.subscribers, 0) - COALESCE(h.subscribers, 0) AS subscribers, h.at
+      FROM want w
+      FULL JOIN have h ON h.merchant_id = w.merchant_id AND h.subscription_id = w.subscription_id AND h.currency = w.currency AND h.product_id = w.product_id
+)
+INSERT INTO billing.mrr_movement_lines (merchant_id, movement_id, subscription_id, product_id, price_id, delta, mrr_before, mrr_after,
+    subscriber_delta, cause, occurred_at, currency)
+SELECT o.merchant_id, NULL, o.subscription_id, o.product_id, o.price_id, o.delta, greatest(-o.delta, 0), greatest(o.delta, 0),
+       greatest(-1, least(1, o.subscribers)), sm.cause, greatest(sm.changed_at, o.at), o.currency
+  FROM owed o
+  JOIN billing.subscription_mrr sm ON sm.merchant_id = o.merchant_id AND sm.subscription_id = o.subscription_id
+ WHERE o.delta <> 0;
+
 -- Each churn still scheduled becomes a movement dated at its end, classified
 -- along the customer's timeline from its MRR now; one due and not yet taken
 -- is dated at its end too.
@@ -398,6 +451,9 @@ DECLARE
     v_live boolean := false;
     v_ends timestamptz;
     v_risk text[];
+    v_currency text;
+    v_product uuid;
+    v_price_id uuid;
 BEGIN
     SELECT * INTO v_price FROM billing.prices WHERE merchant_id = s.merchant_id AND id = s.price_id;
     IF NOT FOUND THEN
@@ -427,30 +483,43 @@ BEGIN
         v_ends := NULL;
     END IF;
     v_risk := billing.subscription_risk(s, v_level, COALESCE(v_prev.risk, '{}'));
+    v_currency := v_price.currency;
+    v_product := s.product_id;
+    v_price_id := s.price_id;
+    -- An end that has come is history: until the subscription adds MRR again
+    -- its row keeps what it added and when that ended, which a settlement
+    -- dated before the end writes again.
+    IF NOT v_live AND v_prev.ends_at <= p_at THEN
+        v_currency := v_prev.currency;
+        v_product := v_prev.product_id;
+        v_price_id := v_prev.price_id;
+        v_level := v_prev.mrr;
+        v_ends := v_prev.ends_at;
+    END IF;
     IF v_prev.subscription_id IS NULL THEN
         INSERT INTO billing.subscription_mrr (merchant_id, subscription_id, customer_id, currency, product_id, price_id, mrr, contributes,
             ends_at, changed_at, cause, recorded_currency, recorded_product_id, recorded_price_id, recorded_mrr, recorded_ends_at,
             risk, recorded_risk, risk_changed_at)
-        VALUES (s.merchant_id, s.id, s.customer_id, v_price.currency, s.product_id, s.price_id, v_level, v_live,
-            v_ends, p_at, p_cause, v_price.currency, s.product_id, s.price_id, 0, NULL,
+        VALUES (s.merchant_id, s.id, s.customer_id, v_currency, v_product, v_price_id, v_level, v_live,
+            v_ends, p_at, p_cause, v_currency, v_product, v_price_id, 0, NULL,
             v_risk, '{}', CASE WHEN v_risk <> '{}' THEN p_at END);
     ELSIF ROW(v_prev.currency, v_prev.product_id, v_prev.price_id, v_prev.mrr, v_prev.contributes, v_prev.ends_at, v_prev.risk)
-          IS DISTINCT FROM ROW(v_price.currency, s.product_id, s.price_id, v_level, v_live, v_ends, v_risk) THEN
+          IS DISTINCT FROM ROW(v_currency, v_product, v_price_id, v_level, v_live, v_ends, v_risk) THEN
         UPDATE billing.subscription_mrr
-           SET currency = v_price.currency, product_id = s.product_id, price_id = s.price_id, mrr = v_level, contributes = v_live,
+           SET currency = v_currency, product_id = v_product, price_id = v_price_id, mrr = v_level, contributes = v_live,
                ends_at = v_ends, risk = v_risk,
                risk_changed_at = CASE WHEN v_prev.risk <> v_risk THEN greatest(p_at, v_prev.risk_changed_at) ELSE v_prev.risk_changed_at END,
                -- A change of what MRR counts, or of when it ends, is dated and
                -- explained by this one.
                changed_at = CASE WHEN ROW(v_prev.currency, v_prev.product_id, v_prev.price_id, v_prev.mrr, v_prev.ends_at)
-                   IS DISTINCT FROM ROW(v_price.currency, s.product_id, s.price_id, v_level, v_ends) THEN p_at ELSE v_prev.changed_at END,
+                   IS DISTINCT FROM ROW(v_currency, v_product, v_price_id, v_level, v_ends) THEN p_at ELSE v_prev.changed_at END,
                cause = CASE WHEN ROW(v_prev.currency, v_prev.product_id, v_prev.price_id, v_prev.mrr, v_prev.ends_at)
-                   IS DISTINCT FROM ROW(v_price.currency, s.product_id, s.price_id, v_level, v_ends) THEN p_cause ELSE v_prev.cause END
+                   IS DISTINCT FROM ROW(v_currency, v_product, v_price_id, v_level, v_ends) THEN p_cause ELSE v_prev.cause END
          WHERE merchant_id = s.merchant_id AND customer_id = s.customer_id AND subscription_id = s.id;
     END IF;
 END;
 $$;
-COMMENT ON FUNCTION billing.refresh_subscription_mrr(s billing.subscriptions, p_at timestamptz, p_cause text) IS 'Recomputes one subscription''s subscription_mrr at p_at: its level, its end and its status reasons. A change makes the row dirty; billing.settle_mrr records it at commit.';
+COMMENT ON FUNCTION billing.refresh_subscription_mrr(s billing.subscriptions, p_at timestamptz, p_cause text) IS 'Recomputes one subscription''s subscription_mrr at p_at: its level, its end and its status reasons; once its end has come, its level and end stay until it adds MRR again. A change makes the row dirty; billing.settle_mrr records it at commit.';
 
 -- The lines a customer's changes in one currency make at p_at: each changed
 -- subscription's MRR there before (as recorded) and after. A subscription
@@ -508,11 +577,13 @@ BEGIN
        AND l.merchant_id = p_merchant AND l.movement_id = v.id;
     DELETE FROM billing.mrr_movements v
      WHERE v.merchant_id = p_merchant AND v.customer_id = p_customer AND v.scheduled AND v.occurred_at > v_at;
-    -- The customer's currencies with MRR at the change.
-    SELECT count(*) FILTER (WHERE x.mrr_after > 0) INTO v_active
-      FROM (SELECT DISTINCT ON (v.currency) v.mrr_after FROM billing.mrr_movements v
+    -- The customer's MRR at an instant is the sum of its movements dated by
+    -- then, whatever order they were written in: its currencies with MRR at
+    -- the change.
+    SELECT count(*) FILTER (WHERE x.mrr > 0) INTO v_active
+      FROM (SELECT sum(v.delta) AS mrr FROM billing.mrr_movements v
              WHERE v.merchant_id = p_merchant AND v.customer_id = p_customer AND v.occurred_at <= v_at
-             ORDER BY v.currency, v.occurred_at DESC, v.id DESC) x;
+             GROUP BY v.currency) x;
     FOR v_currency IN
         SELECT DISTINCT c.currency FROM billing.subscription_mrr m
          CROSS JOIN LATERAL (VALUES (m.currency), (m.recorded_currency)) c(currency)
@@ -523,10 +594,8 @@ BEGIN
           FROM billing.pending_mrr_lines(p_merchant, p_customer, v_currency, v_at) l;
         v_movement := NULL;
         IF v_total <> 0 THEN
-            SELECT v.mrr_after, v.cohort_at INTO v_before, v_first FROM billing.mrr_movements v
-             WHERE v.merchant_id = p_merchant AND v.customer_id = p_customer AND v.currency = v_currency AND v.occurred_at <= v_at
-             ORDER BY v.occurred_at DESC, v.id DESC LIMIT 1;
-            v_before := COALESCE(v_before, 0);
+            SELECT COALESCE(sum(v.delta), 0), min(v.cohort_at) INTO v_before, v_first FROM billing.mrr_movements v
+             WHERE v.merchant_id = p_merchant AND v.customer_id = p_customer AND v.currency = v_currency AND v.occurred_at <= v_at;
             v_after := v_before + v_total;
             v_logo := (v_after > 0)::integer - (v_before > 0)::integer;
             -- An upgrade explains the whole movement; otherwise its largest
@@ -580,10 +649,8 @@ BEGIN
          GROUP BY m.currency, m.ends_at
          ORDER BY m.ends_at, m.currency
     LOOP
-        SELECT v.mrr_after, v.cohort_at INTO v_before, v_first FROM billing.mrr_movements v
-         WHERE v.merchant_id = p_merchant AND v.customer_id = p_customer AND v.currency = v_end.currency
-         ORDER BY v.occurred_at DESC, v.id DESC LIMIT 1;
-        v_before := COALESCE(v_before, 0);
+        SELECT COALESCE(sum(v.delta), 0), min(v.cohort_at) INTO v_before, v_first FROM billing.mrr_movements v
+         WHERE v.merchant_id = p_merchant AND v.customer_id = p_customer AND v.currency = v_end.currency AND v.occurred_at < v_end.at;
         v_after := v_before - v_end.level;
         v_logo := -(v_after = 0)::integer;
         v_kind := CASE WHEN v_after = 0 THEN 'churn' ELSE 'contraction' END;

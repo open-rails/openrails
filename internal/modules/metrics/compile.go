@@ -186,12 +186,13 @@ func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, 
 	if spec.Calendar {
 		from, to = calendarBound(from, plan.zone(), false), calendarBound(to, plan.zone(), true)
 	}
-	if spec.AsOf {
-		to = plan.asOf(to)
-	}
+
 	where = append(where,
 		fmt.Sprintf("%s >= %s", spec.TimeExpr, arg(from)),
 		fmt.Sprintf("%s < %s", spec.TimeExpr, arg(to)))
+	if spec.AsOf {
+		where = append(where, fmt.Sprintf("%s <= %s", spec.TimeExpr, arg(plan.AsOf)))
+	}
 	for _, d := range sortedFilterDims(plan.Filters) {
 		expr, ok := spec.DimExprs[d]
 		if !ok {

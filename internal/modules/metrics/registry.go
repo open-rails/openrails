@@ -106,8 +106,8 @@ type familySpec struct {
 	// rollup was kept for. It groups as that date in any zone: there is no
 	// finer time to regroup.
 	Calendar bool
-	// AsOf: a flow ends at the plan's as-of instant, so a fact dated ahead
-	// (a scheduled movement) counts once its date passes.
+	// AsOf: a flow takes only rows dated by the plan's as-of instant, so a
+	// fact dated ahead (a scheduled movement) counts once its date comes.
 	AsOf bool
 }
 

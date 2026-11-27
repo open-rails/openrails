@@ -167,7 +167,7 @@ func upgradeKeepsEveryMRRMeasure(t *testing.T) {
 		amount        int64
 		product       uuid.UUID
 	}{{"basic-USD", "USD", 10_000_000, core}, {"pro-USD", "USD", 25_000_000, core}, {"basic-EUR", "EUR", 9_000_000, core}, {"pro-EUR", "EUR", 22_000_000, core},
-		{"addon-USD", "USD", 5_000_000, addon}} {
+		{"addon-USD", "USD", 5_000_000, addon}, {"plus-USD", "USD", 10_000_000, addon}} {
 		prices[p.key] = price{id(100 + i), p.product}
 		exec("INSERT INTO "+table("prices")+" (id, merchant_id, product_id, key, amount, currency, archived, billing_interval_months) VALUES ($1, $2, $3, $4, $5, $6, false, 1)",
 			id(100+i), m, p.product, p.key, p.amount, p.currency)
@@ -178,13 +178,13 @@ func upgradeKeepsEveryMRRMeasure(t *testing.T) {
 	// them: the triggers keep MRR.
 	customers := map[string]uuid.UUID{}
 	cards := map[string]uuid.UUID{}
+	insert := "INSERT INTO " + table("subscriptions") + ` (id, merchant_id, customer_id, price_id, product_id, status, rail, collection_policy, payment_method_id,
+		current_period_starts_at, current_period_ends_at, started_at, psp_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'active', 'stripe', 'engine', $6, $7, $8, $7, $9, $7, $7)`
 	subscribe := func(customer string, sub int, key string, start, end time.Time) {
 		t.Helper()
 		p := prices[key]
-		exec("INSERT INTO "+table("subscriptions")+` (id, merchant_id, customer_id, price_id, product_id, status, rail, collection_policy, payment_method_id,
-			current_period_starts_at, current_period_ends_at, started_at, psp_id, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, 'active', 'stripe', 'engine', $6, $7, $8, $7, $9, $7, $7)`,
-			id(sub), m, customers[customer], p.id, p.product, cards[customer], start, end, psp)
+		exec(insert, id(sub), m, customers[customer], p.id, p.product, cards[customer], start, end, psp)
 	}
 	arrive := func(customer string, n, sub int, key string, start, end time.Time) {
 		t.Helper()
@@ -198,7 +198,7 @@ func upgradeKeepsEveryMRRMeasure(t *testing.T) {
 	set := func(sub int, when time.Time, status, key string, start, end time.Time, cancel any, ended any) {
 		t.Helper()
 		exec("UPDATE "+table("subscriptions")+` SET status = $3, price_id = $4, current_period_starts_at = $5, current_period_ends_at = $6, cancel_type = $7,
-			canceled_at = CASE WHEN $3 = 'canceled' THEN $8 END, ended_at = $9, lifecycle_rev = lifecycle_rev + 1, updated_at = $8
+			canceled_at = CASE WHEN $3 = 'canceled' THEN $8::timestamptz END, ended_at = $9::timestamptz, lifecycle_rev = lifecycle_rev + 1, updated_at = $8
 			WHERE merchant_id = $1 AND id = $2`, m, id(sub), status, prices[key].id, start, end, cancel, when, ended)
 	}
 
@@ -219,9 +219,12 @@ func upgradeKeepsEveryMRRMeasure(t *testing.T) {
 	arrive("c4", 4, 5, "pro-USD", at(1, 20), at(2, 20))
 	set(5, at(3, 15), "canceled", "pro-USD", at(2, 20), at(3, 20), "merchant", at(3, 15))
 	subscribe("c4", 6, "basic-USD", at(5, 2), at(6, 2))
-	// A cancellation at period end whose end came before the upgrade.
+	// A cancellation at period end whose end came before the upgrade, and a
+	// plan bought after that end but before the job took it: the churn is
+	// written after the purchase, dated before it.
 	arrive("c5", 5, 7, "basic-USD", at(3, 1), at(4, 1))
 	set(7, at(6, 20), "canceled", "basic-USD", at(6, 1), at(7, 1), "user", at(7, 1))
+	subscribe("c5", 18, "basic-USD", at(7, 3), at(8, 3))
 	// Waiting for a card, then expired: churn at risk.
 	arrive("c6", 6, 8, "basic-USD", at(2, 15), at(3, 15))
 	set(8, at(5, 15), "awaiting_method", "basic-USD", at(4, 15), at(5, 15), nil, nil)
@@ -249,6 +252,21 @@ func upgradeKeepsEveryMRRMeasure(t *testing.T) {
 		m, customers["c11"], at(6, 10))
 	// Euros, plainly.
 	arrive("c12", 12, 14, "basic-EUR", at(5, 15), at(6, 15))
+	// A move to another product within its currency.
+	arrive("c13", 13, 15, "basic-USD", at(2, 1), at(3, 1))
+	exec("UPDATE "+table("subscriptions")+` SET price_id = $3, product_id = $4, current_period_starts_at = $5, current_period_ends_at = $6,
+		lifecycle_rev = lifecycle_rev + 1, updated_at = $5 WHERE merchant_id = $1 AND id = $2`, m, id(15), prices["addon-USD"].id, addon, at(4, 2), at(5, 2))
+	// An upgrade to another product at an equal MRR: the customer's MRR
+	// stays, the products' moves.
+	arrive("c14", 14, 16, "basic-USD", at(3, 5), at(4, 5))
+	upgrade, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	_, err = upgrade.Exec(ctx, "UPDATE "+table("subscriptions")+` SET status = 'canceled', cancel_type = 'upgrade', canceled_at = $3, ended_at = $3,
+		lifecycle_rev = lifecycle_rev + 1, updated_at = $3 WHERE merchant_id = $1 AND id = $2`, m, id(16), at(4, 12))
+	require.NoError(t, err)
+	_, err = upgrade.Exec(ctx, insert, id(17), m, customers["c14"], prices["plus-USD"].id, addon, cards["c14"], at(4, 12), at(5, 12), psp)
+	require.NoError(t, err)
+	require.NoError(t, upgrade.Commit(ctx))
 
 	// As the build before ran its jobs: each end that came, and the risk
 	// changes queued.
@@ -378,4 +396,26 @@ func upgradeKeepsEveryMRRMeasure(t *testing.T) {
 	// customer resumes, and the contraction ahead goes.
 	set(2, at(7, 15), "active", "basic-USD", at(7, 12), at(8, 12), nil, nil)
 	require.Equal(t, []string{"EUR churn -22000000 -1 08-10"}, scheduled())
+
+	// A customer's MRR is its movements summed by date, not the last one
+	// written: c5's plan ending leaves it none, a churn.
+	set(18, at(7, 16), "canceled", "basic-USD", at(7, 3), at(8, 3), "merchant", at(7, 16))
+	moves := func(customer string) []string {
+		t.Helper()
+		rows, err := pool.Query(ctx, "SELECT currency || ' ' || kind || ' ' || delta || ' ' || logo_delta || ' ' || to_char(occurred_at AT TIME ZONE 'UTC', 'MM-DD') FROM "+
+			table("mrr_movements")+" WHERE merchant_id = $1 AND customer_id = $2 ORDER BY occurred_at, id", m, customers[customer])
+		require.NoError(t, err)
+		out, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		require.NoError(t, err)
+		return out
+	}
+	require.Equal(t, "USD churn -10000000 -1 07-16", moves("c5")[len(moves("c5"))-1])
+
+	// An end that has come stays with its subscription: touched after it, then
+	// met by a change dated before it, c7's churn is written again, a
+	// contraction beside the plan bought then.
+	set(9, at(8, 12), "canceled", "pro-EUR", at(7, 10), at(8, 10), "user", at(8, 10))
+	subscribe("c7", 19, "basic-EUR", at(7, 20), at(8, 20))
+	require.Equal(t, []string{"EUR new 22000000 1 04-10", "EUR expansion 9000000 0 07-20", "EUR contraction -22000000 0 08-10"}, moves("c7"))
+	require.Equal(t, []string{"EUR contraction -22000000 0 08-10"}, scheduled())
 }
