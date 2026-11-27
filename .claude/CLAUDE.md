@@ -218,11 +218,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   with its `invoice_lines` (`il_`), provider-run renewals included (`billing.Invoice`'s doc);
   an `invoice_attempts` row (`iat_`) is a provider attempt; a host
   charges its own metered price with a `running_charges` row.
-- Spellings matched against stored or provider records still say "order": NMI's `orderid`
-  and order references, Stripe metadata `order_id`/`order_attempt_id`, intent payload keys,
-  River kinds (`openrails.order_expiry`, `openrails.usage_orders`), the
-  `waive_order` destructive kind, idempotency and derived-id namespaces, ledger and books
-  sources (`order`, `order_line`). Never rename them.
+- Spellings matched against stored or provider records keep their old words: NMI's `orderid` and order references, Stripe metadata `order_id`/`order_attempt_id`, intent payload keys, the `waive_order` destructive kind, idempotency and derived-id namespaces, ledger and books sources (`order`, `order_line`), and the spend scope value `payer` (hashed into spend window keys). Never rename them; River kinds and Go names are free to rename.
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
 - Usage events live in ClickHouse (`Deps.ClickHouse`, `internal/eventstore`, its own embedded migrations): raw events for 90 days, the 15-minute history and limit counters. Money stays in PostgreSQL: intake prices each item once into `usage_totals`, which is the balance's pending; a posting (daily once its day ends in `accounting.timezone`, and before any other movement of the balance) books the period's total price less what its earlier receipts took, as ledger transfers and one immutable `usage_receipts` row. No posting reads ClickHouse. Whether `Deps.ClickHouse` is set decides usage: without it the event-backed routes (`Route.EventStore`), catalog declarations and settings answer 409 `event_store_required`.
 - User-facing records soft-delete: `deleted_at`, and reads filter `deleted_at IS NULL`.
