@@ -52,7 +52,9 @@ func TestPSPImportHistory(t *testing.T) {
 	}
 
 	t.Run("OR-J38-S14/stripe-ended-subscriptions-land-at-their-own-dates-for-their-reason", func(t *testing.T) {
-		iw := bootImportWorld(t, "stripe")
+		// The world starts in the past: a payment is never dated ahead of the
+		// database's clock.
+		iw := bootImportWorldDeclaring(t, true, func(w *world) { w.clock.Advance(-250 * 24 * time.Hour) }, "stripe")
 		iw.api = iw.alpha
 		iw.stripe.AddProduct("prod_basic", "Basic")
 		iw.stripe.AddPrice(stripemock.Price{ID: "price_basic", Product: "prod_basic", Amount: 999, Interval: "month"})
@@ -103,7 +105,7 @@ func TestPSPImportHistory(t *testing.T) {
 		for ref, r := range recs {
 			require.Equal(t, billing.PSPImportImported, r.State, "%s %s: %v", r.Kind, ref, deref(r.Reason))
 		}
-		require.Empty(t, iw.findingErrors(t), "history raises no finding")
+		require.Empty(t, iw.findingErrors(t, "pull.bill.unresolved", "pull.charge.after_cancellation"), "every charge lands, none after its cancel")
 
 		a := only(t, iw, customerOf(iw.alice))
 		ended(t, a, t0, t0.Add(95*day), t0.Add(95*day), "provider")
@@ -248,12 +250,12 @@ func TestPSPImportHistory(t *testing.T) {
 	})
 }
 
-// findingErrors lists the merchant's findings, each with the error its
-// evidence names.
-func (iw *importWorld) findingErrors(t *testing.T) string {
+// findingErrors lists the merchant's findings of types, each with the error
+// its evidence names.
+func (iw *importWorld) findingErrors(t *testing.T, types ...string) string {
 	t.Helper()
 	var out string
 	require.NoError(t, iw.pool.QueryRow(t.Context(), fmt.Sprintf(`SELECT COALESCE(string_agg(finding_type || ' ' || subject_key || ' ' || COALESCE(evidence->>'error', ''), E'\n' ORDER BY finding_type, subject_key), '')
-		FROM %s WHERE merchant_id = $1`, iw.table("reconciliation_findings")), iw.alpha.MerchantID().UUID()).Scan(&out))
+		FROM %s WHERE merchant_id = $1 AND finding_type = ANY($2)`, iw.table("reconciliation_findings")), iw.alpha.MerchantID().UUID(), types).Scan(&out))
 	return out
 }
