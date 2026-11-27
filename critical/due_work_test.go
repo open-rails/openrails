@@ -188,7 +188,7 @@ func TestDueWork(t *testing.T) {
 		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
 		var queued int
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema + "_river", "river_job"}.Sanitize()+
-			" WHERE kind IN ('openrails.dunning', 'openrails.usage_orders', 'openrails.billing_pass')").Scan(&queued))
+			" WHERE kind IN ('openrails.dunning', 'openrails.usage_invoices', 'openrails.billing_pass')").Scan(&queued))
 		require.Zero(t, queued, "what falls due waits for the hourly billing pass; a refresh queues none of it")
 	})
 	t.Run("OR-J29-S70/a-grant-commits-with-its-customers-convergence", func(t *testing.T) {

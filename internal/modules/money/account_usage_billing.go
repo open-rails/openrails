@@ -24,8 +24,7 @@ import (
 )
 
 // KindUsageInvoices bills the due usage accounts and queues the due collections.
-// It keeps the kind, and UsageInvoiceKey its key, that queued jobs carry.
-const KindUsageInvoices = "openrails.usage_orders"
+const KindUsageInvoices = "openrails.usage_invoices"
 
 // UsageInvoicesInterval is the pass's cadence: how long a bill date or a due
 // collection waits. A threshold crossing queues a pass at once.
@@ -59,7 +58,7 @@ type UsageAccountKey struct {
 type UsageInvoiceKey struct {
 	DueAt      time.Time `json:"due_at"`
 	MerchantID uuid.UUID `json:"merchant_id"`
-	InvoiceID  uuid.UUID `json:"order_id"`
+	InvoiceID  uuid.UUID `json:"invoice_id"`
 }
 
 func (UsageInvoiceArgs) Kind() string { return KindUsageInvoices }

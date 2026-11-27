@@ -22,7 +22,7 @@ import (
 
 type usageDueJob struct{}
 
-func (usageDueJob) Kind() string { return "openrails.usage_orders" }
+func (usageDueJob) Kind() string { return "openrails.usage_invoices" }
 
 func runUsageDue(t *testing.T, fleet *river.Client[pgx.Tx]) {
 	t.Helper()
@@ -343,7 +343,7 @@ func TestUsageBillingContracts(t *testing.T) {
 			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.InvoiceComplete
 		}, 30*time.Second, 50*time.Millisecond, "the pass continues past its first page")
 		require.Eventually(t, func() bool {
-			jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.usage_orders").States(rivertype.JobStateCompleted).First(100))
+			jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.usage_invoices").States(rivertype.JobStateCompleted).First(100))
 			require.NoError(t, err)
 			for _, job := range jobs.Jobs {
 				var args struct {
@@ -398,7 +398,7 @@ func TestUsageBillingContracts(t *testing.T) {
 			require.NoError(t, err)
 			return len(jobs.Jobs)
 		}
-		require.Eventually(t, func() bool { return running("openrails.usage_orders") == 0 }, 10*time.Second, 50*time.Millisecond,
+		require.Eventually(t, func() bool { return running("openrails.usage_invoices") == 0 }, 10*time.Second, 50*time.Millisecond,
 			"no usage pass waits on the gateway")
 		require.Equal(t, 1, running("openrails.provider_operation"), "the collection's own operation job charges")
 		hold.Release()

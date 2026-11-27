@@ -81,7 +81,7 @@ canceled only through the merchant route. Subscription invoices keep their
 refusal: cancel the subscription instead. `close` cancels or expires an open
 invoice, releases its claims and
 abandons a challenged attempt at the provider (`AbandonInvoiceAttempt`). An invoice
-past `expires_at` reads expired at once (`Invoice.AsOf`); the `openrails.order_expiry`
+past `expires_at` reads expired at once (`Invoice.AsOf`); the `openrails.invoice_expiry`
 scan of the hourly billing pass (`InvoiceExpiryWorker`) writes it. Money landing on
 a closed invoice revives it while its claims are free; otherwise it is recorded,
 its full refund is queued (`intents.RefundLateInvoicePayment`; CCBill's is left to a
