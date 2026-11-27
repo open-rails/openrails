@@ -377,9 +377,43 @@
       "TestUnarmedCancels/OR-J17-S14/a-staff-cancel-on-an-unarmed-merchant-is-still-held"
     ],
     "OR-J17-S15": [
-      "TestUnarmedCancels/OR-J17-S15/over-the-customer-budget-a-customers-own-cancel-reaches-no-provider",
-      "TestUnarmedCancels/OR-J17-S15/over-the-customer-budget-a-customers-own-cancel-reaches-no-provider/nmi",
-      "TestUnarmedCancels/OR-J17-S15/over-the-customer-budget-a-customers-own-cancel-reaches-no-provider/ccbill"
+      "TestUnarmedCancels/OR-J17-S15/six-customers-own-cancels-all-stop-the-provider-without-spending-the-card-budget",
+      "TestUnarmedCancels/OR-J17-S15/six-customers-own-cancels-all-stop-the-provider-without-spending-the-card-budget/nmi",
+      "TestUnarmedCancels/OR-J17-S15/six-customers-own-cancels-all-stop-the-provider-without-spending-the-card-budget/ccbill"
+    ],
+    "OR-J17-S16": [
+      "TestSubscriptionGrantRevocations/OR-J17-S16/admin-revoke-leaves-ended-paid-periods-unrevoked"
+    ],
+    "OR-J17-S17": [
+      "TestCanceledUnknownRenewal/OR-J17-S17/period-end-cancel-keeps-a-late-paid-renewal",
+      "TestCanceledUnknownRenewal/OR-J17-S17/period-end-cancel-keeps-a-late-paid-renewal/customer",
+      "TestCanceledUnknownRenewal/OR-J17-S17/period-end-cancel-keeps-a-late-paid-renewal/admin",
+      "TestCanceledUnknownRenewal/OR-J17-S17/period-end-cancel-keeps-a-late-paid-renewal/customer-expired-period",
+      "TestCanceledUnknownRenewal/OR-J17-S17/period-end-cancel-keeps-a-late-paid-renewal/admin-expired-period",
+      "TestCanceledUnknownRenewal/OR-J17-S17/period-end-cancel-keeps-a-late-paid-renewal/customer-expired-long-access"
+    ],
+    "OR-J17-S18": [
+      "TestCanceledUnknownRenewal/OR-J17-S18/revoke-access-cancel-refunds-a-late-paid-renewal",
+      "TestCanceledUnknownRenewal/OR-J17-S18/revoke-access-cancel-refunds-a-late-paid-renewal/0s",
+      "TestCanceledUnknownRenewal/OR-J17-S18/revoke-access-cancel-refunds-a-late-paid-renewal/192h0m0s",
+      "TestCanceledUnknownRenewal/OR-J17-S18/revoke-access-cancel-refunds-a-late-paid-renewal/period-end-then-revoke"
+    ],
+    "OR-J17-S19": [
+      "TestCanceledUnknownRenewal/OR-J17-S19/canceled-unpaid-renewal-voids-its-invoice",
+      "TestCanceledUnknownRenewal/OR-J17-S19/canceled-unpaid-renewal-voids-its-invoice/false",
+      "TestCanceledUnknownRenewal/OR-J17-S19/canceled-unpaid-renewal-voids-its-invoice/true"
+    ],
+    "OR-J17-S20": [
+      "TestCancellationCustody/OR-J17-S20/engine-cancel-locks-customer-before-subscription",
+      "TestCancellationCustody/OR-J17-S20/engine-cancel-locks-customer-before-subscription/false",
+      "TestCancellationCustody/OR-J17-S20/engine-cancel-locks-customer-before-subscription/true"
+    ],
+    "OR-J17-S21": [
+      "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal",
+      "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal/same-product",
+      "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal/same-tier-group",
+      "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal/canceled-replacement",
+      "TestCanceledUnknownRenewal/OR-J17-S21/replacement-membership-refunds-a-late-paid-renewal/unpaid-replacement-invoice"
     ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
@@ -517,9 +551,6 @@
     ],
     "OR-J23-S33": [
       "TestLimitDecisions/OR-J23-S33/a-spend-window-that-names-no-currency-is-in-its-policys-currency"
-    ],
-    "OR-J23-S34": [
-      "TestLimitDecisions/OR-J23-S34/a-policys-accrual-rate-cap-is-in-its-policy-currency"
     ],
     "OR-J23-S35": [
       "TestLimitDecisions/OR-J23-S35/a-limit-counting-two-meters-by-weight-admits-and-refuses-at-their-weighted-total"
@@ -744,6 +775,9 @@
     ],
     "OR-J31-S14": [
       "TestLimitArchive/OR-J31-S14/open-limit-windows-and-staff-adjustments-move-with-the-book"
+    ],
+    "OR-J31-S15": [
+      "TestBillingArchive/OR-J31-S15/canceled-renewal-retains-revocation-evidence-through-restore"
     ],
     "OR-J32-S01": [
       "TestMerchantHost/OR-J32-S01/provision-find-list-rename-retains-identity"
@@ -1243,6 +1277,15 @@
     "OR-J16-S55": [
       "TestDunningSchedule/OR-J16-S55/a-declared-failure-past-its-own-cycles-window-is-not-dunned"
     ],
+    "OR-J16-S56": [
+      "TestDunningSchedule/OR-J16-S56/a-held-engine-case-ends-once-the-merchant-is-armed",
+      "TestDunningSchedule/OR-J16-S56/a-held-engine-case-ends-once-the-merchant-is-armed/armed",
+      "TestDunningSchedule/OR-J16-S56/a-held-engine-case-ends-once-the-merchant-is-armed/admin-cancel",
+      "TestDunningSchedule/OR-J16-S56/a-held-engine-case-ends-once-the-merchant-is-armed/new-card"
+    ],
+    "OR-J16-S57": [
+      "TestDunningSchedule/OR-J16-S57/a-customers-own-declined-payments-spend-no-scheduled-retry"
+    ],
     "OR-J15-S70": [
       "TestDueWork/OR-J15-S70/an-nmi-renewal-the-probe-cannot-settle-is-read-by-id-after-its-grace"
     ],
@@ -1446,6 +1489,9 @@
     "OR-J18-S07": [
       "TestSubscriptionChangeContracts/OR-J18-S07/an-upgrade-in-the-microsecond-the-membership-started-ends-its-period-validly"
     ],
+    "OR-J18-S08": [
+      "TestSubscriptionGrantRevocations/OR-J18-S08/upgrade-leaves-ended-paid-periods-unrevoked"
+    ],
     "OR-J19-S07": [
       "TestPriceMigrationContracts/OR-J19-S07/stripe-push-keeps-the-seats-and-replays-a-lost-schedule-create"
     ],
@@ -1463,9 +1509,6 @@
     ],
     "OR-J25-S37": [
       "TestBalanceLooks/OR-J25-S37/a-pass-that-waited-behind-a-look-leaves-the-watch-it-moved"
-    ],
-    "OR-J25-S05": [
-      "TestRunningChargeContracts/OR-J25-S05/running-charges-count-toward-the-accrual-rate-cap"
     ],
     "OR-J25-S43": [
       "TestBalanceLooks/OR-J25-S43/a-look-at-a-balance-without-pending-usage-needs-no-event-store"
@@ -1896,6 +1939,33 @@
     "OR-J23-S41": [
       "TestGate/OR-J23-S41/a-window-that-resets-between-syncs-is-decided-from-the-next-window"
     ],
+    "OR-J23-S42": [
+      "TestLimitDecisions/OR-J23-S42/one-policy-caps-what-is-owed-and-spend-per-window-and-a-customers-own-limit-overrides-its-cap"
+    ],
+    "OR-J23-S43": [
+      "TestTrustTiers/OR-J23-S43/a-customer-graduates-once-its-net-amount-paid-reaches-a-tier"
+    ],
+    "OR-J23-S44": [
+      "TestTrustTiers/OR-J23-S44/a-tier-asking-days-since-the-first-payment-is-reached-once-they-pass"
+    ],
+    "OR-J23-S45": [
+      "TestTrustTiers/OR-J23-S45/a-tier-asking-an-amount-and-days-needs-both"
+    ],
+    "OR-J23-S46": [
+      "TestTrustTiers/OR-J23-S46/a-chargeback-or-refund-lowers-the-net-amount-paid-and-the-tier-drops"
+    ],
+    "OR-J23-S47": [
+      "TestTrustTiers/OR-J23-S47/an-explicit-trust-level-beats-the-rules-and-a-requests-beats-both"
+    ],
+    "OR-J23-S48": [
+      "TestTrustTiers/OR-J23-S48/a-gates-view-carries-the-computed-tier-and-its-policy"
+    ],
+    "OR-J23-S49": [
+      "TestTrustTiers/OR-J23-S49/trust-tiers-that-cannot-be-met-in-order-are-refused"
+    ],
+    "OR-J23-S50": [
+      "TestTrustTiers/OR-J23-S50/the-credit-line-and-delinquency-grace-follow-the-computed-tiers-policy"
+    ],
     "OR-J24-S37": [
       "TestLeaseSyncs/OR-J24-S37/a-batch-reporters-usage-only-sync-answers-as-before"
     ],
@@ -1969,6 +2039,21 @@
     "OR-J01-S33": [
       "TestStandaloneAuthSurface/OR-J01-S33/the-server-listens-on-loopback-and-refuses-the-development-operator-beyond-it"
     ],
+    "OR-J01-S34": [
+      "TestStaffAccounts/OR-J01-S34/a-fresh-server-logs-one-setup-link-that-creates-the-owner-once"
+    ],
+    "OR-J01-S35": [
+      "TestStaffAccounts/OR-J01-S35/setup-link-issues-a-break-glass-owner-link-while-operators-exist"
+    ],
+    "OR-J01-S36": [
+      "TestStaffAccounts/OR-J01-S36/without-email-an-operators-invitation-answers-its-link-to-share"
+    ],
+    "OR-J01-S37": [
+      "TestStaffAccounts/OR-J01-S37/an-accepted-invitation-makes-the-invitee-an-operator"
+    ],
+    "OR-J01-S38": [
+      "TestStaffAccounts/OR-J01-S38/a-server-whose-staff-sign-in-elsewhere-advertises-no-groups-or-setup"
+    ],
     "OR-J24-S42": [
       "TestLeaseSyncs/OR-J24-S42/a-view-request-is-refused-alone-and-the-sync-stands"
     ],
@@ -2033,7 +2118,7 @@
       "TestUsageRecovery/OR-J24-S62/usage-the-store-lost-is-not-a-price-that-fell"
     ],
     "OR-J24-S63": [
-      "TestUsageRecovery/OR-J24-S63/an-erasure-run-again-after-stopping-part-way-keeps-history-whole"
+      "TestUsageRecovery/OR-J24-S63/an-erasure-run-again-after-stopping-part-way-clears-the-events-and-leaves-history-alone"
     ],
     "OR-J24-S64": [
       "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting",
@@ -2408,7 +2493,7 @@
       "TestMerchantControls/OR-J06-S81/unreadable-controls-deny-writes-rebills-and-destructive-actions"
     ],
     "OR-J06-S83": [
-      "TestFindingAlerts/OR-J06-S83/customers-own-cancellations-past-the-cap-name-the-wave-and-alert-staff-and-staff-cancels-spend-none"
+      "TestFindingAlerts/OR-J06-S83/customer-cancels-spend-no-budget-and-card-removals-past-the-cap-alert-staff-once"
     ],
     "OR-J06-S84": [
       "TestStandaloneAuthSurface/OR-J06-S84/auth-settings-beyond-the-key-path-refuse-boot"
@@ -2493,7 +2578,7 @@
       "TestEventStore/OR-J24-S66/two-engines-migrating-one-fresh-clickhouse-database-together-both-start"
     ],
     "OR-J24-S67": [
-      "TestUsageStore/OR-J24-S67/history-is-utc-hours-grouped-into-the-zones-days-as-read-a-25-hour-day-a-zone-change-and-burn-included"
+      "TestUsageStore/OR-J24-S67/history-is-utc-quarter-hours-grouped-into-the-zones-days-as-read-a-25-hour-day-a-zone-change-and-burn-included"
     ],
     "OR-J24-S68": [
       "TestUsageStore/OR-J24-S68/usage-metadata-past-1024-bytes-of-compact-json-is-refused-alone"
@@ -2668,6 +2753,78 @@
     ],
     "OR-J38-S97": [
       "TestCCBillIdentity/OR-J38-S97/a-second-rebill-past-the-cycles-billing-day-is-an-extra-capture"
+    ],
+    "OR-J24-S76": [
+      "TestUsageSeries/OR-J24-S76/an-hourly-series-across-a-clock-change-has-each-of-the-days-hours"
+    ],
+    "OR-J24-S77": [
+      "TestUsageSeries/OR-J24-S77/a-kolkata-day-series-cuts-its-days-at-the-half-hour"
+    ],
+    "OR-J24-S78": [
+      "TestUsageSeries/OR-J24-S78/usage-older-than-its-raw-events-stays-in-the-series-and-by-invoker-is-refused"
+    ],
+    "OR-J24-S79": [
+      "TestUsageSeries/OR-J24-S79/a-series-past-its-bucket-cap-is-refused-and-a-month-by-hour-is-not"
+    ],
+    "OR-J24-S80": [
+      "TestUsageSeries/OR-J24-S80/a-customer-reads-only-its-own-usage-over-time"
+    ],
+    "OR-J24-S81": [
+      "TestUsageSeries/OR-J24-S81/a-volume-tiers-fall-is-its-own-discount-and-totals-equal-what-posted"
+    ],
+    "OR-J24-S82": [
+      "TestUsageSeries/OR-J24-S82/failed-usage-is-counted-on-its-event-row-not-a-row-of-its-own"
+    ],
+    "OR-J24-S83": [
+      "TestUsageSeries/OR-J24-S83/a-late-item-whose-limit-window-ended-settles-and-counts-toward-no-window"
+    ],
+    "OR-J25-S44": [
+      "TestBalanceLooks/OR-J25-S44/the-burn-rate-reads-each-ended-quarter-hour-of-usage-history-once"
+    ],
+    "OR-J14-S08": [
+      "TestNMIEngineRenewalRecovery/OR-J14-S08/gateway-refusals-settle-through-dunning"
+    ],
+    "OR-J14-S09": [
+      "TestNMIEngineRenewalRecovery/OR-J14-S09/duplicate-and-ambiguous-renewals-stay-unknown"
+    ],
+    "OR-J14-S10": [
+      "TestNMIEngineRenewalRecovery/OR-J14-S10/operator-qualifies-the-exact-renewal-receipt"
+    ],
+    "OR-J14-S11": [
+      "TestNMIEngineRenewalRecovery/OR-J14-S11/operator-releases-empty-renewal-order-for-next-attempt"
+    ],
+    "OR-J14-S12": [
+      "TestNMIEngineRenewalRecovery/OR-J14-S12/operator-retains-the-orders-definitive-decline"
+    ],
+    "OR-J14-S13": [
+      "TestNMIEngineRenewalRecovery/OR-J14-S13/stripe-engine-renewals-reject-operator-resolution"
+    ],
+    "OR-J14-S14": [
+      "TestRenewal/OR-J14-S14/stuck-renewal-verification-slows-with-age-and-stops-at-the-cap"
+    ],
+    "OR-J14-S15": [
+      "TestRenewal/OR-J14-S15/late-renewal-submission-starts-with-handler-verification-backoff"
+    ],
+    "OR-J04-S90": [
+      "TestSubmittedRenewalGrace/OR-J04-S90/a-sent-renewal-keeps-access-until-its-answer"
+    ],
+    "OR-J04-S91": [
+      "TestSubmittedRenewalGrace/OR-J04-S91/releasing-a-sent-renewal-restores-the-suspend-allowance"
+    ],
+    "OR-J04-S92": [
+      "TestSubmittedRenewalGrace/OR-J04-S92/an-unsent-renewal-still-suspends-at-its-allowance"
+    ],
+    "OR-J04-S93": [
+      "TestSubmittedRenewalGrace/OR-J04-S93/a-successful-renewal-keeps-its-access-write-count"
+    ],
+    "OR-J04-S94": [
+      "TestSubmittedRenewalGrace/OR-J04-S94/an-unanswered-dunning-retry-keeps-access-suspended"
+    ],
+    "OR-J04-S95": [
+      "TestSubmittedRenewalGrace/OR-J04-S95/an-unresolved-renewal-finding-survives-a-grace-write-failure"
+    ],
+    "OR-J04-S96": [
+      "TestSubmittedRenewalGrace/OR-J04-S96/keep-policy-verification-does-not-lock-the-membership"
     ]
   }
 }

@@ -104,7 +104,7 @@ func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
 		}
 		prev.Compare = ""
 		if prev.HasTime {
-			prev.Buckets = bucketLabels(prev.From, prev.To, prev.Grain, prev.zone())
+			prev.Buckets, _ = calendarutil.Buckets(prev.From, prev.To, prev.Grain, prev.zone(), MaxBuckets)
 		}
 		prevRows, err := s.run(ctx, &prev)
 		if err != nil {

@@ -116,9 +116,9 @@ func ChargeSubscriptions(ctx context.Context, d *db.DB, payment *models.Payment)
 // at once with its access when revoke, else at period end. A subscription
 // no longer active is left as it is.
 func endSubscription(ctx context.Context, d *db.DB, lc *subscriptions.SubscriptionLifecycleService, id uuid.UUID, cancelType models.CancelType, revoke bool, cause string) error {
-	sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, id)
+	sub, err := subscriptions.NewSubscriptionRepo(d).GetByID(ctx, id)
 	if err != nil {
-		return fmt.Errorf("lock subscription %s: %w", id, err)
+		return fmt.Errorf("load subscription %s: %w", id, err)
 	}
 	rail := sub.Rail
 	_, err = lc.CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{

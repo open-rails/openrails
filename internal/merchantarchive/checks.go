@@ -62,6 +62,7 @@ var excludedTables = map[string]string{
 
 	"price_keys":                    "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
 	"network_activity_daily":        "derived: the payments, disputes and fraud_reports triggers rebuild it as they are restored",
+	"customer_paid_totals":          "derived: the payments trigger rebuilds it as they are restored",
 	"balance_watches":               "derived: when a watched balance is next looked at; restore watches every prepaid balance and running charge again",
 	"psp_imports":                   "import working state: the destination pulls its PSPs again",
 	"psp_import_records":            "import working state: copies of provider objects, pulled again",
@@ -121,6 +122,7 @@ var excludedColumns = map[string]string{
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
 
 	"price_keys":              "merchant_id product_id key revision created_at updated_at",
+	"customer_paid_totals":    "merchant_id customer_id currency net_paid_amount first_paid_at",
 	"network_activity_daily":  "merchant_id psp_id rail network currency day_at sales sales_amount refunds refund_amount chargebacks chargeback_amount fraud_chargebacks fraud_chargeback_amount fraud_reports fraud_report_amount",
 	"balance_watches":         "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
 	"ledger_type_totals":      "merchant_id book currency account_type psp_id credits_posted debits_posted",
@@ -408,7 +410,7 @@ var referenceChecks = []rowCheck{
    WHERE g.merchant_id=$1 AND g.id=ledger_transfers.credit_grant_id AND (
      g.customer_id=ledger_transfers.customer_id OR (
        ledger_transfers.customer_id IS NULL AND g.paid_amount IS NOT NULL
-       AND ledger_transfers.transfer_type IN ('credit_purchase_revenue','credit_refund_cash','credit_refund_cash_restore','credit_refund_funding')
+       AND ledger_transfers.transfer_type='credit_refund_funding'
        AND NOT EXISTS(SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id=$1
          AND a.id IN (ledger_transfers.debit_account_id,ledger_transfers.credit_account_id) AND a.customer_id IS NOT NULL)))))
 	 OR (invoice_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.invoices o WHERE o.merchant_id=$1 AND o.id=ledger_transfers.invoice_id AND o.customer_id=ledger_transfers.customer_id

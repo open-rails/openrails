@@ -21,9 +21,9 @@ LIMIT sqlc.arg(row_limit)::int;
 -- admission gate's live recompute read it, so the stored state and the gate
 -- agree. grace_days and amount_floor are the bound billing policy's overrides,
 -- -1 for none; its floor is in its policy_currency, and overrides only there. policies is the merchant's settings, {policies: {name: body},
--- tiers: {tier: name}, default: name}; the payer's policy is its own
--- assignment while the settings still declare it, else its tier's
--- (money_settings.tier), else the default.
+-- tiers: {tier: name}, default: name, trust}; the payer's policy is its own
+-- assignment while the settings still declare it, else its trust tier's
+-- (billing.trust_tier), else the default.
 --
 -- overdue_started_at and next_due_at are COALESCEd to now so the row is total:
 -- they mean nothing when their count is 0, and every caller reads it first.
@@ -34,10 +34,13 @@ WITH pol AS (
     FROM billing.customers c
     LEFT JOIN billing.money_settings ms
       ON ms.merchant_id = c.merchant_id AND ms.customer_id = c.id AND ms.currency = sqlc.arg(currency)
+    LEFT JOIN billing.customer_paid_totals pt
+      ON pt.merchant_id = c.merchant_id AND pt.customer_id = c.id AND pt.currency = sqlc.arg(currency)
     CROSS JOIN LATERAL (
         SELECT sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
             CASE WHEN sqlc.arg(policies)::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
-            sqlc.arg(policies)::jsonb -> 'tiers' ->> ms.tier,
+            sqlc.arg(policies)::jsonb -> 'tiers' ->> billing.trust_tier(sqlc.arg(policies)::jsonb -> 'trust', sqlc.arg(currency)::text, ms.tier,
+                pt.net_paid_amount, pt.first_paid_at, sqlc.arg(now)::timestamptz),
             sqlc.arg(policies)::jsonb ->> 'default') AS body
     ) bound
     WHERE c.merchant_id = sqlc.arg(merchant_id) AND c.id = sqlc.arg(customer_id)

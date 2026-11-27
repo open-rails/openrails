@@ -58,7 +58,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `embed_origins_required` | 400 | `invalid_request_error` | An embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins. |
 | `entitlement_required` | 403 | `invalid_request_error` | A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks. |
 | `event_cursor_expired` | 410 | `invalid_request_error` | The event cursor is no longer retained; resynchronize current state. |
-| `event_store_required` | 409 | `invalid_request_error` | The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off. |
+| `event_store_required` | 409 | `invalid_request_error` | The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows and usage history are off. |
 | `finding_action_failed` | 502 | `api_error` | Running the finding's recommendation failed; the finding stays open with the error in its notes. |
 | `finding_not_actionable` | 422 | `invalid_request_error` | The finding carries no recommendation to approve; ignore it or fix it out of band. |
 | `finding_requires_merchant_config` | 409 | `invalid_request_error` | The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config. |
@@ -197,9 +197,11 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `subscription_not_found` | 404 | `invalid_request_error` | The subscription does not exist. |
 | `subscription_paid_through` | 409 | `invalid_request_error` | A canceled subscription to this product is still paid; buy again once its paid period ends. |
 | `subscription_resumable` | 409 | `invalid_request_error` | A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again. |
+| `too_many_buckets` | 400 | `invalid_request_error` | The window at the interval holds more buckets than a series answers (a usage series: 1,000); shorten the window or widen the interval. param is interval. |
 | `trial_unsupported_on_rail` | 400 | `invalid_request_error` | This rail cannot run a trial first phase. |
 | `unknown_field` | 400 | `invalid_request_error` | The JSON body names a field the route does not accept; param is the field. |
 | `unsupported_media_type` | 415 | `invalid_request_error` | The request body is not application/json. |
+| `usage_events_expired` | 400 | `invalid_request_error` | Usage by invoker reads raw usage events, kept 90 days; the window starts before them. History by event type and meter reaches back further. param is the window's start. |
 | `usage_meter_invalid` | 400 | `invalid_request_error` | The meter definition is invalid. |
 | `usage_meter_not_found` | 404 | `invalid_request_error` | The usage meter does not exist. |
 | `usage_not_priced` | 422 | `invalid_request_error` | A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field. |

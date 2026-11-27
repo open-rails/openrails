@@ -5,9 +5,10 @@ migration 0001_usage.sql sha256:897e81e110f662a22e8fbdf926040b75d40dd5034ee85e76
 migration 0002_usage_intake.sql sha256:c10bc3b750ce119282c2eb9f10cb8ef078e9ec2092aa82111852bd9f05891cfe
 migration 0003_usage_history_hours.sql sha256:c84be3a33ab84dac5ea9fecc647b23559ae4160802addbadaa93b3316de59043
 migration 0004_usage_history_order.sql sha256:e8c9d41899fa752cc8a508bd8c191a0446e5a26e3d1a1417ecfcfd92429a6f6c
+migration 0005_usage_history_quarter_hours.sql sha256:350f568d6e094f75fdd4dbcf45d849db063555c764408a46784d73ff2aa0e826
 
 table limit_usage
-  engine SummingMergeTree(units) ORDER BY (merchant_id, customer_id, limit_key, window_starts_at) TTL toDateTime(ifNull(window_ends_at, window_starts_at)) + toIntervalDay(61) WHERE window_ends_at IS NOT NULL SETTINGS index_granularity = 1024
+  engine SummingMergeTree(units) ORDER BY (merchant_id, customer_id, limit_key, window_starts_at) TTL toDateTime(ifNull(window_ends_at, window_starts_at)) + toIntervalDay(1) WHERE window_ends_at IS NOT NULL SETTINGS index_granularity = 1024
   column merchant_id UUID
   column customer_id UUID
   column limit_key String
@@ -56,12 +57,14 @@ table usage_events
   column charges.print Array(LowCardinality(String))
   column charges.quantity Array(Int64)
   column charges.stated Array(Int64)
+  column charges.amount Array(Int64) CODEC(ZSTD(1))
+  column charges.discount Array(Int64) CODEC(ZSTD(1))
 
 materialized view usage_events_mv TO {database}.usage_events
-  SELECT merchant_id, event_id, customer_id, currency, event_type, invoker, invoker_type, outcome, source, source_id, lease_id, n, occurred_at, admitted_at, ingested_at, period_starts_at, dimensions, metadata, stated, charged, forgiven, charges.meter, charges.cell, charges.print, charges.quantity, charges.stated FROM {database}.usage_intake
+  SELECT merchant_id, event_id, customer_id, currency, event_type, invoker, invoker_type, outcome, source, source_id, lease_id, n, occurred_at, admitted_at, ingested_at, period_starts_at, dimensions, metadata, stated, charged, forgiven, charges.meter, charges.cell, charges.print, charges.quantity, charges.stated, charges.amount, charges.discount FROM {database}.usage_intake
 
 table usage_history
-  engine SummingMergeTree((requests, quantity, stated, charged, forgiven)) PARTITION BY toYYYYMM(bucket_at) ORDER BY (merchant_id, customer_id, toDate(bucket_at), currency, event_type, meter, cell, print, period_starts_at, invoker, outcome, bucket_at) SETTINGS index_granularity = 1024
+  engine SummingMergeTree((requests, quantity, stated, amount, discount, failed_requests, failed_amount, forgiven)) PARTITION BY toYYYYMM(bucket_at) ORDER BY (merchant_id, customer_id, toDate(bucket_at), currency, event_type, meter, cell, bucket_at) SETTINGS index_granularity = 1024
   column merchant_id UUID
   column customer_id UUID
   column bucket_at DateTime('UTC')
@@ -69,21 +72,20 @@ table usage_history
   column event_type LowCardinality(String)
   column meter LowCardinality(String)
   column cell String
-  column print LowCardinality(String)
-  column period_starts_at DateTime64(6, 'UTC')
-  column invoker String
-  column outcome Enum8('succeeded' = 1, 'failed' = 2)
   column requests Int64
   column quantity Int64
   column stated Int64
-  column charged Int64
+  column amount Int64
+  column discount Int64
+  column failed_requests Int64
+  column failed_amount Int64
   column forgiven Int64
 
 materialized view usage_history_charges_mv TO {database}.usage_history
-  SELECT merchant_id, customer_id, toStartOfHour(toDateTime(occurred_at, 'UTC')) AS bucket_at, currency, event_type, charges.meter AS meter, charges.cell AS cell, charges.print AS print, period_starts_at, invoker, outcome, toInt64(1) AS requests, charges.quantity AS quantity, charges.stated AS stated, toInt64(0) AS charged, toInt64(0) AS forgiven FROM {database}.usage_intake ARRAY JOIN charges
+  SELECT merchant_id, customer_id, toStartOfFifteenMinutes(toDateTime(occurred_at, 'UTC')) AS bucket_at, currency, event_type, charges.meter AS meter, charges.cell AS cell, toInt64(1) AS requests, charges.quantity AS quantity, charges.stated AS stated, charges.amount AS amount, charges.discount AS discount, toInt64(0) AS failed_requests, toInt64(0) AS failed_amount, toInt64(0) AS forgiven FROM {database}.usage_intake ARRAY JOIN charges
 
 materialized view usage_history_events_mv TO {database}.usage_history
-  SELECT merchant_id, customer_id, toStartOfHour(toDateTime(occurred_at, 'UTC')) AS bucket_at, currency, event_type, '' AS meter, '' AS cell, '' AS print, period_starts_at, invoker, outcome, toInt64(1) AS requests, toInt64(0) AS quantity, ifNull(stated, 0) AS stated, charged, forgiven FROM {database}.usage_intake
+  SELECT merchant_id, customer_id, toStartOfFifteenMinutes(toDateTime(occurred_at, 'UTC')) AS bucket_at, currency, event_type, '' AS meter, '' AS cell, toInt64(1) AS requests, toInt64(0) AS quantity, ifNull(stated, 0) AS stated, toInt64(0) AS amount, toInt64(0) AS discount, toInt64(outcome = 'failed') AS failed_requests, charged AS failed_amount, forgiven FROM {database}.usage_intake
 
 table usage_intake
   engine `Null`
@@ -105,7 +107,6 @@ table usage_intake
   column period_starts_at DateTime64(6, 'UTC')
   column dimensions Map(LowCardinality(String), Int64)
   column metadata String
-  column amount Int64
   column stated Nullable(Int64)
   column charged Int64
   column forgiven Int64
@@ -114,21 +115,12 @@ table usage_intake
   column charges.print Array(LowCardinality(String))
   column charges.quantity Array(Int64)
   column charges.stated Array(Int64)
+  column charges.amount Array(Int64)
+  column charges.discount Array(Int64)
   column limits.key Array(String)
   column limits.window_starts_at Array(DateTime64(6, 'UTC'))
   column limits.window_ends_at Array(Nullable(DateTime64(6, 'UTC')))
   column limits.units Array(Int64)
-
-table usage_minutes
-  engine SummingMergeTree(amount) ORDER BY (merchant_id, customer_id, currency, minute) TTL minute + toIntervalDay(2) SETTINGS index_granularity = 1024
-  column merchant_id UUID
-  column customer_id UUID
-  column currency LowCardinality(String)
-  column minute DateTime('UTC')
-  column amount Int64
-
-materialized view usage_minutes_mv TO {database}.usage_minutes
-  SELECT merchant_id, customer_id, currency, toStartOfMinute(toDateTime(occurred_at, 'UTC')) AS minute, amount FROM {database}.usage_intake
 
 table usage_quantities
   engine SummingMergeTree((quantity, stated, requests)) ORDER BY (merchant_id, customer_id, currency, period_starts_at, meter, cell, print) TTL toDateTime(period_starts_at) + toIntervalDay(100) SETTINGS index_granularity = 1024

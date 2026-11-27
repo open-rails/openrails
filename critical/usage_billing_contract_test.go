@@ -506,7 +506,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.False(t, invoice.Usage.PeriodStartsAt.After(occurred), "the period %s..%s covers the usage at %s",
 			invoice.Usage.PeriodStartsAt, invoice.Usage.PeriodEndsAt, occurred)
 		require.True(t, occurred.Before(invoice.Usage.PeriodEndsAt))
-		require.False(t, invoice.Usage.PeriodEndsAt.Before(a.clock.Now()), "and runs to its bill")
+		require.False(t, invoice.Usage.PeriodEndsAt.Before(a.clock.Now()), "and runs to its bill: %s, now %s", invoice.Usage.PeriodEndsAt, a.clock.Now())
 	})
 	t.Run("OR-J26-S58/revoking-the-agreement-bills-todays-usage", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, false)
@@ -554,7 +554,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		// The policy's floor is a million euros; the debt is in dollars.
 		a, _, customer := usageBillingWorld(t, true, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
-			m.BillingPolicies = []billing.BillingPolicy{{Name: "euro-floor", Kind: "outstanding_cap", OutstandingCapAmount: 1_000_000_000_000,
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "euro-floor",
 				DelinquencyGraceDays: ptr(0), DelinquencyAmountFloor: ptr(int64(1_000_000_000_000)), PolicyCurrency: "EUR"}}
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})
@@ -575,7 +575,7 @@ func TestUsageBillingContracts(t *testing.T) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.UsageBilling.Currencies = []billing.UsageBillingCurrency{{Currency: "USD", CreditLimit: 5_000_000_000, MinimumInvoiceAmount: 1_000_000,
 				CollectionThreshold: ptr(int64(30_000_000)), DelinquencyFloor: ptr(int64(0))}}
-			m.BillingPolicies = []billing.BillingPolicy{{Name: "yen", Kind: "outstanding_cap", PolicyCurrency: "JPY", OutstandingCapAmount: 10_000_000, CollectionThresholdAmount: ptr(int64(10_000_000))}}
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "yen", PolicyCurrency: "JPY", OutstandingCapAmount: 10_000_000, CollectionThresholdAmount: ptr(int64(10_000_000))}}
 			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "yen"}}
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})
@@ -603,7 +603,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.ArrearsGraceDays = ptr(30)
-			m.BillingPolicies = []billing.BillingPolicy{{Name: "strict", Kind: "outstanding_cap", OutstandingCapAmount: 1_000_000_000_000, DelinquencyGraceDays: ptr(0), DelinquencyAmountFloor: ptr(int64(0)), PolicyCurrency: "USD"}}
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "strict", DelinquencyGraceDays: ptr(0), DelinquencyAmountFloor: ptr(int64(0)), PolicyCurrency: "USD"}}
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})
 		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{BillingPolicy: catalog.Value("strict")})

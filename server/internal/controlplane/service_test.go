@@ -46,15 +46,15 @@ func TestAuthKitIsDerivedFromTheEngine(t *testing.T) {
 	if !slices.Equal(a.HTTP.TrustedProxies, engine.TrustedProxies) || a.HTTP.DirectPeerIP {
 		t.Errorf("AuthKit's client IP follows trusted_proxies: %+v", a.HTTP)
 	}
-	if !slices.Contains(a.HTTP.Groups, iam.RouteInvitations) {
-		t.Errorf("staff join by invitation: %v", a.HTTP.Groups)
+	if !slices.Contains(a.HTTP.Groups, iam.RouteInvitations) || !slices.Contains(a.HTTP.Groups, iam.RouteSetup) {
+		t.Errorf("staff join by invitation, the first owner by the console's setup link: %v", a.HTTP.Groups)
 	}
 	if !slices.ContainsFunc(a.AuthorizationServer.Clients, func(c authkit.OAuthClientConfig) bool { return c.ID == ConsoleClientID }) {
 		t.Error("the console's client is declared")
 	}
 
-	if a, err := AuthKit(&engine, Options{}); err != nil || a.FrontendURL != "" {
-		t.Errorf("without the console AuthKit's links land at the issuer's origin: %q %v", a.FrontendURL, err)
+	if a, err := AuthKit(&engine, Options{}); err != nil || a.FrontendURL != "" || slices.Contains(a.HTTP.Groups, iam.RouteSetup) {
+		t.Errorf("without the console AuthKit's links land at the issuer's origin, and no setup link has a page: %q %v %v", a.FrontendURL, a.HTTP.Groups, err)
 	}
 	for name, c := range map[string]struct {
 		base string

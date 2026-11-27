@@ -93,7 +93,8 @@ var Tables = map[string]Table{
 	"idempotency_keys":                {Rows, "rows are deleted at expires_at."},
 	"user_destructive_reservations":   {Rows, "rows are deleted 24 hours after reserved_at."},
 	"network_activity_daily":          {Class: State},
-	"limit_windows":                   {Rows, "rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does."},
+	"customer_paid_totals":            {Class: State},
+	"limit_windows":                   {Rows, "rows are deleted a day after window_ends_at, 61 days after it once reached_at is set; a row without an end stays while its customer does."},
 	"leases":                          {Rows, "rows are deleted 61 days after last_sync_at."},
 	"lease_in_flight":                 {Rows, "rows; each sync replaces its lease's rows, close clears them, and they go with the lease."},
 	"limit_adjustments":               {Rows, "rows are deleted 61 days after created_at."},
@@ -172,8 +173,7 @@ var Tables = map[string]Table{
 // migrations' TTLs state them.
 var EventStoreTTLs = map[string]string{
 	"usage_events":     "90 days after occurred_at",
-	"limit_usage":      "61 days after the window ends; a window without an end is kept",
+	"limit_usage":      "a day after the window ends; a window without an end is kept",
 	"usage_quantities": "100 days after the pricing period starts",
-	"usage_minutes":    "2 days after the minute",
-	"usage_history":    "kept: no TTL; a merchant purge deletes its rows",
+	"usage_history":    "kept: no TTL, by UTC quarter hour; a merchant purge deletes its rows",
 }

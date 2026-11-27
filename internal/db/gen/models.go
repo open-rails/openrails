@@ -27,9 +27,9 @@ type BillingBalanceWatch struct {
 	UpdatedAt  time.Time
 	// When the customer was funded (a deposit, a credit grant, a reinstatement or a payment of what it owes) since its last notice; only funding re-arms a notice, and a notice clears it.
 	FundedAt *time.Time
-	// Exponentially weighted rate of usage spend, one-hour time constant, in native units per hour: each look adds the per-minute spend (usage_minutes) of the minutes ended since rate_sampled_at.
+	// Exponentially weighted rate of usage spend, one-hour time constant, in native units per hour: each look adds what the usage history's quarter hours that ended since rate_sampled_at cost.
 	UsageRatePerHour int64
-	// The instant usage_rate_per_hour was sampled at; minutes before it are not read again.
+	// The instant usage_rate_per_hour was sampled at; quarter hours ended before it are not read again.
 	RateSampledAt *time.Time
 	// The available amount (balance less held) at or under which the balance is low, as the last look found the line; null with no line.
 	LowLineAmount *int64
@@ -386,6 +386,17 @@ type BillingCustomerMrr struct {
 	Subscriptions int32
 	// When the customer first had MRR in the currency: its cohort.
 	FirstActiveAt *time.Time
+}
+
+// What a customer paid in a currency, net of refunds and chargebacks, and when it first paid: what the merchant's trust tier rules read. Written only by the payments trigger, which rebuilds it on restore.
+type BillingCustomerPaidTotal struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	// Settled receipts (books.ReceiptOf: taken at a rail on a PSP, or recorded by the merchant) plus the signed amounts of their settled refunds, chargebacks and won disputes, in native units.
+	NetPaidAmount int64
+	// The earliest settled receipt's purchased_at; NULL when none counts.
+	FirstPaidAt *time.Time
 }
 
 // Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|cohort|funnel|heading|programs), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant's profile.
@@ -957,7 +968,7 @@ type BillingLimitAdjustment struct {
 	CreatedAt      time.Time
 }
 
-// One customer's window of one limit, identified by the server clock: a session or first-use window a use opened, a window staff adjusted, or one whose usage reached capacity; a rolling limit's bucket, a rate or lifetime limit's one row, or a billing policy's spend window (spend:<identity>). What usage took of it is in the event store (limit_usage). Retention: rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does.
+// One customer's window of one limit, identified by the server clock: a session or first-use window a use opened, a window staff adjusted, or one whose usage reached capacity; a rolling limit's bucket, a rate or lifetime limit's one row, or a billing policy's spend window (spend:<identity>). What usage took of it is in the event store (limit_usage). Usage settled after a window ended counts toward it no more. Retention: rows are deleted a day after window_ends_at, 61 days after it once reached_at is set; a row without an end stays while its customer does.
 type BillingLimitWindow struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID

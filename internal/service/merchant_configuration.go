@@ -97,7 +97,7 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 	if !cache.Writable() {
 		return nil, merchants.ErrConfigReadOnly
 	}
-	if params.MerchantSettings != nil && (params.MerchantSettings.UsageBilling != nil || params.MerchantSettings.BillingPolicies != nil || params.MerchantSettings.BillingPolicyBindings != nil) {
+	if params.MerchantSettings != nil && (params.MerchantSettings.UsageBilling != nil || params.MerchantSettings.BillingPolicies != nil || params.MerchantSettings.BillingPolicyBindings != nil || params.MerchantSettings.TrustTiers != nil) {
 		unlock, err := s.rt.DB.LockUsagePolicy(ctx, mid)
 		if err != nil {
 			return nil, err
@@ -142,7 +142,7 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 		if usage := settings.Config.UsageBilling; usage != nil {
 			for _, cur := range usage.Currencies {
 				err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-					customer, err := s.rt.DB.Gen(ctx).FindInvalidUsageMinimum(ctx, gen.FindInvalidUsageMinimumParams{MerchantID: mid.UUID(), Currency: string(cur.Currency), DefaultCredit: cur.CreditLimit, DefaultMinimum: cur.MinimumInvoiceAmount, Policies: settings.PoliciesParam()})
+					customer, err := s.rt.DB.Gen(ctx).FindInvalidUsageMinimum(ctx, gen.FindInvalidUsageMinimumParams{MerchantID: mid.UUID(), Currency: string(cur.Currency), DefaultCredit: cur.CreditLimit, DefaultMinimum: cur.MinimumInvoiceAmount, Policies: settings.PoliciesParam(), Now: s.now()})
 					if errors.Is(err, pgx.ErrNoRows) {
 						return nil
 					}
@@ -308,6 +308,9 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	}
 	if patch.BillingPolicyBindings != nil {
 		current.BillingPolicyBindings = patch.BillingPolicyBindings
+	}
+	if patch.TrustTiers != nil {
+		current.TrustTiers = patch.TrustTiers
 	}
 	if patch.DelegatedInvokerWastedSpendLimits != nil {
 		current.DelegatedInvokerWastedSpendLimits = patch.DelegatedInvokerWastedSpendLimits

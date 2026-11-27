@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (186), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (189), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or an application holding the route's permission, as `application`). Every route of a tier that checks a permission names one; the route catalog refuses one that does not.
 
@@ -65,6 +65,7 @@ A customer acting on its own account.
 | PUT | `/v1/me/low-balance-lines/{currency}` | customer | — | `SetLowBalanceLineParams` | 200 `EffectiveLowBalanceLine` |  |
 | GET | `/v1/me/balance/transactions` | customer | — | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/me/usage` | customer | — | — | 200 `Usage` | event store |
+| GET | `/v1/me/usage/series` | customer | — | — | 200 `UsageSeries` | event store |
 | GET | `/v1/me/limits` | customer | — | — | 200 `ListPage<CustomerLimit>` | event store |
 | GET | `/v1/me/payments` | customer | — | — | 200 `ListPage<Payment>` |  |
 | PUT | `/v1/me/default-payment-methods/{currency}` | customer | — | `SetDefaultPaymentMethodParams` | 200 `DefaultPaymentMethod` |  |
@@ -111,6 +112,8 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | POST | `/v1/admin/credit-grants/{id}/reinstate` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `ReinstateCreditGrantParams` | 200 `CreditGrant` | `Idempotency-Key` |
 | GET | `/v1/admin/customers/{customer_id}/balance/transactions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Balance` |  |
+| GET | `/v1/admin/customers/{customer_id}/usage` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Usage` | event store |
+| GET | `/v1/admin/customers/{customer_id}/usage/series` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `UsageSeries` | event store |
 | POST | `/v1/admin/customers/{customer_id}/limit-adjustments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `AdjustCustomerLimitParams` | 200 `CustomerLimit` | limit `grant`; event store |
 | POST | `/v1/admin/payments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RecordExternalPaymentParams` | 200 `Payment`<br>201 `Payment` | limit `off_channel` |
 | GET | `/v1/admin/payments` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Payment>` |  |

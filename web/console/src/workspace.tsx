@@ -12,6 +12,8 @@ import type { AuthClient } from "@openrails/auth-ui/client"
 import { useIdentity } from "./lib/identity"
 import { useMerchantDirectory } from "./lib/directory"
 import { AccessPage } from "./pages/access"
+import { TeamPage } from "./pages/team"
+import { useOwnAccounts } from "./lib/own-accounts"
 import { takeMerchantFromHash } from "./lib/merchant"
 import { Redirect, useRedirect } from "./lib/redirect"
 import type { BootstrapConfig } from "./config"
@@ -167,6 +169,9 @@ function Workspace({
     },
   }
   const hasAccess = !!access?.any
+  // Operators manage operators where the server runs its own accounts.
+  const ownAccounts = useOwnAccounts()
+  const team = root && ownAccounts.team
   const initial = billing ? "/billing" : hasAccess ? "/access" : "/account"
   return (
     <AuthUiProvider appearance={{ theme }}>
@@ -204,6 +209,7 @@ function Workspace({
           <nav className="console-tabs" aria-label="Console">
             {billing && <Link to="/billing">Billing</Link>}
             {hasAccess && <Link to="/access">Access</Link>}
+            {team && <Link to="/team">Team</Link>}
             <Link to="/account">Account</Link>
           </nav>
           <Routes>
@@ -272,6 +278,20 @@ function Workspace({
                     />
                   )}
                 </>
+              }
+            />
+            <Route
+              path="team/*"
+              element={
+                team ? (
+                  <TeamPage
+                    auth={auth}
+                    baseUrl={config.auth_base_url}
+                    navigation={navigation}
+                  />
+                ) : (
+                  <p className="console-empty">No access to the team.</p>
+                )
               }
             />
             <Route

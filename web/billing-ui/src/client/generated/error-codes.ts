@@ -192,9 +192,11 @@ export type OpenRailsErrorCode =
   | "subscription_not_found"
   | "subscription_paid_through"
   | "subscription_resumable"
+  | "too_many_buckets"
   | "trial_unsupported_on_rail"
   | "unknown_field"
   | "unsupported_media_type"
+  | "usage_events_expired"
   | "usage_meter_invalid"
   | "usage_meter_not_found"
   | "usage_not_priced"
@@ -262,7 +264,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   embed_origins_required: { status: 400, type: "invalid_request_error", meaning: "An embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins." },
   entitlement_required: { status: 403, type: "invalid_request_error", meaning: "A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks." },
   event_cursor_expired: { status: 410, type: "invalid_request_error", meaning: "The event cursor is no longer retained; resynchronize current state." },
-  event_store_required: { status: 409, type: "invalid_request_error", meaning: "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off." },
+  event_store_required: { status: 409, type: "invalid_request_error", meaning: "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows and usage history are off." },
   finding_action_failed: { status: 502, type: "api_error", meaning: "Running the finding's recommendation failed; the finding stays open with the error in its notes." },
   finding_not_actionable: { status: 422, type: "invalid_request_error", meaning: "The finding carries no recommendation to approve; ignore it or fix it out of band." },
   finding_requires_merchant_config: { status: 409, type: "invalid_request_error", meaning: "The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config." },
@@ -401,9 +403,11 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   subscription_not_found: { status: 404, type: "invalid_request_error", meaning: "The subscription does not exist." },
   subscription_paid_through: { status: 409, type: "invalid_request_error", meaning: "A canceled subscription to this product is still paid; buy again once its paid period ends." },
   subscription_resumable: { status: 409, type: "invalid_request_error", meaning: "A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again." },
+  too_many_buckets: { status: 400, type: "invalid_request_error", meaning: "The window at the interval holds more buckets than a series answers (a usage series: 1,000); shorten the window or widen the interval. param is interval." },
   trial_unsupported_on_rail: { status: 400, type: "invalid_request_error", meaning: "This rail cannot run a trial first phase." },
   unknown_field: { status: 400, type: "invalid_request_error", meaning: "The JSON body names a field the route does not accept; param is the field." },
   unsupported_media_type: { status: 415, type: "invalid_request_error", meaning: "The request body is not application/json." },
+  usage_events_expired: { status: 400, type: "invalid_request_error", meaning: "Usage by invoker reads raw usage events, kept 90 days; the window starts before them. History by event type and meter reaches back further. param is the window's start." },
   usage_meter_invalid: { status: 400, type: "invalid_request_error", meaning: "The meter definition is invalid." },
   usage_meter_not_found: { status: 404, type: "invalid_request_error", meaning: "The usage meter does not exist." },
   usage_not_priced: { status: 422, type: "invalid_request_error", meaning: "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field." },

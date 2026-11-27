@@ -244,6 +244,23 @@ export const ko: BillingUiMessageBundle = {
       stripe: "카드",
     },
   },
+  usage: {
+    title: "사용량",
+    description: "기간별 사용 요금입니다.",
+    intervalLabel: "간격",
+    interval: {
+      hour: "시간별",
+      day: "일별",
+      week: "주별",
+      month: "월별",
+    },
+    timezone: "시간대",
+    total: "합계",
+    requests: "요청",
+    discount: "볼륨 할인",
+    empty: "이 기간에 사용량이 없습니다",
+    emptyDescription: "사용량은 기록되는 대로 여기에 표시됩니다.",
+  },
   errors: {
     generic: "문제가 발생했습니다. 다시 시도하세요.",
     network_error:

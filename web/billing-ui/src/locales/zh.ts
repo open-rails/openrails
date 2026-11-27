@@ -231,6 +231,23 @@ export const zh: BillingUiMessageBundle = {
       stripe: "银行卡",
     },
   },
+  usage: {
+    title: "用量",
+    description: "您的用量随时间产生的费用。",
+    intervalLabel: "间隔",
+    interval: {
+      hour: "按小时",
+      day: "按天",
+      week: "按周",
+      month: "按月",
+    },
+    timezone: "时区",
+    total: "合计",
+    requests: "请求",
+    discount: "批量折扣",
+    empty: "此期间没有用量",
+    emptyDescription: "用量记录后会显示在这里。",
+  },
   errors: {
     generic: "出了点问题，请重试。",
     network_error: "无法连接服务器。请检查网络后重试。",

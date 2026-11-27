@@ -109,11 +109,14 @@ plan; a refund: the approved refund of the reserved amount on the original
 sale) before the normal receipt path commits its local effects.
 
 --not-executed needs the operation type's own proof. For an NMI or custodian
-sale that is NMI showing a definitive decline as the one transaction under the
-sale's order, or zero transactions with the operator attesting release without
-proof of nonexecution. A submitted invoice collection, rebill or tier-change
-proration refuses it. An operation that never
-crossed its submission fence is released on that alone.
+sale or engine renewal (subscription_collection), that is NMI showing one
+definitive decline under the order, or zero transactions with the operator
+attesting release without proof of nonexecution. A renewal decline enters
+dunning; an empty-order release permits the next attempt under the same order,
+read before submission to catch late money. Renewals never release automatically.
+Stripe engine renewals refuse operator resolution. A submitted invoice
+collection, manual rebill or tier-change proration refuses --not-executed.
+An operation that never crossed its submission fence is released on that alone.
 
 --step selects the step of a multi-step operation (nmi_upgrade: successor or
 proration; stripe_tier_change: update, schedule or phases). --actor and

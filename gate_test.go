@@ -802,6 +802,8 @@ func TestGateRefusesARequestItCannotViewAlone(t *testing.T) {
 		ok, broken := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
 		f.set(func(f *fakeViews) { f.broken = map[billing.CustomerID]bool{broken: true} })
 		warm(t, g, ok)
+		// No sync warming started is counted below.
+		synctest.Wait()
 		// What no server would take is refused before anything is sent.
 		bad := work(ok, "btc", 1)
 		bad.Currency = "BTC"
@@ -831,6 +833,70 @@ func TestGateRefusesARequestItCannotViewAlone(t *testing.T) {
 		time.Sleep(30 * time.Second)
 		if n := syncCount(f) - quiet; n != 0 {
 			t.Fatalf("the gate synced %d more times for a refused view", n)
+		}
+	})
+}
+
+// A sync can answer a view between its request asking for it and waiting
+// for it: the answer, a refusal too, is the request's, and the sync puts
+// the views first.
+func TestGateKeepsAnAnswerThatComesBeforeItsRequestWaits(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 100}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		defer closeGate(t, g)
+		s := g.g
+		busy, broken, cold := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
+		f.set(func(f *fakeViews) { f.broken = map[billing.CustomerID]bool{broken: true} })
+		warm(t, g, busy)
+		synctest.Wait()
+		before := syncCount(f)
+		ask := func(p billing.AdmitParams) (billing.AdmitParams, *viewWait) {
+			if err := normalizeGateAdmit(&p); err != nil {
+				t.Fatal(err)
+			}
+			return p, s.serve(attrsKey(p), p)
+		}
+		pb, wb := ask(work(broken, "broken", 1))
+		pc, wc := ask(work(cold, "cold", 1))
+		// Queued usage starts the sync that answers both before either waits.
+		if err := mustAdmit(t, g, work(busy, "queued", 1)).Capture(t.Context(), capture(1)); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		answered := syncCount(f)
+		if err := s.await(t.Context(), attrsKey(pb), pb, wb); !hasCode(err, billing.CodeInternalError) {
+			t.Fatalf("a view refused before its request waited: %v", err)
+		}
+		if err := s.await(t.Context(), attrsKey(pc), pc, wc); err != nil {
+			t.Fatalf("a view answered before its request waited: %v", err)
+		}
+		synctest.Wait()
+		if n := syncCount(f) - answered; n != 0 {
+			t.Errorf("waiting for views a sync had answered took %d more syncs", n)
+		}
+		f.mu.Lock()
+		syncs := slices.Clone(f.syncs[before:answered])
+		f.mu.Unlock()
+		first := slices.IndexFunc(syncs, func(p billing.SyncLeasesParams) bool {
+			return slices.ContainsFunc(p.Views, func(v billing.ViewParams) bool { return v.CustomerID == broken })
+		})
+		if first < 0 {
+			t.Fatal("no sync asked for the refused view")
+		}
+		if n := len(syncs[first].Usage); n > 0 {
+			t.Errorf("the sync answering views requests were about to wait for carried %d usage items", n)
+		}
+		if got := f.settledOf(busy, "quota"); got != 2 {
+			t.Errorf("settled %d, want 2", got)
+		}
+		// The busy customer's wait was answered with no request on it.
+		s.mu.Lock()
+		left := len(s.waiters)
+		s.mu.Unlock()
+		if left != 0 {
+			t.Errorf("%d answered waits left", left)
 		}
 	})
 }
@@ -1170,15 +1236,20 @@ func TestGateAnswersAFirstViewInASyncWithoutUsage(t *testing.T) {
 		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		warm(t, g, billing.CustomerID(uuid.New()))
-		// Usage waits to be sent when a new customer's first request comes.
+		// Usage waits to be sent when a new customer's first request comes:
+		// it is captured while a slow sync with nothing queued is out.
 		busy := billing.CustomerID(uuid.New())
 		warm(t, g, busy)
-		if err := mustAdmit(t, g, work(busy, "queued", 3)).Capture(t.Context(), capture(3)); err != nil {
-			t.Fatal(err)
-		}
+		queued := mustAdmit(t, g, work(busy, "queued", 3))
+		f.set(func(f *fakeViews) { f.slow = time.Second })
+		mustAdmit(t, g, work(busy, "probe", 1)).Release(t.Context())
+		synctest.Wait()
 		f.mu.Lock()
 		before := len(f.syncs)
 		f.mu.Unlock()
+		if err := queued.Capture(t.Context(), capture(3)); err != nil {
+			t.Fatal(err)
+		}
 		cold := billing.CustomerID(uuid.New())
 		mustAdmit(t, g, work(cold, "first", 1)).Release(t.Context())
 		flush(t, g)

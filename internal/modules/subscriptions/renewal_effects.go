@@ -17,7 +17,8 @@ type renewalEffects struct {
 	PeriodStart, PeriodEnd       time.Time
 	Downgrade, PreserveLifecycle bool
 	// Reinstate reactivates a decided cancellation on an explicit override.
-	Reinstate bool
+	Reinstate    bool
+	KeepCanceled bool
 	// SeatsChanged ends access of the old seats where the new period starts.
 	SeatsChanged    bool
 	ProductName     string
@@ -31,7 +32,7 @@ type renewalEffects struct {
 func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, d *db.DB, sub *models.Subscription, effects renewalEffects) (*models.NotificationEvent, error) {
 	if !effects.PreserveLifecycle {
 		// The payment fact decides through the state machine.
-		var event lifecycle.Event = lifecycle.RenewalPaid{PeriodStart: effects.PeriodStart, PeriodEnd: effects.PeriodEnd}
+		var event lifecycle.Event = lifecycle.RenewalPaid{PeriodStart: effects.PeriodStart, PeriodEnd: effects.PeriodEnd, KeepCanceled: effects.KeepCanceled}
 		if effects.Reinstate && sub.Status == models.StatusCanceled {
 			event = lifecycle.Reinstate{PeriodStart: effects.PeriodStart, PeriodEnd: effects.PeriodEnd}
 		}
@@ -42,7 +43,9 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 		if len(applied) > 0 {
 			// The paid window is the charge's own period, never moved backwards.
 			sub.CurrentPeriodStartsAt, sub.CurrentPeriodEndsAt = &effects.PeriodStart, &effects.PeriodEnd
-			sub.CancelFeedback = nil
+			if sub.Status != models.StatusCanceled {
+				sub.CancelFeedback = nil
+			}
 			sub.ClearRetrySchedule()
 		}
 	}
@@ -59,7 +62,8 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 			return nil, err
 		}
 	}
-	if _, err := entitlementsService.PushAccess(ctx, subscriptionAccessForPeriod(sub, effects.PeriodStart, &effects.PeriodEnd)); err != nil {
+	access := subscriptionAccessForPeriod(sub, effects.PeriodStart, &effects.PeriodEnd)
+	if _, err := entitlementsService.PushAccess(ctx, access); err != nil {
 		return nil, fmt.Errorf("grant renewal access %s: %w", sub.ID, err)
 	}
 	if !effects.PreserveLifecycle && effects.PeriodEnd.After(s.now().UTC()) {

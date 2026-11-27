@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -308,9 +309,9 @@ func (v balanceView) watched() bool {
 }
 
 // sampleUsageRate adds the usage dated since the last sample to the decayed
-// rate, by whole minutes: each minute is read by one look once it has ended;
-// minutes before the last sample, or more than one time constant ago, are left
-// out: the rate is an estimate.
+// rate, by the usage history's quarter hours at what they cost: each is read
+// by one look once it has ended; quarter hours before the last sample's, or
+// more than one time constant ago, are left out: the rate is an estimate.
 func (s *MoneyService) sampleUsageRate(ctx context.Context, q *gen.Queries, watch gen.BillingBalanceWatch, now time.Time) (rate int64, sampledAt time.Time, err error) {
 	since := now.Add(-usageRateTimeConstant)
 	if prev := watch.RateSampledAt; prev != nil {
@@ -330,13 +331,31 @@ func (s *MoneyService) sampleUsageRate(ctx context.Context, q *gen.Queries, watc
 		case err != nil:
 			return 0, now, err
 		default:
-			if spent, err = store.MinuteAmount(ctx, billing.CustomerID(watch.CustomerID), watch.Currency, since, now); err != nil {
+			if spent, err = historySpend(ctx, store, watch, since, now); err != nil {
 				return 0, now, err
 			}
 		}
 	}
 	// Spent within one time constant of an hour is that much per hour.
 	return satAdd(rate, satMul(spent, int64(time.Hour/usageRateTimeConstant))), now, nil
+}
+
+// historySpend is what the customer's usage cost in the history buckets
+// that ended in [since's bucket, until).
+func historySpend(ctx context.Context, store *eventstore.Store, watch gen.BillingBalanceWatch, since, until time.Time) (int64, error) {
+	from, to := since.UTC().Truncate(eventstore.HistoryBucket), until.UTC().Truncate(eventstore.HistoryBucket)
+	if !from.Before(to) {
+		return 0, nil
+	}
+	rows, err := store.UsageHistory(ctx, eventstore.HistoryFilter{CustomerID: billing.CustomerID(watch.CustomerID), Currency: watch.Currency, From: from, To: to})
+	if err != nil {
+		return 0, err
+	}
+	var spent int64
+	for _, r := range rows {
+		spent = satAdd(spent, r.Cost())
+	}
+	return spent, nil
 }
 
 // decayRate is a rate decayed exponentially over elapsed, rounded to the unit.

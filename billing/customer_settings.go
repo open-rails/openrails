@@ -1,6 +1,10 @@
 package billing
 
-import "github.com/open-rails/openrails/catalog"
+import (
+	"time"
+
+	"github.com/open-rails/openrails/catalog"
+)
 
 // CustomerSettingsResult confirms a customer's saved billing settings.
 type CustomerSettingsResult struct {
@@ -76,11 +80,35 @@ type CreditLimit struct {
 	Amount   int64            `json:"amount,string"`
 }
 
-// TrustLevel is the trust tier a customer's admissions are judged at in one
-// currency when a request names none; empty is the default tier.
+// TrustLevel is a customer's explicit trust tier in one currency: it beats
+// the merchant's trust_tiers rules. A request's own trust level picks only
+// that request's spend windows.
 type TrustLevel struct {
 	Currency   catalog.Currency `json:"currency"`
 	TrustLevel string           `json:"trust_level"`
+}
+
+// TrustLevelSource is where an effective trust level comes from.
+type TrustLevelSource string
+
+const (
+	// TrustLevelExplicit: the customer's own trust level, or the request's.
+	TrustLevelExplicit TrustLevelSource = "explicit"
+	// TrustLevelRule: the highest of the merchant's trust_tiers it meets.
+	TrustLevelRule TrustLevelSource = "rule"
+	// TrustLevelDefault: neither; the default tier, free.
+	TrustLevelDefault TrustLevelSource = "default"
+)
+
+// EffectiveTrustLevel is the trust tier a customer's requests in one
+// currency are judged at, with what the rules read: what it paid net of
+// refunds and chargebacks, and when it first paid.
+type EffectiveTrustLevel struct {
+	Currency      catalog.Currency `json:"currency"`
+	TrustLevel    string           `json:"trust_level"`
+	Source        TrustLevelSource `json:"source"`
+	NetPaidAmount int64            `json:"net_paid_amount,string"`
+	FirstPaidAt   *time.Time       `json:"first_paid_at"`
 }
 
 // UpdateCustomerParams changes the settings it names for one customer; an

@@ -3,6 +3,9 @@
 # not edit. Monthly partitions are left out: their names follow the calendar.
 migration 0001_schema.up.sql sha256:99068c67d793d5eb6517f0640dfaaf188071e4878eb0fe747eab97a4275e8b24
 migration 0002_ledger_balance.up.sql sha256:b6b26bda613c49cc07120269833eccf88c8b71af018516478ec39f00e16b98c1
+migration 0003_transfer_types.up.sql sha256:e995e170597775acff551d82f2f7cff698bc09799c04554a30ed2ec755fb6d40
+migration 0004_customer_paid_totals.up.sql sha256:4b9a2facc723bab9d8579e3955f6c2cbe4f16e9f6df45b2f19d080be61007dbd
+migration 0005_usage_quarter_hours.up.sql sha256:289f968ac3d0bbce937f66f71f850c8a9d5a0ffc96b52c23ee45a504b50ae07a
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -497,6 +500,17 @@ table billing.customer_mrr
   constraint customer_mrr_subscriptions_check CHECK ((subscriptions >= 0))
   index CREATE INDEX customer_mrr_first_active_at_idx ON billing.customer_mrr USING btree (merchant_id, first_active_at)
   index CREATE UNIQUE INDEX customer_mrr_pkey ON billing.customer_mrr USING btree (merchant_id, customer_id, currency)
+
+table billing.customer_paid_totals
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column currency text NOT NULL
+  column net_paid_amount bigint NOT NULL
+  column first_paid_at timestamp with time zone
+  constraint customer_paid_totals_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint customer_paid_totals_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint customer_paid_totals_pkey PRIMARY KEY (merchant_id, customer_id, currency)
+  index CREATE UNIQUE INDEX customer_paid_totals_pkey ON billing.customer_paid_totals USING btree (merchant_id, customer_id, currency)
 
 table billing.customers
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1284,11 +1298,11 @@ table billing.ledger_transfers
   constraint ledger_transfers_revenue_schedule_check CHECK (((book = 'general'::text) OR (revenue_schedule_id IS NULL)))
   constraint ledger_transfers_source_check CHECK (((octet_length(source) >= 1) AND (octet_length(source) <= 512)))
   constraint ledger_transfers_source_id_check CHECK (((octet_length(source_id) >= 1) AND (octet_length(source_id) <= 512)))
-  constraint ledger_transfers_type_check CHECK ((((book = 'units'::text) AND (transfer_type = ANY (ARRAY['deposit'::text, 'deposit_bonus'::text, 'credit_purchase_revenue'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text, 'owed_repayment'::text, 'owed_reopened'::text, 'credit_refund'::text, 'credit_refund_restore'::text, 'credit_refund_cash'::text, 'credit_refund_cash_restore'::text, 'credit_refund_funding'::text, 'usage_reversed'::text]))) OR ((book = 'general'::text) AND (transfer_type = ANY (ARRAY['cash_received'::text, 'cash_applied'::text, 'cash_returned'::text, 'revenue_adjusted'::text, 'revenue_recognized'::text, 'refund_deferred'::text, 'refund_recognized'::text, 'chargeback_deferred'::text, 'chargeback_recognized'::text, 'dispute_won'::text, 'credit_released'::text, 'credit_breakage'::text, 'credit_forfeited'::text, 'credit_forfeit_reversed'::text, 'promotional_credit_applied'::text, 'usage_accrued'::text, 'usage_collected'::text, 'usage_repaid'::text, 'usage_waived'::text, 'usage_reopened'::text, 'bad_debt'::text, 'bad_debt_recovery'::text, 'processor_fee'::text, 'chargeback_fee'::text, 'opening_balance'::text, 'usage_reversed'::text])))))
+  constraint ledger_transfers_type_check CHECK ((((book = 'units'::text) AND (transfer_type = ANY (ARRAY['deposit'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text, 'owed_repayment'::text, 'owed_reopened'::text, 'credit_refund'::text, 'credit_refund_restore'::text, 'credit_refund_funding'::text, 'usage_reversed'::text]))) OR ((book = 'general'::text) AND (transfer_type = ANY (ARRAY['cash_received'::text, 'cash_applied'::text, 'cash_returned'::text, 'revenue_adjusted'::text, 'revenue_recognized'::text, 'refund_deferred'::text, 'refund_recognized'::text, 'chargeback_deferred'::text, 'chargeback_recognized'::text, 'dispute_won'::text, 'credit_released'::text, 'credit_breakage'::text, 'credit_forfeited'::text, 'credit_forfeit_reversed'::text, 'promotional_credit_applied'::text, 'usage_accrued'::text, 'usage_collected'::text, 'usage_repaid'::text, 'usage_waived'::text, 'usage_reopened'::text, 'bad_debt'::text, 'bad_debt_recovery'::text, 'processor_fee'::text, 'chargeback_fee'::text, 'opening_balance'::text, 'usage_reversed'::text])))))
   index CREATE INDEX ledger_transfers_created_at_idx ON billing.ledger_transfers USING btree (merchant_id, created_at)
   index CREATE INDEX ledger_transfers_credit_account_id_idx ON billing.ledger_transfers USING btree (merchant_id, credit_account_id)
   index CREATE INDEX ledger_transfers_credit_grant_id_idx ON billing.ledger_transfers USING btree (merchant_id, credit_grant_id) WHERE (credit_grant_id IS NOT NULL)
-  index CREATE UNIQUE INDEX ledger_transfers_credit_grant_id_transfer_type_key ON billing.ledger_transfers USING btree (merchant_id, credit_grant_id, transfer_type) WHERE ((credit_grant_id IS NOT NULL) AND (transfer_type = ANY (ARRAY['deposit'::text, 'deposit_bonus'::text, 'credit_purchase_revenue'::text, 'credit_expire'::text])))
+  index CREATE UNIQUE INDEX ledger_transfers_credit_grant_id_transfer_type_key ON billing.ledger_transfers USING btree (merchant_id, credit_grant_id, transfer_type) WHERE ((credit_grant_id IS NOT NULL) AND (transfer_type = ANY (ARRAY['deposit'::text, 'credit_expire'::text])))
   index CREATE INDEX ledger_transfers_customer_id_currency_created_at_idx ON billing.ledger_transfers USING btree (merchant_id, customer_id, currency, created_at DESC) WHERE (customer_id IS NOT NULL)
   index CREATE UNIQUE INDEX ledger_transfers_customer_id_currency_id_key ON billing.ledger_transfers USING btree (merchant_id, customer_id, currency, id)
   index CREATE INDEX ledger_transfers_debit_account_id_idx ON billing.ledger_transfers USING btree (merchant_id, debit_account_id)
@@ -2358,6 +2372,7 @@ table billing.payments
   index CREATE INDEX payments_subscription_id_idx ON billing.payments USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)
   trigger CREATE TRIGGER payments_enqueue_settlement_event AFTER INSERT OR UPDATE OF status ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.enqueue_payment_settlement_event()
   trigger CREATE TRIGGER payments_network_activity AFTER INSERT OR DELETE OR UPDATE OF status, amount, currency, deleted_at, card_brand, purchased_at, psp_id, money_movement ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.payment_network_activity()
+  trigger CREATE TRIGGER payments_paid_totals AFTER INSERT OR DELETE OR UPDATE OF status, amount, currency, deleted_at, purchased_at, money_movement, psp_id ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.payment_paid_totals()
   trigger CREATE TRIGGER payments_queue_stripe_fee_read AFTER INSERT OR UPDATE OF status, money_movement ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.queue_stripe_fee_read()
 
 table billing.periodic_leases
@@ -4683,6 +4698,7 @@ function billing.guard_billing_restore_receipt()
                     'customer_low_balance_lines',
                     'customer_messages',
                     'customer_mrr',
+                    'customer_paid_totals',
                     'customers',
                     'dashboard_configs',
                     'destructive_actions',
@@ -5431,6 +5447,43 @@ function billing.payment_network_activity()
           END;
           IF measure IS NOT NULL THEN
               PERFORM billing.add_network_activity(p.merchant_id, p.psp_id, p.rail, billing.card_network(p.card_brand), p.currency, p.purchased_at, measure, sign, sign * abs(p.amount));
+          END IF;
+      END LOOP;
+      RETURN NULL;
+  END;
+  $function$
+
+function billing.payment_paid_totals()
+  CREATE OR REPLACE FUNCTION billing.payment_paid_totals()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE
+      sign integer;
+      p record;
+      receipt boolean;
+  BEGIN
+      FOREACH sign IN ARRAY CASE TG_OP WHEN 'INSERT' THEN ARRAY[1] WHEN 'DELETE' THEN ARRAY[-1] ELSE ARRAY[-1, 1] END LOOP
+          IF sign < 0 THEN p := OLD; ELSE p := NEW; END IF;
+          CONTINUE WHEN p.deleted_at IS NOT NULL;
+          receipt := p.reversal_kind IS NULL AND p.amount > 0 AND p.status IN ('succeeded', 'refunded')
+              AND (p.channel = 'manual' OR p.money_movement = 'rail' AND p.psp_id IS NOT NULL);
+          CONTINUE WHEN NOT receipt AND NOT (p.reversal_kind IS NOT NULL AND p.status = 'succeeded' AND p.amount <> 0
+              AND EXISTS (SELECT 1 FROM billing.payments o WHERE o.merchant_id = p.merchant_id AND o.id = p.refunded_payment_id
+                  AND (o.channel = 'manual' OR o.money_movement = 'rail' AND o.psp_id IS NOT NULL)));
+          INSERT INTO billing.customer_paid_totals AS t (merchant_id, customer_id, currency, net_paid_amount, first_paid_at)
+          VALUES (p.merchant_id, p.customer_id, p.currency, sign * p.amount, CASE WHEN receipt AND sign > 0 THEN p.purchased_at END)
+          ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE
+              SET net_paid_amount = t.net_paid_amount + EXCLUDED.net_paid_amount, first_paid_at = LEAST(t.first_paid_at, EXCLUDED.first_paid_at);
+          IF receipt AND sign < 0 THEN
+              UPDATE billing.customer_paid_totals t SET first_paid_at = (
+                  SELECT min(o.purchased_at) FROM billing.payments o
+                  WHERE o.merchant_id = p.merchant_id AND o.customer_id = p.customer_id AND o.currency = p.currency
+                    AND o.deleted_at IS NULL AND o.reversal_kind IS NULL AND o.amount > 0 AND o.status IN ('succeeded', 'refunded')
+                    AND (o.channel = 'manual' OR o.money_movement = 'rail' AND o.psp_id IS NOT NULL))
+              WHERE t.merchant_id = p.merchant_id AND t.customer_id = p.customer_id AND t.currency = p.currency
+                AND t.first_paid_at = p.purchased_at;
           END IF;
       END LOOP;
       RETURN NULL;
@@ -6765,6 +6818,21 @@ function billing.subscriptions_track_unverified()
       END IF;
       RETURN NULL;
   END;
+  $function$
+
+function billing.trust_tier(jsonb,text,text,bigint,timestamp with time zone,timestamp with time zone)
+  CREATE OR REPLACE FUNCTION billing.trust_tier(p_trust jsonb, p_currency text, p_explicit text, p_net_paid bigint, p_first_paid_at timestamp with time zone, p_now timestamp with time zone)
+   RETURNS text
+   LANGUAGE sql
+   IMMUTABLE PARALLEL SAFE
+  AS $function$
+  SELECT COALESCE(NULLIF(p_explicit, ''), (
+      SELECT r.rule ->> 'tier'
+      FROM jsonb_array_elements(p_trust -> 'rules' -> p_currency) WITH ORDINALITY AS r(rule, n)
+      WHERE COALESCE(p_net_paid, 0) >= (r.rule ->> 'net_paid_amount')::bigint
+        AND ((r.rule ->> 'days')::integer = 0 OR p_first_paid_at <= p_now - (r.rule ->> 'days')::integer * interval '24 hours')
+      ORDER BY r.n
+      LIMIT 1), p_trust ->> 'default')
   $function$
 
 function billing.void_ended_renewal_invoices()

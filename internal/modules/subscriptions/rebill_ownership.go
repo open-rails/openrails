@@ -62,27 +62,3 @@ func RefuseOwnedRebillTerms(ctx context.Context, d *db.DB, sub *models.Subscript
 	}
 	return nil
 }
-
-// refuseSubmittedRenewal refuses a lifecycle change while the subscription's
-// unresolved renewal collection has crossed its submission fence. Run it on
-// the locked subscription in the mutation's transaction.
-func refuseSubmittedRenewal(ctx context.Context, d *db.DB, sub *models.Subscription) error {
-	row, err := d.Gen(ctx).GetUnresolvedSubscriptionCollection(ctx, gen.GetUnresolvedSubscriptionCollectionParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
-	if db.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var evidence map[string]json.RawMessage
-	if len(row.ResultEvidence) > 0 {
-		if err := json.Unmarshal(row.ResultEvidence, &evidence); err != nil {
-			return ErrRenewalInProgress
-		}
-	}
-	_, submitted := evidence["submitted_at"]
-	if submitted || row.Status == "unknown_needs_verify" {
-		return ErrRenewalInProgress
-	}
-	return nil
-}

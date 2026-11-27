@@ -50,6 +50,10 @@ func (s *Service) customers(ctx context.Context, mid billing.MerchantID, rows []
 	if err != nil {
 		return nil, err
 	}
+	trust, err := s.moneyService().CustomersTrustLevels(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]billing.Customer, len(rows))
 	for i, row := range rows {
 		m := money[row.ID]
@@ -58,7 +62,7 @@ func (s *Service) customers(ctx context.Context, mid billing.MerchantID, rows []
 		}
 		out[i] = billing.Customer{
 			ID: billing.CustomerID(row.ID), CreatedAt: row.CreatedAt.UTC(), LastSeenAt: row.LastSeenAt.UTC(),
-			Settings: settings[row.ID], Balances: m.Balances, DefaultPaymentMethods: m.Defaults,
+			Settings: settings[row.ID], Balances: m.Balances, DefaultPaymentMethods: m.Defaults, TrustLevels: trust[row.ID],
 		}
 		if contact, ok := found[row.ID]; ok {
 			out[i].Contact = contact.Customer()
@@ -68,7 +72,7 @@ func (s *Service) customers(ctx context.Context, mid billing.MerchantID, rows []
 }
 
 // GetCustomer reads one customer: its contact, its settings, and per currency
-// its balance and collection card.
+// its balance, collection card and effective trust tier.
 func (s *Service) GetCustomer(ctx context.Context, id identity.CustomerID) (*billing.Customer, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {

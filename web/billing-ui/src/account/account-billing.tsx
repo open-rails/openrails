@@ -5,6 +5,7 @@ import type { SendSolanaTransaction } from "#orck/client/client"
 import { BillingUiRoot } from "#orck/scope"
 import { PaymentHistory } from "./payment-history"
 import { PaymentMethodsPanel } from "./payment-methods-panel"
+import { UsagePanel } from "./usage-panel"
 import {
   SubscriptionsPanel,
   type SubscriptionsPanelProps,
@@ -22,11 +23,13 @@ export interface AccountBillingProps {
   plansHref?: string
   renderSubscriptionFooter?: SubscriptionsPanelProps["renderSubscriptionFooter"]
   historyPageSize?: number
+  /** Shows the customer's usage over time in this currency (or unit). */
+  usageCurrency?: string
   appearance?: BillingAppearance
   className?: string
 }
 
-/** Subscriptions, payment methods and history in one column. */
+/** Subscriptions, payment methods, history and, with `usageCurrency`, usage in one column. */
 export function AccountBilling({
   defaultCurrency,
   defaultCountry,
@@ -34,6 +37,7 @@ export function AccountBilling({
   plansHref,
   renderSubscriptionFooter,
   historyPageSize,
+  usageCurrency,
   appearance,
   className,
 }: AccountBillingProps) {
@@ -55,6 +59,9 @@ export function AccountBilling({
         appearance={appearance}
       />
       <PaymentHistory pageSize={historyPageSize} appearance={appearance} />
+      {usageCurrency ? (
+        <UsagePanel currency={usageCurrency} appearance={appearance} />
+      ) : null}
     </BillingUiRoot>
   )
 }

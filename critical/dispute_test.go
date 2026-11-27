@@ -159,6 +159,12 @@ func disputeInquiry(t *testing.T) {
 		trail(iw).send(t, "charge.dispute.updated", iw.stripe.Dispute("dp_pulled", sub, "under_review", "chargeback", "fraudulent"))
 		require.Eventually(t, func() bool { return responded(t, iw.authorityWorld, "dp_pulled") }, 20*time.Second, 50*time.Millisecond,
 			"a provider's notice is no advisory pull's: the response runs unarmed")
+		// The notice's chargeback ends the subscription: its provider cancel
+		// runs on the fleet, after the response.
+		require.Eventually(t, func() bool { return len(iw.stripe.Mutations("")) == 1 }, 20*time.Second, 50*time.Millisecond)
+		iw.stripeWrites = iw.stripe.Mutations("")
+		require.Equal(t, "/v1/subscriptions/"+sub, iw.stripeWrites[0].Path)
+		require.Equal(t, "true", iw.stripeWrites[0].Form.Get("cancel_at_period_end"), "Stripe stops billing it at its period end")
 	})
 }
 
@@ -567,9 +573,15 @@ func newSales(t *testing.T, configure ...func(*world)) *sales {
 
 func (s *sales) buy(t *testing.T, key string) billing.Payment {
 	t.Helper()
+	return s.buyAs(t, s.a.aliceToken, key)
+}
+
+// buyAs is one sale to the customer token signs in.
+func (s *sales) buyAs(t *testing.T, token, key string) billing.Payment {
+	t.Helper()
 	input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: s.price}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
 		Payment: &billing.InvoicePaymentParams{Token: s.p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-	status, raw := s.a.request(t, http.MethodPost, "/v1/me/invoices", s.a.aliceToken, input, map[string]string{"Idempotency-Key": key})
+	status, raw := s.a.request(t, http.MethodPost, "/v1/me/invoices", token, input, map[string]string{"Idempotency-Key": key})
 	require.Equal(t, http.StatusCreated, status, string(raw))
 	var invoice billing.Invoice
 	require.NoError(t, json.Unmarshal(raw, &invoice))

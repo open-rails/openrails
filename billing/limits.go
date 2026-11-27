@@ -108,9 +108,6 @@ const (
 	DenyDelinquentUnpaidInvoice DenyCode = "delinquent_unpaid_invoice"
 	// DenyBudgetExceeded: a spend-cap window is full.
 	DenyBudgetExceeded DenyCode = "budget_exceeded"
-	// DenyAccrualRateCapReached: the measured accrual rate, with the request,
-	// would pass the customer's hourly quota.
-	DenyAccrualRateCapReached DenyCode = "accrual_rate_cap_reached"
 	// DenyDelegatedSpendNotAllowed: only the customer's own credential spends
 	// its balance, not a delegated invoker.
 	DenyDelegatedSpendNotAllowed DenyCode = "delegated_spend_not_allowed"

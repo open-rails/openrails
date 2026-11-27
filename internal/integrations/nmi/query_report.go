@@ -219,15 +219,15 @@ func (a QueryAction) Is(kind string) bool {
 // Succeeded reports an approved action.
 func (a QueryAction) Succeeded() bool { return strings.TrimSpace(a.Success) == "1" }
 
-// DefinitiveDecline distinguishes a completed processor refusal from errors,
-// unreadable outcomes, and transactions the gateway can still execute.
+// DefinitiveDecline distinguishes a completed refusal from errors, unreadable
+// outcomes, and transactions the gateway can still execute.
 func (a QueryAction) DefinitiveDecline(condition string) (int, bool) {
 	if strings.TrimSpace(a.Success) != "0" {
 		return 0, false
 	}
 	state := strings.ToLower(strings.TrimSpace(condition))
 	code, err := strconv.Atoi(strings.TrimSpace(a.ResponseCode))
-	return code, err == nil && code >= 200 && code < 300 &&
+	return code, err == nil && (code >= 200 && code < 300 || a.Is("sale") && IsSaleRefusalCode(code) && !duplicateRefusal(code, a.ResponseText)) &&
 		(state == "" || state == "failed" || state == "complete")
 }
 

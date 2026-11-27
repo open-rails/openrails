@@ -51,24 +51,16 @@ const (
 type TransferType = books.TransferType
 
 const (
-	// DepositBonus and CreditPurchaseRevenue are history: a pack's bonus is
-	// part of its rate now, its money the general ledger's.
-	DepositBonus          TransferType = "deposit_bonus"
-	CreditPurchaseRevenue TransferType = "credit_purchase_revenue"
 	// CreditRefund takes a refunded lot's units left to units_refunded, and
 	// CreditRefundFunding its units already retired, owed or consumed;
 	// CreditRefundRestore and CreditRefundFunding return them.
 	CreditRefund        TransferType = "credit_refund"
 	CreditRefundRestore TransferType = "credit_refund_restore"
 	CreditRefundFunding TransferType = "credit_refund_funding"
-	// CreditRefundCash and CreditRefundCashRestore are history: a refund's
-	// cash is the general ledger's.
-	CreditRefundCash        TransferType = "credit_refund_cash"
-	CreditRefundCashRestore TransferType = "credit_refund_cash_restore"
-	Deposit                 TransferType = "deposit"       // units_sold -> customer_units
-	CreditSpend             TransferType = "credit_spend"  // customer_units -> units_redeemed
-	CreditExpire            TransferType = "credit_expire" // unspent lot remainder, time-lapsed
-	CreditRevoke            TransferType = "credit_revoke" // unspent lot remainder, clawed back
+	Deposit             TransferType = "deposit"       // units_sold -> customer_units
+	CreditSpend         TransferType = "credit_spend"  // customer_units -> units_redeemed
+	CreditExpire        TransferType = "credit_expire" // unspent lot remainder, time-lapsed
+	CreditRevoke        TransferType = "credit_revoke" // unspent lot remainder, clawed back
 	// CreditReinstate reverses a clawback (units_revoked -> customer_units).
 	CreditReinstate TransferType = "credit_reinstate"
 	OwedAccrual     TransferType = "owed_accrual" // postpaid usage -> customer_owed
@@ -91,16 +83,16 @@ const (
 
 // AllTransferTypes is the units book's whole vocabulary (OR-J40-S01 checks it
 // against ledger_transfers_type_check).
-var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditRefund, CreditRefundRestore, CreditRefundCash, CreditRefundCashRestore, CreditRefundFunding, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff, OwedRepayment, OwedReopened, UsageReversed}
+var AllTransferTypes = []TransferType{Deposit, CreditRefund, CreditRefundRestore, CreditRefundFunding, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff, OwedRepayment, OwedReopened, UsageReversed}
 
 // fundingTransfers re-arm a customer's balance notices: money added to its
 // balance, and debt it paid.
-var fundingTransfers = map[TransferType]bool{Deposit: true, DepositBonus: true, CreditReinstate: true, OwedPayment: true}
+var fundingTransfers = map[TransferType]bool{Deposit: true, CreditReinstate: true, OwedPayment: true}
 
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
 // ledger_transfers_credit_grant_id_transfer_type_key. A reinstated lot can be
 // revoked again.
-var LotOnceTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditExpire}
+var LotOnceTransferTypes = []TransferType{Deposit, CreditExpire}
 
 // Operation is the kind of money write that posted a transfer, part of the
 // idempotency coordinate. The engine composes it and a caller supplies only
