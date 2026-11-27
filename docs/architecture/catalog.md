@@ -66,7 +66,10 @@ via `providerobjects.Observer`, read by id when absent (`readProviderPriceTerms`
 `observedTerms`); CCBill declares its terms. The row is `provider_owned` with a
 `provider_snapshot`, its id salted with the provider object (`providerPriceID`).
 A provider that does not answer refuses a new provider price and leaves an
-existing one on cached terms, with a warning. Stripe product and price events queue
+existing one on cached terms, with a warning. An NMI plan may declare its amount
+and billing interval: while NMI does not answer, a new price takes them with a
+warning and stays unconfirmed (`VerifyPrice` reads `unknown`) until NMI does;
+when NMI answers, its own terms win and a declaration that differs is a warning. Stripe product and price events queue
 `ProviderObjectObserveWorker`, which syncs the unmapped-price finding.
 
 **Solana plans.** A recurring USD price of ours that sells on Solana gets an
