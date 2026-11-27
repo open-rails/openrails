@@ -336,8 +336,11 @@ WITH bound AS (
     WHERE s.merchant_id=$5::uuid AND $3::jsonb ? s.currency
 ), scoped AS (
     SELECT merchant_id, customer_id, currency, usage_next_bill_at, usage_minimum_invoice_amount,
-        CASE WHEN credit_limit_override THEN credit_limit_amount
-        ELSE COALESCE(NULLIF(CASE WHEN COALESCE(policy ->> 'policy_currency', currency) = currency THEN (policy ->> 'outstanding_cap_amount')::bigint END, 0), terms_credit_limit) END AS effective_credit_limit
+        LEAST(CASE WHEN credit_limit_override THEN credit_limit_amount
+        ELSE COALESCE(NULLIF(CASE WHEN COALESCE(policy ->> 'policy_currency', currency) = currency THEN (policy ->> 'outstanding_cap_amount')::bigint END, 0), terms_credit_limit) END,
+        COALESCE(CASE WHEN COALESCE(policy ->> 'policy_currency', currency) = currency AND (policy ->> 'collection_threshold_amount')::bigint > 0
+            THEN (policy ->> 'collection_threshold_amount')::bigint END,
+            CASE WHEN ($6::jsonb->>currency)::bigint > 0 THEN ($6::jsonb->>currency)::bigint END)) AS effective_threshold
     FROM bound
 )
 UPDATE billing.money_settings m SET usage_due_at = LEAST(m.usage_due_at, $1::timestamptz)
@@ -345,7 +348,7 @@ FROM scoped s
 WHERE m.merchant_id = s.merchant_id AND m.customer_id = s.customer_id AND m.currency = s.currency AND (
     EXISTS (SELECT 1 FROM billing.ledger_accounts ar
         WHERE ar.merchant_id=s.merchant_id AND ar.customer_id=s.customer_id AND ar.currency=s.currency AND ar.account_type='customer_owed'
-        AND ar.debits_posted-ar.credits_posted >= s.effective_credit_limit
+        AND ar.debits_posted-ar.credits_posted >= s.effective_threshold
         AND ar.debits_posted-ar.credits_posted > 0
         AND ar.debits_posted-ar.credits_posted >= COALESCE(s.usage_minimum_invoice_amount,($2::jsonb->>s.currency)::bigint,0)
         AND EXISTS (SELECT 1 FROM billing.owed_items oi WHERE oi.merchant_id=s.merchant_id AND oi.customer_id=s.customer_id AND oi.currency=s.currency AND oi.status='pending' AND oi.invoice_id IS NULL
@@ -361,10 +364,11 @@ type MarkUsageAccountsDueParams struct {
 	Limits     []byte
 	Policies   []byte
 	MerchantID uuid.UUID
+	Thresholds []byte
 }
 
 // The merchant's usage terms changed: each of its accounts in a configured
-// currency whose arrears reach the resulting credit limit with enough
+// currency whose arrears reach the resulting collection threshold with enough
 // unbilled to bill, or with unbilled charges and no bill date, is checked on
 // the next pass.
 func (q *Queries) MarkUsageAccountsDue(ctx context.Context, arg MarkUsageAccountsDueParams) error {
@@ -374,6 +378,7 @@ func (q *Queries) MarkUsageAccountsDue(ctx context.Context, arg MarkUsageAccount
 		arg.Limits,
 		arg.Policies,
 		arg.MerchantID,
+		arg.Thresholds,
 	)
 	return err
 }

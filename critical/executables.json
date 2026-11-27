@@ -662,6 +662,7 @@
     "OR-J26-S01": [
       "TestUsageBillingContracts/OR-J26-S01/threshold",
       "TestUsageBillingContracts/OR-J26-S01/monthly-date",
+      "TestUsageBillingContracts/OR-J26-S01/lowered-threshold",
       "TestUsageBillingContracts/OR-J26-S01"
     ],
     "OR-J26-S02": [
