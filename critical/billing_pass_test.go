@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,16 +30,6 @@ func (billingPass) Kind() string { return "openrails.billing_pass" }
 
 func (billingPass) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: openrails.QueueBilling, MaxAttempts: 1}
-}
-
-// nmiHistoryJob is the hourly NMI history job as River queues it: one
-// attempt, on its own queue.
-type nmiHistoryJob struct{}
-
-func (nmiHistoryJob) Kind() string { return "openrails.nmi_history" }
-
-func (nmiHistoryJob) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "nmi_history", MaxAttempts: 1}
 }
 
 // quietFleet is a started fleet with no periodic pass: each pass is the
@@ -71,12 +59,6 @@ func runPass(t *testing.T, fleet *river.Client[pgx.Tx]) bool {
 	return failed
 }
 
-// runHistory runs one NMI history job and reports whether it failed.
-func runHistory(t *testing.T, fleet *river.Client[pgx.Tx]) bool {
-	t.Helper()
-	return runOnce(t, fleet, nmiHistoryJob{})
-}
-
 // runOnce queues one job until it runs and reports whether it failed.
 func runOnce(t *testing.T, fleet *river.Client[pgx.Tx], args river.JobArgs) bool {
 	t.Helper()
@@ -103,7 +85,7 @@ func passExits(t *testing.T, fleet *river.Client[pgx.Tx]) {
 
 // leasedPasses exit while another run of their kind holds its lease: one
 // that ran records its report, one that exited none.
-var leasedPasses = map[string]bool{"openrails.billing_pass": true, "openrails.nmi_history": true}
+var leasedPasses = map[string]bool{"openrails.billing_pass": true}
 
 // finishPass queues rounds of jobs with insert until one of a round ran, and
 // returns that round's finishes. A fleet's own pass, such as the one it runs
@@ -159,59 +141,6 @@ func passRan(t *testing.T, fleet *river.Client[pgx.Tx], event *river.Event) bool
 	job, err := fleet.JobGet(t.Context(), event.Job.ID)
 	require.NoError(t, err)
 	return job.Output() != nil
-}
-
-// isHistoryRead is NMI's transaction report as the history job reads it: a
-// window of every transaction, naming no sale, schedule or vault.
-func isHistoryRead(r *http.Request) bool {
-	if !strings.HasSuffix(r.URL.Path, "/query.php") {
-		return false
-	}
-	_ = r.ParseForm()
-	return r.Form.Get("start_date") != "" && r.Form.Get("order_id") == "" && r.Form.Get("subscription_id") == "" &&
-		r.Form.Get("customer_vault_id") == "" && r.Form.Get("transaction_id") == ""
-}
-
-type nmiHistoryReadRow struct {
-	ReadAt *time.Time
-	DueAt  time.Time
-}
-
-func nmiHistoryReads(t *testing.T, a *authorityWorld) []nmiHistoryReadRow {
-	t.Helper()
-	rows, err := a.pool.Query(t.Context(), "SELECT read_at, due_at FROM "+pgx.Identifier{a.schema, "nmi_history_reads"}.Sanitize()+" WHERE merchant_id = $1", a.alpha.MerchantID().UUID())
-	require.NoError(t, err)
-	reads, err := pgx.CollectRows(rows, pgx.RowToStructByPos[nmiHistoryReadRow])
-	require.NoError(t, err)
-	return reads
-}
-
-// awaitHistoryQueued waits for the merchant's configuration, loaded in the
-// background at start, to queue its NMI PSP's history.
-func awaitHistoryQueued(t *testing.T, a *authorityWorld) {
-	t.Helper()
-	require.Eventually(t, func() bool { return len(nmiHistoryReads(t, a)) == 1 }, 20*time.Second, 20*time.Millisecond,
-		"the declared NMI PSP's history is queued")
-}
-
-// nmiHistoryRead is the merchant's one NMI PSP's history read: when it last
-// completed and when the next is due.
-func nmiHistoryRead(t *testing.T, a *authorityWorld) (*time.Time, time.Time) {
-	t.Helper()
-	reads := nmiHistoryReads(t, a)
-	require.Len(t, reads, 1)
-	return reads[0].ReadAt, reads[0].DueAt
-}
-
-// nmiHistoryCounts sums the merchant's NMI history authorizations by outcome.
-func nmiHistoryCounts(t *testing.T, client *openrails.Client) map[string]int64 {
-	t.Helper()
-	got := map[string]int64{}
-	for _, row := range metricTable(t, client, billing.QueryMetricsParams{Measures: []string{"nmi_history_authorizations"},
-		By: []string{"outcome"}, Range: &billing.MetricsRange{Last: "90d"}}) {
-		got[fmt.Sprint(row["outcome"])] += whole(t, row["nmi_history_authorizations"])
-	}
-	return got
 }
 
 // openInvoices counts the invoices still open in storage.
@@ -566,81 +495,6 @@ func TestBillingPass(t *testing.T) {
 		require.False(t, runPass(t, fleet))
 		require.EqualValues(t, 1000, lotExpired(t, a.alpha, lots[0].ID))
 		renewalSettled(t, a, p, sub, due)
-	})
-	t.Run("OR-J04-S71/a-failed-nmi-history-read-fails-its-own-job-and-the-next-hours-reads-it", func(t *testing.T) {
-		a, p := newNMIWorld(t)
-		awaitHistoryQueued(t, a)
-		fleet := quietFleet(t, a.world)
-		p.core.QueryUnavailable(true)
-		advanceTo(a.world, nextHour(a.clock.Now()))
-		require.False(t, runPass(t, fleet), "the billing pass reads no NMI history")
-		require.True(t, runHistory(t, fleet), "a history read NMI refused fails the history job, not only a log line")
-		read, due := nmiHistoryRead(t, a)
-		require.Nil(t, read, "a failed read records none")
-		require.False(t, due.After(a.clock.Now()), "and stays due")
-		p.core.QueryUnavailable(false)
-		advanceTo(a.world, nextHour(a.clock.Now()))
-		require.False(t, runHistory(t, fleet), "the next hour's job reads the account's history")
-		read, due = nmiHistoryRead(t, a)
-		require.NotNil(t, read)
-		require.True(t, read.Equal(a.clock.Now()), "read at %s", read)
-		require.True(t, due.Equal(read.Add(23*time.Hour)), "a completed read is due again a day later, less the hour: %s", due)
-	})
-	t.Run("OR-J04-S83/a-slow-nmi-history-read-holds-up-no-billing-pass-and-catches-up", func(t *testing.T) {
-		a, p := newNMIWorld(t)
-		vault := p.core.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
-		at := a.clock.Now().Add(-48 * time.Hour)
-		for _, sale := range []nmimock.Sale{{}, {Declined: "200", IssuerCode: "51"}} {
-			sale.Vault, sale.Amount, sale.At = vault, "10.00", at
-			p.core.AddSale(sale)
-			at = at.Add(time.Minute)
-		}
-		require.NoError(t, p.persist(t.Context()))
-		awaitHistoryQueued(t, a)
-		// NMI's transaction report stalls: the history read waits on it.
-		stalled := p.core.Hold(isHistoryRead, nmimock.HoldRequest)
-		defer stalled.Release()
-		advanceTo(a.world, nextHour(a.clock.Now()))
-		// One billing worker and the fleet's own schedule: the hourly history
-		// job is queued at start, beside the billing pass.
-		fleet := hostFleet(t, a.world, 1)
-		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
-		require.NoError(t, fleet.Start(t.Context()))
-		select {
-		case <-stalled.Arrived():
-		case <-time.After(20 * time.Second):
-			t.Fatal("the hourly NMI history job did not reach NMI")
-		}
-		queued, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.nmi_history").States(rivertype.JobStateRunning))
-		require.NoError(t, err)
-		require.Len(t, queued.Jobs, 1, "NMI history is its own job")
-		history := queued.Jobs[0]
-		require.Equal(t, "nmi_history", history.Queue, "provider reporting reads run on their own queue")
-		require.False(t, runPass(t, fleet), "the billing pass runs and finishes while the history read waits")
-		running, err := fleet.JobGet(t.Context(), history.ID)
-		require.NoError(t, err)
-		require.Equal(t, rivertype.JobStateRunning, running.State, "the history read still waits on NMI")
-
-		stalled.Release()
-		require.Eventually(t, func() bool {
-			done, err := fleet.JobGet(t.Context(), history.ID)
-			return err == nil && done.State == rivertype.JobStateCompleted
-		}, 20*time.Second, 20*time.Millisecond, "once NMI answers, the history job finishes")
-		require.Equal(t, map[string]int64{"approved": 1, "declined": 1}, nmiHistoryCounts(t, a.alpha), "and the account's history is caught up")
-
-		// A completed read waits a day: the next hour's job reads nothing, the
-		// next day's reads the account again.
-		var reads atomic.Int32
-		p.core.Intercept(isHistoryRead, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
-			reads.Add(1)
-			return serve(), nil
-		})
-		advanceTo(a.world, nextHour(a.clock.Now()))
-		require.False(t, runHistory(t, fleet))
-		require.Zero(t, reads.Load(), "nothing is due an hour after a read")
-		a.clock.Advance(23 * time.Hour)
-		require.False(t, runHistory(t, fleet))
-		require.Positive(t, reads.Load(), "a day after it the account is read again")
 	})
 	t.Run("OR-J04-S48/job-progress-fails-a-day-overdue-and-clears-on-a-clean-pass", func(t *testing.T) {
 		w := newWorld(t)

@@ -56,7 +56,12 @@ func newProviderRuntime(ctx context.Context, logger *slog.Logger, opts providerR
 		return nil, nil, err
 	}
 	cleanup := func() { _ = database.Close() }
-	bindParkWakes(ctx, cfg, database)
+	// A prune's converge records billing facts, each queueing its customer
+	// message in the fact's transaction.
+	if err := bindRiverProducer(ctx, cfg, database); err != nil {
+		cleanup()
+		return nil, nil, err
+	}
 	if err := database.RequireMerchantID(ctx, opts.MerchantID); err != nil {
 		cleanup()
 		return nil, nil, err

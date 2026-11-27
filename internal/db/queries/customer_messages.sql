@@ -1,18 +1,3 @@
--- name: ClaimPendingCustomerMessages :many
--- CROSS-MERCHANT: the oldest pending messages, marked queued. SKIP LOCKED
--- hands each to one dispatcher, whose transaction queues its send job.
-UPDATE billing.customer_messages m
-SET status = 'queued', updated_at = sqlc.arg(now)::timestamptz
-FROM (
-    SELECT p.merchant_id, p.id FROM billing.customer_messages p
-    WHERE p.status = 'pending'
-    ORDER BY p.created_at, p.merchant_id, p.id
-    LIMIT sqlc.arg(batch)::int
-    FOR UPDATE SKIP LOCKED
-) due
-WHERE m.merchant_id = due.merchant_id AND m.id = due.id
-RETURNING m.merchant_id, m.id;
-
 -- name: GetCustomerMessage :one
 -- A message and the fact it is about; the fact is absent once pruned.
 SELECT m.merchant_id, m.id, m.customer_id, m.event_id, m.event_type, m.status, m.attempts, e.data, e.created_at AS occurred_at

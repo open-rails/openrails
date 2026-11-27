@@ -674,7 +674,7 @@ count, primary or sticky session.
 - **Background work:** every instance with workers takes River jobs, each job on
   one instance. River's leader alone schedules periodic work; a crashed leader
   is replaced within about 20 seconds. Each instance works up to 20 billing
-  jobs at once, plus the `psp_import`, `provider_refresh` and `nmi_history` queues. Outside
+  jobs at once, plus the `psp_import` and `provider_refresh` queues. Outside
   River every instance runs the Solana Pay poller (leased claims) and checks its
   PSP credentials at start, on change and before a write once its verdict is an
   hour old.
@@ -969,7 +969,7 @@ Periods are constants, the same for every merchant. Each table's comment states 
 
 | Table | Deleted |
 |---|---|
-| `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
+| `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles` | 25 months |
 | `provider_intents` | instruction-only intents 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
 | `invoice_attempts`; `invoices`, `invoice_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed invoices with no attempt, 397 days |

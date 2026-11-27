@@ -7,7 +7,8 @@ migration 0003_transfer_types.up.sql sha256:e995e170597775acff551d82f2f7cff698bc
 migration 0004_customer_paid_totals.up.sql sha256:4b9a2facc723bab9d8579e3955f6c2cbe4f16e9f6df45b2f19d080be61007dbd
 migration 0005_usage_quarter_hours.up.sql sha256:289f968ac3d0bbce937f66f71f850c8a9d5a0ffc96b52c23ee45a504b50ae07a
 migration 0006_usage_receipts.up.sql sha256:73fca1d59b23e1c17080b6a429b13e59232a6a2e745fd6b8035808402f8dc677
-migration 0007_rebill_watch_dropped.up.sql sha256:7d1008c1f618110cd1418a1c66e1dc8b4cd79fee7523e7b9548360000276ae98
+migration 0007_retired_jobs.up.sql sha256:ba9b17805a8b793bc4eb5f96a22a72e8af1df696ea9071564a58b1c8143d0540
+migration 0008_rebill_watch_dropped.up.sql sha256:7d1008c1f618110cd1418a1c66e1dc8b4cd79fee7523e7b9548360000276ae98
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -479,11 +480,10 @@ table billing.customer_messages
   constraint customer_messages_pkey PRIMARY KEY (merchant_id, id)
   constraint customer_messages_recipient_check CHECK (((octet_length(recipient) >= 3) AND (octet_length(recipient) <= 320)))
   constraint customer_messages_sent_check CHECK (((status = 'sent'::text) = (sent_at IS NOT NULL)))
-  constraint customer_messages_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'queued'::text, 'sending'::text, 'sent'::text, 'disabled'::text, 'test_environment'::text, 'no_contact'::text, 'rate_limited'::text, 'failed'::text])))
+  constraint customer_messages_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'sending'::text, 'sent'::text, 'disabled'::text, 'test_environment'::text, 'no_contact'::text, 'rate_limited'::text, 'failed'::text])))
   index CREATE INDEX customer_messages_created_at_idx ON billing.customer_messages USING btree (merchant_id, created_at, id)
   index CREATE INDEX customer_messages_customer_idx ON billing.customer_messages USING btree (merchant_id, customer_id, created_at, id)
   index CREATE UNIQUE INDEX customer_messages_event_id_channel_key ON billing.customer_messages USING btree (merchant_id, event_id, channel)
-  index CREATE INDEX customer_messages_pending_idx ON billing.customer_messages USING btree (created_at, merchant_id, id) WHERE (status = 'pending'::text)
   index CREATE UNIQUE INDEX customer_messages_pkey ON billing.customer_messages USING btree (merchant_id, id)
 
 table billing.customer_mrr
@@ -1896,36 +1896,6 @@ table billing.nmi_bulk_checkpoints
   constraint nmi_bulk_checkpoints_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
   index CREATE UNIQUE INDEX nmi_bulk_checkpoints_pkey ON billing.nmi_bulk_checkpoints USING btree (merchant_id, psp_id)
 
-table billing.nmi_history_months
-  column merchant_id uuid NOT NULL
-  column psp_id uuid NOT NULL
-  column month_at timestamp with time zone NOT NULL
-  column kind text NOT NULL
-  column reason text NOT NULL
-  column authorizations bigint NOT NULL
-  column outcome text NOT NULL
-  column decline_cause text
-  constraint nmi_history_months_authorizations_check CHECK ((authorizations > 0))
-  constraint nmi_history_months_decline_cause_check CHECK ((decline_cause = ANY (ARRAY['customer'::text, 'issuer'::text, 'fraud'::text, 'merchant'::text, 'processing'::text, 'unknown'::text])))
-  constraint nmi_history_months_kind_check CHECK ((kind = ANY (ARRAY['verification'::text, 'one_off_sale'::text, 'scheduled_rebill'::text])))
-  constraint nmi_history_months_month_at_check CHECK ((month_at = date_trunc('month'::text, month_at, 'UTC'::text)))
-  constraint nmi_history_months_outcome_check CHECK ((outcome = ANY (ARRAY['approved'::text, 'declined'::text, 'refused'::text, 'error'::text])))
-  constraint nmi_history_months_pkey PRIMARY KEY (merchant_id, psp_id, month_at, kind, reason)
-  constraint nmi_history_months_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
-  constraint nmi_history_months_reason_check CHECK ((((outcome = 'approved'::text) = (reason = ''::text)) AND ((outcome = 'approved'::text) = (decline_cause IS NULL)) AND ((decline_cause = 'merchant'::text) = (outcome = 'refused'::text)) AND ((decline_cause = 'processing'::text) = (outcome = 'error'::text))))
-  index CREATE INDEX nmi_history_months_month_at_idx ON billing.nmi_history_months USING btree (merchant_id, month_at)
-  index CREATE UNIQUE INDEX nmi_history_months_pkey ON billing.nmi_history_months USING btree (merchant_id, psp_id, month_at, kind, reason)
-
-table billing.nmi_history_reads
-  column merchant_id uuid NOT NULL
-  column psp_id uuid NOT NULL
-  column read_at timestamp with time zone
-  column due_at timestamp with time zone NOT NULL
-  constraint nmi_history_reads_pkey PRIMARY KEY (merchant_id, psp_id)
-  constraint nmi_history_reads_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
-  index CREATE INDEX nmi_history_reads_due_at_idx ON billing.nmi_history_reads USING btree (due_at, merchant_id, psp_id)
-  index CREATE UNIQUE INDEX nmi_history_reads_pkey ON billing.nmi_history_reads USING btree (merchant_id, psp_id)
-
 table billing.notification_channel_state
   column merchant_id uuid NOT NULL
   column restore_required boolean NOT NULL DEFAULT false
@@ -1948,7 +1918,6 @@ table billing.notification_events
   index CREATE INDEX notification_events_delivery_idx ON billing.notification_events USING btree (inserted_at, merchant_id, id)
   index CREATE INDEX notification_events_ended_idx ON billing.notification_events USING btree (merchant_id, customer_id, created_at) WHERE (event_type = 'premium_ended'::text)
   index CREATE UNIQUE INDEX notification_events_pkey ON billing.notification_events USING btree (merchant_id, id)
-  trigger CREATE TRIGGER notification_event_customer_message AFTER INSERT ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.queue_customer_message()
   trigger CREATE TRIGGER notification_event_immutable BEFORE UPDATE ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.guard_notification_event()
   trigger CREATE TRIGGER notification_event_log_capture AFTER INSERT ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.capture_notification_event_log()
 
@@ -4756,8 +4725,6 @@ function billing.guard_billing_restore_receipt()
                     'mrr_streak_flows',
                     'mrr_totals',
                     'nmi_bulk_checkpoints',
-                    'nmi_history_months',
-                    'nmi_history_reads',
                     'notification_events',
                     'operation_log',
                     'owed_items',
@@ -5604,24 +5571,6 @@ function billing.products_propagate_tier_group()
           WHERE merchant_id = NEW.merchant_id AND product_id = NEW.id AND deleted_at IS NULL;
       END IF;
       RETURN NULL;
-  END;
-  $function$
-
-function billing.queue_customer_message()
-  CREATE OR REPLACE FUNCTION billing.queue_customer_message()
-   RETURNS trigger
-   LANGUAGE plpgsql
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-  AS $function$
-  BEGIN
-      IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
-      INSERT INTO billing.customer_messages (merchant_id, customer_id, event_id, event_type, channel, status, attempts)
-      VALUES (NEW.merchant_id, NEW.customer_id, NEW.id, NEW.event_type, 'email', 'pending', 0)
-      ON CONFLICT (merchant_id, event_id, channel) DO NOTHING;
-      IF FOUND THEN
-          PERFORM pg_notify('openrails_customer_messages', TG_TABLE_SCHEMA);
-      END IF;
-      RETURN NEW;
   END;
   $function$
 

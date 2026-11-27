@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -19,7 +18,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
@@ -1178,7 +1176,7 @@ func unitInvoiceRevenue(t *testing.T) {
 func reapplyInvoice(t *testing.T, a *authorityWorld, invoice billing.InvoiceID) {
 	t.Helper()
 	require.NoError(t, booksRawTx(t, a.world, func(ctx context.Context, tx pgx.Tx, _ *gen.Queries) error {
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		database, err := producerDB(a.pool, a.schema)
 		if err != nil {
 			return err
 		}

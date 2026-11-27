@@ -79,12 +79,6 @@ SELECT count(*) FROM billing.payment_method_versions WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsPaymentMethodVersions :exec
 DELETE FROM billing.payment_method_versions WHERE merchant_id = $1;
 
--- name: CountMerchantRowsNMIHistoryMonths :one
-SELECT count(*) FROM billing.nmi_history_months WHERE merchant_id = $1;
-
--- name: PurgeMerchantRowsNMIHistoryMonths :exec
-DELETE FROM billing.nmi_history_months WHERE merchant_id = $1;
-
 -- name: CountMerchantRowsSolanaPayReceipts :one
 SELECT count(*) FROM billing.solana_pay_receipts WHERE merchant_id = $1;
 

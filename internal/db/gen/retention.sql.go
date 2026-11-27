@@ -507,12 +507,6 @@ FROM (
         AND rc.due_at < $5::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
-    (SELECT DISTINCT nh.merchant_id AS mid
-       FROM billing.nmi_history_months nh
-      WHERE ($1::uuid IS NULL OR nh.merchant_id > $1::uuid)
-        AND nh.month_at < $5::timestamptz
-      ORDER BY 1 LIMIT $3::int)
-    UNION
     (SELECT DISTINCT st.merchant_id AS mid
        FROM billing.subscription_status_transitions st
       WHERE ($1::uuid IS NULL OR st.merchant_id > $1::uuid)

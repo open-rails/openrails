@@ -156,7 +156,7 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
 - **Convergence**: `reconcile.Decide` is the one pure decision table. Webhook
   fetches, probes, verifier reads, pulls and imports each give it an
   `EvidenceBundle`; only `ApplyDecision` changes a subscription.
-- **Missed callbacks**: the due pass moves a provider-billed renewal unpaid past its rail's deadline to `unverified`, access kept: `reconcile.NMIRebillDeadline` (24 h) for an NMI schedule, `reconcile.PeriodGrace` (48 h) for Stripe and CCBill. `trg_subscriptions_track_unverified` queues it in `subscription_verifications`; the `Verifier` reads queued ids at once, 50 per request, and `openrails.subscription_verification_retry` again any not read for an hour. An NMI cycle the read leaves with no attempt is decided from NMI's transactions for it (`life.rebill.missed`): a found charge is recorded, a reversed or unrecorded one never recharged, a gone schedule ended, a proven skip collected (`CollectSkippedRenewal`). `openrails.charge_attributions`, `openrails.nmi_history` and `openrails provider-refresh` (from `psp_refresh_watermarks`) read the rest; `life.webhooks.silent` fires when webhooks stop but pulls find charges.
+- **Missed callbacks**: the due pass moves a provider-billed renewal unpaid past its rail's deadline to `unverified`, access kept: `reconcile.NMIRebillDeadline` (24 h) for an NMI schedule, `reconcile.PeriodGrace` (48 h) for Stripe and CCBill. `trg_subscriptions_track_unverified` queues it in `subscription_verifications`; the `Verifier` reads queued ids at once, 50 per request, and `openrails.subscription_verification_retry` again any not read for an hour. An NMI cycle the read leaves with no attempt is decided from NMI's transactions for it (`life.rebill.missed`): a found charge is recorded, a reversed or unrecorded one never recharged, a gone schedule ended, a proven skip collected (`CollectSkippedRenewal`). `openrails.charge_attributions` and `openrails provider-refresh` (from `psp_refresh_watermarks`) read the rest; `life.webhooks.silent` fires when webhooks stop but pulls find charges.
 - **Proposals**: only `proposals.Executor` applies a `pull.*` finding's `change`,
   one approval run per approve call, reversed by `openrails undo-run`.
 - **Parking**: an unmapped price, an unlinked customer or a customer already
@@ -181,7 +181,7 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   at NMI and Stripe carry the book id (`internal/booktag`).
 
 Other tables: `provider_bills`, `provider_charge_attributions`, `provider_listed_rebills`, `webhook_health`,
-`webhook_health_daily`, `nmi_history_months`, `nmi_bulk_checkpoints`,
+`webhook_health_daily`, `nmi_bulk_checkpoints`,
 `solana_subscriptions`, `solana_pay_references`, `solana_pay_receipts`.
 
 ## Interfaces

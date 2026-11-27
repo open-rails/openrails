@@ -78,8 +78,6 @@ var ownedTables = []string{
 	"mrr_totals",
 	"network_activity_daily",
 	"nmi_bulk_checkpoints",
-	"nmi_history_months",
-	"nmi_history_reads",
 	"notification_events",
 	"notification_issue_revisions",
 	"notification_channel_state",

@@ -8,9 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/destructive"
 	"hash/crc32"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,12 +16,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/destructive"
+
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -407,7 +406,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 
 		// A prune of the restored book ends now, by the target's clock: the
 		// record its undo reads.
-		database, err := db.NewWithPGXPool(slog.Default(), target.pool, target.schema)
+		database, err := producerDB(target.pool, target.schema)
 		require.NoError(t, err)
 		mid := client.MerchantID().UUID()
 		require.NoError(t, database.MerchantTx(merchant.WithID(t.Context(), client.MerchantID()), func(ctx context.Context, tx pgx.Tx) error {

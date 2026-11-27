@@ -89,7 +89,6 @@ var Tables = map[string]Table{
 	"host_outbox":                     {Rows, "rows are deleted after at least 90 days from recorded_at and never earlier than the configured event retention, independently of readers."},
 	"payment_attempts":                {Rows, "rows are deleted 25 months (761 days) after attempted_at."},
 	"rebill_cycles":                   {Rows, "rows are deleted 25 months (761 days) after due_at, once their attempts are gone."},
-	"nmi_history_months":              {Rows, "rows are deleted 25 months (761 days) after their month."},
 	"idempotency_keys":                {Rows, "rows are deleted at expires_at."},
 	"user_destructive_reservations":   {Rows, "rows are deleted 24 hours after reserved_at."},
 	"network_activity_daily":          {Class: State},
@@ -164,7 +163,6 @@ var Tables = map[string]Table{
 	"mrr_risk_flows":             {Class: State},
 	"mrr_risk_totals":            {Class: State},
 	"mrr_risk_due":               {Class: State},
-	"nmi_history_reads":          {Class: State},
 	"reconciliation_state":       {Class: State},
 	"ownership_claims":           {Class: State},
 }

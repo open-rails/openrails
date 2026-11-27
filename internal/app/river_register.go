@@ -180,9 +180,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}
 	// Customer messages: each pending one's job, queued by the dispatcher or
 	// its periodic backstop, and the job that sends it.
-	if err := addWorker(workers, &riverjobs.CustomerMessageDispatchWorker{Messages: r.Messages}); err != nil {
-		return fmt.Errorf("add customer message dispatch worker: %w", err)
-	}
 	if err := addWorker(workers, &riverjobs.CustomerMessageWorker{Messages: r.Messages}); err != nil {
 		return fmt.Errorf("add customer message worker: %w", err)
 	}
@@ -201,11 +198,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	usage := &riverjobs.UsageInvoiceWorker{DB: r.DB, Money: r.MoneyService, Config: r.Config, Clock: clock, Log: r.Log}
 	if err := addWorker(workers, usage); err != nil {
 		return fmt.Errorf("add usage invoice worker: %w", err)
-	}
-	// Each NMI PSP's own history, as monthly aggregates, in its own hourly job
-	// on its own queue: a slow provider report holds no billing worker.
-	if err := addWorker(workers, &riverjobs.NMIHistoryWorker{DB: r.DB, Leases: r.leaseDB, Clock: clock, NMIResolver: r.CollectionResolver, Log: r.Log}); err != nil {
-		return fmt.Errorf("add NMI history worker: %w", err)
 	}
 	// Every due scan, in turn, at the top of each hour. Renewals, retries,
 	// delinquency and lapses are critical: a day overdue fails job progress.

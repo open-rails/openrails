@@ -55,8 +55,6 @@ var excludedTables = map[string]string{
 	"subscription_verifications":    "derived: re-detected from unverified subscriptions",
 	"stored_card_checks":            "derived: re-planned from subscriptions",
 	"nmi_bulk_checkpoints":          "transient read progress",
-	"nmi_history_months":            "decline analytics re-read from NMI, kept 25 months",
-	"nmi_history_reads":             "read progress: restore queues each NMI PSP and the destination backfills its own",
 	"solana_pay_references":         "transient Solana Pay watch state; pending references refuse the archive",
 	"solana_pay_receipts":           "Solana transfer receipts; credited transfers are archived as payments, unresolved reviews refuse the archive",
 
@@ -114,8 +112,6 @@ var excludedColumns = map[string]string{
 	"subscription_verifications":    "merchant_id subscription_id unverified_at reads last_read_at last_error",
 	"stored_card_checks":            "merchant_id payment_method_id due_at",
 	"nmi_bulk_checkpoints":          "merchant_id psp_id window_starts_at window_ends_at next_page started_at",
-	"nmi_history_months":            "merchant_id psp_id month_at kind reason authorizations outcome decline_cause",
-	"nmi_history_reads":             "merchant_id psp_id read_at due_at",
 	"solana_pay_references":         "merchant_id reference invoice_attempt_id kind status expires_at watch_ends_at next_poll_at signature seen_until scan_stack scan_below built_transaction built_valid_height created_at updated_at",
 	"solana_pay_receipts":           "merchant_id reference signature invoice_attempt_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
 	"reconciliation_findings":       "id merchant_id finding_type rail psp_id subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity change source evidence_digest approval_run_id pull_id dismissed_at",

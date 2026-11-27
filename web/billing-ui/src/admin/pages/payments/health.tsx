@@ -8,7 +8,6 @@ import * as React from "react"
 import { Link, useSearchParams } from "#orck/admin/router"
 import { useQuery } from "@tanstack/react-query"
 
-import { Badge } from "#orck/admin/components/ui/badge"
 import {
   Card,
   CardContent,
@@ -34,7 +33,7 @@ import {
 import type { MetricsResult } from "#orck/admin/lib/api/metrics"
 
 import { cn } from "#orck/admin/lib/utils"
-import { formatBucket, formatMeasure } from "#orck/admin/pages/dashboard/lib"
+import { formatMeasure } from "#orck/admin/pages/dashboard/lib"
 import { WidgetVizView } from "#orck/admin/pages/dashboard/widget-viz"
 
 import {
@@ -49,10 +48,6 @@ import {
   missedQuery,
   missedRows,
   NEW_CARD,
-  NMI_KINDS,
-  nmiHistoryMonths,
-  nmiHistoryQueries,
-  nmiRefusals,
   OWNERS,
   RANGES,
   reasonGroups,
@@ -61,7 +56,6 @@ import {
   RECOVERY_DAYS,
   recoveryCurves,
   recoveryQueries,
-  recordingSince,
   TILES,
   tileValue,
   trendQueries,
@@ -96,9 +90,6 @@ export function PaymentHealthPage() {
     setParams(p)
   }
   const pspKey = (id: string) => psps?.find((p) => p.id === id)?.key ?? id
-  const nmi = psp
-    ? psp.rail === "nmi"
-    : Boolean(psps?.some((p) => p.rail === "nmi"))
 
   return (
     <div className="flex flex-col gap-4">
@@ -152,7 +143,6 @@ export function PaymentHealthPage() {
         <Missed scope={scope} pspKey={pspKey} />
         <Coverage scope={scope} pspKey={pspKey} />
       </div>
-      {nmi && <NMIHistory scope={scope} />}
     </div>
   )
 }
@@ -745,156 +735,5 @@ function Coverage({
         </Table>
       )}
     </Panel>
-  )
-}
-
-function NMIHistory({ scope }: { scope: Scope }) {
-  const { id: adminId, text: adminText } = useAdminUI()
-
-  const metrics = useAdminServices().adminQueries.widgetMetrics
-
-  const q = nmiHistoryQueries(scope)
-  const months = useQuery(metrics(q.months))
-  const reasons = useQuery(metrics(q.reasons))
-  const recorded = useQuery(metrics(q.recorded))
-  const since = recordingSince(recorded.data)
-  const rows = nmiHistoryMonths(months.data, since)
-  const refusals = nmiRefusals(reasons.data).slice(0, 10)
-  return (
-    <section
-      className="flex flex-col gap-3"
-      aria-labelledby={adminId("nmi-history")}
-    >
-      <div className="flex flex-col gap-1">
-        <h2
-          id={adminId("nmi-history")}
-          className="text-lg font-semibold tracking-tight"
-        >
-          <AdminMessage
-            id={"NMI history (before OpenRails recorded attempts)"}
-          />
-        </h2>
-        <p className="max-w-4xl text-sm text-muted-foreground">
-          <AdminMessage
-            id={
-              "NMI's own transaction history, read daily and kept 25 months. It counts every sender, OpenRails too once it started. One-off sales mix initial sales, upgrades and retries of declined rebills: the history cannot tell them apart. Scheduled rebills are NMI's own charges, each the first try of its period. Rates count authorizations, not buyers."
-            }
-          />{" "}
-          {since
-            ? `OpenRails recorded its own attempts from ${formatBucket(since, "month")}; from then on the panels above measure them.`
-            : "OpenRails recorded no NMI attempt in this range."}
-        </p>
-      </div>
-      <div className="grid gap-4 @min-[56rem]/page:grid-cols-3">
-        <Panel
-          title={adminText("Refusal rate by month")}
-          className="@min-[56rem]/page:col-span-2"
-        >
-          {months.isPending || recorded.isPending ? (
-            <Loading />
-          ) : rows.length === 0 ? (
-            <Empty label={adminText("No NMI history yet: it is read daily.")} />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>
-                    <AdminMessage id={"Month"} />
-                  </TableHead>
-                  {NMI_KINDS.map((k) => (
-                    <TableHead key={k.value} className="text-right">
-                      {k.label}
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((m) => (
-                  <TableRow
-                    key={m.month}
-                    className={cn(m.recorded && "text-muted-foreground")}
-                  >
-                    <TableCell>
-                      <span className="flex items-center gap-2">
-                        {formatBucket(m.month, "month")}
-                        {m.month === since && (
-                          <Badge variant="outline">
-                            <AdminMessage id={"OpenRails starts"} />
-                          </Badge>
-                        )}
-                      </span>
-                    </TableCell>
-                    {NMI_KINDS.map((k) => {
-                      const cell = m.kinds[k.value]
-                      return (
-                        <TableCell
-                          key={k.value}
-                          className="text-right tabular-nums"
-                        >
-                          {cell ? (
-                            <>
-                              {pct(cell.refusalRate)}
-                              <span className="ml-1 text-xs text-muted-foreground">
-                                <AdminMessage id={"of "} />
-                                {cell.authorizations.toLocaleString()}
-                              </span>
-                            </>
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                      )
-                    })}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </Panel>
-        <Panel title={adminText("Top refusal reasons")}>
-          {reasons.isPending ? (
-            <Loading />
-          ) : refusals.length === 0 ? (
-            <Empty label={adminText("No refusals in NMI's history.")} />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>
-                    <AdminMessage id={"Kind / reason"} />
-                  </TableHead>
-                  <TableHead className="text-right">
-                    <AdminMessage id={"Refused"} />
-                  </TableHead>
-                  <TableHead className="text-right">
-                    <AdminMessage id={"Share"} />
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {refusals.map((r) => (
-                  <TableRow key={`${r.kind}|${r.cause}|${r.reason}`}>
-                    <TableCell>
-                      <span className="block text-xs text-muted-foreground">
-                        {NMI_KINDS.find((k) => k.value === r.kind)?.label ??
-                          r.kind}{" "}
-                        · {r.cause}
-                      </span>
-                      {r.reason}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {r.count.toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {pct(r.share)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </Panel>
-      </div>
-    </section>
   )
 }
