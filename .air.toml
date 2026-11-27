@@ -14,7 +14,8 @@ cmd = "cd server && go build -buildvcs=false -o ../tmp/openrails ./cmd/openrails
 bin = "./tmp/openrails"
 args_bin = ["run-server"]
 
-include_ext = ["go"]
+# Migrations are embedded .sql files.
+include_ext = ["go", "sql"]
 exclude_dir = [
   ".cache",
   ".claude",

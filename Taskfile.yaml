@@ -104,7 +104,7 @@ tasks:
       - docker compose stop
 
   dev:api:
-    desc: The API server under Air on 127.0.0.1:3053 (the default host), rebuilt on every Go change; its output is also tmp/dev.log, replaced each start
+    desc: The API server under Air on 127.0.0.1:3053 (the default host), rebuilt on every Go or SQL change; its output is also tmp/dev.log, replaced each start
     set: [pipefail]
     env: &dev-env
       PUBLIC_URL: '{{.PUBLIC_URL | default "http://localhost:3053"}}'

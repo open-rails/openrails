@@ -40,7 +40,7 @@ The server listens on loopback (`127.0.0.1`) unless `host` names another address
 
 ## Local development
 
-`task dev:services` starts the Compose dependencies (PostgreSQL, Redis as Valkey, ClickHouse and Vault, each on a loopback port) and mounts Vault's engines; `task dev:services:stop` stops them. `task dev` runs the server under Air on `127.0.0.1:3053` and the console under Vite at `http://localhost:3054/admin/`; it first checks the dependencies are up and Vault has its `kv` mount, and otherwise names `task dev:services` and exits. The server's output is also written to `tmp/dev.log`, replaced each start. Once the server is ready it seeds a local operator and a merchant named `sandbox`, and prints the sign-in; `task dev:login` prints it again. Ctrl+C stops the server and the console, not the dependencies.
+`task dev:services` starts the Compose dependencies (PostgreSQL, Redis as Valkey, ClickHouse and Vault, each on a loopback port) and mounts Vault's engines; `task dev:services:stop` stops them. `task dev` runs the server under Air on `127.0.0.1:3053` and the console under Vite at `http://localhost:3054/admin/`; it first checks the dependencies are up and Vault has its `kv` mount, and otherwise names `task dev:services` and exits. Air rebuilds the server on every change to a `.go` or `.sql` file, migrations included, and the server's output is also written to `tmp/dev.log`, replaced each start. Once the server is ready it seeds a local operator and a merchant named `sandbox`, and prints the sign-in; `task dev:login` prints it again. Ctrl+C stops the server and the console, not the dependencies.
 
 | Sign-in | |
 |---|---|
