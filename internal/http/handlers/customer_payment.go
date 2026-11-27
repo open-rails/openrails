@@ -19,11 +19,11 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-func customerActionPayer(r *httprequest.Request) (identity.CustomerID, bool) {
+func actionCustomer(r *httprequest.Request) (identity.CustomerID, bool) {
 	if !customerInitiatedChargeAllowed(r) {
 		return identity.CustomerID{}, false
 	}
-	return selfAccountPayer(r)
+	return selfAccountCustomer(r)
 }
 
 // customerInitiatedChargeAllowed refuses a customer-initiated charge unless
@@ -56,7 +56,7 @@ func paymentActionKey(r *httprequest.Request) (string, bool) {
 }
 func RetryMySubscriptionNow(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	payer, ok := customerActionPayer(r)
+	customer, ok := actionCustomer(r)
 	if !ok {
 		return
 	}
@@ -77,7 +77,7 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeInvalidParam, "invalid payment_method_id")
 		return
 	}
-	if refuseBlockedCardAttempt(r, payer.String()) {
+	if refuseBlockedCardAttempt(r, customer.String()) {
 		return
 	}
 	svc, err := billingservice.New(r.Log, r.State)
@@ -86,11 +86,11 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 		return
 	}
 	ctx := intents.WithInvoiceCaptchaSubjects(r.Request.Context(), middleware.SubjectKeysFromContext(r.Request.Context()))
-	result, err := svc.RetrySubscriptionNow(ctx, payer, id, key, body, verifiedPrincipal(r))
+	result, err := svc.RetrySubscriptionNow(ctx, customer, id, key, body, verifiedPrincipal(r))
 	if err != nil {
 		var refusal *billingservice.CustomerPaymentRefusal
 		if errors.As(err, &refusal) {
-			noteCardDecline(r, payer.String())
+			noteCardDecline(r, customer.String())
 		}
 		customerPaymentError(r, err)
 		return

@@ -8,11 +8,11 @@ import (
 
 // GetMyUsage reports the customer's own usage.
 func GetMyUsage(r *httprequest.Request) {
-	payer, ok := selfAccountPayer(r)
+	customer, ok := selfAccountCustomer(r)
 	if !ok {
 		return
 	}
-	getUsage(r, payer)
+	getUsage(r, customer)
 }
 
 // GetUsage reports a customer's usage to staff.
@@ -26,11 +26,11 @@ func GetUsage(r *httprequest.Request) {
 
 // GetMyUsageSeries reports the customer's own usage over time.
 func GetMyUsageSeries(r *httprequest.Request) {
-	payer, ok := selfAccountPayer(r)
+	customer, ok := selfAccountCustomer(r)
 	if !ok {
 		return
 	}
-	getUsageSeries(r, payer)
+	getUsageSeries(r, customer)
 }
 
 // GetUsageSeries reports a customer's usage over time to staff.

@@ -1,7 +1,7 @@
 -- Arrears delinquency: the state projection, its due work, and the durable
 -- host-lifecycle signal feed.
 
--- CROSS-MERCHANT: the payers whose delinquency time alone changes now (a usage
+-- CROSS-MERCHANT: the customers whose delinquency time alone changes now (a usage
 -- invoice fell due, a grace window ran out), in due order. Strictly before now:
 -- an invoice is overdue only once its due_at has passed. An idle pass reads no
 -- row.
@@ -16,12 +16,12 @@ ORDER BY next_evaluation_at, merchant_id, customer_id, currency
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: GetOverdueInvoiceAggregate :one
--- One payer's usage invoices in a currency against now: how much is overdue and
+-- One customer's usage invoices in a currency against now: how much is overdue and
 -- since when, and when the next one falls due. Every evaluation and the
 -- admission gate's live recompute read it, so the stored state and the gate
 -- agree. grace_days and amount_floor are the bound billing policy's overrides,
 -- -1 for none; its floor is in its policy_currency, and overrides only there. policies is the merchant's settings, {policies: {name: body},
--- tiers: {tier: name}, default: name, trust}; the payer's policy is its own
+-- tiers: {tier: name}, default: name, trust}; the customer's policy is its own
 -- assignment while the settings still declare it, else its trust tier's
 -- (billing.trust_tier), else the default.
 --
@@ -61,7 +61,7 @@ WHERE o.merchant_id = sqlc.arg(merchant_id)
   AND o.amount_paid < o.total;
 
 -- name: NotifyOverdueInvoices :exec
--- Tells the payer once about each of its open usage invoices in the currency
+-- Tells the customer once about each of its open usage invoices in the currency
 -- past its due date; the notice id derives from the invoice's (uuidutil.ChildV7
 -- of "invoice_overdue": its timestamp, then SHA-256 of the invoice id and name),
 -- so a later evaluation adds none. One with a collection in flight waits for
@@ -81,7 +81,7 @@ WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.customer_id = sqlc.arg(c
 ON CONFLICT (merchant_id, id) DO NOTHING;
 
 -- name: ScheduleDelinquency :exec
--- The payer is evaluated on the next pass: its policy could not be read when
+-- The customer is evaluated on the next pass: its policy could not be read when
 -- one of its usage invoices changed.
 INSERT INTO billing.customer_delinquency (merchant_id, customer_id, currency, state, overdue_amount, overdue_invoices,
     entered_at, transition_seq, evaluated_at, next_evaluation_at)
@@ -91,7 +91,7 @@ ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE
 SET next_evaluation_at = LEAST(billing.customer_delinquency.next_evaluation_at, EXCLUDED.next_evaluation_at);
 
 -- name: MarkDelinquencyDue :exec
--- The merchant's delinquency policy may have changed: every payer it holds
+-- The merchant's delinquency policy may have changed: every customer it holds
 -- in grace or delinquent is evaluated again on the next pass.
 UPDATE billing.customer_delinquency
 SET next_evaluation_at = sqlc.arg(now)::timestamptz
@@ -99,7 +99,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND state <> 'current'
   AND next_evaluation_at IS DISTINCT FROM sqlc.arg(now)::timestamptz;
 
 -- name: RebuildDelinquencyDue :exec
--- A restored merchant's payers with an open usage invoice are evaluated again
+-- A restored merchant's customers with an open usage invoice are evaluated again
 -- at once; MarkDelinquencyDue covers the ones in grace or delinquent.
 INSERT INTO billing.customer_delinquency (merchant_id, customer_id, currency, state, overdue_amount, overdue_invoices,
     entered_at, transition_seq, evaluated_at, next_evaluation_at)
@@ -170,7 +170,7 @@ SELECT upserted.state,
 FROM upserted;
 
 -- A row is NEVER deleted once it exists, and one is created `current` only to
--- hold a payer's next evaluation (transition_seq 0). Deleting a cleared row would
+-- hold a customer's next evaluation (transition_seq 0). Deleting a cleared row would
 -- restart transition_seq, and a restarted sequence collides with the dedupe key
--- of the payer's earlier transition — which would silently swallow the second
+-- of the customer's earlier transition — which would silently swallow the second
 -- shutoff signal for anyone who has been delinquent before.

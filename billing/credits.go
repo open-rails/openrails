@@ -472,19 +472,19 @@ type BillingPolicy struct {
 	// budget_exceeded.
 	SpendWindows []BudgetWindow `json:"spend_windows,omitempty"`
 	// CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor
-	// override the merchant-wide invoice policy for payers bound here; nil defers
+	// override the merchant-wide invoice policy for customers bound here; nil defers
 	// to it. DelinquencyAmountFloor is in
 	// PolicyCurrency, which it requires, and applies to debt in it.
 	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty,string"`
 	DelinquencyGraceDays      *int   `json:"delinquency_grace_days,omitempty"`
 	DelinquencyAmountFloor    *int64 `json:"delinquency_amount_floor,omitempty,string"`
 	// CollectionCycleBoundary is declarable and REFUSED: statement periods must
-	// tile a payer's lifetime, and rebinding is a live lever, so the boundary
+	// tile a customer's lifetime, and rebinding is a live lever, so the boundary
 	// stays merchant-wide. Declaring it here fails with that reason.
 	CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
-	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
+	// BadSpendWindows are the #497 per-CUSTOMER direct-credential wasted-spend grace
 	// windows: at most Limit of host-reported wasted spend is forgiven per window;
-	// direct-payer overage is charged.
+	// direct-customer overage is charged.
 	BadSpendWindows []BudgetWindow `json:"bad_spend_windows,omitempty"`
 	// PolicyCurrency is the currency of the policy's amounts and of a spend or
 	// bad-spend window that names none; absent, the request's. The outstanding

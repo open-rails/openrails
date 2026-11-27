@@ -18,7 +18,7 @@ const (
 )
 
 // AdmitParams is one request a Gate decides against a customer's money
-// (payer capacity, spend windows and failed-usage cutoffs) and the usage
+// (customer capacity, spend windows and failed-usage cutoffs) and the usage
 // limits its usage counts toward, on the gate's view: nothing is held on
 // the server.
 type AdmitParams struct {

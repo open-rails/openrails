@@ -19,14 +19,14 @@ import (
 const (
 	KindDelinquency = "openrails.delinquency"
 
-	// delinquencyBatch is how many due payers one read takes. The read is
+	// delinquencyBatch is how many due customers one read takes. The read is
 	// indexed on the due instant, so a pass costs what is due.
 	delinquencyBatch = 200
 )
 
-// DelinquencyWorker evaluates the payers whose delinquency time alone changed
+// DelinquencyWorker evaluates the customers whose delinquency time alone changed
 // (customer_delinquency.next_evaluation_at): a usage invoice fell due or a grace
-// window ran out. A change to a usage invoice evaluates its payer inline. It
+// window ran out. A change to a usage invoice evaluates its customer inline. It
 // moves no money and calls no provider, so it runs with no charger armed and
 // under a limited or readonly write posture. A failed evaluation stays due and fails the
 // pass once the others are done.
@@ -43,7 +43,7 @@ func (w DelinquencyWorker) now() time.Time {
 	return time.Now().UTC()
 }
 
-// DueBy reports a payer the pass would evaluate at at.
+// DueBy reports a customer the pass would evaluate at at.
 func (w DelinquencyWorker) DueBy(ctx context.Context, at time.Time) (bool, error) {
 	due, err := w.DB.GenDirectory().ListDueDelinquency(ctx, gen.ListDueDelinquencyParams{Now: at, RowLimit: 1})
 	return len(due) > 0, err

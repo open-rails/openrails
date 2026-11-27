@@ -16,7 +16,7 @@ import (
 var errCollectionNonexecutionUnproven = errors.New("fenced collection has no qualified nonexecution proof")
 
 // CompleteInvoiceCollection is called at the end of the domain transaction,
-// after its payer/invoice/attempt locks. It is deliberately collection-specific:
+// after its customer/invoice/attempt locks. It is deliberately collection-specific:
 // a successful state requires retained, validated provider receipt custody.
 func (s *Store) CompleteInvoiceCollection(ctx context.Context, in gen.BillingProviderIntent, outcome Outcome, now time.Time) error {
 	if in.IntentType != TypeInvoiceCollection {

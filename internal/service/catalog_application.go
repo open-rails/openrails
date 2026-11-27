@@ -536,7 +536,7 @@ func (s *Service) applyCatalogBilling(ctx context.Context, params catalogwire.Ap
 		}
 		for _, key := range slices.Sorted(maps.Keys(params.Products)) {
 			if p := params.Products[key]; p.RateCards.Set {
-				// Preserve all other products and payer overrides; replace exactly
+				// Preserve all other products and customer overrides; replace exactly
 				// this named product's explicit list after existing dependency checks.
 				kept := make([]CatalogRateCardSpec, 0, len(desired.RateCards))
 				for _, card := range desired.RateCards {

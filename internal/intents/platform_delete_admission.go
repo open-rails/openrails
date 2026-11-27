@@ -70,7 +70,7 @@ func (h *PlatformMethodDeleteHandler) admit(ctx context.Context, store *Store, p
 		if err != nil {
 			return err
 		}
-		if aliases.ForeignPayers != 0 || aliases.Total != 1 {
+		if aliases.ForeignCustomers != 0 || aliases.Total != 1 {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		if _, err := q.LockCustodianDeletionAccount(ctx, gen.LockCustodianDeletionAccountParams{MerchantID: mid.UUID(), ID: *pm.CustodianID}); err != nil {
@@ -134,7 +134,7 @@ func (h *PlatformMethodDeleteHandler) checkFence(ctx context.Context, in gen.Bil
 		if err != nil {
 			return err
 		}
-		if aliases.ForeignPayers != 0 || aliases.Total != 1 {
+		if aliases.ForeignCustomers != 0 || aliases.Total != 1 {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		return deletionMethodUnused(ctx, q, in.MerchantID, p.PaymentMethodID, 1)

@@ -9,7 +9,7 @@ import (
 )
 
 // DeletedMethod validates a terminal instrument decision without requiring the
-// removed row. Archives use its immutable payer/ID to explain nullable history.
+// removed row. Archives use its immutable customer/ID to explain nullable history.
 func DeletedMethod(in gen.BillingProviderIntent) (uuid.UUID, uuid.UUID, error) {
 	invalid := errors.New("invalid terminal payment-method deletion")
 	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.Status != StatusSucceeded {

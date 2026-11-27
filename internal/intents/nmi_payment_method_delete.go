@@ -291,7 +291,7 @@ func (h *NMIPaymentMethodDeleteHandler) complete(ctx context.Context, in gen.Bil
 	defer cancel()
 	customer, err := uuid.Parse(p.UserID)
 	if err != nil {
-		return Ambiguous("invalid accepted deletion payer")
+		return Ambiguous("invalid accepted deletion customer")
 	}
 	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := h.DB.NewWithPgxTx(tx)

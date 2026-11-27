@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
-// SpendgatePolicyLoader resolves the payer's policy windows inside the
+// SpendgatePolicyLoader resolves the customer's policy windows inside the
 // admission transaction. FX conversion expresses each limit in the request unit.
 type SpendgatePolicyLoader struct {
 	policies *BillingPolicyStore
@@ -26,22 +26,22 @@ func NewSpendgatePolicyLoader(policies *BillingPolicyStore, fxp *fx.Rates) *Spen
 }
 
 // ResolvePolicy reads the current binding and policy together from PostgreSQL.
-func (l *SpendgatePolicyLoader) ResolvePolicy(ctx context.Context, payer identity.CustomerID, trustLevel string) (ResolvedPolicy, error) {
-	return l.policies.Resolve(ctx, payer, trustLevel)
+func (l *SpendgatePolicyLoader) ResolvePolicy(ctx context.Context, customer identity.CustomerID, trustLevel string) (ResolvedPolicy, error) {
+	return l.policies.Resolve(ctx, customer, trustLevel)
 }
 
-// Load turns an already-resolved policy into the payer-scope windows the SQL
+// Load turns an already-resolved policy into the customer-scope windows the SQL
 // gate enforces, in requestCurrency. A window that names no currency is in
 // the policy's policy_currency, else the request's.
 func (l *SpendgatePolicyLoader) Load(ctx context.Context, requestCurrency string, resolved ResolvedPolicy) (spendgate.Policy, error) {
-	pw, err := l.convert(ctx, spendgate.ScopePayer, resolved.SpendWindows, resolved.PolicyCurrency, requestCurrency)
+	pw, err := l.convert(ctx, spendgate.ScopeCustomer, resolved.SpendWindows, resolved.PolicyCurrency, requestCurrency)
 	if err != nil {
 		return spendgate.Policy{}, err
 	}
 	if len(pw) == 0 {
 		return spendgate.Policy{}, nil
 	}
-	return spendgate.Policy{Scopes: []spendgate.ScopedWindows{{Scope: spendgate.ScopePayer, Windows: pw}}}, nil
+	return spendgate.Policy{Scopes: []spendgate.ScopedWindows{{Scope: spendgate.ScopeCustomer, Windows: pw}}}, nil
 }
 
 // convert maps budgets.BudgetWindow → spendgate.Window, FX-converting the limit to
@@ -79,13 +79,13 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 	return out, nil
 }
 
-// payerCapacity is the affordability snapshot the spendgate is evaluated
+// customerCapacity is the affordability snapshot the spendgate is evaluated
 // against: spendable balance (ledger customer_units counters, O(1)) less
 // pending usage and running-charge accrual, plus, in arrears, the credit line
 // still available: the customer's credit limit (its own, else its policy's
 // cap, else the merchant's usage terms') less what it owes, floored at zero.
 // Prepaid, what it owes is not available to new work.
-func payerCapacity(capacity money.AdmissionCapacity) (available, creditLine, outstanding int64) {
+func customerCapacity(capacity money.AdmissionCapacity) (available, creditLine, outstanding int64) {
 	available = capacity.Balance - capacity.Unposted()
 	outstanding = capacity.OutstandingOwed
 	if capacity.BillingMode != money.BillingModeArrears {
@@ -97,6 +97,6 @@ func payerCapacity(capacity money.AdmissionCapacity) (available, creditLine, out
 // Available is what the customer may spend before any credit line: its
 // balance less pending usage and accrual, less what it owes when it prepays.
 func Available(capacity money.AdmissionCapacity) int64 {
-	available, _, _ := payerCapacity(capacity)
+	available, _, _ := customerCapacity(capacity)
 	return available
 }

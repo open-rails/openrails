@@ -153,8 +153,8 @@ var omittedColumns = map[string]string{
 	"price_migrations": "destructive_action_id",
 	// Derived from the lines: a restored open invoice is not found by it.
 	"invoices": "lines_digest",
-	// When time alone next changes a payer's delinquency: restore schedules
-	// every payer again.
+	// When time alone next changes a customer's delinquency: restore schedules
+	// every customer again.
 	"customer_delinquency": "next_evaluation_at",
 	// When a usage account is next checked: restore schedules it again.
 	"money_settings": "usage_due_at",
@@ -333,7 +333,7 @@ var registryCurrencies = func() string {
 }()
 
 // referenceChecks: the ledger intentionally has no control-plane FKs. Archive
-// restoration still refuses missing/cross-payer retained business references.
+// restoration still refuses missing/cross-customer retained business references.
 var referenceChecks = []rowCheck{
 	// Current available prices obey the same product/price contract as ordinary
 	// catalog writes; incompatible archived history remains portable.

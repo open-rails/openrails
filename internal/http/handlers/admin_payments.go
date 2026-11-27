@@ -465,7 +465,7 @@ type MyPaymentListQuery struct {
 // ListMyPayments (GET /me/payments) is one page of the caller's payments,
 // newest first.
 func ListMyPayments(r *httprequest.Request) {
-	customer, ok := selfAccountPayer(r)
+	customer, ok := selfAccountCustomer(r)
 	if !ok {
 		return
 	}

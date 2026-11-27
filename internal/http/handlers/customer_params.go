@@ -10,14 +10,14 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
-// servicePayer converts a typed wire customer id to the engine's payer
+// serviceCustomer converts a typed wire customer id to the engine's customer
 // identity; the zero id is nil (absent).
-func servicePayer(id billing.CustomerID) *billingidentity.CustomerID {
+func serviceCustomer(id billing.CustomerID) *billingidentity.CustomerID {
 	if id.IsZero() {
 		return nil
 	}
-	payer := billingidentity.CustomerID(id)
-	return &payer
+	customer := billingidentity.CustomerID(id)
+	return &customer
 }
 
 // customerIDParam reads a plain-UUID customer id from a path or query value;

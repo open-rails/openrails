@@ -7,7 +7,7 @@
 
 -- name: SetCustomerBillingPolicy :execrows
 -- The customer's own billing policy, by its name in the merchant's settings:
--- staff's lever for one payer, beating the tier and the default. NULL clears it.
+-- staff's lever for one customer, beating the tier and the default. NULL clears it.
 UPDATE billing.customers SET billing_policy = sqlc.narg(policy)::text
 WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(customer_id);
 

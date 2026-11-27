@@ -40,7 +40,7 @@ type RoutingInput struct {
 	Product *models.Product
 	// Mode is the purchase mode this price implies (one_off | subscription).
 	Mode models.PurchaseKind
-	// Country is the payer's country when the request carries one, else "".
+	// Country is the customer's country when the request carries one, else "".
 	Country string
 	// Selector is an EXPLICIT client preference (the wire payment.rail). When
 	// set it wins outright and no fallback applies: the browser has already

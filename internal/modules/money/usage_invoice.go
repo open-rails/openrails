@@ -26,9 +26,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// Owed usage is billed as a usage invoice: the period sweep closes each payer's
+// Owed usage is billed as a usage invoice: the period sweep closes each customer's
 // previous period, the threshold pass the period so far once it reaches the
-// payer's trigger, and an explicit close any window. Each bills the window's
+// customer's trigger, and an explicit close any window. Each bills the window's
 // pending owed charges, once.
 
 var (
@@ -36,17 +36,17 @@ var (
 	ErrPaymentExceedsDue     = errors.New("payment amount exceeds what the usage invoice has due")
 )
 
-// FinalizeUsage closes [from, to) for one payer and currency at now, the
+// FinalizeUsage closes [from, to) for one customer and currency at now, the
 // caller's clock: the window's pending owed charges, usage priced when it was
-// recorded included, are billed as one usage invoice, due after the payer's net
+// recorded included, are billed as one usage invoice, due after the customer's net
 // terms. A second close of the same window answers the first invoice. Nil when
 // the window billed nothing.
-func (s *MoneyService) FinalizeUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to, now time.Time) (*gen.BillingInvoice, error) {
+func (s *MoneyService) FinalizeUsage(ctx context.Context, customer identity.CustomerID, currency string, from, to, now time.Time) (*gen.BillingInvoice, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
+	if customer.IsZero() {
+		return nil, fmt.Errorf("customer required")
 	}
 	if !to.After(from) {
 		return nil, fmt.Errorf("invalid period: to must be after from")
@@ -60,21 +60,21 @@ func (s *MoneyService) FinalizeUsage(ctx context.Context, payer identity.Custome
 		return nil, err
 	}
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		return ensureCustomer(ctx, s.db.Gen(ctx), mid.UUID(), payer.UUID())
+		return ensureCustomer(ctx, s.db.Gen(ctx), mid.UUID(), customer.UUID())
 	}); err != nil {
 		return nil, err
 	}
 	var out *gen.BillingInvoice
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		out, err = s.finalizeUsageTx(ctx, s.db.NewWithPgxTx(tx), payer, cur, from, to, instant(now))
+		out, err = s.finalizeUsageTx(ctx, s.db.NewWithPgxTx(tx), customer, cur, from, to, instant(now))
 		return err
 	})
 	return out, err
 }
 
 // finalizeUsageTx bills the window [from, to) at now, the caller's clock.
-func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer identity.CustomerID, cur string, from, to, now time.Time) (*gen.BillingInvoice, error) {
+func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, customer identity.CustomerID, cur string, from, to, now time.Time) (*gen.BillingInvoice, error) {
 	q := d.Gen(ctx)
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -82,27 +82,27 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 	}
 	var out *gen.BillingInvoice
 	err = func() error {
-		merchantID, payerID, pfrom, pto := mid.UUID(), payer.UUID(), from.UTC(), to.UTC()
-		// Concurrent closes and money writes serialize on the payer.
-		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID, ID: payerID}); err != nil {
-			return fmt.Errorf("lock usage payer: %w", err)
+		merchantID, customerID, pfrom, pto := mid.UUID(), customer.UUID(), from.UTC(), to.UTC()
+		// Concurrent closes and money writes serialize on the customer.
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID, ID: customerID}); err != nil {
+			return fmt.Errorf("lock usage customer: %w", err)
 		}
 		// Usage is owed as it accrued, and running charges through the
 		// window's end as far as it has come, before the window is billed.
-		if _, err := s.WithDatabase(d).at(now).postEverything(ctx, q, merchantID, payerID, cur, usagePostingBilling); err != nil {
+		if _, err := s.WithDatabase(d).at(now).postEverything(ctx, q, merchantID, customerID, cur, usagePostingBilling); err != nil {
 			return err
 		}
-		if _, err := postRunningChargesThrough(ctx, q, merchantID, payerID, cur, earlier(pto, now), now); err != nil {
+		if _, err := postRunningChargesThrough(ctx, q, merchantID, customerID, cur, earlier(pto, now), now); err != nil {
 			return err
 		}
 		// The invoice bills the window's owed items; its period runs from where
 		// their charges began (a pricing period's start) to the window's end.
-		start, err := q.EarliestPendingOwedCharge(ctx, gen.EarliestPendingOwedChargeParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur,
+		start, err := q.EarliestPendingOwedCharge(ctx, gen.EarliestPendingOwedChargeParams{MerchantID: merchantID, CustomerID: customerID, Currency: cur,
 			WindowStartsAt: pfrom, WindowEndsAt: pto})
 		if err != nil {
 			return err
 		}
-		existing, err := q.GetUsageInvoiceOfWindow(ctx, gen.GetUsageInvoiceOfWindowParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur,
+		existing, err := q.GetUsageInvoiceOfWindow(ctx, gen.GetUsageInvoiceOfWindowParams{MerchantID: merchantID, CustomerID: customerID, Currency: cur,
 			PeriodEndsAt: pto, WindowStartsAt: pfrom})
 		if err == nil {
 			out = &existing
@@ -112,7 +112,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 			return err
 		}
 		sources, err := q.SumPendingOwedItemAmountBySourceInPeriod(ctx, gen.SumPendingOwedItemAmountBySourceInPeriodParams{
-			MerchantID: merchantID, CustomerID: payerID, Currency: cur, PeriodStartsAt: pfrom, PeriodEndsAt: pto})
+			MerchantID: merchantID, CustomerID: customerID, Currency: cur, PeriodStartsAt: pfrom, PeriodEndsAt: pto})
 		if err != nil {
 			return err
 		}
@@ -129,26 +129,26 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 		}
 		// Owed a funded balance already repaid is not billed again: an invoice
 		// claims at most the owed no other invoice claims.
-		owed, err := s.moneyLedger(q, merchantID).OutstandingOwed(ctx, payerID, cur)
+		owed, err := s.moneyLedger(q, merchantID).OutstandingOwed(ctx, customerID, cur)
 		if err != nil {
 			return err
 		}
-		claimed, err := q.SumOwedInvoiceClaims(ctx, gen.SumOwedInvoiceClaimsParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur})
+		claimed, err := q.SumOwedInvoiceClaims(ctx, gen.SumOwedInvoiceClaimsParams{MerchantID: merchantID, CustomerID: customerID, Currency: cur})
 		if err != nil {
 			return err
 		}
 		due := min(receivable, max(owed-claimed, 0))
-		// The payer's invoice profile: net-N terms, collection method and the
+		// The customer's invoice profile: net-N terms, collection method and the
 		// document fields the invoice carries.
 		var profile *CustomerInvoiceProfile
-		if row, err := q.GetInvoiceProfile(ctx, gen.GetInvoiceProfileParams{MerchantID: merchantID, CustomerID: payerID}); err == nil {
+		if row, err := q.GetInvoiceProfile(ctx, gen.GetInvoiceProfileParams{MerchantID: merchantID, CustomerID: customerID}); err == nil {
 			if profile, err = invoiceProfileFromGen(row); err != nil {
 				return err
 			}
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		u := usage.Invoice{CustomerID: payerID, Currency: cur, PeriodStart: earlier(start.UTC(), pfrom), PeriodEnd: pto, DueAt: now, Paid: receivable - due,
+		u := usage.Invoice{CustomerID: customerID, Currency: cur, PeriodStart: earlier(start.UTC(), pfrom), PeriodEnd: pto, DueAt: now, Paid: receivable - due,
 			Lines: lines, CollectionMethod: CollectionChargeAutomatically}
 		if profile != nil {
 			if profile.NetTermsDays > 0 {
@@ -163,7 +163,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 		if err != nil {
 			return err
 		}
-		if _, err := q.AttachPendingOwedItemsToInvoice(ctx, gen.AttachPendingOwedItemsToInvoiceParams{MerchantID: merchantID, CustomerID: payerID,
+		if _, err := q.AttachPendingOwedItemsToInvoice(ctx, gen.AttachPendingOwedItemsToInvoiceParams{MerchantID: merchantID, CustomerID: customerID,
 			InvoiceID: invoice.ID, Currency: cur, PeriodStartsAt: pfrom, PeriodEndsAt: pto, Now: now}); err != nil {
 			return err
 		}
@@ -175,7 +175,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 			}
 			if err := q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
 				ID:         uuidutil.DerivedV7(uuidutil.TimeOf(invoice.ID), uuidutil.DeterministicNamespace, uuidutil.Name("order_due", merchantID.String(), invoice.ID.String())),
-				MerchantID: merchantID, CustomerID: payerID,
+				MerchantID: merchantID, CustomerID: customerID,
 				EventType: string(models.NotificationInvoiceDue), Data: data, CreatedAt: now,
 			}); err != nil {
 				return fmt.Errorf("invoice due notification: %w", err)
@@ -187,7 +187,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 	return out, err
 }
 
-// lockUsageInvoice locks a usage invoice under its payer, in the caller's
+// lockUsageInvoice locks a usage invoice under its customer, in the caller's
 // transaction.
 func lockUsageInvoice(ctx context.Context, q *gen.Queries, merchantID, id uuid.UUID) (gen.BillingInvoice, error) {
 	row, err := q.GetInvoice(ctx, gen.GetInvoiceParams{MerchantID: merchantID, ID: id})

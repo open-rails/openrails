@@ -326,7 +326,7 @@ func (s *PurchaseService) resolveChange(ctx context.Context, req *SubscriptionCh
 	if req.SubscriptionID != uuid.Nil {
 		sub, err = s.SubscriptionService.GetByID(ctx, req.SubscriptionID)
 		// Ownership compares parsed customer ids, not their spelling.
-		if payer := identity.CustomerIDFromString(user.ID); err != nil || payer.IsZero() || sub.CustomerID != payer.UUID() {
+		if customer := identity.CustomerIDFromString(user.ID); err != nil || customer.IsZero() || sub.CustomerID != customer.UUID() {
 			return nil, &TierChangeError{Code: billing.CodeSubscriptionNotFound, Message: "subscription not found"}
 		}
 	} else if sub, err = s.SubscriptionService.GetActiveSubscription(ctx, user.ID); err != nil {

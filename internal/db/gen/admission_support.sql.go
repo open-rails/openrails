@@ -169,7 +169,7 @@ type SetCustomerBillingPolicyParams struct {
 // budget_reservations + FOR UPDATE) was removed in the #513 hard cut — budget
 // accounting now lives in the Redis spendgate.
 // The customer's own billing policy, by its name in the merchant's settings:
-// staff's lever for one payer, beating the tier and the default. NULL clears it.
+// staff's lever for one customer, beating the tier and the default. NULL clears it.
 func (q *Queries) SetCustomerBillingPolicy(ctx context.Context, arg SetCustomerBillingPolicyParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setCustomerBillingPolicy, arg.Policy, arg.MerchantID, arg.CustomerID)
 	if err != nil {

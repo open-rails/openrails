@@ -8,7 +8,7 @@ import (
 // ListMyAgreements handles GET /v1/me/agreements: the customer's live charge
 // agreements, newest first.
 func ListMyAgreements(r *httprequest.Request) {
-	customer, ok := selfAccountPayer(r)
+	customer, ok := selfAccountCustomer(r)
 	if !ok {
 		return
 	}
@@ -32,7 +32,7 @@ func ListMyAgreements(r *httprequest.Request) {
 // RevokeMyAgreement handles POST /v1/me/agreements/{id}/revoke: the
 // merchant charges the card under it no more.
 func RevokeMyAgreement(r *httprequest.Request) {
-	customer, ok := selfAccountPayer(r)
+	customer, ok := selfAccountCustomer(r)
 	if !ok {
 		return
 	}

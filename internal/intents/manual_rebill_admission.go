@@ -38,18 +38,18 @@ var (
 )
 
 // EnqueueCustomer shares the scheduled admission lock and ownership. The HTTP
-// command supplies payer only after verifying a payer-scoped customer action.
-func (h *ManualRebillHandler) EnqueueCustomer(ctx context.Context, subscriptionID, payer uuid.UUID, clientKey string, method *uuid.UUID) (gen.BillingProviderIntent, bool, error) {
-	if payer == uuid.Nil || strings.TrimSpace(clientKey) == "" || len(clientKey) > 255 {
-		return gen.BillingProviderIntent{}, false, errors.New("payer and a 1-255 byte idempotency key required")
+// command supplies customer only after verifying a customer-scoped customer action.
+func (h *ManualRebillHandler) EnqueueCustomer(ctx context.Context, subscriptionID, customerID uuid.UUID, clientKey string, method *uuid.UUID) (gen.BillingProviderIntent, bool, error) {
+	if customerID == uuid.Nil || strings.TrimSpace(clientKey) == "" || len(clientKey) > 255 {
+		return gen.BillingProviderIntent{}, false, errors.New("customer and a 1-255 byte idempotency key required")
 	}
 	if method != nil && *method == uuid.Nil {
 		return gen.BillingProviderIntent{}, false, errors.New("payment method is invalid")
 	}
-	return h.enqueueRebill(ctx, subscriptionID, payer, charge.CustomerPaymentKey(subscriptions.TypeManualRebill, payer, strings.TrimSpace(clientKey)), method)
+	return h.enqueueRebill(ctx, subscriptionID, customerID, charge.CustomerPaymentKey(subscriptions.TypeManualRebill, customerID, strings.TrimSpace(clientKey)), method)
 }
 
-func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID, payer uuid.UUID, customerKey string, requestedMethod *uuid.UUID) (gen.BillingProviderIntent, bool, error) {
+func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID, customerID uuid.UUID, customerKey string, requestedMethod *uuid.UUID) (gen.BillingProviderIntent, bool, error) {
 	var accepted gen.BillingProviderIntent
 	replayed := false
 	customer := customerKey != ""
@@ -65,7 +65,7 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 			return err
 		}
 		if customer {
-			if sub.CustomerID != payer {
+			if sub.CustomerID != customerID {
 				return pgx.ErrNoRows
 			}
 			prior, err := d.Gen(ctx).GetProviderIntentByIdempotencyKey(ctx, gen.GetProviderIntentByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: customerKey})
@@ -77,7 +77,7 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 				if err != nil {
 					return err
 				}
-				if p.Renewal.SubscriptionID != subscriptionID || p.Renewal.CustomerID != payer || p.Initiator != charge.InitiatorCustomer || !sameOptionalID(p.RequestedPaymentMethodID, requestedMethod) {
+				if p.Renewal.SubscriptionID != subscriptionID || p.Renewal.CustomerID != customerID || p.Initiator != charge.InitiatorCustomer || !sameOptionalID(p.RequestedPaymentMethodID, requestedMethod) {
 					return ErrRebillKeyConflict
 				}
 				accepted, replayed = prior, true
@@ -140,7 +140,7 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		actor := ""
 		if customer {
 			key, initiator, origin, reason = customerKey, charge.InitiatorCustomer, OriginUser, "verified customer subscription retry"
-			actor = payer.String()
+			actor = customerID.String()
 		}
 		store := NewStore(d)
 		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, now, nil)

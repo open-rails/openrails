@@ -185,7 +185,7 @@ Checks:
 - OR-J05-S01 pins 9.99 USD × 3 at 29970000 native and 2997 minor units; OR-J40-S01 refuses a merchant unit in the general ledger.
 
 ### 4. Access control and tenant isolation
-Both tables key on `PRIMARY KEY (merchant_id, id)`, and a transfer's account foreign keys include `merchant_id`, so a transfer cannot reach another merchant's account. `ledger.New` and `books.New` bind one merchant and every query passes it. A transfer that moves a customer's account names that customer, enforced by the trigger. Staff reads need `merchant:customer:read`; the customer routes read `selfAccountPayer`, never a path id.
+Both tables key on `PRIMARY KEY (merchant_id, id)`, and a transfer's account foreign keys include `merchant_id`, so a transfer cannot reach another merchant's account. `ledger.New` and `books.New` bind one merchant and every query passes it. A transfer that moves a customer's account names that customer, enforced by the trigger. Staff reads need `merchant:customer:read`; the customer routes read `selfAccountCustomer`, never a path id.
 
 Checks:
 - `ledger_transfers_debit_account_id_fkey` and `ledger_transfers_credit_account_id_fkey` reference `(merchant_id, id)`.
@@ -219,7 +219,7 @@ The books have no write route; they move only through the systems above, which c
 
 Checks:
 - No package under `internal/http` imports `internal/modules/money/ledger` or `internal/modules/money/books`.
-- The customer reads take the payer from the signed-in identity (`selfAccountPayer`) and a bounded page.
+- The customer reads take the customer from the signed-in identity (`selfAccountCustomer`) and a bounded page.
 
 ### 9. Destructive-action safeguards
 Nothing deletes or rewrites a transfer: a correction is a compensating transfer. Undo runs refuse the five tables (`reconcile.NeverRollbackableTables`) and a merchant purge leaves them (`purgeMerchantRows` has no case for them). Staff commands that move money are admitted where they start: `destructive.RevokeCredit`, `destructive.Refund`, `destructive.WaiveInvoice`. Each transfer records its coordinate and, where known, `invoker_id`, `resource` and `invoice_id`.

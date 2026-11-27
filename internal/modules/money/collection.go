@@ -69,8 +69,8 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	if req.PaymentMethodID == uuid.Nil {
 		return nil, fmt.Errorf("payment_method_id required")
 	}
-	if req.Payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
+	if req.Customer.IsZero() {
+		return nil, fmt.Errorf("customer required")
 	}
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, fmt.Errorf("idempotency_key required")
@@ -98,7 +98,7 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	if method.MerchantID != merchantID {
 		return nil, fmt.Errorf("payment method belongs to another merchant")
 	}
-	if method.CustomerID != req.Payer.UUID() {
+	if method.CustomerID != req.Customer.UUID() {
 		return nil, fmt.Errorf("payment method belongs to another customer")
 	}
 	if !paymentmethods.Chargeable(method) {
@@ -173,7 +173,7 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 func (c *ScopedCharger) checkInstrumentForSubmit(ctx context.Context, req ChargeRequest, rail string) error {
 	return c.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: req.MerchantID, ID: req.Payer.UUID()}); err != nil {
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: req.MerchantID, ID: req.Customer.UUID()}); err != nil {
 			return err
 		}
 		method, err := q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: req.MerchantID, ID: req.PaymentMethodID})
@@ -183,7 +183,7 @@ func (c *ScopedCharger) checkInstrumentForSubmit(ctx context.Context, req Charge
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != req.Payer.UUID() || !paymentmethods.Chargeable(method) || normalizeRail(method.Rail) != rail {
+		if method.CustomerID != req.Customer.UUID() || !paymentmethods.Chargeable(method) || normalizeRail(method.Rail) != rail {
 			return charge.ErrInstrumentChanged
 		}
 		if err := req.Instrument.Matches(method); err != nil {

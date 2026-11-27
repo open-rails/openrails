@@ -1,4 +1,4 @@
-// Package admission implements OpenRails service admission for payer money
+// Package admission implements OpenRails service admission for customer money
 // capacity, delegated spend windows, and delegated wasted-spend cutoffs.
 package admission
 
@@ -28,7 +28,7 @@ func NewBillingPolicyStore(database *db.DB) *BillingPolicyStore {
 	return &BillingPolicyStore{db: database}
 }
 
-// ResolvedPolicy is the effective policy for one (payer, tier) plus the name it
+// ResolvedPolicy is the effective policy for one (customer, tier) plus the name it
 // resolved through, so a denial can say WHICH policy refused. A zero
 // ResolvedPolicy (no binding at all) sets no window. Its outstanding cap is
 // the customer's credit line, which money resolves (AdmissionCapacity).
@@ -36,36 +36,36 @@ type ResolvedPolicy struct {
 	Name           string
 	SpendWindows   []budgets.BudgetWindow
 	PolicyCurrency string
-	// BadSpendWindows are the #497 per-PAYER wasted-spend grace windows;
-	// direct-payer overage is charged at report time.
+	// BadSpendWindows are the #497 per-CUSTOMER wasted-spend grace windows;
+	// direct-customer overage is charged at report time.
 	BadSpendWindows []models.BudgetWindowPolicy
 	// CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor
-	// override the merchant-wide invoice policy for payers bound here. Nil defers
+	// override the merchant-wide invoice policy for customers bound here. Nil defers
 	// to the merchant-wide value.
 	CollectionThresholdAmount *int64
 	DelinquencyGraceDays      *int
 	DelinquencyAmountFloor    *int64
 }
 
-// Resolve returns the effective policy for (payer, tier): the customer's own
+// Resolve returns the effective policy for (customer, tier): the customer's own
 // assignment while the settings still declare it, else its tier's, else the
 // default. None yields a zero ResolvedPolicy.
-func (s *BillingPolicyStore) Resolve(ctx context.Context, payer identity.CustomerID, tier string) (ResolvedPolicy, error) {
-	r, err := s.resolver(ctx, []uuid.UUID{payer.UUID()})
+func (s *BillingPolicyStore) Resolve(ctx context.Context, customer identity.CustomerID, tier string) (ResolvedPolicy, error) {
+	r, err := s.resolver(ctx, []uuid.UUID{customer.UUID()})
 	if err != nil {
 		return ResolvedPolicy{}, err
 	}
-	return r.resolve(payer.UUID(), tier), nil
+	return r.resolve(customer.UUID(), tier), nil
 }
 
-// policyResolver resolves payers' policies from one read of the merchant's
-// settings and of the payers' own assignments.
+// policyResolver resolves customers' policies from one read of the merchant's
+// settings and of the customers' own assignments.
 type policyResolver struct {
 	settings merchantconfig.Settings
 	assigned map[uuid.UUID]string
 }
 
-func (s *BillingPolicyStore) resolver(ctx context.Context, payers []uuid.UUID) (*policyResolver, error) {
+func (s *BillingPolicyStore) resolver(ctx context.Context, customers []uuid.UUID) (*policyResolver, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -75,7 +75,7 @@ func (s *BillingPolicyStore) resolver(ctx context.Context, payers []uuid.UUID) (
 		return nil, err
 	}
 	r := &policyResolver{settings: settings, assigned: map[uuid.UUID]string{}}
-	ids := slices.DeleteFunc(slices.Clone(payers), func(id uuid.UUID) bool { return id == uuid.Nil })
+	ids := slices.DeleteFunc(slices.Clone(customers), func(id uuid.UUID) bool { return id == uuid.Nil })
 	if len(settings.Policies) == 0 || len(ids) == 0 {
 		return r, nil
 	}
@@ -93,8 +93,8 @@ func (s *BillingPolicyStore) resolver(ctx context.Context, payers []uuid.UUID) (
 // declares reports whether the merchant declares any policy.
 func (r *policyResolver) declares() bool { return len(r.settings.Policies) > 0 }
 
-func (r *policyResolver) resolve(payer uuid.UUID, tier string) ResolvedPolicy {
-	name, body, ok, _ := r.settings.Policy(r.assigned[payer], tier)
+func (r *policyResolver) resolve(customer uuid.UUID, tier string) ResolvedPolicy {
+	name, body, ok, _ := r.settings.Policy(r.assigned[customer], tier)
 	if !ok {
 		return ResolvedPolicy{}
 	}

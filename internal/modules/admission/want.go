@@ -64,7 +64,7 @@ func (a *Admitter) ResolveSet(ctx context.Context, q *gen.Queries, req AdmitRequ
 	if out.Spend, err = spendgate.SpendClaims(tid.UUID(), req.CustomerID.UUID(), strings.TrimSpace(req.Currency), g.policy, g.request, 0, now); err != nil {
 		return Set{}, err
 	}
-	out.Available, out.CreditLine, out.Outstanding = payerCapacity(capacity)
+	out.Available, out.CreditLine, out.Outstanding = customerCapacity(capacity)
 	return out, nil
 }
 
@@ -102,22 +102,22 @@ func (a *Admitter) SpendPolicies(ctx context.Context, reqs []AdmitRequest) ([]*S
 	if err != nil {
 		return nil, nil, err
 	}
-	var payers []uuid.UUID
+	var customers []uuid.UUID
 	for _, req := range reqs {
-		if identity.IsDirectPayerInvoker(req.InvokerType) {
-			payers = append(payers, req.CustomerID.UUID())
+		if identity.IsCustomerInvoker(req.InvokerType) {
+			customers = append(customers, req.CustomerID.UUID())
 		}
 	}
-	if len(payers) == 0 {
+	if len(customers) == 0 {
 		return policies, errs, nil
 	}
-	r, rerr := a.loader.policies.resolver(ctx, payers)
+	r, rerr := a.loader.policies.resolver(ctx, customers)
 	// Trust levels matter only where a policy is declared.
 	tiers := map[string]map[uuid.UUID]billing.EffectiveTrustLevel{}
 	if rerr == nil && r.declares() {
 		byCurrency := map[string][]uuid.UUID{}
 		for _, req := range reqs {
-			if identity.IsDirectPayerInvoker(req.InvokerType) && req.TrustLevel == "" {
+			if identity.IsCustomerInvoker(req.InvokerType) && req.TrustLevel == "" {
 				cur := money.NormalizeCurrency(req.Currency)
 				byCurrency[cur] = append(byCurrency[cur], req.CustomerID.UUID())
 			}
@@ -129,7 +129,7 @@ func (a *Admitter) SpendPolicies(ctx context.Context, reqs []AdmitRequest) ([]*S
 		}
 	}
 	for i, req := range reqs {
-		if !identity.IsDirectPayerInvoker(req.InvokerType) {
+		if !identity.IsCustomerInvoker(req.InvokerType) {
 			continue
 		}
 		if rerr != nil {

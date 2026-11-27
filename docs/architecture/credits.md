@@ -120,7 +120,7 @@ Checks:
 - A lot's money is released by `books.CreditLot.Worth` of its units left, never by a per-spend rate, so rounding never drifts and the last unit releases the remainder (OR-J40-S10); `ledger-audit` lot drift compares `deferred_credited` and `deferred_debited` with the lot's legs.
 
 ### 4. Access control and tenant isolation
-Staff routes need `merchant:customer:read` or `manage`, lease syncs `merchant:usage:manage`; a customer reads its own balance and sets its own line (`selfAccountPayer`). `credit_grants` keys on `(merchant_id, id)` with composite foreign keys to `customers`, its balance account (customer and currency included), `payments`, `products` and `invoice_lines`; `ledger_transfers.credit_grant_id` and `credit_grant_events` reference it.
+Staff routes need `merchant:customer:read` or `manage`, lease syncs `merchant:usage:manage`; a customer reads its own balance and sets its own line (`selfAccountCustomer`). `credit_grants` keys on `(merchant_id, id)` with composite foreign keys to `customers`, its balance account (customer and currency included), `payments`, `products` and `invoice_lines`; `ledger_transfers.credit_grant_id` and `credit_grant_events` reference it.
 
 Checks:
 - Each query in `internal/db/queries/credit_grants.sql` and `purchased_credits.sql` filters `merchant_id`.

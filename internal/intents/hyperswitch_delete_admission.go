@@ -99,7 +99,7 @@ func (h *HyperSwitchMethodDeleteHandler) admit(ctx context.Context, store *Store
 		if err != nil {
 			return err
 		}
-		if aliases.ForeignPayers != 0 || aliases.Total == 0 {
+		if aliases.ForeignCustomers != 0 || aliases.Total == 0 {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		if _, err := q.LockCustodianDeletionAccount(ctx, gen.LockCustodianDeletionAccountParams{MerchantID: mid.UUID(), ID: *pm.CustodianID}); err != nil {
@@ -160,7 +160,7 @@ func (h *HyperSwitchMethodDeleteHandler) checkFence(ctx context.Context, in gen.
 		if err != nil {
 			return err
 		}
-		if aliases.ForeignPayers != 0 || (!p.DetachOnly && aliases.Total != 1) || (p.DetachOnly && aliases.Total < 2) {
+		if aliases.ForeignCustomers != 0 || (!p.DetachOnly && aliases.Total != 1) || (p.DetachOnly && aliases.Total < 2) {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		return deletionMethodUnused(ctx, q, in.MerchantID, p.PaymentMethodID, 1)

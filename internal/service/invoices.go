@@ -112,7 +112,7 @@ func (s *Service) PreviewInvoice(ctx context.Context, actor InvoiceActor, params
 
 // previewInvoice prices lines for customer; replacing prices them as
 // FindOrCreate buys them.
-func (s *Service) previewInvoice(ctx context.Context, customer billing.CustomerID, payer *InvoiceActor, params billing.PreviewMyInvoiceParams, replacing bool) (*billing.InvoicePreview, error) {
+func (s *Service) previewInvoice(ctx context.Context, customer billing.CustomerID, actor *InvoiceActor, params billing.PreviewMyInvoiceParams, replacing bool) (*billing.InvoicePreview, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func (s *Service) previewInvoice(ctx context.Context, customer billing.CustomerI
 	// The balance pays an invoice in a merchant's unit: no PSP takes it.
 	var options []billing.InvoicePaymentOption
 	if !invoices.InMerchantUnit(quote.Currency) {
-		if options, err = s.invoiceOptions(ctx, customer.UUID(), payer, quote.Prices(), quote.Products()); err != nil {
+		if options, err = s.invoiceOptions(ctx, customer.UUID(), actor, quote.Prices(), quote.Products()); err != nil {
 			return nil, err
 		}
 	}
@@ -732,7 +732,7 @@ func (s *Service) viewOf(ctx context.Context, rt *invoiceRuntime, actor InvoiceA
 
 // openInvoiceOptions are what can pay an open invoice, each with the invoice's
 // failed attempts through it; none for any other invoice.
-func (s *Service) openInvoiceOptions(ctx context.Context, invoice *invoices.Invoice, payer *InvoiceActor) ([]billing.InvoicePaymentOption, error) {
+func (s *Service) openInvoiceOptions(ctx context.Context, invoice *invoices.Invoice, actor *InvoiceActor) ([]billing.InvoicePaymentOption, error) {
 	var options []billing.InvoicePaymentOption
 	var err error
 	switch {
@@ -747,7 +747,7 @@ func (s *Service) openInvoiceOptions(ctx context.Context, invoice *invoices.Invo
 	default:
 		var quote frozenLines
 		if quote, err = s.frozenQuote(ctx, invoice); err == nil {
-			options, err = s.invoiceOptions(ctx, invoice.CustomerID, payer, quote.prices, quote.products)
+			options, err = s.invoiceOptions(ctx, invoice.CustomerID, actor, quote.prices, quote.products)
 		}
 	}
 	if err != nil || len(options) == 0 {
@@ -788,9 +788,9 @@ func (s *Service) frozenQuote(ctx context.Context, invoice *invoices.Invoice) (f
 	return out, nil
 }
 
-// invoiceOptions are the PSPs that sell the lines. For payer, the customer
+// invoiceOptions are the PSPs that sell the lines. For customer, the customer
 // reading them, a CCBill option names what its page still needs (identify).
-func (s *Service) invoiceOptions(ctx context.Context, customer uuid.UUID, payer *InvoiceActor, prices []*models.Price, products []*models.Product) ([]billing.InvoicePaymentOption, error) {
+func (s *Service) invoiceOptions(ctx context.Context, customer uuid.UUID, actor *InvoiceActor, prices []*models.Price, products []*models.Product) ([]billing.InvoicePaymentOption, error) {
 	if page, ok := paymentpage.FromContext(ctx); ok && !page.SavedPaymentMethods {
 		customer = uuid.Nil
 	}
@@ -805,12 +805,12 @@ func (s *Service) invoiceOptions(ctx context.Context, customer uuid.UUID, payer 
 			saved = append(saved, billing.PaymentMethodID(id))
 		}
 		option := billing.InvoicePaymentOption{PSPID: billing.PSPID(o.PSPID), Rail: billing.Rail(o.Rail), Accepts: o.Accepts(), SavedPaymentMethodIDs: saved}
-		if payer != nil && o.Rail == string(models.RailCCBill) {
+		if actor != nil && o.Rail == string(models.RailCCBill) {
 			// A hint only: paying checks again, so a directory outage
 			// leaves the option without it rather than failing the read.
-			user := &payment.UserIdentity{ID: payer.Customer.String()}
-			if err := s.identify(ctx, *payer, user); err != nil {
-				s.Log.WarnContext(ctx, "ccbill option: cannot read the customer's identity", logx.Err(err), "customer_id", payer.Customer.String())
+			user := &payment.UserIdentity{ID: actor.Customer.String()}
+			if err := s.identify(ctx, *actor, user); err != nil {
+				s.Log.WarnContext(ctx, "ccbill option: cannot read the customer's identity", logx.Err(err), "customer_id", actor.Customer.String())
 			} else {
 				option.Requires = payment.CCBillIdentityMissing(user)
 			}
