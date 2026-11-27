@@ -141,7 +141,7 @@ Checks:
 
 ### 7. Work scales with activity
 
-The due pass reads partial indexes on due instants ([dunning](dunning.md)), pages 500 merchants and defers an unchanged row (`due_recheck_at`). Operations wake at `next_attempt_at`; webhooks coalesce.
+The due pass reads partial indexes on due instants ([dunning](dunning.md)) and pages 500 merchants; a row it leaves unchanged is due again at the next hourly pass. Operations wake at `next_attempt_at`; webhooks coalesce.
 
 Checks:
 - `ListDueDunningMerchants` and `ListDueDunningSubscriptions` read due instants.

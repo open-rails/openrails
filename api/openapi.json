@@ -14978,7 +14978,7 @@
           "usage": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/UsageDeduction"
+                "$ref": "#/components/schemas/UsageReceipt"
               },
               {
                 "type": "null"
@@ -28453,17 +28453,9 @@
           "discount"
         ]
       },
-      "UsageDeduction": {
+      "UsageReceipt": {
         "type": "object",
         "properties": {
-          "period_starts_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "period_ends_at": {
-            "type": "string",
-            "format": "date-time"
-          },
           "through": {
             "type": "string",
             "format": "date-time"
@@ -28475,21 +28467,75 @@
           "lines": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/UsageDeductionLine"
+              "$ref": "#/components/schemas/UsageReceiptLine"
+            }
+          },
+          "charges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageReceiptCharge"
             }
           }
         },
         "required": [
-          "period_starts_at",
-          "period_ends_at",
           "through",
           "amount",
-          "lines"
+          "lines",
+          "charges"
         ]
       },
-      "UsageDeductionLine": {
+      "UsageReceiptCharge": {
         "type": "object",
         "properties": {
+          "running_charge_id": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "resource": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "running_charge_id",
+          "reference",
+          "resource",
+          "starts_at",
+          "ends_at",
+          "amount"
+        ]
+      },
+      "UsageReceiptLine": {
+        "type": "object",
+        "properties": {
+          "period_starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period_ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
           "meter_key": {
             "type": "string"
           },
@@ -28515,6 +28561,8 @@
           }
         },
         "required": [
+          "period_starts_at",
+          "period_ends_at",
           "meter_key",
           "cell",
           "requests",

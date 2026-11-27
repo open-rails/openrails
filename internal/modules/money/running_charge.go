@@ -27,9 +27,11 @@ import (
 )
 
 // A running charge is (customer, currency, rate per hour, started_at) until it
-// is stopped. Nothing is written while it runs: a balance read deducts what it
-// has accrued, and it reaches the ledger in a posting (running_charge_posting.go).
-// The customer row is the money lock: start, stop and every posting hold it.
+// is stopped. Nothing is written while it runs, and a stop only records its
+// instant: a balance read deducts what it has accrued, and it reaches the
+// ledger in the usage postings (running_charge_posting.go). Its start queues
+// its customer for the daily posting. The customer row is the money lock:
+// start, stop and every posting hold it.
 
 const (
 	// runningChargeClockSkew is how far ahead of the clock a host's instant
@@ -54,6 +56,9 @@ func runningChargeTermsChanged(reference, field string, committed, retried any) 
 
 // instant is a host or clock instant as PostgreSQL stores it.
 func instant(t time.Time) time.Time { return t.UTC().Truncate(time.Microsecond) }
+
+// instantLayout writes an instant to the microsecond, in keys.
+const instantLayout = "2006-01-02T15:04:05.000000Z"
 
 // validateRunningChargeStart refuses malformed terms and answers the start
 // instant. A reference is exact text that survives JSON, a URL path segment
@@ -114,6 +119,11 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 	if err != nil {
 		return nil, false, err
 	}
+	// Read before the ledger moves (postUsageTx).
+	zone, err := txSvc.AccountingZone(ctx)
+	if err != nil {
+		return nil, false, err
+	}
 	byReference := gen.GetRunningChargeByReferenceParams{MerchantID: merchantID.UUID(), Reference: in.Reference}
 	existing, err := q.GetRunningChargeByReference(ctx, byReference)
 	if err == nil {
@@ -165,6 +175,9 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 	if err != nil {
 		return nil, false, err
 	}
+	if err := queueRunningCharge(ctx, q, merchantID.UUID(), customer.UUID(), string(in.Currency), dayAfter(zone, startedAt), now); err != nil {
+		return nil, false, err
+	}
 	if err := txSvc.watchBalance(ctx, q, merchantID.UUID(), customer.UUID(), string(in.Currency)); err != nil {
 		return nil, false, err
 	}
@@ -173,6 +186,21 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 	}
 	charge, err = runningChargeFromRow(row, now)
 	return charge, true, err
+}
+
+// queueRunningCharge queues the customer for the daily posting at due, once
+// the accounting-zone day the charge started in ends. A queue row due no
+// later is left unwritten, so intakes holding it never wait on the start.
+func queueRunningCharge(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, due, now time.Time) error {
+	row, err := q.GetUsagePending(ctx, gen.GetUsagePendingParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
+	switch {
+	case err == nil && !due.Before(row.DueAt):
+		return nil
+	case err != nil && !errors.Is(err, pgx.ErrNoRows):
+		return err
+	}
+	return q.UpsertUsagePending(ctx, gen.UpsertUsagePendingParams{MerchantID: merchantID, Currency: currency, Now: now,
+		CustomerIds: []uuid.UUID{customer}, DueAts: []time.Time{due}})
 }
 
 // replayRunningChargeStart answers a repeated start with the charge as it
@@ -203,9 +231,10 @@ func replayRunningChargeStart(row gen.BillingRunningCharge, in billing.StartRunn
 	return charge, false, err
 }
 
-// StopRunningChargeInTx stops a charge at the host's instant and posts the
-// rest of it, in a caller-owned transaction. Stopping a stopped charge at the
-// same instant answers it.
+// StopRunningChargeInTx stops a charge at the host's instant, in a
+// caller-owned transaction, and posts nothing: what it accrued since its last
+// posting stays in the balance until the next posting takes it. Stopping a
+// stopped charge at the same instant answers it.
 func (s *MoneyService) StopRunningChargeInTx(ctx context.Context, txDB *db.DB, reference string, in billing.StopRunningChargeParams) (*billing.RunningCharge, error) {
 	if s == nil || txDB == nil {
 		return nil, fmt.Errorf("running charge requires a bound transaction")
@@ -249,18 +278,14 @@ func (s *MoneyService) StopRunningChargeInTx(ctx context.Context, txDB *db.DB, r
 	if stoppedAt.Before(row.StartedAt) {
 		return nil, runningChargeInvalid("stopped_at", "stopped_at is before the charge started")
 	}
-	// A lot that lapsed before the stop funds what accrued until it lapsed:
-	// it is settled and expired first, as the expiry sweep would.
-	if _, err := txSvc.creditLots(q, merchantID.UUID()).ExpireLapsedBy(ctx, customer.UUID(), row.Currency, earlier(stoppedAt, now)); err != nil {
-		return nil, err
-	}
-	if row, err = q.GetRunningChargeByReference(ctx, byReference); err != nil {
-		return nil, err
-	}
 	if stoppedAt.Before(row.PostedThroughAt) {
 		return nil, runningChargeInvalid("stopped_at", "stopped_at is before the charge was last posted")
 	}
-	if row, err = txSvc.postRunningCharge(ctx, q, row, stoppedAt, true); err != nil {
+	row, err = q.StopRunningCharge(ctx, gen.StopRunningChargeParams{MerchantID: merchantID.UUID(), ID: row.ID, StoppedAt: stoppedAt, Now: now})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("running charge %s changed under the customer lock", reference)
+	}
+	if err != nil {
 		return nil, err
 	}
 	if err := txSvc.watchBalance(ctx, q, merchantID.UUID(), customer.UUID(), row.Currency); err != nil {
@@ -377,7 +402,7 @@ func (s *MoneyService) ListRunningCharges(ctx context.Context, params billing.Ru
 }
 
 // runningChargeFromRow is the charge as of now: a running one has charged its
-// total through now, a stopped one its total through the stop.
+// total through now, a stopped one its total through the stop, posted or not.
 func runningChargeFromRow(row gen.BillingRunningCharge, now time.Time) (*billing.RunningCharge, error) {
 	out := &billing.RunningCharge{
 		ID: billing.RunningChargeID(row.ID), Reference: row.Reference, CustomerID: billing.CustomerID(row.CustomerID),
@@ -389,7 +414,9 @@ func runningChargeFromRow(row gen.BillingRunningCharge, now time.Time) (*billing
 	if row.StoppedAt != nil {
 		stoppedAt := row.StoppedAt.UTC()
 		out.State, out.StoppedAt, out.AsOf = billing.RunningChargeStopped, &stoppedAt, stoppedAt
-		return out, nil
+		total, err := RunningChargeTotal(row.RatePerHour, row.StartedAt, stoppedAt)
+		out.ChargedAmount = total
+		return out, err
 	}
 	total, err := RunningChargeTotal(row.RatePerHour, row.StartedAt, now)
 	if err != nil {

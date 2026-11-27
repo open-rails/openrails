@@ -9,10 +9,12 @@ import (
 
 // A running charge bills a customer at a rate per hour from StartedAt until it
 // is stopped: round_half_up(RatePerHour x whole seconds / 3600), per second,
-// no minimum. Nothing is written while it runs. What it has accrued is taken
-// off the customer's available balance on every read (Balance.AccruedAmount),
-// and reaches the ledger when the charge stops, once a day at 00:00 UTC, and
-// before a credit lot it draws is expired, revoked or refunded.
+// no minimum. Nothing is written while it runs, and a stop only records its
+// instant. What it has accrued is taken off the customer's available balance
+// on every read (Balance.AccruedAmount), and reaches the ledger in the usage
+// postings: once a day, through midnight in the merchant's
+// accounting.timezone, and before a usage invoice bills or a credit lot it
+// draws is expired, revoked or refunded.
 
 // RunningChargeID names one running charge; on the wire "rch_<uuid>".
 type RunningChargeID uuid.UUID

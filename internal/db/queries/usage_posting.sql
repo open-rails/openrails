@@ -1,10 +1,12 @@
--- What the ledger took of usage: who has usage no posting has taken (the
--- queue), the running totals intake settles and postings price, each posting's
--- usage receipt, and the rate cards usage was priced under.
+-- What the ledger took of usage and running charges: who has either that no
+-- posting has taken (the queue), the running totals intake settles and
+-- postings price, each posting's usage receipt, and the rate cards usage was
+-- priced under.
 
 -- name: UpsertUsagePending :exec
 -- Intake queues customers' usage in a currency for posting, in the
--- transaction that settles it, in customer order: the earliest due date wins.
+-- transaction that settles it, in customer order, and a running charge's
+-- start its customer: the earliest due date wins.
 INSERT INTO billing.usage_pending AS u (merchant_id, customer_id, currency, due_at, updated_at)
 SELECT sqlc.arg(merchant_id)::uuid, m.customer_id, sqlc.arg(currency)::text, m.due_at, sqlc.arg(now)::timestamptz
 FROM unnest(sqlc.arg(customer_ids)::uuid[], sqlc.arg(due_ats)::timestamptz[]) AS m(customer_id, due_at)
@@ -109,28 +111,30 @@ ON CONFLICT (merchant_id, customer_id, currency, period_starts_at, meter_key, ce
     updated_at = EXCLUDED.updated_at;
 
 -- name: InsertUsageReceipt :one
-INSERT INTO billing.usage_receipts (merchant_id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines,
-    forgiven, forgiven_lines, created_at)
-VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, sqlc.arg(period_starts_at)::timestamptz,
-    sqlc.arg(period_ends_at)::timestamptz, sqlc.arg(cut_at)::timestamptz, sqlc.arg(reason)::text, sqlc.arg(amount)::bigint,
-    sqlc.arg(lines)::jsonb, sqlc.arg(forgiven)::bigint, sqlc.narg(forgiven_lines)::jsonb, sqlc.arg(now)::timestamptz)
+INSERT INTO billing.usage_receipts (merchant_id, customer_id, currency, cut_at, reason, amount, lines, charges, forgiven, created_at)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, sqlc.arg(cut_at)::timestamptz, sqlc.arg(reason)::text,
+    sqlc.arg(amount)::bigint, sqlc.arg(lines)::jsonb, sqlc.arg(charges)::jsonb, sqlc.arg(forgiven)::bigint, sqlc.arg(now)::timestamptz)
 RETURNING *;
 
 -- name: ListForgivenUsageReceipts :many
--- The merchant's receipts that forgave usage or took forgiveness back, cut
--- after one instant and through another.
+-- The merchant's receipts with a line that forgave usage or took forgiveness
+-- back, cut after one instant and through another.
 SELECT * FROM billing.usage_receipts
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND forgiven <> 0
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND jsonb_path_exists(lines, '$[*] ? (@.forgiven != 0)')
   AND cut_at > sqlc.arg(cut_after)::timestamptz AND cut_at <= sqlc.arg(cut_through)::timestamptz
 ORDER BY cut_at, id;
 
--- name: ListUsageReceipts :many
--- A customer's receipts in a currency of some pricing periods: what their
--- postings took.
-SELECT * FROM billing.usage_receipts
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-  AND currency = sqlc.arg(currency)::text AND period_starts_at = ANY(sqlc.arg(periods)::timestamptz[])
-ORDER BY period_starts_at, created_at, id;
+-- name: SumPeriodForgiveness :many
+-- What a customer's receipts in a currency forgave, net, of each of some
+-- pricing periods: every receipt that took usage of a period was cut at or
+-- after its start.
+SELECT (l.line ->> 'period_starts_at')::timestamptz AS period_starts_at, sum((l.line ->> 'forgiven')::bigint)::bigint AS forgiven
+FROM billing.usage_receipts r
+CROSS JOIN LATERAL jsonb_array_elements(r.lines) AS l(line)
+WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.customer_id = sqlc.arg(customer_id)::uuid AND r.currency = sqlc.arg(currency)::text
+  AND r.cut_at >= sqlc.arg(cut_from)::timestamptz
+  AND (l.line ->> 'period_starts_at')::timestamptz = ANY(sqlc.arg(periods)::timestamptz[])
+GROUP BY 1;
 
 -- name: ListUsageReceiptsByIDs :many
 SELECT * FROM billing.usage_receipts

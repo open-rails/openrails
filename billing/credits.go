@@ -213,10 +213,11 @@ type BalanceTransaction struct {
 	Resource      *string                `json:"resource"`
 	Source        string                 `json:"source"`
 	SourceID      string                 `json:"source_id"`
-	// Usage is what a usage deduction was for: the day's usage per meter.
-	// Every leg of one posting carries it; null on other movements.
-	Usage     *UsageDeduction `json:"usage"`
-	CreatedAt time.Time       `json:"created_at"`
+	// Usage is the usage receipt a posting's movement took: its usage per
+	// period and meter, and its running charges. Every leg of one posting
+	// carries it; null on other movements.
+	Usage     *UsageReceipt `json:"usage"`
+	CreatedAt time.Time     `json:"created_at"`
 }
 
 // BalanceTransactionListParams selects a customer's ledger in one currency,

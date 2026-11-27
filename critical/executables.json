@@ -295,7 +295,7 @@
       "TestDunning/OR-J16-S30/a-seen-nmi-decline-opens-dunning-in-one-transaction"
     ],
     "OR-J16-S31": [
-      "TestDunning/OR-J16-S31/held-awaiting-method-expiry-waits-for-its-recheck"
+      "TestDunning/OR-J16-S31/held-awaiting-method-expiry-is-taken-by-every-pass-and-a-day-held-is-overdue"
     ],
     "OR-J16-S32": [
       "TestDunning/OR-J16-S32/due-pass-queues-an-nmi-retry-without-waiting-on-the-gateway"
@@ -2864,6 +2864,29 @@
     ],
     "OR-J34-S44": [
       "TestDestructiveSafeguards/OR-J34-S44/an-owed-provider-stop-of-a-customer-holding-the-product-blocks-its-row-not-the-book"
+    ],
+    "OR-J25-S45": [
+      "TestDailyPosting/OR-J25-S45/a-running-charge-posts-at-the-accounting-zones-midnight-on-the-days-receipt"
+    ],
+    "OR-J25-S46": [
+      "TestDailyPosting/OR-J25-S46/a-stop-posts-nothing-until-the-daily-posting"
+    ],
+    "OR-J24-S88": [
+      "TestDailyPosting/OR-J24-S88/a-receipt-holds-a-volume-fall-beside-new-usage"
+    ],
+    "OR-J48-S20": [
+      "TestDailyPosting/OR-J48-S20/a-posting-in-a-unit-forgives-with-the-event-store-down"
+    ],
+    "OR-J24-S89": [
+      "TestDailyPosting/OR-J24-S89/a-posting-past-a-periods-end-dates-each-periods-owed-in-its-period"
+    ],
+    "OR-J24-S90": [
+      "TestDailyPosting/OR-J24-S90",
+      "TestDailyPosting/OR-J24-S90/a-fall-is-credited-before-a-later-rise-is-spent-in-usd",
+      "TestDailyPosting/OR-J24-S90/a-fall-is-credited-before-a-later-rise-is-spent-in-a-unit"
+    ],
+    "OR-J24-S91": [
+      "TestReceiptMigration/OR-J24-S91/an-old-receipts-forgiveness-is-shared-over-its-lines-by-their-amounts"
     ]
   }
 }

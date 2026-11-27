@@ -73,7 +73,7 @@ func TestRenewalAgreements(t *testing.T) {
 		// The invoice's sale alone renews the first period.
 		_, err = a.pool.Exec(t.Context(), "DELETE FROM "+intents+" WHERE merchant_id = $1 AND idempotency_key = 'critical:second-agreement'", a.alpha.MerchantID().UUID())
 		require.NoError(t, err)
-		// Its recheck is a minute later; the period still starts at the boundary.
+		// The next pass takes it again; the period still starts at the boundary.
 		current = renewedAt(t, a, fleet, sub.ID, due.Add(2*time.Minute), due)
 		require.EqualValues(t, 1000, lastCharge(t, p, 2))
 		require.Empty(t, refused(), "the refusal closes once the renewal is admitted")

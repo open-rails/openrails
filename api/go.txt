@@ -1416,7 +1416,7 @@ pkg openrails/billing, type BalanceTransaction struct, Resource *string `json:"r
 pkg openrails/billing, type BalanceTransaction struct, Source string `json:"source"`
 pkg openrails/billing, type BalanceTransaction struct, SourceID string `json:"source_id"`
 pkg openrails/billing, type BalanceTransaction struct, Type BalanceTransactionType `json:"type"`
-pkg openrails/billing, type BalanceTransaction struct, Usage *UsageDeduction `json:"usage"`
+pkg openrails/billing, type BalanceTransaction struct, Usage *UsageReceipt `json:"usage"`
 pkg openrails/billing, type BalanceTransactionID [16]byte
 pkg openrails/billing, type BalanceTransactionListParams struct
 pkg openrails/billing, type BalanceTransactionListParams struct, Currency catalog.Currency `form:"currency"`
@@ -4186,18 +4186,6 @@ pkg openrails/billing, type UsageCharge struct, Cell *string `json:"cell"`
 pkg openrails/billing, type UsageCharge struct, MeterKey string `json:"meter_key"`
 pkg openrails/billing, type UsageCharge struct, Model catalog.Model `json:"model"`
 pkg openrails/billing, type UsageCharge struct, Quantity int64 `json:"quantity"`
-pkg openrails/billing, type UsageDeduction struct
-pkg openrails/billing, type UsageDeduction struct, Amount int64 `json:"amount,string"`
-pkg openrails/billing, type UsageDeduction struct, Lines []UsageDeductionLine `json:"lines"`
-pkg openrails/billing, type UsageDeduction struct, PeriodEndsAt time.Time `json:"period_ends_at"`
-pkg openrails/billing, type UsageDeduction struct, PeriodStartsAt time.Time `json:"period_starts_at"`
-pkg openrails/billing, type UsageDeduction struct, Through time.Time `json:"through"`
-pkg openrails/billing, type UsageDeductionLine struct
-pkg openrails/billing, type UsageDeductionLine struct, Amount int64 `json:"amount,string"`
-pkg openrails/billing, type UsageDeductionLine struct, Cell *string `json:"cell"`
-pkg openrails/billing, type UsageDeductionLine struct, MeterKey string `json:"meter_key"`
-pkg openrails/billing, type UsageDeductionLine struct, Quantity int64 `json:"quantity"`
-pkg openrails/billing, type UsageDeductionLine struct, Requests int64 `json:"requests"`
 pkg openrails/billing, type UsageEstimate struct
 pkg openrails/billing, type UsageEstimate struct, Amount *int64 `json:"amount,omitempty,string"`
 pkg openrails/billing, type UsageEstimate struct, Dimensions map[string]int64 `json:"dimensions,omitempty"`
@@ -4219,6 +4207,26 @@ pkg openrails/billing, type UsageParams struct, OccurredAt *time.Time `json:"occ
 pkg openrails/billing, type UsageParams struct, Outcome UsageOutcome `json:"outcome,omitempty"`
 pkg openrails/billing, type UsageParams struct, Source string `json:"source"`
 pkg openrails/billing, type UsageParams struct, SourceID string `json:"source_id"`
+pkg openrails/billing, type UsageReceipt struct
+pkg openrails/billing, type UsageReceipt struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type UsageReceipt struct, Charges []UsageReceiptCharge `json:"charges"`
+pkg openrails/billing, type UsageReceipt struct, Lines []UsageReceiptLine `json:"lines"`
+pkg openrails/billing, type UsageReceipt struct, Through time.Time `json:"through"`
+pkg openrails/billing, type UsageReceiptCharge struct
+pkg openrails/billing, type UsageReceiptCharge struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type UsageReceiptCharge struct, EndsAt time.Time `json:"ends_at"`
+pkg openrails/billing, type UsageReceiptCharge struct, Reference string `json:"reference"`
+pkg openrails/billing, type UsageReceiptCharge struct, Resource *string `json:"resource"`
+pkg openrails/billing, type UsageReceiptCharge struct, RunningChargeID RunningChargeID `json:"running_charge_id"`
+pkg openrails/billing, type UsageReceiptCharge struct, StartsAt time.Time `json:"starts_at"`
+pkg openrails/billing, type UsageReceiptLine struct
+pkg openrails/billing, type UsageReceiptLine struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type UsageReceiptLine struct, Cell *string `json:"cell"`
+pkg openrails/billing, type UsageReceiptLine struct, MeterKey string `json:"meter_key"`
+pkg openrails/billing, type UsageReceiptLine struct, PeriodEndsAt time.Time `json:"period_ends_at"`
+pkg openrails/billing, type UsageReceiptLine struct, PeriodStartsAt time.Time `json:"period_starts_at"`
+pkg openrails/billing, type UsageReceiptLine struct, Quantity int64 `json:"quantity"`
+pkg openrails/billing, type UsageReceiptLine struct, Requests int64 `json:"requests"`
 pkg openrails/billing, type UsageRow struct
 pkg openrails/billing, type UsageRow struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type UsageRow struct, Cell *string `json:"cell"`

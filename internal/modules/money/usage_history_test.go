@@ -22,16 +22,3 @@ func TestLargestRemainder(t *testing.T) {
 		}
 	}
 }
-
-func TestTakeBackForgiven(t *testing.T) {
-	forgave := map[forgivenKey]int64{{invoker: "a"}: 6, {invoker: "b"}: 2, {invoker: "c"}: 0}
-	got := takeBackForgiven(forgave, -5)
-	want := []ForgivenLine{{Invoker: "a", Amount: -4}, {Invoker: "b", Amount: -1}}
-	if !slices.Equal(got, want) {
-		t.Errorf("takeBackForgiven(-5) = %v, want %v", got, want)
-	}
-	all := takeBackForgiven(forgave, -8)
-	if want := []ForgivenLine{{Invoker: "a", Amount: -6}, {Invoker: "b", Amount: -2}}; !slices.Equal(all, want) {
-		t.Errorf("takeBackForgiven(-8) = %v, want %v", all, want)
-	}
-}

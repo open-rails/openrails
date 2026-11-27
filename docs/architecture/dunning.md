@@ -93,8 +93,9 @@ admitted ([subscriptions](subscriptions.md)); an expired wait ends
 or the provider is asked by id (`AskProviderPastGrace`). A second scan asks about
 provider-billed renewals unpaid past their rail's deadline, 24 hours for an NMI
 schedule and 48 for Stripe and CCBill (`AskProviderOverdueRenewal`). A row
-whose processing fails raises `life.due_pass.refused`; every row left unchanged
-gets `due_recheck_at` from `deferDue`.
+whose processing fails raises `life.due_pass.refused`; a row left unchanged is
+due again at the next pass, and one still due a day past its due day is in the
+pass's overdue report (`openrails_job_progress`).
 
 **Customer retries.** `POST /v1/me/subscriptions/{id}/retry-now` (NMI
 schedules) and paying an engine renewal invoice with the subscription's card pass
@@ -118,7 +119,7 @@ customer. Admission refuses `delinquent_unpaid_invoice` only if `IsDelinquent`'s
 live recompute agrees. Nothing is revoked or canceled.
 
 Tables: `subscriptions` (`retry_attempts`, `transient_retries`,
-`next_retry_at`, `grace_ends_at`, `dunning_policy`, `due_recheck_at`), `invoices`
+`next_retry_at`, `grace_ends_at`, `dunning_policy`), `invoices`
 (`next_collection_attempt_at`), `payment_attempts`, `rebill_cycles`,
 `customer_delinquency`, `provider_intents` and `reconciliation_findings`.
 
@@ -208,11 +209,12 @@ Due work reads partial indexes in bounded cursor pages:
 `subscriptions_grace_ends_at_idx`, `subscriptions_next_retry_at_rail_idx`,
 `subscriptions_current_period_ends_at_engine_due_global_idx`,
 `invoices_usage_collection_due_idx` and `customer_delinquency_due_idx`. A row left
-unchanged leaves the due set until `due_recheck_at`.
+unchanged stays due: the hourly pass takes it again, and a day past its due day
+the pass reports it overdue.
 
 Checks:
-- `deferDue` waits half the overdue age, clamped to 1 minute to 1 hour.
-- Scenarios: OR-J26-S02, OR-J26-S40 and OR-J04-S45.
+- Scenarios: OR-J26-S02, OR-J26-S40, OR-J04-S45 and OR-J16-S31 (a held row is
+  taken again by every pass and reported a day overdue).
 
 ### 8. Abuse protection
 `retry-now` is in the `subscriptions` rate-limit bucket (`subscribe` limit, 20

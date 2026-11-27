@@ -1,16 +1,12 @@
 package money
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
 	"slices"
-	"strings"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -61,135 +57,49 @@ func (s *MoneyService) history(ctx context.Context, events bool, f eventstore.Hi
 }
 
 // UsageForgiveness is what usage receipts cut in (from, to] forgave of usage
-// in a merchant's unit, as rows of the cut's bucket, from the split each
-// receipt stored (usage_receipts.forgiven_lines): Forgiven, and the same
-// taken out of Amount, what was charged. A reversal that takes forgiveness
-// back is negative.
+// in a merchant's unit, as rows of the cut's bucket, from each receipt line's
+// forgiven: by event type and meter cell, with no invoker. Forgiven, and the
+// same taken out of Amount, what was charged. A period whose price fell
+// takes forgiveness back: negative.
 func (s *MoneyService) UsageForgiveness(ctx context.Context, from, to time.Time) ([]eventstore.UsageBucket, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := s.db.Gen(ctx).ListForgivenUsageReceipts(ctx, gen.ListForgivenUsageReceiptsParams{MerchantID: mid.UUID(), CutAfter: from, CutThrough: to})
+	q := s.db.Gen(ctx)
+	receipts, err := q.ListForgivenUsageReceipts(ctx, gen.ListForgivenUsageReceiptsParams{MerchantID: mid.UUID(), CutAfter: from, CutThrough: to})
+	if err != nil || len(receipts) == 0 {
+		return nil, err
+	}
+	decoded := make([][]receiptLine, len(receipts))
+	var prints []string
+	for i, r := range receipts {
+		if err := json.Unmarshal(r.Lines, &decoded[i]); err != nil {
+			return nil, fmt.Errorf("usage receipt %s: decode lines: %w", r.ID, err)
+		}
+		for _, l := range decoded[i] {
+			if l.Forgiven != 0 {
+				prints = append(prints, l.Print)
+			}
+		}
+	}
+	// A line's event type is its card's.
+	cards, err := loadPrints(ctx, q, mid.UUID(), prints)
 	if err != nil {
 		return nil, err
 	}
 	var out []eventstore.UsageBucket
-	for _, p := range receipts {
-		lines, err := decodeForgivenLines(p.ForgivenLines)
-		if err != nil {
-			return nil, fmt.Errorf("usage receipt %s: %w", p.ID, err)
-		}
-		bucket := p.CutAt.Add(-time.Microsecond).UTC().Truncate(eventstore.HistoryBucket)
-		for _, l := range lines {
-			out = append(out, eventstore.UsageBucket{CustomerID: billing.CustomerID(p.CustomerID), BucketAt: bucket, Currency: p.Currency,
-				EventType: l.EventType, Meter: l.MeterKey, Cell: l.Cell, Invoker: l.Invoker, Amount: -l.Amount, Forgiven: l.Amount})
+	for i, r := range receipts {
+		bucket := r.CutAt.Add(-time.Microsecond).UTC().Truncate(eventstore.HistoryBucket)
+		for _, l := range decoded[i] {
+			if l.Forgiven == 0 {
+				continue
+			}
+			out = append(out, eventstore.UsageBucket{CustomerID: billing.CustomerID(r.CustomerID), BucketAt: bucket, Currency: r.Currency,
+				EventType: cards[l.Print].card.EventType, Meter: l.MeterKey, Cell: l.Cell, Amount: -l.Forgiven, Forgiven: l.Forgiven})
 		}
 	}
 	return out, nil
-}
-
-// ForgivenLine is one share of a receipt's forgiveness: the invoker, event
-// type and meter cell it was charged to.
-type ForgivenLine struct {
-	Invoker   string `json:"invoker"`
-	EventType string `json:"event_type"`
-	MeterKey  string `json:"meter_key"`
-	Cell      string `json:"cell"`
-	Amount    int64  `json:"amount"`
-}
-
-type forgivenKey struct{ invoker, eventType, meter, cell string }
-
-func (l ForgivenLine) key() forgivenKey {
-	return forgivenKey{l.Invoker, l.EventType, l.MeterKey, l.Cell}
-}
-
-func decodeForgivenLines(raw []byte) ([]ForgivenLine, error) {
-	var lines []ForgivenLine
-	if len(raw) == 0 {
-		return lines, nil
-	}
-	if err := json.Unmarshal(raw, &lines); err != nil {
-		return nil, fmt.Errorf("decode forgiven lines: %w", err)
-	}
-	return lines, nil
-}
-
-// shareForgiven splits amount (either sign) across weights by largest
-// remainder, in keys' order, leaving out empty shares.
-func shareForgiven(amount int64, keys []forgivenKey, weights []int64) []ForgivenLine {
-	sign := int64(1)
-	if amount < 0 {
-		sign = -1
-	}
-	var out []ForgivenLine
-	for i, x := range largestRemainder(amount*sign, weights) {
-		if x != 0 {
-			k := keys[i]
-			out = append(out, ForgivenLine{Invoker: k.invoker, EventType: k.eventType, MeterKey: k.meter, Cell: k.cell, Amount: x * sign})
-		}
-	}
-	return out
-}
-
-// forgivenLines shares what a posting forgives across what its period charged
-// before the cut, per invoker, event type and meter cell, from the store's
-// raw events at intake's prices, as it posts: the split is stored with the
-// receipt. It is the posting's one read of the event store, for attribution
-// only.
-func (s *MoneyService) forgivenLines(ctx context.Context, q *gen.Queries, customer uuid.UUID, currency string, period, cut time.Time, amount int64) ([]ForgivenLine, error) {
-	store := s.eventStore(q)
-	if store == nil {
-		return nil, eventstore.Required("forgiving usage")
-	}
-	charges, err := store.PeriodCharges(ctx, billing.CustomerID(customer), currency, period.UTC(), cut)
-	if err != nil {
-		return nil, err
-	}
-	charged := map[forgivenKey]int64{}
-	var keys []forgivenKey
-	for _, c := range charges {
-		if c.Amount <= 0 {
-			continue
-		}
-		k := forgivenKey{c.Invoker, c.EventType, c.Meter, c.Cell}
-		if _, ok := charged[k]; !ok {
-			keys = append(keys, k)
-		}
-		charged[k] = addSat(charged[k], c.Amount)
-	}
-	if len(keys) == 0 {
-		keys, charged = []forgivenKey{{}}, map[forgivenKey]int64{{}: 1}
-	}
-	slices.SortFunc(keys, func(a, b forgivenKey) int {
-		return cmp.Or(strings.Compare(a.invoker, b.invoker), strings.Compare(a.eventType, b.eventType), strings.Compare(a.meter, b.meter), strings.Compare(a.cell, b.cell))
-	})
-	weights := make([]int64, len(keys))
-	for i, k := range keys {
-		weights[i] = charged[k]
-	}
-	return shareForgiven(amount, keys, weights), nil
-}
-
-// takeBackForgiven shares a reversal's take-back (negative) across what the
-// period's postings forgave, net, by the same rule: no share goes below
-// what it forgave.
-func takeBackForgiven(forgave map[forgivenKey]int64, amount int64) []ForgivenLine {
-	var keys []forgivenKey
-	for k, v := range forgave {
-		if v > 0 {
-			keys = append(keys, k)
-		}
-	}
-	slices.SortFunc(keys, func(a, b forgivenKey) int {
-		return cmp.Or(strings.Compare(a.invoker, b.invoker), strings.Compare(a.eventType, b.eventType), strings.Compare(a.meter, b.meter), strings.Compare(a.cell, b.cell))
-	})
-	weights := make([]int64, len(keys))
-	for i, k := range keys {
-		weights[i] = forgave[k]
-	}
-	return shareForgiven(amount, keys, weights)
 }
 
 // largestRemainder splits a nonnegative amount across positive weights: each
