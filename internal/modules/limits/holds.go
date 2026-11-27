@@ -133,9 +133,10 @@ func (h Holder) Standing(ctx context.Context, c Claim) (Standing, *gen.GetLimitW
 
 // standing is a claim's limit's standing in its window given the window's
 // row (nil: none). A rolling limit counts its buckets from the window's
-// start; a rate limit's level is read from its recent buckets. What is held is read before the event store: a sync inserts its events
-// before it commits the end of the in-flight report that held them, so an
-// item is counted twice at worst, never not at all.
+// start; a rate limit's level is read from its recent buckets. What is held
+// is read before the event store, so an item is counted twice at worst, and
+// not at all only between its sync's commit, which ends the in-flight report
+// that held it, and its insert.
 func (h Holder) standing(ctx context.Context, c Claim, row *gen.GetLimitWindowForUpdateRow) (Standing, error) {
 	s := Standing{Capacity: c.Capacity}
 	w, from := c.Window, c.Window.StartsAt

@@ -276,7 +276,9 @@ func usageMeterHasActivity(
 	}
 	// Hold the merchant's settlements of these event types while the activity
 	// predicate is checked, so a concurrent report cannot slip between the
-	// check and the semantic update and then be reinterpreted.
+	// check and the semantic update and then be reinterpreted. A sync inserts
+	// its events just after it commits: one that committed a moment before
+	// the check may not be in the store yet.
 	queries := gen.New(tx)
 	if err := queries.LockUsageEventTypes(ctx, gen.LockUsageEventTypesParams{MerchantID: merchantID, EventTypes: eventTypes}); err != nil {
 		return false, fmt.Errorf("lock usage activity: %w", err)

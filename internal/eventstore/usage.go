@@ -83,9 +83,10 @@ const insertUsage = "INSERT INTO {database}.usage_intake (merchant_id, event_id,
 
 // InsertUsage takes events in as one asynchronous insert into usage_intake
 // and returns once ClickHouse has written them, raw and rollups: what it
-// acknowledged reads back, so a view answered after the sync counts it. A
-// resend after a sync that failed past its insert inserts again: raw events
-// collapse the copies on merge and in FINAL reads, the rollups count both.
+// acknowledged reads back, so a view answered after the sync counts it.
+// Intake inserts only what PostgreSQL settled, once: a retry after an error
+// that hid a success inserts twice, which raw events collapse on merge and in
+// FINAL reads and the rollups count.
 func (s *Store) InsertUsage(ctx context.Context, events []UsageEvent) error {
 	if len(events) == 0 {
 		return nil
@@ -114,6 +115,11 @@ func (s *Store) InsertUsage(ctx context.Context, events []UsageEvent) error {
 		}
 	}
 	return fail("insert usage", batch.Send())
+}
+
+// Ping reports whether the store answers now.
+func (s *Store) Ping(ctx context.Context) error {
+	return fail("ping", s.conn.Ping(ctx))
 }
 
 type charges struct {
