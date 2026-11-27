@@ -1,0 +1,79 @@
+name: Measure MRR without rollups
+
+# Throwaway (tracker openrails#1418): MRR measures read from the rollups
+# against the same measures read from the MRR facts, on a synthetic merchant
+# written through the schema's triggers, at 10,000 and 100,000 customers.
+on:
+  push:
+    branches: [measure/1418-mrr]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: measure-1418-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: MRR at ${{ matrix.customers }} customers
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - customers: 10000
+            budget: "0"
+            runs: 7
+          - customers: 100000
+            budget: 200m
+            runs: 5
+    env:
+      DSN: postgres://postgres:postgres@127.0.0.1:5432
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Start PostgreSQL 18
+        run: |
+          set -euo pipefail
+          pg="$(scripts/ci-pull-image.sh postgres@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71)" # 18-alpine
+          docker run -d --pull never --name measure-postgres -p 127.0.0.1:5432:5432 --shm-size=1g \
+            -e POSTGRES_DB=measure -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
+            "$pg" -c shared_buffers=2GB -c effective_cache_size=8GB -c work_mem=32MB -c maintenance_work_mem=512MB \
+            -c max_wal_size=8GB -c checkpoint_timeout=15min -c synchronous_commit=off -c max_locks_per_transaction=256 -c jit=off
+          timeout 90 bash -c 'until docker exec measure-postgres pg_isready -h 127.0.0.1 -U postgres -d measure; do sleep 1; done'
+          docker exec measure-postgres psql -U postgres -d measure -c 'CREATE DATABASE smoke'
+          nproc; free -m; df -h /
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: GOWORK=off go build -o "$RUNNER_TEMP/measure1418" ./scripts/measure1418
+      - name: Smoke (300 customers, one year)
+        run: '"$RUNNER_TEMP/measure1418" -dsn "$DSN/smoke?sslmode=disable" -customers 300 -years 1 -runs 1 -write-samples 5 -out "$RUNNER_TEMP/smoke" > /dev/null'
+      - name: Measure
+        timeout-minutes: 335
+        run: '"$RUNNER_TEMP/measure1418" -dsn "$DSN/measure?sslmode=disable" -customers ${{ matrix.customers }} -runs ${{ matrix.runs }} -gen-budget ${{ matrix.budget }} -out "$RUNNER_TEMP/out"'
+      - name: Summary
+        if: ${{ always() }}
+        run: |
+          for f in "$RUNNER_TEMP/out/summary.md" "$RUNNER_TEMP/smoke/summary.md"; do
+            if [[ -f "$f" ]]; then head -c 900000 "$f" >> "$GITHUB_STEP_SUMMARY"; break; fi
+          done
+          docker logs --tail 200 measure-postgres > "$RUNNER_TEMP/postgres.log" 2>&1 || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() }}
+        with:
+          name: measure-1418-${{ matrix.customers }}
+          path: |
+            ${{ runner.temp }}/out/
+            ${{ runner.temp }}/smoke/
+            ${{ runner.temp }}/postgres.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Tear down PostgreSQL
+        if: ${{ always() }}
+        run: docker rm -f measure-postgres || true
