@@ -41,7 +41,7 @@ func TestRunningChargeContracts(t *testing.T) {
 					require.Zero(t, state.PostedAmount)
 				} else {
 					require.Equal(t, billing.RunningChargeStopped, state.State)
-					require.EqualValues(t, 900, state.PostedAmount)
+					require.Zero(t, state.PostedAmount, "a stop posts nothing")
 				}
 				child.kill(t)
 				// A replacement process receives the host's same durable stop time.
@@ -52,17 +52,26 @@ func TestRunningChargeContracts(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, started.ID, final.ID)
 				require.Equal(t, billing.RunningChargeStopped, final.State)
-				require.EqualValues(t, 900, final.PostedAmount)
+				require.Zero(t, final.PostedAmount)
 				require.EqualValues(t, 900, final.ChargedAmount)
 				require.WithinDuration(t, stopAt, *final.StoppedAt, time.Microsecond)
-				balance(t, w.alpha, customer, 100, 0, 100)
-				ledger, err := w.alpha.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
-				require.NoError(t, err)
-				require.Len(t, ledger.Items, 3)
-				// UTC daily posting splits 23:50-00:05 into ten and five
-				// minutes. Restart must preserve both segments exactly once.
-				require.ElementsMatch(t, []int64{1000, -600, -300}, []int64{ledger.Items[0].Amount, ledger.Items[1].Amount, ledger.Items[2].Amount})
+				balance(t, w.alpha, customer, 100, 0, 1000)
 				restarted.kill(t)
+				// Each day's posting takes the charge through its midnight:
+				// 23:50-00:05 is ten minutes on the first day's receipt and
+				// five on the next, each once.
+				fleet := startFleet(t, w)
+				postDays(t, fleet)
+				require.Equal(t, []int64{-600, 1000}, ledgerAmounts(t, w.alpha, customer))
+				balance(t, w.alpha, customer, 100, 0, 400)
+				nextDay(w)
+				postDays(t, fleet)
+				postDays(t, fleet)
+				require.Equal(t, []int64{-300, -600, 1000}, ledgerAmounts(t, w.alpha, customer))
+				balance(t, w.alpha, customer, 100, 0, 100)
+				final, err = w.alpha.GetRunningCharge(t.Context(), input.Reference)
+				require.NoError(t, err)
+				require.EqualValues(t, 900, final.PostedAmount)
 			})
 		}
 	})
@@ -84,21 +93,37 @@ func TestRunningChargeContracts(t *testing.T) {
 		require.EqualValues(t, 1000, b.BalanceAmount)
 		require.EqualValues(t, 900, b.AccruedAmount)
 		require.EqualValues(t, 100, b.AvailableAmount)
+		startedAt := accruing.StartedAt
 		stopped, err := w.alpha.StopRunningCharge(t.Context(), input.Reference, billing.StopRunningChargeParams{StoppedAt: ptr(w.clock.Now())})
 		require.NoError(t, err)
 		require.Equal(t, billing.RunningChargeStopped, stopped.State)
 		require.EqualValues(t, 900, stopped.ChargedAmount)
-		require.EqualValues(t, 900, stopped.PostedAmount)
-		balance(t, w.alpha, customer, 100, 0, 100)
+		require.Zero(t, stopped.PostedAmount)
+		balance(t, w.alpha, customer, 100, 0, 1000)
 		w.clock.Advance(2 * time.Hour)
 		final, err := w.alpha.GetRunningCharge(t.Context(), input.Reference)
 		require.NoError(t, err)
 		require.EqualValues(t, 900, final.ChargedAmount)
 		require.Equal(t, stopped.StoppedAt, final.StoppedAt)
+		// The day's posting takes the exact segment once, as a charge line of
+		// its receipt naming the charge and its resource.
+		fleet := startFleet(t, w)
+		nextDay(w)
+		postDays(t, fleet)
+		postDays(t, fleet)
+		balance(t, w.alpha, customer, 100, 0, 100)
 		ledger, err := w.alpha.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
 		require.NoError(t, err)
 		require.Len(t, ledger.Items, 2)
 		require.ElementsMatch(t, []int64{1000, -900}, []int64{ledger.Items[0].Amount, ledger.Items[1].Amount})
+		receipt := ledger.Items[0].Usage
+		require.NotNil(t, receipt)
+		require.Empty(t, receipt.Lines)
+		require.Equal(t, []billing.UsageReceiptCharge{{RunningChargeID: started.ID, Reference: input.Reference, Resource: ptr("gpu"),
+			StartsAt: startedAt, EndsAt: *stopped.StoppedAt, Amount: 900}}, receipt.Charges)
+		final, err = w.alpha.GetRunningCharge(t.Context(), input.Reference)
+		require.NoError(t, err)
+		require.EqualValues(t, 900, final.PostedAmount)
 		_, err = w.beta.GetRunningCharge(t.Context(), input.Reference)
 		require.ErrorIs(t, err, billing.ErrNotFound)
 	})
@@ -129,12 +154,9 @@ func TestRunningChargeContracts(t *testing.T) {
 			require.NoError(t, done.err)
 			require.Equal(t, started.ID, done.charge.ID)
 			require.EqualValues(t, 300, done.charge.ChargedAmount)
-			require.EqualValues(t, 300, done.charge.PostedAmount)
+			require.Zero(t, done.charge.PostedAmount)
 		}
-		balance(t, w.alpha, customer, 700, 0, 700)
-		ledger, err := w.alpha.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
-		require.NoError(t, err)
-		require.Len(t, ledger.Items, 2)
+		balance(t, w.alpha, customer, 700, 0, 1000)
 		late := billing.StopRunningChargeParams{StoppedAt: ptr(w.clock.Now().Add(time.Second))}
 		_, err = w.alpha.StopRunningCharge(t.Context(), input.Reference, late)
 		require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
@@ -157,6 +179,12 @@ func TestRunningChargeContracts(t *testing.T) {
 		input.RatePerHour = 7200
 		_, err = w.alpha.StartRunningCharge(t.Context(), input)
 		require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
+		balance(t, w.alpha, customer, 700, 0, 1000)
+		fleet := startFleet(t, w)
+		nextDay(w)
+		postDays(t, fleet)
+		postDays(t, fleet)
+		require.Equal(t, []int64{-300, 1000}, ledgerAmounts(t, w.alpha, customer), "one segment, posted once")
 		balance(t, w.alpha, customer, 700, 0, 700)
 	})
 	t.Run("OR-J25-S04/depletion-notifies-host-and-explicit-stop-never-reopens", func(t *testing.T) {
@@ -195,7 +223,8 @@ func TestRunningChargeContracts(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, billing.RunningChargeStopped, final.State)
 		require.EqualValues(t, 1000, final.ChargedAmount)
-		balance(t, w.alpha, customer, 0, 0, 0)
+		// Its accrual is pending until the day's posting takes it.
+		balance(t, w.alpha, customer, 0, 0, 1000)
 		events, err = w.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"balance.depleted"}, Limit: 100})
 		require.NoError(t, err)
 		require.Len(t, events.Events, 1)

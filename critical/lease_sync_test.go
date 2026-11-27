@@ -226,7 +226,7 @@ func TestLeaseSyncs(t *testing.T) {
 		require.EqualValues(t, -300, deductions[0].Amount)
 		require.True(t, deductions[0].Usage.Through.After(day), "a posting takes everything the event store holds")
 		require.EqualValues(t, 300, deductions[0].Usage.Amount)
-		require.Equal(t, []billing.UsageDeductionLine{{MeterKey: "compute", Requests: 2, Quantity: 3, Amount: 300}}, deductions[0].Usage.Lines)
+		require.Equal(t, []billing.UsageReceiptLine{{MeterKey: "compute", Requests: 2, Quantity: 3, Amount: 300}}, periodless(t, now, deductions[0].Usage.Lines))
 		postDays(t, fleet)
 		require.Len(t, usageDeductions(t, w.alpha, customer), 1, "a posted day posts nothing again")
 	})

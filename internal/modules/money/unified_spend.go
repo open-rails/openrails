@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -128,7 +129,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	}
 
 	if fromBalance > 0 {
-		_, balanceApplied, werr := s.withdrawBalanceAndBlocks(ctx, q, customer, userID, cur, key, s.postingResource(), fromBalance)
+		_, balanceApplied, werr := s.withdrawBalanceAndBlocks(ctx, q, customer, userID, cur, key, fromBalance)
 		if werr != nil {
 			return 0, 0, false, werr
 		}
@@ -143,19 +144,25 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			return 0, 0, false, aerr
 		}
 		applied = applied || owedApplied
+		parts := s.owedParts(key, fromOwed, now)
 		// What it leaves owed is usage revenue receivable, dated as its owed
-		// item is.
+		// items are: one accrual per date, the first at the owed accrual's
+		// coordinate.
 		if owedApplied {
-			at := now
-			if s.posting != nil && !s.posting.owedAt.IsZero() {
-				at = s.posting.owedAt
-			}
-			if err := books.New(q, tenantID).AccrueUsage(ctx, customerID, cur, fromOwed, key.Coord(), at, nil); err != nil {
-				return 0, 0, false, err
+			for i, a := range accrualsByDate(parts) {
+				coord := key.Coord()
+				if i > 0 {
+					coord.SourceID += "@" + a.at.UTC().Format(instantLayout)
+				}
+				if err := books.New(q, tenantID).AccrueUsage(ctx, customerID, cur, a.amount, coord, a.at, nil); err != nil {
+					return 0, 0, false, err
+				}
 			}
 		}
-		if err := s.insertOwedItemsTx(ctx, q, tenantID, customerID, cur, key, fromOwed, now); err != nil {
-			return 0, 0, false, err
+		for _, p := range parts {
+			if err := insertPendingOwedItemTx(ctx, q, tenantID, customerID, cur, txOwedAccrual, p.sourceID, p.amount, p.at, p.metadata); err != nil {
+				return 0, 0, false, err
+			}
 		}
 		if err := s.queueUsageBilling(ctx, q, customerID, cur); err != nil {
 			return 0, 0, false, err
@@ -166,35 +173,53 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	return balanceSpent, owedAccrued, applied, nil
 }
 
-// insertOwedItemsTx queues what a spend left owed for its usage invoice: one
-// item, or one per meter an accrual's posting is for, so the invoice bills each
-// meter on its own line.
-func (s *MoneyService) insertOwedItemsTx(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string, key IdempotencyKey, owed int64, now time.Time) error {
-	if s.posting != nil && !s.posting.owedAt.IsZero() {
-		now = s.posting.owedAt
-	}
-	// An item names when its charges began, where its invoice's period starts.
-	metadata := func(source string) map[string]any {
-		m := map[string]any{"operation": string(key.Operation()), "source": source}
-		if s.posting != nil && !s.posting.from.IsZero() {
-			m[owedPeriodStartKey] = s.posting.from.UTC().Format(time.RFC3339Nano)
-		}
-		return m
-	}
+// owedPart is one owed item a spend leaves for its usage invoice.
+type owedPart struct {
+	sourceID string
+	amount   int64
+	at       time.Time
+	metadata map[string]any
+}
+
+// owedParts split what a spend left owed into its owed items: one dated now,
+// or one per share of a posting (a period's meter, its running charges),
+// each dated and starting as its share says, so the invoice bills each on
+// its own line.
+func (s *MoneyService) owedParts(key IdempotencyKey, owed int64, now time.Time) []owedPart {
 	if s.posting == nil || len(s.posting.owed) == 0 {
-		return insertPendingOwedItemTx(ctx, q, merchantID, customerID, currency, txOwedAccrual, key.owedItemSourceID(), owed, now, metadata(key.Source()))
+		return []owedPart{{sourceID: key.owedItemSourceID(), amount: owed, at: now,
+			metadata: map[string]any{"operation": string(key.Operation()), "source": key.Source()}}}
 	}
 	weights := make([]int64, len(s.posting.owed))
 	for i, o := range s.posting.owed {
 		weights[i] = o.weight
 	}
+	var out []owedPart
 	for i, amount := range share(owed, weights) {
-		meter := s.posting.owed[i].meter
-		if err := insertPendingOwedItemTx(ctx, q, merchantID, customerID, currency, txOwedAccrual, key.owedItemSourceID()+"/"+meter, amount, now, metadata("metered:"+meter)); err != nil {
-			return err
-		}
+		o := s.posting.owed[i]
+		from := o.from.UTC().Format(time.RFC3339Nano)
+		out = append(out, owedPart{sourceID: key.owedItemSourceID() + "/" + o.source + "@" + from, amount: amount, at: o.at,
+			metadata: map[string]any{"operation": string(key.Operation()), "source": o.source, owedPeriodStartKey: from}})
 	}
-	return nil
+	return out
+}
+
+// accrualsByDate sums owed parts by date, earliest first.
+func accrualsByDate(parts []owedPart) []owedPart {
+	var out []owedPart
+	for _, p := range parts {
+		if p.amount <= 0 {
+			continue
+		}
+		i := slices.IndexFunc(out, func(a owedPart) bool { return a.at.Equal(p.at) })
+		if i < 0 {
+			out = append(out, owedPart{at: p.at})
+			i = len(out) - 1
+		}
+		out[i].amount = addSat(out[i].amount, p.amount)
+	}
+	slices.SortFunc(out, func(a, b owedPart) int { return a.at.Compare(b.at) })
+	return out
 }
 
 // spendableUnits is what a customer's lots in a merchant's unit can take now,

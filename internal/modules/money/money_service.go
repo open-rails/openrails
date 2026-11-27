@@ -69,8 +69,8 @@ type MoneyService struct {
 	usageRecoveryResolver railresolve.NMIClientResolver
 	db                    *db.DB
 	clock                 clockwork.Clock
-	// posting is set on the service a running charge's posting runs on.
-	posting *runningChargePosting
+	// posting is set on the service a usage posting's ledger write runs on.
+	posting *ledgerPosting
 }
 
 func NewMoneyService(database *db.DB, clocks ...clockwork.Clock) *MoneyService {
@@ -198,13 +198,13 @@ func (s *MoneyService) ListBalanceTransactions(ctx context.Context, customer ide
 		if err != nil {
 			return page, err
 		}
-		deductions, err := usageDeductions(ctx, s.db.Gen(ctx), tid.UUID(), customer.UUID(), rows)
+		receipts, err := usageReceipts(ctx, s.db.Gen(ctx), tid.UUID(), customer.UUID(), rows)
 		if err != nil {
 			return page, err
 		}
 		for _, r := range rows {
 			item := balanceTransactionFromTransfer(r)
-			item.Usage = deductions[r.ID]
+			item.Usage = receipts[r.ID]
 			page.Items = append(page.Items, item)
 		}
 		return page, nil
@@ -232,14 +232,14 @@ func (s *MoneyService) ListBalanceTransactions(ctx context.Context, customer ide
 	if err != nil {
 		return page, err
 	}
-	deductions, err := usageDeductions(ctx, s.db.Gen(ctx), tid.UUID(), customer.UUID(), rows)
+	receipts, err := usageReceipts(ctx, s.db.Gen(ctx), tid.UUID(), customer.UUID(), rows)
 	if err != nil {
 		return page, err
 	}
 	items := make([]billing.BalanceTransaction, 0, len(rows))
 	for _, r := range rows {
 		item := balanceTransactionFromTransfer(r)
-		item.Usage = deductions[r.ID]
+		item.Usage = receipts[r.ID]
 		items = append(items, item)
 	}
 	return pagination.Cut(items, limit, func(t billing.BalanceTransaction) any {
@@ -546,7 +546,7 @@ func creditGrantTxn(lot gen.BillingCreditGrant) *models.MoneyTransaction {
 // per lot at the caller's coordinate. The available/credit-line gate is the
 // caller's job; this fails only if the lots cannot cover amount. Returns the
 // derived balance after the debit.
-func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, customer identity.CustomerID, invokerID, currency string, key IdempotencyKey, resource string, amount int64) (newBalance int64, applied bool, err error) {
+func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, customer identity.CustomerID, invokerID, currency string, key IdempotencyKey, amount int64) (newBalance int64, applied bool, err error) {
 	cur := normalizeCurrency(currency)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -562,7 +562,7 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 	if bal.Balance < amount {
 		return 0, false, ErrInsufficientCredits
 	}
-	applied, err = s.creditLots(q, tenantID).Spend(ctx, customerID, cur, amount, invokerID, resource, key.Coord())
+	applied, err = s.creditLots(q, tenantID).Spend(ctx, customerID, cur, amount, invokerID, "", key.Coord())
 	if err != nil {
 		if errors.Is(err, credits.ErrInsufficientCredits) {
 			return 0, false, ErrInsufficientCredits

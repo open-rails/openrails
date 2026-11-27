@@ -75,7 +75,7 @@ func (s *Service) runUsage(ctx context.Context, plan *Plan, groups map[string]*g
 		return err
 	}
 	// Usage a merchant's unit forgave at posting moves from charged to
-	// forgiven.
+	// forgiven, by rate card with no invoker: a posting knows none.
 	if seen["usage_charged"] {
 		forgiven, err := svc.UsageForgiveness(ctx, plan.From, plan.To)
 		if err != nil {

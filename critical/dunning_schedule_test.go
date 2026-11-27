@@ -121,15 +121,14 @@ func TestDunningSchedule(t *testing.T) {
 				require.True(t, access.Entitlements["membership:paid"])
 				creates, effects, seen := paymentIntentCreates(p), p.effects(t), held("requires_review").LastSeenAt
 				var version int64
-				var grace, recheck, advice *time.Time
+				var grace, advice *time.Time
 				read := func() {
-					require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT row_version, grace_ends_at, due_recheck_at, retry_advised_at FROM "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" WHERE id = $1", sub.ID.UUID()).Scan(&version, &grace, &recheck, &advice))
+					require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT row_version, grace_ends_at, retry_advised_at FROM "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" WHERE id = $1", sub.ID.UUID()).Scan(&version, &grace, &advice))
 				}
 				read()
 				require.NotNil(t, grace)
 				require.True(t, grace.Equal(a.clock.Now()))
 				require.Nil(t, advice)
-				require.Nil(t, recheck)
 				heldVersion := version
 				if route != "new-card" {
 					for range 3 {
@@ -139,7 +138,6 @@ func TestDunningSchedule(t *testing.T) {
 				}
 				read()
 				require.Equal(t, heldVersion, version, "a disarmed held row is not written by later passes")
-				require.Nil(t, recheck, "a disarmed held row is not deferred by the due pass")
 				require.Equal(t, seen, held("requires_review").LastSeenAt)
 				held("requires_review")
 				subscriptionState(t, a, sub.ID, "past_due")

@@ -282,34 +282,171 @@ func (q *Queries) ListRunningChargesByCustomer(ctx context.Context, arg ListRunn
 	return items, nil
 }
 
+const listRunningChargesByIDs = `-- name: ListRunningChargesByIDs :many
+SELECT id, merchant_id, reference, customer_id, currency, rate_per_hour, overdraft_amount, resource, started_at, stopped_at, posted_through_at, posted_amount, created_at, updated_at FROM billing.running_charges
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+`
+
+type ListRunningChargesByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListRunningChargesByIDs(ctx context.Context, arg ListRunningChargesByIDsParams) ([]BillingRunningCharge, error) {
+	rows, err := q.db.Query(ctx, listRunningChargesByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingRunningCharge
+	for rows.Next() {
+		var i BillingRunningCharge
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Reference,
+			&i.CustomerID,
+			&i.Currency,
+			&i.RatePerHour,
+			&i.OverdraftAmount,
+			&i.Resource,
+			&i.StartedAt,
+			&i.StoppedAt,
+			&i.PostedThroughAt,
+			&i.PostedAmount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnpostedRunningCharges = `-- name: ListUnpostedRunningCharges :many
+SELECT id, merchant_id, reference, customer_id, currency, rate_per_hour, overdraft_amount, resource, started_at, stopped_at, posted_through_at, posted_amount, created_at, updated_at FROM billing.running_charges
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND currency = $3::text AND stopped_at IS DISTINCT FROM posted_through_at
+ORDER BY started_at, id
+`
+
+type ListUnpostedRunningChargesParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// A customer's charges in one currency a posting may take, oldest first: the
+// running ones and those stopped after their last posting.
+func (q *Queries) ListUnpostedRunningCharges(ctx context.Context, arg ListUnpostedRunningChargesParams) ([]BillingRunningCharge, error) {
+	rows, err := q.db.Query(ctx, listUnpostedRunningCharges, arg.MerchantID, arg.CustomerID, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingRunningCharge
+	for rows.Next() {
+		var i BillingRunningCharge
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Reference,
+			&i.CustomerID,
+			&i.Currency,
+			&i.RatePerHour,
+			&i.OverdraftAmount,
+			&i.Resource,
+			&i.StartedAt,
+			&i.StoppedAt,
+			&i.PostedThroughAt,
+			&i.PostedAmount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const postRunningCharge = `-- name: PostRunningCharge :one
 UPDATE billing.running_charges
 SET posted_through_at = $1::timestamptz,
     posted_amount = $2::bigint,
-    stopped_at = CASE WHEN $3::boolean THEN $1::timestamptz END,
-    updated_at = $4::timestamptz
-WHERE merchant_id = $5::uuid AND id = $6::uuid
-  AND stopped_at IS NULL AND posted_through_at <= $1::timestamptz
+    updated_at = $3::timestamptz
+WHERE merchant_id = $4::uuid AND id = $5::uuid
+  AND posted_through_at <= $1::timestamptz
+  AND (stopped_at IS NULL OR $1::timestamptz <= stopped_at)
 RETURNING id, merchant_id, reference, customer_id, currency, rate_per_hour, overdraft_amount, resource, started_at, stopped_at, posted_through_at, posted_amount, created_at, updated_at
 `
 
 type PostRunningChargeParams struct {
 	Through      time.Time
 	PostedAmount int64
-	Stop         bool
 	Now          time.Time
 	MerchantID   uuid.UUID
 	ID           uuid.UUID
 }
 
-// Moves a running charge's posting to an instant, and stops it there when
-// asked. posted_amount is the caller's total through it, which the table
-// checks against running_charge_total. The caller holds the customer lock.
+// Moves a charge's posting to an instant, no later than its stop.
+// posted_amount is the caller's total through it, which the table checks
+// against running_charge_total. The caller holds the customer lock.
 func (q *Queries) PostRunningCharge(ctx context.Context, arg PostRunningChargeParams) (BillingRunningCharge, error) {
 	row := q.db.QueryRow(ctx, postRunningCharge,
 		arg.Through,
 		arg.PostedAmount,
-		arg.Stop,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+	)
+	var i BillingRunningCharge
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Reference,
+		&i.CustomerID,
+		&i.Currency,
+		&i.RatePerHour,
+		&i.OverdraftAmount,
+		&i.Resource,
+		&i.StartedAt,
+		&i.StoppedAt,
+		&i.PostedThroughAt,
+		&i.PostedAmount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const stopRunningCharge = `-- name: StopRunningCharge :one
+UPDATE billing.running_charges
+SET stopped_at = $1::timestamptz, updated_at = $2::timestamptz
+WHERE merchant_id = $3::uuid AND id = $4::uuid
+  AND stopped_at IS NULL AND posted_through_at <= $1::timestamptz
+RETURNING id, merchant_id, reference, customer_id, currency, rate_per_hour, overdraft_amount, resource, started_at, stopped_at, posted_through_at, posted_amount, created_at, updated_at
+`
+
+type StopRunningChargeParams struct {
+	StoppedAt  time.Time
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// Stops a running charge at an instant not before its last posting; what it
+// accrued since posts later. The caller holds the customer lock.
+func (q *Queries) StopRunningCharge(ctx context.Context, arg StopRunningChargeParams) (BillingRunningCharge, error) {
+	row := q.db.QueryRow(ctx, stopRunningCharge,
+		arg.StoppedAt,
 		arg.Now,
 		arg.MerchantID,
 		arg.ID,

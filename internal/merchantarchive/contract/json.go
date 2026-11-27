@@ -436,9 +436,10 @@ var jsonRules = map[string]jsonRule{
 	// An invoice line's credit benefit per unit, frozen when the invoice was made.
 	"invoice_lines.credit_grant":    nullable(object(map[string]jsonRule{"amount": moneyStringValue, "currency": textValue, "expires_after_days": integerValue})),
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
-	"grants.spec_snapshot":           nullable(object(map[string]jsonRule{"entitlements": array(textValue)})),
-	"usage_receipts.lines":           array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "print": textValue, "requests": integerValue, "quantity": integerValue, "stated": integerValue, "amount": integerValue})),
-	"usage_receipts.forgiven_lines":  nullable(array(object(map[string]jsonRule{"invoker": textValue, "event_type": textValue, "meter_key": textValue, "cell": textValue, "amount": integerValue}))),
+	"grants.spec_snapshot": nullable(object(map[string]jsonRule{"entitlements": array(textValue)})),
+	"usage_receipts.lines": array(object(map[string]jsonRule{"period_starts_at": textValue, "period_ends_at": textValue, "meter_key": textValue, "cell": textValue, "print": textValue,
+		"requests": integerValue, "quantity": integerValue, "stated": integerValue, "amount": integerValue, "forgiven": integerValue})),
+	"usage_receipts.charges":         array(object(map[string]jsonRule{"running_charge_id": uuidValue, "starts_at": textValue, "ends_at": textValue, "amount": integerValue})),
 	"usage_card_prints.card":         metadataJSON,
 	"event_store.usage_events.event": metadataJSON,
 	"invoice_attempts.metadata":      metadataJSON,

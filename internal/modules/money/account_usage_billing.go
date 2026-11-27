@@ -292,10 +292,7 @@ func (s *MoneyService) BillDueUsageAccount(ctx context.Context, customer uuid.UU
 		// What the usage and running charges accrued is owed before it is
 		// billed, so the day before a bill date is in that bill whichever job
 		// runs first.
-		if _, err := s.WithDatabase(s.db.NewWithPgxTx(tx)).at(now).postEverything(ctx, q, mid.UUID(), customer, currency, usagePostingBilling); err != nil {
-			return err
-		}
-		if _, err := postRunningChargesThrough(ctx, q, mid.UUID(), customer, currency, now, now); err != nil {
+		if _, err := s.WithDatabase(s.db.NewWithPgxTx(tx)).at(now).postEverything(ctx, q, mid.UUID(), customer, currency, now, usagePostingBilling); err != nil {
 			return err
 		}
 		if cur == nil {
