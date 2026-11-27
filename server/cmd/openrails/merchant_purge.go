@@ -10,10 +10,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
-	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 // newMerchantPurgeCmd purges one merchant: alone it takes and prints the
@@ -73,30 +71,23 @@ func newMerchantPurgeCmd() *cobra.Command {
 }
 
 // withPurgeMerchants opens the merchants service a purge runs on: its
-// configuration, the destructive-action gate, a River producer in the
-// fleet's schema for the cleanup job, and the event store with the usage
-// ledger, which post the merchant's unposted usage and delete its events.
+// configuration with the River producer the cleanup job is queued with
+// (openCLIMerchants), the destructive-action gate, and the event store with
+// the usage ledger, which post the merchant's unposted usage and delete its
+// events.
 func withPurgeMerchants(cmd *cobra.Command, run func(context.Context, *db.DB, *merchants.Service) error) error {
 	return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
-		cfg := hostconfig.Engine(ctx)
-		if err := bindCLIRiverProducer(ctx, cfg, database); err != nil {
-			return err
-		}
 		events, err := cliEventStore(ctx)
 		if err != nil {
 			return err
 		}
 		database.SetEventStore(events)
 		database.SetUsageLedger(money.NewMoneyService(database))
-		vault, err := cliVault(ctx)
+		rt, closeMerchants, err := openCLIMerchants(ctx, database, billing.MerchantID{})
 		if err != nil {
 			return err
 		}
-		opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database, vault)
-		if err != nil {
-			return err
-		}
-		defer opened.Close()
-		return run(ctx, database, opened.Service.WithDestructivePolicy(destructive.New(database)).WithJobs(database))
+		defer closeMerchants()
+		return run(ctx, database, rt.Merchants.WithDestructivePolicy(destructive.New(database)).WithJobs(database))
 	})
 }

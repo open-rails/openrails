@@ -11,9 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
-	"github.com/open-rails/openrails/internal/merchantdocs"
 
-	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
@@ -104,11 +102,8 @@ type ReconcileOptions struct {
 	// Insert registers a merchant the manifest names that does not exist.
 	Insert bool
 	// Merchants is the merchants service over the configuration the manifest
-	// fills (a file) or reads (Vault); nil opens one for this call, over
-	// Vault.
+	// fills (a file) or reads (Vault), armed for writes.
 	Merchants *merchants.Service
-	// Vault is the authenticated client Merchants is opened over.
-	Vault *vaultapi.Client
 	// Refuse, set by a serving process, takes what cannot be served: a
 	// merchant that cannot be provisioned is reported to it and the others
 	// proceed, and a document the merchant does not serve is refused alone.
@@ -146,6 +141,9 @@ func ReconcileMerchantManifestData(ctx context.Context, logger *slog.Logger, cfg
 	if manifest == nil {
 		return fmt.Errorf("merchant bootstrap manifest is required")
 	}
+	if opts.Merchants == nil {
+		return fmt.Errorf("merchant bootstrap requires the merchant configuration")
+	}
 	if manifest.Version != merchantbootstrap.BootstrapManifestVersion {
 		return fmt.Errorf("merchant bootstrap: manifest version must be %d", merchantbootstrap.BootstrapManifestVersion)
 	}
@@ -174,21 +172,9 @@ func ReconcileMerchantManifestData(ctx context.Context, logger *slog.Logger, cfg
 	if err != nil {
 		return fmt.Errorf("wrap control-plane db: %w", err)
 	}
-	directory := opts.Merchants
-	if directory == nil {
-		opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database, opts.Vault)
-		if err != nil {
-			return fmt.Errorf("merchant bootstrap: %w", err)
-		}
-		defer opened.Close()
-		directory = opened.Service
-		if _, ok := directory.Config().Source().(*merchantdocs.FileSource); ok {
-			logger.InfoContext(ctx, "merchant bootstrap: without Vault the manifest is read by the server that boots with it; only merchant identities persist here")
-		}
-	}
 	for _, slug := range slices.Sorted(maps.Keys(manifest.Merchants)) {
 		tn, err := ProvisionMerchant(ctx, ProvisionMerchantParams{
-			Config: cfg, ControlPlane: cp, Database: database, Merchants: directory,
+			Config: cfg, ControlPlane: cp, Database: database, Merchants: opts.Merchants,
 			Slug: slug, Merchant: merchantsDeclared[slug], Insert: opts.Insert,
 			Tolerate: opts.Refuse != nil,
 		})
