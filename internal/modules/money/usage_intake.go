@@ -34,27 +34,25 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Usage is taken in, not settled: each item becomes one event in the event
-// store, carrying its priced meter cells (under the card print in force, in
-// its pricing period), a provisional amount (the marginal price at the period
-// position PostgreSQL's running totals hold: what limits count) and the limit
-// windows that count it, located when it was admitted. Intake then adds each
-// item's quantities and provisional price to its lease's running totals
+// Usage is taken in, not posted: intake adds each item's quantities and
+// provisional price (the marginal price at the period position PostgreSQL's
+// running totals hold: what limits count) to its lease's running totals
 // (usage_totals), which the balance deducts as pending until a posting takes
-// them. A failed item is not priced: what its grace leaves is charged at
-// once, with its own ledger legs.
+// them, and makes it one event in the event store, carrying its priced meter
+// cells (under the card print in force, in its pricing period) and the limit
+// windows that count it, located when it was admitted. A failed item is not
+// priced: what its grace leaves is charged at once, with its own ledger legs.
 //
-// Intake is two steps in the caller's transaction: PrepareUsageTx validates,
-// prices and locates, writing nothing; then CommitUsageTx inserts the events,
-// waits until they read back, and writes the PostgreSQL side. It is
-// append-only and takes no customer's lock, except to change what that lock
-// guards: to open a session or first-use window (two first uses in different
-// seconds would open two), or to charge a failed item's grace (a balance
-// movement). Concurrent intakes of one customer may price from the same
-// period position; postings price the period's total, so only provisional
-// amounts can differ. A resend of a sync that failed after its insert inserts
-// its events again: the store's raw events collapse the copies, its rollups
-// count both, and PostgreSQL settles each item once.
+// Intake is two steps per batch in the caller's transaction, gathered in its
+// UsageSettlement: PrepareUsageTx validates, prices and locates, writing
+// nothing; then CommitUsageTx writes the PostgreSQL side. The event store
+// takes the settlement's events only once the transaction committed, so a
+// resend inserts nothing again. It is append-only and takes no customer's
+// lock, except to change what that lock guards: to open a session or
+// first-use window (two first uses in different seconds would open two), or
+// to charge a failed item's grace (a balance movement). Concurrent intakes of
+// one customer may price from the same period position; postings price the
+// period's total, so only provisional amounts can differ.
 
 // ErrUsageOutsideIngestWindow refuses usage dated before the ingest window or
 // ahead of the clock.
@@ -130,7 +128,7 @@ type UsageResult struct {
 
 // UsageIntake is a prepared batch of usage, ready to commit.
 type UsageIntake struct {
-	store    *eventstore.Store
+	settled  *UsageSettlement
 	merchant uuid.UUID
 	items    []UsageItem
 	Results  []UsageResult
@@ -139,10 +137,9 @@ type UsageIntake struct {
 	prints   map[string]ratingCard
 	opens    map[uuid.UUID][]limitOpening
 	// opened are the customers whose items open a window.
-	opened  map[uuid.UUID]bool
-	failed  []failedCharge
-	changed []UsageAccount
-	now     time.Time
+	opened map[uuid.UUID]bool
+	failed []failedCharge
+	now    time.Time
 }
 
 // limitOpening is a session or first-use window a batch opens, or a granted
@@ -176,22 +173,23 @@ func settleRefusal(err error) error {
 	return apperr.Invalidf("%s", err.Error())
 }
 
-// PrepareUsageTx validates and prices a batch, locates its limit windows and
-// reads its failed items' grace. It locks only the customers whose items
-// open a window or charge a failure, in id order, and locates their items
-// again under the lock. It writes nothing. An item that cannot be priced is
-// refused alone.
-func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store *eventstore.Store, items []UsageItem) (*UsageIntake, error) {
+// PrepareUsageTx validates and prices a batch of the settlement's
+// transaction, locates its limit windows and reads its failed items' grace.
+// It locks only the customers whose items open a window or charge a failure,
+// in id order, and locates their items again under the lock. It writes
+// nothing. An item that cannot be priced is refused alone.
+func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, settled *UsageSettlement, items []UsageItem) (*UsageIntake, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if store == nil {
+	if settled == nil || settled.store == nil {
 		return nil, eventstore.Required("usage")
 	}
+	store := settled.store
 	merchantID := mid.UUID()
 	now := instant(s.now())
-	b := &UsageIntake{store: store, merchant: merchantID, items: items, Results: make([]UsageResult, len(items)),
+	b := &UsageIntake{settled: settled, merchant: merchantID, items: items, Results: make([]UsageResult, len(items)),
 		events: make([]*eventstore.UsageEvent, len(items)), prints: map[string]ratingCard{}, opens: map[uuid.UUID][]limitOpening{}, opened: map[uuid.UUID]bool{}, now: now}
 	from, to := now.Add(-retention.UsageIngestWindow), now.Add(retention.UsageClockSkew)
 	var eventTypes []string
@@ -658,7 +656,7 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 			if b.now.Before(readAt) {
 				readAt = b.now
 			}
-			reader := limits.Customer{Q: q, Events: b.store, MerchantID: b.merchant, CustomerID: customer, Now: readAt,
+			reader := limits.Customer{Q: q, Events: b.settled.store, MerchantID: b.merchant, CustomerID: customer, Now: readAt,
 				Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
 					return s.PricingPeriod(ctx, q, b.merchant, customer, unit, at)
 				}}
@@ -748,9 +746,10 @@ func failedLimitKey(currency, window string, delegated bool, invoker string) str
 }
 
 // chargeFailures charges each failed item what its grace does not forgive:
-// the grace its windows have left in the event store, less what earlier
-// items of the batch took. A delegated invoker's failure, or one with no
-// grace windows, is not charged.
+// the grace its windows have left in the event store, less what the
+// transaction's earlier batches and the batch's earlier items took (the
+// store takes none of the transaction's usage before it commits). A
+// delegated invoker's failure, or one with no grace windows, is not charged.
 func (b *UsageIntake) chargeFailures(ctx context.Context, now time.Time) error {
 	var customers []billing.CustomerID
 	for i, it := range b.items {
@@ -761,7 +760,7 @@ func (b *UsageIntake) chargeFailures(ctx context.Context, now time.Time) error {
 	if len(customers) == 0 {
 		return nil
 	}
-	rows, err := b.store.LimitUsage(ctx, customers, now.Add(-retention.UsageIngestWindow))
+	rows, err := b.settled.store.LimitUsage(ctx, customers, now.Add(-retention.UsageIngestWindow))
 	if err != nil {
 		return err
 	}
@@ -774,6 +773,13 @@ func (b *UsageIntake) chargeFailures(ctx context.Context, now time.Time) error {
 	for _, r := range rows {
 		if strings.HasPrefix(r.Key, "failed:") {
 			used[window{r.CustomerID.UUID(), r.Key, r.WindowStartsAt}] += r.Units
+		}
+	}
+	for _, e := range b.settled.events {
+		for _, l := range e.Limits {
+			if strings.HasPrefix(l.Key, "failed:") {
+				used[window{e.CustomerID.UUID(), l.Key, l.WindowStartsAt}] += l.Units
+			}
 		}
 	}
 	for i, it := range b.items {
@@ -846,15 +852,12 @@ func (b *UsageIntake) event(i int, it UsageItem, p pricedItem) *eventstore.Usage
 }
 
 // CommitUsageTx, in the caller's transaction: queues the customers' usage for
-// posting and holds its queue rows, inserts the batch's events and waits
-// until they read back, records the card prints, adds each item's quantities
-// and provisional price to its lease's running totals, opens the session and
-// first-use windows and posts what failed items charge. The caller settles
-// each lease number once, in this transaction, so each item is in the totals
-// once. Should the transaction not commit, the store keeps events PostgreSQL
-// never settled, which no posting reads; a resend settles them. Changed
-// names the balances the usage moved, for the caller to watch
-// (watchUsageTx, WatchUsage).
+// posting and holds its queue rows, records the card prints, adds each item's
+// quantities and provisional price to its lease's running totals, opens the
+// session and first-use windows and posts what failed items charge. The
+// caller settles each lease number once, in this transaction, so each item is
+// in the totals once. The batch's events and the balances it moved join its
+// settlement, which the event store takes once the transaction commits.
 func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *UsageIntake) error {
 	if b == nil {
 		return nil
@@ -903,15 +906,6 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 	if err := b.queueUsage(ctx, q, accounts, func(a account) time.Time { return marks[a].due }); err != nil {
 		return err
 	}
-	var events []eventstore.UsageEvent
-	for _, e := range b.events {
-		if e != nil {
-			events = append(events, *e)
-		}
-	}
-	if err := b.store.InsertUsage(ctx, events); err != nil {
-		return err
-	}
 	prints := make([]string, 0, len(b.prints))
 	for p := range b.prints {
 		prints = append(prints, p)
@@ -952,23 +946,17 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 			return err
 		}
 	}
-	b.changed = b.changed[:0]
+	for _, e := range b.events {
+		if e != nil {
+			b.settled.events = append(b.settled.events, *e)
+		}
+	}
 	for _, a := range accounts {
-		if marks[a].amount > 0 {
-			b.changed = append(b.changed, UsageAccount{Customer: a.customer, Currency: a.currency})
+		if c := (UsageAccount{Customer: a.customer, Currency: a.currency}); marks[a].amount > 0 && !slices.Contains(b.settled.changed, c) {
+			b.settled.changed = append(b.settled.changed, c)
 		}
 	}
 	return nil
-}
-
-// Changed are the balances the committed usage took from: one that crosses
-// a line of its balance watch queues a look, and one that takes arrears to
-// the threshold asks for a usage invoice.
-func (b *UsageIntake) Changed() []UsageAccount {
-	if b == nil {
-		return nil
-	}
-	return b.changed
 }
 
 // queueUsage queues each account's usage for posting, due when due says (a

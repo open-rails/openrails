@@ -69,22 +69,7 @@ grant a requested key.
 
 **SDK cache.** A remote handle with a static `APIKey` caches `CheckEntitlements` by default (`entitlementCheckCache`): a bounded 8 MiB in-process LRU, or Redis when `EntitlementCheckCacheOptions.Redis` is set. Only current exact-key checks use it. It stores each allowed key's answer, never a denial, and answers from the cache only when every requested key is allowed there; otherwise it asks OpenRails for the whole set, with `include_validity`. An entry lives `min(MaxAge, valid_until − evaluated_at)`, timed from before the request was sent; a response naming no merchant (`OpenRails-Bound-Merchant`) is refused, never stored. A check through an `Uncached` handle always asks; its answer replaces allowed entries, drops denied ones and, when it denies a key, advances the scope's generation, so a fill begun before it cannot restore a dropped entry.
 
-**Lease sync.** A gate settles usage and asks for views on a lease sync
-(`POST /v1/app/leases/sync`, `leases.Syncer.Sync`): one transaction, bounded by
-`limits.SyncTimeout` (5 s) and a 2 s lock budget, that takes no customer's lock.
-One that cannot take a lock in time, or is chosen to break a deadlock, commits
-nothing and answers 503.
-It locks the lease (creating it on the first sync), settles new usage in chunks while
-within its usage budget ([usage billing](usage-billing.md)), replaces its in-flight report (changed rows of its own), and stores
-`settled_through_n` and receipts. Once it committed, it watches the balances its
-usage moved (`MoneyService.WatchUsage`) and answers views, limit sets and pricing
-(`views.go`) in one read-only snapshot, reading every customer's money, recent
-spend and limit usage in one batch each; money is PostgreSQL's alone (a balance
-and its pending usage). Every writer inserts usage into the event
-store before it commits the end of the in-flight line that held it, and limit
-reads take PostgreSQL before the event store, so an item counts
-twice at worst, never not at all; the view covers every item the receipts name.
-Views read usage only through `leases.UsageReader`.
+**Lease sync.** A gate settles usage and asks for views on a lease sync (`POST /v1/app/leases/sync`, `leases.Syncer.Sync`): one transaction, bounded by `limits.SyncTimeout` (5 s) and a 2 s lock budget, that takes no customer's lock. One that cannot take a lock in time, or is chosen to break a deadlock, commits nothing and answers 503. It locks the lease (creating it on the first sync), settles new usage in chunks while within its usage budget ([usage billing](usage-billing.md)), replaces its in-flight report (changed rows of its own), and stores `settled_through_n` and receipts. Once it committed, it inserts the usage into the event store, watches the balances its usage moved (`MoneyService.WatchUsage`) and answers views, limit sets and pricing (`views.go`) in one read-only snapshot, reading every customer's money, recent spend and limit usage in one batch each; money is PostgreSQL's alone (a balance and its pending usage). Limit reads take PostgreSQL before the event store, so another gate's view counts an item twice at worst (its in-flight line and its events), and misses it only between its sync's commit and its insert, or for good when the store never takes it. The view covers every item the receipts name that the store took. Views read usage only through `leases.UsageReader`.
 
 **Limits.** Every opener of a window locks the customer (`LockCustomerForSpend`, `FOR NO KEY UPDATE`, so a row naming the customer is written without waiting for it); intake, which only appends usage, takes it only to open a window or charge a failure. A request is checked against `balance`, its spend windows (`spendgate.SpendClaims`), then its declared limits, each by its overrun; a declared limit's or spend window's held is what live leases report in flight, the balance's its pending usage and accrual. `admission.Admitter` resolves the set a view carries and adds delinquency and the delegated-invoker cutoff. Intake (`MoneyService.PrepareUsageTx`) counts units in their windows in full, never clamped, in the event store's `limit_usage`: the windows current when the usage was admitted (`admitted_at`), and the spend windows of the invoker attributes it reports (none when its policy cannot be resolved, such as during an FX outage); reads take a window's units there, a rolling limit's buckets and a rate limit's level from its buckets (`limits.RateLevelOf`). A lease's report counts while it is live (`limits.LeaseLiveSince`). A view request a sync cannot answer is refused alone (`refused_views`).
 

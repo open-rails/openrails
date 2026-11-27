@@ -30,12 +30,13 @@ import (
 // reserves nothing and takes no lock. Usage is read only through
 // UsageReader.
 //
-// Views are read once the sync's transaction committed, in one read-only
-// snapshot taken before any event store read: they cover every item whose
-// receipt the sync answers (its events were inserted before the commit),
-// and an item another sync settles meanwhile is counted at worst twice
-// (its events and its in-flight line), never not at all. What other gates
-// settled since is what the gate measures as others' additions.
+// Views are read once the sync's transaction committed and its events were
+// inserted, in one read-only snapshot taken before any event store read:
+// they cover every item whose receipt the sync answers, unless the store
+// never took it. An item another sync settles meanwhile is counted at worst
+// twice (its events and its in-flight line), and not at all only between
+// that sync's commit and its insert. What other gates settled since is what
+// the gate measures as others' additions.
 
 type viewKey struct {
 	customer uuid.UUID
