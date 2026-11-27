@@ -1,13 +1,13 @@
 // Package ccbillmock is a stateful CCBill DataLink for tests and test
-// fixtures: the ACTIVEMEMBERS roster, REBILL and CANCELLATION
+// fixtures: the ACTIVEMEMBERS roster, NEW, REBILL, CANCELLATION and EXPIRE
 // transaction exports and the subscription-management (SMS) status and
 // cancel actions. Point
 // Deps.ProviderEndpoints.CCBillDataLinkURL at URL. Only tests and test
 // fixtures may import it.
 //
-// Times are written as CCBill's DataLink guide writes them: a roster row's
-// transaction timestamp as YYYYMMDDHHMMSS, a REBILL row's and every rebill,
-// expire and cancel date as YYYY-MM-DD. CCBill names no zone for them; they are UTC,
+// Times are written as CCBill's DataLink guide writes them: a roster or NEW
+// row's transaction timestamp as YYYYMMDDHHMMSS, a REBILL row's and every
+// rebill, expire and cancel date as YYYY-MM-DD. CCBill names no zone for them; they are UTC,
 // the zone OpenRails reads them in.
 //
 // As CCBill's guide says, DataLink answers a live account (no testMode=1) one
@@ -21,8 +21,9 @@
 //
 // Known differences from real CCBill: credentials are checked only after
 // RequireCredentials; members carry no amount (DataLink's roster names none);
-// exports honor startTime and endTime (CCBill's MST clock), refuse a range
-// over 24 hours as CCBill does, and list only rebills and cancellations. A
+// a NEW row is what AddSignup seeds, not every member; exports honor
+// startTime and endTime (CCBill's MST clock), refuse a range over 24 hours as
+// CCBill does, and list only signups, rebills, cancellations and expiries. A
 // refused request does not restart the hour.
 package ccbillmock
 
@@ -61,6 +62,23 @@ type Cancellation struct {
 	At, Expires    time.Time
 }
 
+// Signup is one NEW row: a member's signup at At with its initial and
+// recurring terms (decimals in major units, periods in days).
+type Signup struct {
+	SubscriptionID, Username, Email string
+	At                              time.Time
+	Initial, Recurring              string
+	InitialDays, RecurringDays      int
+}
+
+// Expiry is one EXPIRE row: a subscription whose paid time ended on Expires;
+// Canceled is when its member canceled, nil when a rebill failed.
+type Expiry struct {
+	SubscriptionID string
+	Expires        time.Time
+	Canceled       *time.Time
+}
+
 // Call is one SMS action CCBill received.
 type Call struct {
 	Path string
@@ -84,8 +102,10 @@ type Mock struct {
 	mu            sync.Mutex
 	seq           int
 	members       []Member
+	signups       []Signup
 	rebills       []Rebill
 	cancellations []Cancellation
+	expiries      []Expiry
 	cancels       map[string]int
 	calls         []Call
 	requests      []Request
@@ -152,6 +172,25 @@ func (m *Mock) AddCancellation(c Cancellation) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cancellations = append(m.cancellations, c)
+}
+
+// AddSignup records a member's signup and returns its subscription id
+// (SubscriptionID when set).
+func (m *Mock) AddSignup(s Signup) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s.SubscriptionID == "" {
+		s.SubscriptionID = m.nextID()
+	}
+	m.signups = append(m.signups, s)
+	return s.SubscriptionID
+}
+
+// AddExpiry records the end of a subscription's paid time.
+func (m *Mock) AddExpiry(e Expiry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.expiries = append(m.expiries, e)
 }
 
 // RequireCredentials makes DataLink answer only username and password. Any
@@ -288,6 +327,16 @@ func (m *Mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		req := &m.requests[len(m.requests)-1]
 		req.Start, req.End = start, end
 		var rows []string
+		if strings.Contains(r.Form.Get("transactionTypes"), "NEW") {
+			for _, su := range m.signups {
+				if at := su.At.Truncate(time.Second); at.Before(start) || at.After(end) {
+					continue
+				}
+				// The guide's default NEW fields after the type and account.
+				rows = append(rows, fmt.Sprintf(`"NEW","999999","0000","%s","%s","","","%s","","","","","","","%s","","ACTIVE","%s","%d","%s","%d","Y","VISA","",""`,
+					su.SubscriptionID, su.At.UTC().Format("20060102150405"), su.Username, su.Email, su.Initial, su.InitialDays, su.Recurring, su.RecurringDays))
+			}
+		}
 		if strings.Contains(r.Form.Get("transactionTypes"), "REBILL") {
 			for _, rb := range m.rebills {
 				if at := rb.At.Truncate(time.Second); at.Before(start) || at.After(end) {
@@ -304,6 +353,15 @@ func (m *Mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// The guide's default CANCELLATION fields after the type and
 				// account: subscription id, expire date, cancel date, batched.
 				rows = append(rows, fmt.Sprintf(`"CANCELLATION","999999","0000","%s","%s","%s","N"`, c.SubscriptionID, date(&c.Expires), date(&c.At)))
+			}
+		}
+		if strings.Contains(r.Form.Get("transactionTypes"), "EXPIRE") {
+			for _, e := range m.expiries {
+				// An expiry is listed on its day: DataLink dates it, it states no time.
+				if day := e.Expires.UTC().Truncate(24 * time.Hour); day.Before(start.UTC().Truncate(24*time.Hour)) || day.After(end) {
+					continue
+				}
+				rows = append(rows, fmt.Sprintf(`"EXPIRE","999999","0000","%s","%s","%s","N"`, e.SubscriptionID, date(&e.Expires), date(e.Canceled)))
 			}
 		}
 		_, _ = io.WriteString(w, strings.Join(rows, "\n"))
