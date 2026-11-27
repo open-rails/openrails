@@ -199,11 +199,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if err := addWorker(workers, usage); err != nil {
 		return fmt.Errorf("add usage invoice worker: %w", err)
 	}
-	// Each NMI PSP's own history, as monthly aggregates, in its own hourly job
-	// on its own queue: a slow provider report holds no billing worker.
-	if err := addWorker(workers, &riverjobs.NMIHistoryWorker{DB: r.DB, Leases: r.leaseDB, Clock: clock, NMIResolver: r.CollectionResolver, Log: r.Log}); err != nil {
-		return fmt.Errorf("add NMI history worker: %w", err)
-	}
 	// Every due scan, in turn, at the top of each hour. Renewals, retries,
 	// delinquency and lapses are critical: a day overdue fails job progress.
 	dunning := &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, Lifecycle: r.SubscriptionLifecycleService, Log: r.Log}

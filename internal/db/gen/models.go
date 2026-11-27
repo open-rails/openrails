@@ -1360,28 +1360,6 @@ type BillingNmiBulkCheckpoint struct {
 	StartedAt      time.Time
 }
 
-// Authorizations NMI answered per PSP, month_at (the month's first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and answer: a refusal's reason from the one classifier, with its outcome and decline_cause, or an approval (reason empty). A read replaces every month it covers. Retention: rows are deleted 25 months (761 days) after their month.
-type BillingNmiHistoryMonth struct {
-	MerchantID     uuid.UUID
-	PspID          uuid.UUID
-	MonthAt        time.Time
-	Kind           string
-	Reason         string
-	Authorizations int64
-	Outcome        string
-	DeclineCause   *string
-}
-
-// Each current NMI PSP's history read: when it last completed and when the next is due. A PSP never read is backfilled 25 months; later reads start the month before the last.
-type BillingNmiHistoryRead struct {
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-	// When the last read completed; NULL until one has.
-	ReadAt *time.Time
-	// When the hourly openrails.nmi_history job reads it next: a day after a completed read, unchanged after a failed one; infinity while the PSP is archived, superseded or its merchant deleted, until its configuration declares it again.
-	DueAt time.Time
-}
-
 // Whether a financial archive restore still blocks the merchant's inbox publication: the restore sets restore_required, and only restoring the source's notification ordering clears it. No revision is reset implicitly.
 type BillingNotificationChannelState struct {
 	MerchantID      uuid.UUID

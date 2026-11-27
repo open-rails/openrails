@@ -56,7 +56,6 @@ var kinds = map[string]time.Duration{
 	KindProviderRefreshRequested:         time.Hour,
 	KindPacedProviderRefresh:             time.Hour,
 	KindMerchantHealth:                   time.Hour,
-	KindNMIHistory:                       time.Hour,
 	reconcile.KindChargeAttributions:     time.Hour,
 	KindStripeWebhookReconcile:           DefaultTimeout,
 	KindMRRRisk:                          DefaultTimeout,

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 877,
+  "scenario_count": 875,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2474,11 +2474,6 @@
       "name": "The hourly health pass raises held engine renewals and closes them once attempted"
     },
     {
-      "id": "OR-J04-S71",
-      "journey": "J04",
-      "name": "An NMI history read that fails fails its own job, never the billing pass, and stays due; the next hour's job reads it and is due again a day later"
-    },
-    {
       "id": "OR-J27-S10",
       "journey": "J27",
       "name": "Imported admin grant windows change at the evidence horizon and replay without extra history"
@@ -3254,6 +3249,11 @@
       "name": "A metrics query's order term it cannot sort by is refused invalid_order on its own order[i] param: both a measure and a dimension, a direction other than asc or desc, a measure it does not ask for, a dimension it does not group by"
     },
     {
+      "id": "OR-J53-S09",
+      "journey": "J53",
+      "name": "NMI's own transaction history is no measure: the schema names no nmi_history measure or nmi_kind dimension, and a query naming nmi_history_authorizations is refused unknown_measure"
+    },
+    {
       "id": "OR-J43-S01",
       "journey": "J43",
       "name": "A catalog edit and its history entry commit together, and a refused edit rolls both back"
@@ -3442,11 +3442,6 @@
       "id": "OR-J45-S07",
       "journey": "J45",
       "name": "Authorization rate, issuer-discretion decline rate and first-try rebill approval read the stored outcomes and causes: refusals and errors are in neither, missed renewals in neither; the decline mix and Visa categories, and cuts by kind, card brand, BIN, token type and whether the storing transaction's id was sent; the overview shows them as tiles and in Payment health"
-    },
-    {
-      "id": "OR-J45-S08",
-      "journey": "J45",
-      "name": "NMI history months carry each answer's outcome and cause: a catch-all 200 by the issuer's code, 461 as the merchant account's refusal"
     },
     {
       "id": "OR-J45-S10",
@@ -3747,11 +3742,6 @@
       "id": "OR-J04-S82",
       "journey": "J04",
       "name": "Deps.ProviderEndpoints sends provider clients only to loopback fakes: a hostname, a non-loopback address, userinfo or a source matching every address refuses New, and so does any endpoint beside a live PSP"
-    },
-    {
-      "id": "OR-J04-S83",
-      "journey": "J04",
-      "name": "A slow NMI history read runs on its own queue: a fleet with one billing worker finishes the billing pass while it waits, and once NMI answers the job catches the account up; the next hour reads nothing, the next day reads it again"
     },
     {
       "id": "OR-J04-S84",

@@ -1543,9 +1543,6 @@
       "TestRefundRecovery/OR-J20-S08/an-unresolved-nmi-refund-is-named-and-closed-by-the-operator/lost-response",
       "TestRefundRecovery/OR-J20-S08/an-unresolved-nmi-refund-is-named-and-closed-by-the-operator/lost-request"
     ],
-    "OR-J04-S71": [
-      "TestBillingPass/OR-J04-S71/a-failed-nmi-history-read-fails-its-own-job-and-the-next-hours-reads-it"
-    ],
     "OR-J04-S72": [
       "TestHostDeps/OR-J04-S72/boots-on-a-pool-without-a-connection-string"
     ],
@@ -1824,6 +1821,9 @@
     ],
     "OR-J53-S08": [
       "TestReporting/OR-J53-S08/a-sort-term-the-query-cannot-order-by-is-refused-on-its-order-param"
+    ],
+    "OR-J53-S09": [
+      "TestReporting/OR-J53-S09/nmis-own-history-is-no-measure-authorizations-are-measured-on-attempts"
     ],
     "OR-J43-S01": [
       "TestConfigurationHistory/OR-J43-S01/an-edit-and-its-entry-commit-and-roll-back-together"
@@ -2169,9 +2169,6 @@
     "OR-J45-S07": [
       "TestDeclineCauses/OR-J45-S07/authorization-rates-the-decline-mix-and-their-cuts-read-the-stored-answers"
     ],
-    "OR-J45-S08": [
-      "TestDeclineCauses/OR-J45-S08/nmi-history-months-carry-each-answers-outcome-and-cause"
-    ],
     "OR-J45-S10": [
       "TestDeclineCauses/OR-J45-S10/the-system-errors-finding-counts-the-rails-own-errors-not-the-issuers",
       "TestDeclineCauses/OR-J45-S10/the-system-errors-finding-counts-the-rails-own-errors-not-the-issuers/an-issuers-malfunction-is-not-ours",
@@ -2399,9 +2396,6 @@
     ],
     "OR-J04-S82": [
       "TestHostDeps/OR-J04-S82/provider-endpoints-are-loopback-fakes-never-beside-a-live-psp"
-    ],
-    "OR-J04-S83": [
-      "TestBillingPass/OR-J04-S83/a-slow-nmi-history-read-holds-up-no-billing-pass-and-catches-up"
     ],
     "OR-J04-S84": [
       "TestBackgroundJobs/OR-J04-S84/fleets-sharing-a-database-report-no-stall-while-another-queues-the-billing-pass"

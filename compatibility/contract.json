@@ -1998,7 +1998,6 @@
     ],
     "internal/river": [
       "type CleanupExpiredDataArgs struct {\n\tAfter *uuid.UUID `json:\"after,omitempty\"`\n}",
-      "type NMIHistoryReport struct {\n\tRead int `json:\"read\"`\n}",
       "type PacedProviderRefreshArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tPSPID      uuid.UUID `json:\"psp_id\" river:\"unique\"`\n}",
       "type PassReport struct {\n\tOverdue []string `json:\"overdue\"`\n}",
       "type ProviderRefreshRequestArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}",
@@ -4967,25 +4966,6 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5",
       "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks"
-    },
-    "internal/river/jobs_nmi_history.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "clockwork": "github.com/jonboulle/clockwork",
-      "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "logx": "github.com/open-rails/openrails/internal/logx",
-      "merchants": "github.com/open-rails/openrails/internal/merchants",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
-      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
-      "river": "github.com/riverqueue/river",
-      "slog": "log/slog",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/river/jobs_provider_refresh.go": {
       "alerting": "github.com/open-rails/openrails/internal/modules/alerting",

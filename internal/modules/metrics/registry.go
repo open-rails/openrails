@@ -70,7 +70,6 @@ const (
 	FamAttempts       Family = "attempts"        // flow over payment_attempts (attempted_at)
 	FamPurchases      Family = "purchases"       // flow over purchases, one per purchase_id (first attempt)
 	FamRebillCycles   Family = "rebill_cycles"   // cohort over rebill_cycles (due_at: the period that came due)
-	FamNMIHistory     Family = "nmi_history"     // flow over nmi_history_months (month_at)
 	FamFindings       Family = "findings"        // snapshot over reconciliation_findings: open at t
 	FamCheckouts      Family = "checkouts"       // flow over checkouts: invoices started for a customer to pay (created_at)
 	FamSales          Family = "sales"           // flow over paid checkouts (completed_at)
@@ -236,7 +235,7 @@ var Dimensions = []Dimension{
 	{Name: "basis", Description: "what cohort_retention counts: subscribers (customers with MRR; default) | mrr", Values: []string{"subscribers", "mrr"}},
 	{Name: "customer", Description: "the customer id (usage and limit measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseCustomerID(s) })},
 	{Name: "invoker", Description: "the invoker that fired a usage event (usage measures; read from raw usage events, kept 90 days, so the range must start within them)"},
-	{Name: "outcome", Description: "how a funnel's row ended; its values depend on the measure (dim_values): attempts and nmi_history_authorizations approved | declined (the issuer said no) | refused (the merchant or its gateway refused it first) | error (it did not complete); purchases approved | recovered | failed | open; rebills approved | recovered | lost | open; checkouts and checkout_customers paid | abandoned | open; usage succeeded | failed; disputes open | won | lost | closed | unreported; fraud_reports recorded | refunded | nothing_to_refund | disputed"},
+	{Name: "outcome", Description: "how a funnel's row ended; its values depend on the measure (dim_values): attempts approved | declined (the issuer said no) | refused (the merchant or its gateway refused it first) | error (it did not complete); purchases approved | recovered | failed | open; rebills approved | recovered | lost | open; checkouts and checkout_customers paid | abandoned | open; usage succeeded | failed; disputes open | won | lost | closed | unreported; fraud_reports recorded | refunded | nothing_to_refund | disputed"},
 	// Checkouts: from a checkout's creation to its payment, and who paid.
 	{Name: "step", Description: "how far a checkout got as of the range end: created | opened (its payment form loaded) | submitted (its customer asked to pay) | paid", Values: checkoutSteps},
 	{Name: "surface", Description: "where a checkout was paid: direct (the merchant's page, billing-ui or its own) | pay_url (the hosted payment page) | embedded (the payment page framed on the merchant's site)", Values: []string{"direct", "pay_url", "embedded"}},
@@ -293,7 +292,6 @@ var Dimensions = []Dimension{
 	{Name: "severity", Description: "finding severity", Values: []string{"critical", "high", "medium", "low"}},
 	{Name: "finding_status", Description: "requires_review (needs a person; the console's bell counts these) | reconcile_required (OpenRails is repairing it)", Values: []string{"requires_review", "reconcile_required"}},
 	{Name: "risk_reason", Description: "why MRR is at risk: past_due | needs_payment_method | unverified | card_expiring (its card expires before the renewal) | delinquent (its customer, in its currency); on at_risk_recovery_rate, the reason the case entered with", Values: riskReasonValues()},
-	{Name: "nmi_kind", Description: "what NMI's own history tells apart: verification ($0 card verification) | one_off_sale (initial sales, upgrades and retries of declined rebills, whoever sent them) | scheduled_rebill (NMI's own schedule charge)", Values: []string{"verification", "one_off_sale", "scheduled_rebill"}},
 }
 
 // A payment settles its whole invoice, not each line independently. Attribute
@@ -809,20 +807,6 @@ var families = map[Family]familySpec{
 			"finding_status": `CASE WHEN f.status IN ('reconcile_required','auto_fixed') THEN 'reconcile_required' ELSE 'requires_review' END`,
 		},
 	},
-	FamNMIHistory: {
-		Kind:     "flow",
-		From:     `billing.nmi_history_months h`,
-		TimeExpr: `h.month_at`,
-		Calendar: true,
-		DimExprs: map[string]string{
-			"psp":           `COALESCE('psp_' || h.psp_id::text, '')`,
-			"nmi_kind":      `h.kind`,
-			"decline_cause": `COALESCE(h.decline_cause, '')`,
-			"reason":        `h.reason`,
-			"outcome":       `h.outcome`,
-		},
-		DimValues: map[string][]string{"outcome": attemptOutcomes},
-	},
 }
 
 // A renewal the engine owns is missed when nothing attempted it by its
@@ -945,7 +929,6 @@ var (
 	attemptDims  = []string{"currency", "rail", "psp", "owner", "kind", "card_entry", "source", "observed_via", "decline_cause", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type", "advice_code", "network_advice_code", "visa_category", "network_transaction_id"}
 	purchaseDims = []string{"currency", "rail", "psp", "owner", "card_entry"}
 	cycleDims    = []string{"currency", "rail", "psp", "owner", "first_outcome", "first_decline_cause", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover", "card_brand", "card_bin", "token_type", "network_transaction_id"}
-	nmiHistDims  = []string{"psp", "nmi_kind", "decline_cause", "reason"}
 	cashDims     = append([]string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "network", "kind", "discount_code"}, checkoutFactDims...)
 	disputeDims  = []string{"currency", "rail", "psp", "network", "kind", "dispute_kind", "dispute_reason", "outcome"}
 	networkDims  = []string{"rail", "psp"}
@@ -1377,11 +1360,6 @@ var declared = []Measure{
 		Formula:     "SUM(daily drift counters)",
 		Expr:        `COALESCE(SUM(whd.drift), 0)::bigint`,
 		Dims:        webhookDims},
-	{Name: "nmi_history_authorizations", Class: ClassAdditive, Family: FamNMIHistory, Unit: "count", Group: GroupOps, Direction: Neutral,
-		Description: "authorizations NMI answered, read daily from its transaction history (card verifications, one-off sales and NMI-scheduled rebills, whoever sent them), by outcome (approved, declined, refused, error) and decline_cause; dated by month",
-		Formula:     "SUM(authorizations in NMI's history)",
-		Agg:         sum(`h.authorizations`, ""),
-		Dims:        with(nmiHistDims, "outcome")},
 	{Name: "entitled_customers", Class: ClassSnapshot, Family: FamEntitlSnapshot, Unit: "count", Group: GroupOps, Direction: UpIsGood,
 		Description: "distinct customers holding a live entitlement at t: a key of a product they hold (includes timed/comped access, not just subscribers)",
 		Formula:     "COUNT(DISTINCT customers) with an entitlement at t",
@@ -1404,7 +1382,6 @@ var Caveats = []string{
 	"snapshot series evaluate at each bucket's START instant (UTC); without a time grouping they evaluate at the range end (balance measures: strictly-before semantics)",
 	"token_type exists from its instrumentation onward: NULL/legacy rows read 'unknown' and are excluded from token_type-filtered analyses; kind on payments exists from instrumentation onward; older and imported rows read 'unknown'. Declines are measured on attempts, not payments: Stripe- and CCBill-owned renewals are recorded as their providers report them",
 	"attempts, purchases and rebill cycles begin at their instrumentation: earlier history lives in payments and the provider. Purchases and cycles are dated by their first attempt and due date; their outcome is as of the range end: a purchase quiet for an hour has failed, a cycle past its 15-day dunning window is lost",
-	"nmi_history measures are NMI's own transaction history, read daily per NMI PSP and kept 25 months: they include what OpenRails sent and what came before it. Rows are dated by their month's first instant, so use month-aligned ranges. one_off_sale cannot separate initial sales from retries of declined rebills",
 	"limits_reached counts each window of a declared limit once, when settled and held usage first took it to capacity; a rate or lifetime limit's one window counts its first time only. A window that reached capacity is kept 61 days past its end",
 	"time buckets zero-fill: a bucket present with zeros means genuinely zero activity, not missing data",
 	"checkouts and sales count checkouts from their instrumentation (a purchase number set), dated by creation and payment; a zero-total checkout is a sale but not a checkout. Step and outcome are as of the range end; a checkout past its expiry is abandoned. Unpaid checkouts that never reached a payment attempt are kept 397 days, so checkout measures reach back 13 months. Attribution is the merchant's, unverified; country and language are the customer's, never their address",

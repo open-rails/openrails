@@ -39,7 +39,7 @@ const DestructiveRunKindMerchantPurge = "merchant_purge"
 // SQL assembly). existingMerchantTables preserves this order.
 var merchantOwnedTables = []string{
 	"notification_events", "customer_messages",
-	"payment_attempts", "rebill_cycles", "payment_method_versions", "mandates", "nmi_history_months",
+	"payment_attempts", "rebill_cycles", "payment_method_versions", "mandates",
 	"solana_pay_receipts", "solana_pay_references",
 	"operation_log", "provider_intents",
 	"invoice_attempts", "product_access", "stripe_fee_reads", "disputes", "fraud_reports", "payments", "customer_paid_totals", "network_activity_daily", "subscriptions",
@@ -89,8 +89,6 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsPaymentMethodVersions(ctx, id)
 	case "mandates":
 		return q.CountMerchantRowsMandates(ctx, id)
-	case "nmi_history_months":
-		return q.CountMerchantRowsNMIHistoryMonths(ctx, id)
 	case "solana_pay_receipts":
 		return q.CountMerchantRowsSolanaPayReceipts(ctx, id)
 	case "solana_pay_references":
@@ -147,8 +145,6 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsPaymentMethodVersions(ctx, id)
 	case "mandates":
 		return q.PurgeMerchantRowsMandates(ctx, id)
-	case "nmi_history_months":
-		return q.PurgeMerchantRowsNMIHistoryMonths(ctx, id)
 	case "solana_pay_receipts":
 		return q.PurgeMerchantRowsSolanaPayReceipts(ctx, id)
 	case "solana_pay_references":

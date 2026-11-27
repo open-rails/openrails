@@ -457,7 +457,6 @@ export const billingAdminMessages = {
   "Kept with the scheduled change.": "Kept with the scheduled change.",
   Key: "Key",
   Kind: "Kind",
-  "Kind / reason": "Kind / reason",
   "Last 3 months": "Last 3 months",
   "Last 30 days": "Last 30 days",
   "Last 6 months": "Last 6 months",
@@ -508,10 +507,6 @@ export const billingAdminMessages = {
   "Move everyone to the new price at their first renewal on or after a date you choose.":
     "Move everyone to the new price at their first renewal on or after a date you choose.",
   "Must be at least ": "Must be at least ",
-  "NMI history (before OpenRails recorded attempts)":
-    "NMI history (before OpenRails recorded attempts)",
-  "NMI's own transaction history, read daily and kept 25 months. It counts every sender, OpenRails too once it started. One-off sales mix initial sales, upgrades and retries of declined rebills: the history cannot tell them apart. Scheduled rebills are NMI's own charges, each the first try of its period. Rates count authorizations, not buyers.":
-    "NMI's own transaction history, read daily and kept 25 months. It counts every sender, OpenRails too once it started. One-off sales mix initial sales, upgrades and retries of declined rebills: the history cannot tell them apart. Scheduled rebills are NMI's own charges, each the first try of its period. Rates count authorizations, not buyers.",
   "NMI-owned": "NMI-owned",
   "NMI-scheduled rebills": "NMI-scheduled rebills",
   Name: "Name",
@@ -537,8 +532,6 @@ export const billingAdminMessages = {
   "Next billing date": "Next billing date",
   "Next charge": "Next charge",
   "Next page": "Next page",
-  "No NMI history yet: it is read daily.":
-    "No NMI history yet: it is read daily.",
   "No PSPs configured.": "No PSPs configured.",
   "No actions are available for your permissions and this invoice's state.":
     "No actions are available for your permissions and this invoice's state.",
@@ -570,7 +563,6 @@ export const billingAdminMessages = {
     "No provider-scheduled charges in this range.",
   "No recovered cycles.": "No recovered cycles.",
   "No refunds.": "No refunds.",
-  "No refusals in NMI's history.": "No refusals in NMI's history.",
   "No saved payment methods. Add one on the customer page before retrying collection.":
     "No saved payment methods. Add one on the customer page before retrying collection.",
   "No subscriptions.": "No subscriptions.",
@@ -598,7 +590,6 @@ export const billingAdminMessages = {
   "Open issues": "Open issues",
   "Open matching list": "Open matching list",
   OpenRails: "OpenRails",
-  "OpenRails starts": "OpenRails starts",
   "OpenRails-owned": "OpenRails-owned",
   "Operational notifications will stop delivering to this webhook. This cannot be undone.":
     "Operational notifications will stop delivering to this webhook. This cannot be undone.",
@@ -738,8 +729,6 @@ export const billingAdminMessages = {
   "Refund payment": "Refund payment",
   Refunded: "Refunded",
   Refunds: "Refunds",
-  "Refusal rate by month": "Refusal rate by month",
-  Refused: "Refused",
   "Register event properties used by filters or matrix rates.":
     "Register event properties used by filters or matrix rates.",
   Remaining: "Remaining",
@@ -853,7 +842,6 @@ export const billingAdminMessages = {
   Tiers: "Tiers",
   Title: "Title",
   "Toggle Sidebar": "Toggle Sidebar",
-  "Top refusal reasons": "Top refusal reasons",
   Total: "Total",
   "Transaction ledger · ": "Transaction ledger · ",
   "Trust level": "Trust level",

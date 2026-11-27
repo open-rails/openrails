@@ -74,7 +74,7 @@ CREATE TRIGGER %s BEFORE INSERT ON %s FOR EACH ROW EXECUTE FUNCTION %s()`,
 func runRegisteredFails(t *testing.T, fleet *river.Client[pgx.Tx], kind string) {
 	t.Helper()
 	finished := finishPass(t, fleet, kind, func() []int64 {
-		job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: registeredQueue(kind)})
+		job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		return []int64{job.Job.ID}
 	})
@@ -201,10 +201,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NotNil(t, health["openrails.billing_pass"].PeriodSeconds)
 		require.EqualValues(t, 3600, *health["openrails.billing_pass"].PeriodSeconds)
 		require.NotContains(t, health, "openrails.customer_messages_dispatch", "a fact queues its message's job; no pass dispatches")
-		require.Contains(t, health, "openrails.nmi_history", "NMI history is its own periodic job, off the billing pass")
-		require.NotNil(t, health["openrails.nmi_history"].PeriodSeconds)
-		require.EqualValues(t, 3600, *health["openrails.nmi_history"].PeriodSeconds)
-		require.EqualValues(t, 3600, health["openrails.nmi_history"].TimeoutSeconds)
+		require.NotContains(t, health, "openrails.nmi_history", "NMI's own history is no job")
 		for _, scan := range []string{"openrails.usage_posting", "openrails.dunning", "openrails.balance_watch", "openrails.delinquency", "openrails.invoice_expiry",
 			"openrails.revenue_recognition", "openrails.rebill_watch", "openrails.config_realerts", "openrails.stored_card_refresh_due"} {
 			require.NotContains(t, health, scan, "a scan runs in the billing pass; it is no job kind")

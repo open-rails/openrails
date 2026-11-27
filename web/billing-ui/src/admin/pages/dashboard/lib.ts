@@ -347,7 +347,6 @@ const HEALTH_MEASURES = new Set([
   "rebill_rate",
   "first_try_rebill_approval_rate",
   "dunning_recovery_rate",
-  "nmi_history_authorizations",
 ])
 
 // deepLinkFor maps a widget to the admin page carrying the same filter: health
