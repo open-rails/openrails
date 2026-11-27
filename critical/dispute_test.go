@@ -1307,4 +1307,8 @@ func disputeUnbookableOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, findings.Items, 1, "one loss, one finding to book it")
 	require.Contains(t, findings.Items[0].SubjectKey, "dp_unbookable")
+	advice := *findings.Items[0].RecommendedAction
+	require.Contains(t, advice, "so OpenRails books no second reversal")
+	require.Contains(t, advice, "Contest the dispute in Stripe and cite the refund")
+	require.NotContains(t, advice, "needs a manual repair")
 }

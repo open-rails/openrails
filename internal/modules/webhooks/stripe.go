@@ -1003,9 +1003,16 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 	}
 	if ledgerErr != nil {
 		originalID := original.ID
+		action := ""
+		if errors.Is(ledgerErr, payments.ErrRefundExceedsPayment) {
+			action = fmt.Sprintf("Stripe dispute %s is on charge %s (transaction %s), whose refunds leave less than the charged amount to reverse, so OpenRails books no second reversal. Contest the dispute in Stripe and cite the refund; if a refund of it is still unresolved, resolve that first. If you lose the dispute, the loss is outside OpenRails' books.", disputeID, billing.PaymentID(original.ID).String(), original.TransactionID)
+		}
+		// Every notice of one dispute is the same loss: one finding, refreshed.
 		if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
+			Action:            action,
 			Provider:          "stripe",
 			Operation:         "dispute_reversal",
+			IdempotencyKey:    "stripe:dispute_reversal:" + disputeID,
 			TransactionID:     disputeID,
 			CustomerID:        original.CustomerID.String(),
 			OriginalPaymentID: &originalID,
