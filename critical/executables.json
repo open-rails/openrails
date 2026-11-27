@@ -274,7 +274,7 @@
       "TestVerificationBinding/OR-J15-S07/verification-burst-reads-only-flagged-subscriptions"
     ],
     "OR-J15-S30": [
-      "TestBackgroundJobs/OR-J15-S30/rebill-watch-backs-off-a-failing-probe"
+      "TestBackgroundJobs/OR-J15-S30/a-failed-nmi-verification-read-waits-for-the-hourly-retry"
     ],
     "OR-J16-S01": [
       "TestDunning/OR-J16-S01/retryable-decline-recovers-on-bounded-weekly-schedule"
@@ -1270,7 +1270,12 @@
       "TestDueWork/OR-J16-S70/a-provider-billed-grace-that-ends-unanswered-is-read-by-the-due-pass"
     ],
     "OR-J16-S71": [
-      "TestDueWork/OR-J16-S71/an-overdue-renewal-is-asked-before-the-rebill-watch-reads-nmi"
+      "TestDueWork/OR-J16-S71/an-overdue-nmi-renewal-is-unverified-before-nmi-is-read"
+    ],
+    "OR-J16-S72": [
+      "TestDueWork/OR-J16-S72",
+      "TestDueWork/OR-J16-S72/stripe",
+      "TestDueWork/OR-J16-S72/ccbill"
     ],
     "OR-J16-S54": [
       "TestDunningSchedule/OR-J16-S54/a-declared-failure-inside-the-merchants-longer-schedule-stays-in-dunning"
@@ -1288,7 +1293,7 @@
       "TestDunningSchedule/OR-J16-S57/a-customers-own-declined-payments-spend-no-scheduled-retry"
     ],
     "OR-J15-S70": [
-      "TestDueWork/OR-J15-S70/an-nmi-renewal-the-probe-cannot-settle-is-read-by-id-after-its-grace"
+      "TestDueWork/OR-J15-S70/an-nmi-renewal-unpaid-a-day-past-its-period-is-unverified-access-kept"
     ],
     "OR-J15-S72": [
       "TestDueWork/OR-J15-S72/a-complete-provider-refresh-queues-no-due-work"
@@ -1675,6 +1680,9 @@
     ],
     "OR-J15-S75": [
       "TestProviderTime/OR-J15-S75/prune-keeps-a-pending-refund-and-a-booked-nmi-chargeback"
+    ],
+    "OR-J15-S76": [
+      "TestNMIRecovery/OR-J15-S76/a-schedule-nmi-no-longer-holds-ends-and-its-cycle-is-missed-as-gone"
     ],
     "OR-J28-S13": [
       "TestProviderTime/OR-J28-S13/a-ccbill-account-archived-or-in-the-other-money-class-is-declarable-by-another-merchant"

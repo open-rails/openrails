@@ -343,13 +343,15 @@ func TestBillingPass(t *testing.T) {
 		due := *sub.CurrentPeriodEndsAt
 		p.core.EditSchedule(*sub.RailSubscriptionID, func(s *nmimock.Schedule) { s.NextBilling = due.Add(7 * 24 * time.Hour) })
 		fleet := quietFleet(t, a.world)
-		// NMI skipped the period: the rebill watch finds it a day on and
-		// OpenRails collects it.
+		// NMI skipped the period: a day on the due pass unverifies the
+		// renewal, the verifier reads the skip and OpenRails collects it.
 		missed := due.Add(24*time.Hour + 20*time.Minute)
 		advanceTo(a.world, missed)
 		require.True(t, entitled(t, a.alpha, sub.CustomerID, "nmi:member"))
 		advanceTo(a.world, nextHour(missed))
-		require.False(t, runPass(t, fleet), "the rebill watch hands the skipped period to collection")
+		require.False(t, runPass(t, fleet), "the due pass asks NMI about the overdue renewal")
+		require.Eventually(t, func() bool { return renewalMiss(t, a, sub.ID) == "provider_skipped" }, 20*time.Second, 20*time.Millisecond,
+			"the verifier hands the skipped period to collection")
 		require.True(t, entitled(t, a.alpha, sub.CustomerID, "nmi:member"), "access holds while the retry waits")
 		advanceTo(a.world, nextHour(a.clock.Now()))
 		require.False(t, runPass(t, fleet), "the next pass queues the retry")
