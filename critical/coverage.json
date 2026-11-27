@@ -1591,7 +1591,7 @@
     {
       "id": "OR-J23-S38",
       "journey": "J23",
-      "name": "Two gates and an unreachable OpenRails keep deciding on their views and together spend at most what was left, each its share; what a flush resends is settled once"
+      "name": "Two gates and an unreachable OpenRails keep deciding on their views and together spend at most what was left, each its share; what a flush resends is settled once, and a sync sent in the outage that fails after OpenRails is back fails no flush begun after it"
     },
     {
       "id": "OR-J23-S40",

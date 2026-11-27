@@ -89,10 +89,49 @@ type gateWire struct {
 	down      atomic.Bool
 	dropReply atomic.Int64
 	watch     func(billing.SyncLeasesParams, *billing.SyncLeasesResult) bool
+	hold      atomic.Pointer[syncHold]
+}
+
+// syncHold keeps one sync in flight: held closes once it is, and it goes on
+// as it was sent once released.
+type syncHold struct {
+	held, release chan struct{}
+	once          sync.Once
+}
+
+// holdSync holds the wire's next sync until the hold is freed, at the latest
+// as the test ends.
+func (w *gateWire) holdSync(t *testing.T) *syncHold {
+	h := &syncHold{held: make(chan struct{}), release: make(chan struct{})}
+	w.hold.Store(h)
+	t.Cleanup(h.free)
+	return h
+}
+
+func (h *syncHold) free() { h.once.Do(func() { close(h.release) }) }
+
+func (h *syncHold) wait(t *testing.T) {
+	t.Helper()
+	select {
+	case <-h.held:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no sync was sent")
+	}
 }
 
 func (w *gateWire) RoundTrip(r *http.Request) (*http.Response, error) {
-	if w.down.Load() {
+	down := w.down.Load()
+	if r.URL.Path == "/v1/app/leases/sync" {
+		if h := w.hold.Swap(nil); h != nil {
+			close(h.held)
+			select {
+			case <-h.release:
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			}
+		}
+	}
+	if down {
 		return nil, errors.New("critical fixture cannot reach OpenRails")
 	}
 	if r.URL.Path != "/v1/app/leases/sync" {
@@ -564,10 +603,26 @@ func TestGate(t *testing.T) {
 		}
 		require.Positive(t, offline, "a view keeps deciding while OpenRails is unreachable")
 		// A flush resends what the outage held back: it settles once, pending
-		// in the balance as each flush returns.
+		// in the balance as each flush returns. A sync sent in the outage is
+		// still in flight as OpenRails comes back and the flush begins; it
+		// fails while the next is in flight, and is not the flush's failure.
 		for _, p := range processes {
+			sent := p.wire.holdSync(t)
+			sent.wait(t)
 			p.wire.down.Store(false)
-			gateFlush(t, p.gate)
+			flushed := make(chan error, 1)
+			go func() {
+				ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+				defer cancel()
+				flushed <- p.gate.Flush(ctx)
+			}()
+			time.Sleep(100 * time.Millisecond)
+			next := p.wire.holdSync(t)
+			sent.free()
+			next.wait(t)
+			time.Sleep(100 * time.Millisecond)
+			next.free()
+			require.NoError(t, <-flushed, "a flush begun after OpenRails came back")
 			b, err := a.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 			require.NoError(t, err)
 			require.GreaterOrEqual(t, b.AvailableAmount, int64(0), "the two gates together spent at most what was left, each its share: %v units", spent)
