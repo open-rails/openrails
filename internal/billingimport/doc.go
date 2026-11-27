@@ -19,7 +19,9 @@
 // without a charge, evidence-starved unverified with access kept). Re-posting
 // a book at the same AsOf is a no-op (all skipped); a newer AsOf converges
 // rows forward and never rewrites settled history. A blocked row never fails
-// the batch. Once a PSP import, an approved proposal or a webhook has read a
+// the batch: one whose customer already holds its product is a lifecycle
+// conflict, a canceled row owed a provider stop included, since it holds the
+// product until the stop lands. Once a PSP import, an approved proposal or a webhook has read a
 // row it is the provider's, and a later book skips it (provider_authority).
 // Imported members are entitled when the call returns.
 //
