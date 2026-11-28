@@ -40,6 +40,7 @@ type providerLedger struct {
 	lostResponse        bool
 	lostRefundResponse  bool
 	refuseRefund        bool
+	refundGate          *wireGate
 	evidenceUnavailable bool
 	evidenceRequested   chan struct{}
 	responseGate        *wireGate
@@ -81,7 +82,16 @@ func (p *providerLedger) serve(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	noEvidence := p.evidenceUnavailable && r.Method == http.MethodGet && (strings.HasPrefix(r.URL.Path, "/v1/payment_intents") || strings.HasPrefix(r.URL.Path, "/v1/charges"))
 	refuse := p.refuseRefund && r.Method == http.MethodPost && r.URL.Path == "/v1/refunds"
+	refundGate := p.refundGate
 	p.mu.Unlock()
+	if refundGate != nil && r.Method == http.MethodPost && r.URL.Path == "/v1/refunds" {
+		refundGate.once.Do(func() { close(refundGate.arrived) })
+		select {
+		case <-refundGate.release:
+		case <-r.Context().Done():
+			return
+		}
+	}
 	if refuse {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)

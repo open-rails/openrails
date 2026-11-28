@@ -87,7 +87,7 @@ var AllTransferTypes = []TransferType{Deposit, CreditRefund, CreditRefundRestore
 
 // fundingTransfers re-arm a customer's balance notices: money added to its
 // balance, and debt it paid.
-var fundingTransfers = map[TransferType]bool{Deposit: true, CreditReinstate: true, OwedPayment: true}
+var fundingTransfers = map[TransferType]bool{Deposit: true, CreditReinstate: true, CreditRefundRestore: true, OwedPayment: true}
 
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
 // ledger_transfers_credit_grant_id_transfer_type_key. A reinstated lot can be

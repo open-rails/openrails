@@ -19,7 +19,7 @@ var creditsRoutes = []Route{
 	{Method: POST, Path: "/v1/admin/credit-grants", Group: Admin, Auth: AuthMerchant, Name: "CreateCreditGrants", Level: LevelUpdate, Limit: middleware.AdminOperationGrant,
 		Doc: "CreateCreditGrants grants 1 to billing.MaxBatchItems credits, across any customers, all or none; the " +
 			"answer is in request order. Each item's SourceID makes it idempotent per customer: an identical " +
-			"retry answers the existing grant with Replayed set, one with a different amount, currency or expiry " +
+			"retry answers the existing grant with Replayed set, one with a different amount, currency, expiry or funding source " +
 			"refuses the batch with billing.ErrIdempotencyKeyReused.",
 		Request: billing.CreateCreditGrantBatchParams{}, Responses: []Reply{{201, billing.CreateCreditGrantBatchResult{}}, {200, billing.CreateCreditGrantBatchResult{}}},
 		Errors: codes("currency_unsupported", "idempotency_key_reused", "invalid_param", billing.CodeServiceCredentialCustomerScopeDenied), Handler: h(handlers.CreateCreditGrants)},

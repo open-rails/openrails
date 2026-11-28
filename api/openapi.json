@@ -5783,7 +5783,7 @@
           "admin"
         ],
         "operationId": "CreateCreditGrants",
-        "description": "CreateCreditGrants grants 1 to billing.MaxBatchItems credits, across any customers, all or none; the answer is in request order. Each item's SourceID makes it idempotent per customer: an identical retry answers the existing grant with Replayed set, one with a different amount, currency or expiry refuses the batch with billing.ErrIdempotencyKeyReused.",
+        "description": "CreateCreditGrants grants 1 to billing.MaxBatchItems credits, across any customers, all or none; the answer is in request order. Each item's SourceID makes it idempotent per customer: an identical retry answers the existing grant with Replayed set, one with a different amount, currency, expiry or funding source refuses the batch with billing.ErrIdempotencyKeyReused.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",

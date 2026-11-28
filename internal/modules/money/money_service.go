@@ -13,10 +13,12 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -465,9 +467,12 @@ func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositPa
 			return nil, gerr
 		}
 	}
+	if expiresAt != nil && !expiresAt.After(now) {
+		return nil, apperr.Invalidf("expires_at must be after now").WithParam("expires_at")
+	}
 	// A replay does not add balance, so only a new deposit needs the overflow guard.
 	if bal.Balance > math.MaxInt64-params.Amount {
-		return nil, fmt.Errorf("deposit would overflow balance")
+		return nil, apperr.Invalidf("amount would overflow the balance").WithParam("amount")
 	}
 
 	funding := params.funding()
@@ -488,6 +493,10 @@ func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositPa
 	}
 	lot, err := s.creditLots(q, tenantID).Issue(ctx, issue)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "22003" {
+			return nil, apperr.Invalidf("amount exceeds what the ledger can hold").WithParam("amount")
+		}
 		return nil, err
 	}
 	if params.RepayOwed {

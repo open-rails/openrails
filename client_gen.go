@@ -512,8 +512,9 @@ func (c *Client) UpdateCustomer(ctx context.Context, customerID billing.Customer
 // CreateCreditGrants grants 1 to billing.MaxBatchItems credits, across any
 // customers, all or none; the answer is in request order. Each item's
 // SourceID makes it idempotent per customer: an identical retry answers the
-// existing grant with Replayed set, one with a different amount, currency or
-// expiry refuses the batch with billing.ErrIdempotencyKeyReused.
+// existing grant with Replayed set, one with a different amount, currency,
+// expiry or funding source refuses the batch with
+// billing.ErrIdempotencyKeyReused.
 func (c *Client) CreateCreditGrants(ctx context.Context, items []billing.CreateCreditGrantParams) ([]billing.CreditGrant, error) {
 	var out billing.CreateCreditGrantBatchResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/admin/credit-grants", body: billing.CreateCreditGrantBatchParams{Items: items}}, &out); err != nil {

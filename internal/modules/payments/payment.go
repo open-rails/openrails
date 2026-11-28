@@ -629,9 +629,8 @@ func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {
 			}
 			return err
 		}
-		// What the failed refund withdrew comes back. A lot that lapsed while
-		// the provider result was unresolved expires again in the same
-		// transaction.
+		// ReleaseRefund retires what it returns to a lapsed lot; expire
+		// anything else lapsed in the same currency too.
 		if err := purchasedcredits.New(d, s.clock).ReleaseRefund(ctx, *payment.RefundedPaymentID, id); err != nil {
 			return err
 		}

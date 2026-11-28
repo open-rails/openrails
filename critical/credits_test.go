@@ -4,8 +4,10 @@ package critical_test
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
@@ -84,5 +86,44 @@ func TestCredits(t *testing.T) {
 		grants, err = a.alphaRemote.CreateCreditGrants(t.Context(), batch("backend", billing.MaxBatchItems))
 		require.NoError(t, err)
 		require.Len(t, grants, billing.MaxBatchItems)
+	})
+	t.Run("OR-J22-S54/a-grant-that-has-already-expired-or-overflows-is-refused", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		for i, expiresAt := range []time.Time{a.clock.Now(), a.clock.Now().Add(-time.Hour)} {
+			_, err := a.alphaRemote.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{
+				CustomerID: billing.CustomerID(uuid.New()), Currency: "USD", Amount: 1000,
+				Source: "critical", SourceID: fmt.Sprintf("expired-%d", i), ExpiresAt: &expiresAt,
+			}})
+			failure := requireCode(t, err, billing.CodeInvalidParam)
+			require.Equal(t, http.StatusBadRequest, failure.Status)
+			require.Equal(t, "items[0].expires_at", *failure.Param)
+		}
+
+		short := []billing.CreateCreditGrantParams{{
+			CustomerID: billing.CustomerID(uuid.New()), Currency: "USD", Amount: 1000,
+			Source: "critical", SourceID: "short", ExpiresAt: ptr(a.clock.Now().Add(time.Second)),
+		}}
+		grants, err := a.alphaRemote.CreateCreditGrants(t.Context(), short)
+		require.NoError(t, err)
+		require.Len(t, grants, 1)
+		a.clock.Advance(2 * time.Second)
+		grants, err = a.alphaRemote.CreateCreditGrants(t.Context(), short)
+		require.NoError(t, err)
+		require.Len(t, grants, 1)
+		require.True(t, grants[0].Replayed)
+
+		_, err = a.alphaRemote.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{
+			CustomerID: billing.CustomerID(uuid.New()), Currency: "USD", Amount: math.MaxInt64,
+			Source: "critical", SourceID: "overflow",
+		}})
+		failure := requireCode(t, err, billing.CodeInvalidParam)
+		require.Equal(t, http.StatusBadRequest, failure.Status)
+		require.Equal(t, "items[0].amount", *failure.Param)
+		grants, err = a.alphaRemote.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{
+			CustomerID: billing.CustomerID(uuid.New()), Currency: "USD", Amount: 1000,
+			Source: "critical", SourceID: "after-overflow",
+		}})
+		require.NoError(t, err)
+		require.Len(t, grants, 1)
 	})
 }

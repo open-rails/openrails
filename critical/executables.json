@@ -1188,6 +1188,24 @@
     "OR-J22-S51": [
       "TestMixedInvoiceCreditRefunds/OR-J22-S51/a-refused-refund-gives-its-credit-back"
     ],
+    "OR-J22-S52": [
+      "TestMixedInvoiceCreditRefunds/OR-J22-S52/a-refund-refused-after-its-lot-lapsed-expires-what-it-gives-back"
+    ],
+    "OR-J22-S53": [
+      "TestCreditExpiry/OR-J22-S53/a-reinstated-lapsing-lot-still-expires"
+    ],
+    "OR-J22-S54": [
+      "TestCredits/OR-J22-S54/a-grant-that-has-already-expired-or-overflows-is-refused"
+    ],
+    "OR-J22-S55": [
+      "TestMixedInvoiceCreditRefunds/OR-J22-S55/a-refused-whole-pack-refund-of-an-arrears-customer-still-expires-at-its-lapse"
+    ],
+    "OR-J22-S56": [
+      "TestMixedInvoiceCreditRefunds/OR-J22-S56/a-refund-settling-for-less-than-it-withdrew-after-the-lapse-retires-the-difference"
+    ],
+    "OR-J22-S57": [
+      "TestMixedInvoiceCreditRefunds/OR-J22-S57/units-a-settled-refund-gives-back-to-an-arrears-customers-lot-still-expire-at-its-lapse"
+    ],
     "OR-J26-S54": [
       "TestUsageBillingContracts/OR-J26-S54/a-running-charge-is-billed-through-the-bill-date-before-its-daily-posting"
     ],

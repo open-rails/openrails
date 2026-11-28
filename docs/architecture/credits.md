@@ -102,14 +102,14 @@ A purchased lot exists only for a succeeded payment and in the same transaction
 (`Fund` checks `payment.Status`). A provider reversal withdraws credit when it is
 recorded (`syncPurchasedCreditRefund`), whichever path reported it. A pending
 refund takes its credit off the balance when it is requested; a refused one gives
-it back and expires the lot if it lapsed meanwhile.
+it back, straight to `units_expired` if the lot lapsed meanwhile.
 
 Checks:
 - `Fund` refuses a payment that is not `succeeded`, is a reversal, or differs in
   customer or currency.
 - `recordRefund`, `CompleteRefundReservation`, `LinkRefundedPayment` and
   `PaymentService.Create` call `syncPurchasedCreditRefund` in their transaction.
-- OR-J22-S07: a pending credit-line refund takes the whole lot off the balance when it is requested; OR-J22-S51: a refused one gives it back.
+- OR-J22-S07: a pending credit-line refund takes the whole lot off the balance when it is requested; OR-J22-S51: a refused one gives it back; OR-J22-S52: to `units_expired` once the lot lapsed.
 
 ### 3. Exact money
 Lots and spends are `int64` native units in one currency; a purchased lot is in
@@ -186,7 +186,11 @@ Checks:
   OR-J22-S04 atomic batches and replay (`TestCreditAtomicity`,
   `TestLedgerMaintenance`); OR-J22-S05 recurring credits (`TestRecurringCredits`);
   OR-J22-S07 to S09 and S51 refunds, chargebacks and won disputes of a mixed
-  invoice (`TestMixedInvoiceCreditRefunds`).
+  invoice, S52 a refund refused after the lapse, S55 a refused arrears refund
+  still lapses, S56 a settled refund's lapsed excess retires, S57 an arrears
+  refund's restored excess still lapses (`TestMixedInvoiceCreditRefunds`);
+  OR-J22-S53 a reinstated lapsing lot expires (`TestCreditExpiry`);
+  OR-J22-S54 an already-expired or overflowing grant is refused (`TestCredits`).
 - J48 (merchant units): OR-J48-S01 packs at their own rates, S02 the same units bought in EUR, S03 a plan allowance and a gift, S04 a unit-priced product paid from the balance, S05 usage by rate card soonest-expiring lot first and never owed, S06 expiry, S07 refund by lot, S08 a gate decides on the unit balance and an overrun is forgiven usage, S09 a pack's reversals in the order they settle, S10 a price fall takes back forgiveness first, S20 a posting forgives with the event store out of reach, S11 a lease sync takes usage in a declared unit only, S12 the first balance in a unit takes the units lock, S13 a unit-priced invoice's revenue scheduled per paid currency, applied once and moved by an archive, S14 a pack's chargeback reducing the schedule its spends funded and its won dispute restoring it, S15 a line paid with given units booking nothing, S16 a later release adding to its schedule's funding and the audit failing a release with no schedule, S17 a refund at the provider, S18 a chargeback split between usage and a schedule, S19 a chargeback of one currency's pack (`TestMerchantUnits`).
 - OR-J22-S10 a lot's view equals its ledger counters through spend, expiry, revocation, refund and restore, and `ledger-audit` names lot drift; OR-J22-S11 a refunded pack raises no refunded-source grant finding; OR-J22-S13 two lapsed lots expire only what each still holds; OR-J26-S62 a usage invoice's change is a bought lot; OR-J40-S04 a deposit that did not post is pending and not spendable until convergence posts it (`TestCreditLotCounters`).
 - OR-J40-S10 a $50 pack of 55 credits releases exactly $10 for 11 credits and the remainder with its last; OR-J40-S11 expiry, revocation and reinstatement; OR-J40-S12 a gift spend, and owed repaid from a gift and from a bonus pack; OR-J40-S13 refunds of spent and unspent credit and a won dispute (`TestCreditBooks`).
@@ -199,5 +203,3 @@ Checks:
 Gaps:
 - No scenario buys a customer-chosen deposit (`customer_amount`, `from_payment`).
 - Credit refunds are tested only on Stripe; no NMI-funded lot is reversed.
-- Spend reads grow with a customer's lifetime lots: a spent lot with no expiry
-  stays in every `ListSpendableCreditLots` read.

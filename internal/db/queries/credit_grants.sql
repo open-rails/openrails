@@ -198,14 +198,14 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
   SELECT sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment', 'usage_reversed')) AS spent,
-         sum(lt.amount) FILTER (WHERE lt.transfer_type = 'credit_expire') AS expired,
+         sum(lt.amount) FILTER (WHERE lt.transfer_type = 'credit_expire' OR lt.transfer_type = 'credit_refund_restore' AND lt.credit_account_id <> g.account_id) AS expired,
          sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_revoke', 'credit_reinstate')) AS revoked,
          sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_refund', 'credit_refund_restore')) AS refunded
   FROM billing.ledger_transfers lt
   WHERE lt.merchant_id = g.merchant_id AND lt.credit_grant_id = g.id
-    AND g.account_id IN (lt.debit_account_id, lt.credit_account_id)
+    AND (g.account_id IN (lt.debit_account_id, lt.credit_account_id) OR lt.transfer_type = 'credit_refund_restore')
 ) t ON true
 ORDER BY g.created_at DESC, g.id DESC;
 
@@ -226,14 +226,14 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
   SELECT sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment', 'usage_reversed')) AS spent,
-         sum(lt.amount) FILTER (WHERE lt.transfer_type = 'credit_expire') AS expired,
+         sum(lt.amount) FILTER (WHERE lt.transfer_type = 'credit_expire' OR lt.transfer_type = 'credit_refund_restore' AND lt.credit_account_id <> g.account_id) AS expired,
          sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_revoke', 'credit_reinstate')) AS revoked,
          sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_refund', 'credit_refund_restore')) AS refunded
   FROM billing.ledger_transfers lt
   WHERE lt.merchant_id = g.merchant_id AND lt.credit_grant_id = g.id
-    AND g.account_id IN (lt.debit_account_id, lt.credit_account_id)
+    AND (g.account_id IN (lt.debit_account_id, lt.credit_account_id) OR lt.transfer_type = 'credit_refund_restore')
 ) t ON true
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.id = ANY(sqlc.arg(ids)::uuid[])
 ORDER BY g.created_at DESC, g.id DESC;
@@ -254,14 +254,14 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
   SELECT sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment', 'usage_reversed')) AS spent,
-         sum(lt.amount) FILTER (WHERE lt.transfer_type = 'credit_expire') AS expired,
+         sum(lt.amount) FILTER (WHERE lt.transfer_type = 'credit_expire' OR lt.transfer_type = 'credit_refund_restore' AND lt.credit_account_id <> g.account_id) AS expired,
          sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_revoke', 'credit_reinstate')) AS revoked,
          sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_refund', 'credit_refund_restore')) AS refunded
   FROM billing.ledger_transfers lt
   WHERE lt.merchant_id = g.merchant_id AND lt.credit_grant_id = g.id
-    AND g.account_id IN (lt.debit_account_id, lt.credit_account_id)
+    AND (g.account_id IN (lt.debit_account_id, lt.credit_account_id) OR lt.transfer_type = 'credit_refund_restore')
 ) t ON true
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.id = sqlc.arg(id)::uuid;
 
