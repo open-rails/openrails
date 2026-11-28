@@ -24,8 +24,9 @@
 // product until the stop lands. Once a PSP import, an approved proposal or a webhook has read a
 // row it is the provider's, and a later book skips it (provider_authority).
 // Imported members are entitled when the call returns. What a book lands
-// adds MRR from its start to its end at their own dates, written in its
-// transaction (billing.record_mrr_history): nothing is booked at AsOf.
+// adds MRR from its start to when its paid service ended at their own
+// dates (DeclaredSubscriptionFact.ServiceEnd), written in its transaction
+// (billing.record_mrr_history): nothing is booked at AsOf.
 //
 // Declared purchases become complete engine-owned invoices with frozen lines
 // and access (a credit pack's credits are not deposited); a mismatched one is

@@ -189,7 +189,9 @@ type PaymentMethodRef struct {
 }
 
 // CancelEvidence is explicit, settled cancel history. Kind is "" (none),
-// "user_canceled", "chargeback" or "provider_terminated".
+// "user_canceled", "chargeback" or "provider_terminated". The subscription's
+// MRR ends at its PaidThrough, though At came later; a chargeback's or a
+// provider's termination at At when that came first; without PaidThrough, at At.
 type CancelEvidence struct {
 	Kind string    `json:"kind,omitempty"`
 	At   time.Time `json:"at,omitempty"`

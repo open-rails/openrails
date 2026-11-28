@@ -480,12 +480,16 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 				}
 			}
 		}
-		var created []uuid.UUID
+		var created, ended []uuid.UUID
+		var ends []time.Time
 		for src, o := range outcomes {
 			switch o.Code {
 			case reconcile.DeclaredImported:
 				res.Imported = append(res.Imported, src)
 				created = append(created, o.SubscriptionID)
+				if o.ServiceEndedAt != nil {
+					ended, ends = append(ended, o.SubscriptionID), append(ends, *o.ServiceEndedAt)
+				}
 			case reconcile.DeclaredAlreadyPresent:
 				res.Skipped = append(res.Skipped, src)
 				if o.Reason != "" {
@@ -509,7 +513,8 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 		// nothing is booked at the import.
 		if len(created) > 0 {
 			slices.SortFunc(created, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
-			if err := q.RecordMRRHistory(ctx, gen.RecordMRRHistoryParams{MerchantID: merchantID.UUID(), SubscriptionIds: created, AsOf: asOf}); err != nil {
+			if err := q.RecordMRRHistory(ctx, gen.RecordMRRHistoryParams{MerchantID: merchantID.UUID(), SubscriptionIds: created,
+				EndedSubscriptionIds: ended, EndedAts: ends, AsOf: asOf}); err != nil {
 				return fmt.Errorf("record imported MRR history: %w", err)
 			}
 		}

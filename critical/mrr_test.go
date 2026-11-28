@@ -210,7 +210,8 @@ func ghostCCBillMembership(t *testing.T, w *world, customer billing.CustomerID, 
 			w.alpha.MerchantID().UUID(), customer.UUID(), product, price, ref, psp, start, paid, canceled, w.clock.Now()).Scan(&id); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, "SELECT billing.record_mrr_history($1, ARRAY[$2]::uuid[], $3)", w.alpha.MerchantID().UUID(), id, w.clock.Now())
+		_, err := tx.Exec(ctx, "SELECT billing.record_mrr_history($1, ARRAY[$2]::uuid[], ARRAY[$2]::uuid[], ARRAY[$3]::timestamptz[], $4)",
+			w.alpha.MerchantID().UUID(), id, paid, w.clock.Now())
 		return err
 	}))
 }

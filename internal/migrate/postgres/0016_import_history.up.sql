@@ -51,7 +51,7 @@ BEGIN
     IF to_regclass('pg_temp.mrr_history_input') IS NULL THEN
         CREATE TEMP TABLE mrr_history_input (
             merchant_id uuid NOT NULL, customer_id uuid NOT NULL, subscription_id uuid NOT NULL, cutoff timestamptz NOT NULL,
-            currency text NOT NULL, product_id uuid NOT NULL, price_id uuid NOT NULL, mrr bigint NOT NULL) ON COMMIT DROP;
+            currency text NOT NULL, product_id uuid NOT NULL, price_id uuid NOT NULL, mrr bigint NOT NULL, ends timestamptz) ON COMMIT DROP;
         CREATE TEMP TABLE mrr_history_lines (
             customer_id uuid NOT NULL, at timestamptz NOT NULL, subscription_id uuid NOT NULL, currency text NOT NULL, product_id uuid NOT NULL,
             price_id uuid NOT NULL, mrr_before bigint NOT NULL, mrr_after bigint NOT NULL, cause text NOT NULL) ON COMMIT DROP;
@@ -68,7 +68,8 @@ COMMENT ON FUNCTION billing.mrr_history_tables() IS 'Creates the session''s work
 -- names, set-based. Each subscription it names adds from its start, priced
 -- by the bills it paid (a change of price or seats dated at the bill's
 -- period), to its end when that came by its cutoff (the instant its import
--- read); its last price is what it added then (mrr, 0 when it had ended).
+-- read) at ends, when its paid service ended; its last price is what it
+-- added then (mrr, 0 when it had ended).
 -- Lines earlier imports wrote of the customers' other subscriptions stay as
 -- written. Each customer's imported movements are written again from all of
 -- them, each classified by the customer's MRR then (the sum of its movements
@@ -89,8 +90,7 @@ BEGIN
         SELECT i.customer_id, i.subscription_id, i.cutoff, i.currency AS cut_currency, i.product_id AS cut_product, i.price_id AS cut_price, i.mrr AS cut_mrr,
                s.price_id AS sub_price, COALESCE(s.quantity, 1) AS sub_quantity, s.cancel_type,
                CASE WHEN p.trial_duration_hours IS NOT NULL THEN s.started_at + make_interval(hours => p.trial_duration_hours) ELSE s.started_at END AS starts,
-               CASE WHEN i.mrr > 0 THEN NULL::timestamptz
-                    WHEN s.status = 'canceled' AND COALESCE(s.ended_at, s.current_period_ends_at) <= i.cutoff THEN COALESCE(s.ended_at, s.current_period_ends_at) END AS ends
+               CASE WHEN i.mrr = 0 AND i.ends <= i.cutoff THEN i.ends END AS ends
           FROM mrr_history_input i
           JOIN billing.subscriptions s ON s.merchant_id = p_merchant AND s.id = i.subscription_id
           JOIN billing.prices p ON p.merchant_id = p_merchant AND p.id = s.price_id
@@ -319,21 +319,23 @@ END;
 $$;
 COMMENT ON FUNCTION billing.write_mrr_history(p_merchant uuid, p_as_of timestamptz) IS 'Writes the imported MRR history of the merchant''s customers pg_temp.mrr_history_input names, set-based: their subscriptions from their start, priced by their bills, to their end or what they added at their import, beside the lines earlier imports wrote; each movement classified by the customer''s MRR then, live movements included; then their ends ahead of p_as_of as scheduled movements. Takes no lock.';
 
--- The import's entry: the subscriptions it landed, at its evidence instant.
--- Each adds what its subscription_mrr row holds then; one an earlier import
+-- The import's entry: the subscriptions it landed, at its evidence instant,
+-- the ended ones (p_ended) to when their paid service ended (p_ends). Each
+-- adds what its subscription_mrr row holds then; one an earlier import
 -- already wrote keeps its history. Their rows are then recorded: the commit
 -- settles nothing of them. One lock for the merchant, whatever the book's
 -- size: an import writes its MRR alone, and settlements wait for it.
-CREATE FUNCTION billing.record_mrr_history(p_merchant uuid, p_subscriptions uuid[], p_as_of timestamptz) RETURNS void
+CREATE FUNCTION billing.record_mrr_history(p_merchant uuid, p_subscriptions uuid[], p_ended uuid[], p_ends timestamptz[], p_as_of timestamptz) RETURNS void
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' SET enable_seqscan TO off SET plan_cache_mode TO force_custom_plan AS $$
 BEGIN
     PERFORM pg_advisory_xact_lock(hashtextextended('openrails.mrr:' || p_merchant::text, 0));
     PERFORM billing.mrr_history_tables();
     DELETE FROM mrr_history_input;
-    INSERT INTO mrr_history_input (merchant_id, customer_id, subscription_id, cutoff, currency, product_id, price_id, mrr)
+    INSERT INTO mrr_history_input (merchant_id, customer_id, subscription_id, cutoff, currency, product_id, price_id, mrr, ends)
     SELECT m.merchant_id, m.customer_id, m.subscription_id, p_as_of, m.currency, m.product_id, m.price_id,
-           CASE WHEN m.ends_at IS NULL OR m.ends_at > p_as_of THEN m.mrr ELSE 0 END
+           CASE WHEN m.ends_at IS NULL OR m.ends_at > p_as_of THEN m.mrr ELSE 0 END, e.ends
       FROM billing.subscription_mrr m
+      LEFT JOIN unnest(p_ended, p_ends) AS e(subscription_id, ends) ON e.subscription_id = m.subscription_id
      WHERE m.merchant_id = p_merchant AND m.subscription_id = ANY(p_subscriptions)
        AND NOT EXISTS (SELECT 1 FROM billing.mrr_movement_lines l WHERE l.merchant_id = p_merchant AND l.subscription_id = m.subscription_id AND l.imported);
     PERFORM billing.write_mrr_history(p_merchant, p_as_of);
@@ -347,7 +349,7 @@ BEGIN
     DELETE FROM mrr_history_input;
 END;
 $$;
-COMMENT ON FUNCTION billing.record_mrr_history(p_merchant uuid, p_subscriptions uuid[], p_as_of timestamptz) IS 'Records the MRR history of the subscriptions an import landed, as of its evidence instant p_as_of, under one lock for the merchant: their customers'' history written again (billing.write_mrr_history), then the subscriptions'' rows recorded so the commit settles nothing of them. A subscription an earlier import wrote keeps its history.';
+COMMENT ON FUNCTION billing.record_mrr_history(p_merchant uuid, p_subscriptions uuid[], p_ended uuid[], p_ends timestamptz[], p_as_of timestamptz) IS 'Records the MRR history of the subscriptions an import landed, as of its evidence instant p_as_of, the ended ones (p_ended) to when their paid service ended (p_ends), under one lock for the merchant: their customers'' history written again (billing.write_mrr_history), then the subscriptions'' rows recorded so the commit settles nothing of them. A subscription an earlier import wrote keeps its history.';
 
 -- Settlements classify live changes alone: an import writes its history.
 CREATE OR REPLACE FUNCTION billing.settle_customer_mrr(p_merchant uuid, p_customer uuid) RETURNS void
@@ -501,7 +503,12 @@ $$;
 
 -- Openings become history. A subscription an import opened runs from its
 -- start to the opening, at what the opening counted; one an import touched
--- without opening it (landed ended) runs from its start to its end. The
+-- without opening it (landed ended) runs from its start to when its paid
+-- service ended: its paid period's end, whether it was canceled for that end
+-- or recorded canceled after it lapsed; an immediate end (a chargeback, a
+-- provider's or merchant's termination) at its cancel when that came first.
+-- One with no paid period ends at its cancel when a bill shows it paid, else
+-- at its start: it paid for nothing. The
 -- import movements go with their lines; each customer's history is written
 -- in their place (live movements after an opening keep how they were
 -- classified then).
@@ -520,6 +527,15 @@ SELECT m.merchant_id, m.customer_id, m.subscription_id, now(), m.currency, m.pro
   JOIN billing.subscriptions s ON s.merchant_id = m.merchant_id AND s.id = m.subscription_id
  WHERE (m.cause = 'import' OR s.cancel_feedback LIKE 'imported: declared %')
    AND NOT EXISTS (SELECT 1 FROM mrr_history_input i WHERE i.merchant_id = m.merchant_id AND i.subscription_id = m.subscription_id);
+UPDATE mrr_history_input i
+   SET ends = CASE
+           WHEN s.current_period_ends_at IS NULL THEN
+               CASE WHEN EXISTS (SELECT 1 FROM billing.invoices inv WHERE inv.merchant_id = s.merchant_id AND inv.subscription_id = s.id
+                                    AND inv.origin = 'subscription' AND inv.status = 'complete') THEN COALESCE(s.ended_at, s.canceled_at) ELSE s.started_at END
+           WHEN s.cancel_type IN ('chargeback', 'provider', 'merchant') AND s.canceled_at < s.current_period_ends_at THEN s.canceled_at
+           ELSE s.current_period_ends_at END
+  FROM billing.subscriptions s
+ WHERE s.merchant_id = i.merchant_id AND s.id = i.subscription_id AND s.status = 'canceled';
 DELETE FROM billing.mrr_movement_lines l
  WHERE l.cause = 'import' OR EXISTS (SELECT 1 FROM billing.mrr_movements v WHERE v.merchant_id = l.merchant_id AND v.id = l.movement_id AND v.cause = 'import');
 DELETE FROM billing.mrr_movements WHERE cause = 'import';

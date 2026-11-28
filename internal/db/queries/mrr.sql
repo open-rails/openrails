@@ -25,5 +25,7 @@ WHERE n.subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[]);
 
 -- name: RecordMRRHistory :exec
 -- The MRR history of the subscriptions an import landed, as of its evidence
--- instant: each customer's imported movements written again.
-SELECT billing.record_mrr_history(sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_ids)::uuid[], sqlc.arg(as_of)::timestamptz);
+-- instant, the ended ones to when their paid service ended: each customer's
+-- imported movements written again.
+SELECT billing.record_mrr_history(sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_ids)::uuid[],
+    sqlc.arg(ended_subscription_ids)::uuid[], sqlc.arg(ended_ats)::timestamptz[], sqlc.arg(as_of)::timestamptz);
