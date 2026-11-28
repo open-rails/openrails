@@ -298,6 +298,11 @@ func (l *Lots) Reinstate(ctx context.Context, id uuid.UUID, reason, actor, key s
 		if err := l.move(ctx, id, books.CreditReinstated, leg, nil); err != nil {
 			return lot, err
 		}
+		if lot.ExpiresAt != nil {
+			if err := ledger.WatchLapsingCredit(ctx, l.q, gen.WatchLapsingCreditParams{MerchantID: l.merchant, CustomerID: lot.CustomerID, Currency: lot.Unit, Now: l.now()}); err != nil {
+				return lot, fmt.Errorf("credits: watch the lapsing lot: %w", err)
+			}
+		}
 	}
 	return l.Get(ctx, id)
 }

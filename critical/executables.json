@@ -1191,6 +1191,9 @@
     "OR-J22-S52": [
       "TestMixedInvoiceCreditRefunds/OR-J22-S52/a-refund-refused-after-its-lot-lapsed-expires-what-it-gives-back"
     ],
+    "OR-J22-S53": [
+      "TestCreditExpiry/OR-J22-S53/a-reinstated-lapsing-lot-still-expires"
+    ],
     "OR-J26-S54": [
       "TestUsageBillingContracts/OR-J26-S54/a-running-charge-is-billed-through-the-bill-date-before-its-daily-posting"
     ],

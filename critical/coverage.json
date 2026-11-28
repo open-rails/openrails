@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 929,
+  "scenario_count": 930,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2292,6 +2292,11 @@
       "id": "OR-J22-S52",
       "journey": "J22",
       "name": "A refund refused after its lot lapsed expires the credit it gives back, and its money breaks"
+    },
+    {
+      "id": "OR-J22-S53",
+      "journey": "J22",
+      "name": "A reinstated lot that lapses is watched again and expires"
     },
     {
       "id": "OR-J26-S54",

@@ -124,6 +124,11 @@ func (s *Service) ReleaseRefund(ctx context.Context, paymentID, reversal uuid.UU
 			if err := postUnits(ctx, ledger.New(q, mid.UUID()), lot, reversal, ledger.UnitsRefunded, to, state.Withdrawn, ledger.CreditRefundRestore, "credit_release"); err != nil {
 				return err
 			}
+			if !retired && lot.ExpiresAt != nil {
+				if err := ledger.WatchLapsingCredit(ctx, q, gen.WatchLapsingCreditParams{MerchantID: mid.UUID(), CustomerID: lot.CustomerID, Currency: lot.Unit, Now: s.now()}); err != nil {
+					return fmt.Errorf("credits: watch the lapsing lot: %w", err)
+				}
+			}
 		}
 		lots := credits.New(q, mid.UUID(), s.now)
 		if err := lots.SyncRefunding(ctx, paymentID); err != nil {
