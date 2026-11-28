@@ -22051,13 +22051,44 @@
               "type": "array",
               "items": {}
             }
+          },
+          "freshness": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PSPKnownThrough"
+            }
+          },
+          "complete_through": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "known_through": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "timezone",
           "range",
           "columns",
-          "rows"
+          "rows",
+          "freshness",
+          "complete_through",
+          "known_through"
         ]
       },
       "MetricsResultRange": {
@@ -22334,6 +22365,26 @@
           "updated_at"
         ]
       },
+      "PSPAwaiting": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "subscriptions": {
+            "type": "integer"
+          },
+          "mrr": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "currency",
+          "subscriptions",
+          "mrr"
+        ]
+      },
       "PSPCatchUp": {
         "type": "object",
         "properties": {
@@ -22478,6 +22529,15 @@
                 "type": "null"
               }
             ]
+          },
+          "has_data": {
+            "type": "boolean"
+          },
+          "awaiting": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PSPAwaiting"
+            }
           }
         },
         "required": [
@@ -22489,7 +22549,9 @@
           "severity",
           "last_read_at",
           "failing_since",
-          "catch_up"
+          "catch_up",
+          "has_data",
+          "awaiting"
         ]
       },
       "PSPImport": {
@@ -22931,6 +22993,137 @@
         "required": [
           "fact",
           "via"
+        ]
+      },
+      "PSPKnownThrough": {
+        "type": "object",
+        "properties": {
+          "psp_id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
+          },
+          "known_through": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "import",
+              "none",
+              "now",
+              "read",
+              "webhook"
+            ]
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "stale_since": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cause": {
+            "type": "string",
+            "enum": [
+              "catching_up",
+              "credentials_refused",
+              "imported",
+              "not_configured",
+              "unreachable",
+              "webhooks_silent"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "info",
+              "warning"
+            ]
+          },
+          "last_read_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failing_since": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "catch_up": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PSPCatchUp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "has_data": {
+            "type": "boolean"
+          },
+          "awaiting": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PSPAwaiting"
+            }
+          }
+        },
+        "required": [
+          "psp_id",
+          "key",
+          "rail",
+          "known_through",
+          "source",
+          "current",
+          "stale_since",
+          "cause",
+          "severity",
+          "last_read_at",
+          "failing_since",
+          "catch_up",
+          "has_data",
+          "awaiting"
         ]
       },
       "PSPPaymentConfig": {

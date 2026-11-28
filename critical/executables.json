@@ -2988,6 +2988,9 @@
     ],
     "OR-J15-S79": [
       "TestKnownThrough/OR-J15-S79/a-live-psp-whose-reads-fail-for-a-day-is-stale-then-caught-up"
+    ],
+    "OR-J42-S44": [
+      "TestKnownThroughMetrics/OR-J42-S44/a-stale-psps-metrics-are-the-best-data-known-marked-never-read-as-churn"
     ]
   }
 }

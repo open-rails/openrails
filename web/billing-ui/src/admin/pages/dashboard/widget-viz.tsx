@@ -20,6 +20,7 @@ import {
   Pie,
   PieChart,
   LabelList,
+  ReferenceArea,
   ReferenceLine,
   XAxis,
   YAxis,
@@ -584,6 +585,7 @@ function TimeSeriesViz({
         series={series}
         registry={registry}
         rangeEnd={result.range.to}
+        incompleteFrom={result.complete_through}
       />
     )
   return (
@@ -600,6 +602,7 @@ function TimeSeriesViz({
               series={group.series}
               registry={registry}
               rangeEnd={result.range.to}
+              incompleteFrom={result.complete_through}
             />
           </div>
         </section>
@@ -618,10 +621,14 @@ function TimeSeriesChart({
   series,
   registry,
   rangeEnd,
+  incompleteFrom,
 }: Pivoted & {
   viz: "line" | "area" | "bar"
   registry: Registry
   rangeEnd?: string
+  // incompleteFrom is a stale PSP's known-through: buckets from the one
+  // holding it are hatched, not drawn as a drop.
+  incompleteFrom?: string | null
 }) {
   const units = useUnits()
   const config: ChartConfig = {}
@@ -734,8 +741,42 @@ function TimeSeriesChart({
     })
   })
   const chartProps = { data, margin: { left: 4, right: 4, top: 4, bottom: 0 } }
+  const first = incompleteFrom
+    ? data.findLastIndex((row) => String(row.bucketISO) <= incompleteFrom)
+    : -1
+  const hatch =
+    incompleteFrom && data.length > 0 ? (
+      <>
+        <defs>
+          <pattern
+            id="incomplete-hatch"
+            width="6"
+            height="6"
+            patternUnits="userSpaceOnUse"
+            patternTransform="rotate(45)"
+          >
+            <line
+              x1="0"
+              y1="0"
+              x2="0"
+              y2="6"
+              stroke="var(--muted-foreground)"
+              strokeOpacity={0.35}
+            />
+          </pattern>
+        </defs>
+        <ReferenceArea
+          x1={data[Math.max(first, 0)].bucket as string}
+          x2={data[data.length - 1].bucket as string}
+          fill="url(#incomplete-hatch)"
+          fillOpacity={1}
+          ifOverflow="extendDomain"
+        />
+      </>
+    ) : null
   const axes = (
     <>
+      {hatch}
       <CartesianGrid vertical={false} strokeOpacity={0.4} />
       <XAxis
         dataKey="bucket"
@@ -978,7 +1019,9 @@ function FunnelViz({
   const dim = indexColumns(result.columns).dims.find(
     (d) => d.name !== "currency"
   )
-  const order = dim ? (registry.values(query?.measures ?? [], dim.name) ?? []) : []
+  const order = dim
+    ? (registry.values(query?.measures ?? [], dim.name) ?? [])
+    : []
   const steps = funnelSteps(result, order)
   if (steps.length === 0 || steps[0].value === 0)
     return <Empty label={adminText("no data in range")} />
@@ -999,7 +1042,7 @@ function FunnelViz({
               }}
             />
           </span>
-          <span className="text-right tabular-nums text-muted-foreground">
+          <span className="text-right text-muted-foreground tabular-nums">
             {step.value.toLocaleString()}
             {step.fromPrevious === null
               ? ""

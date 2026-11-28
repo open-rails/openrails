@@ -10,7 +10,9 @@ SELECT p.id AS psp_id, p.key, p.rail, p.superseded_at,
                   AND s.collection_policy <> 'engine' AND s.status IN ('active', 'past_due', 'awaiting_method', 'unverified'))::boolean AS live_subscriptions,
        EXISTS (SELECT 1 FROM billing.reconciliation_findings r
                 WHERE r.merchant_id = p.merchant_id AND r.finding_type = 'life.webhooks.silent' AND r.subject_key = 'psp:' || p.id::text
-                  AND r.status IN ('requires_review', 'reconcile_required'))::boolean AS webhooks_silent
+                  AND r.status IN ('requires_review', 'reconcile_required'))::boolean AS webhooks_silent,
+       (EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id = p.merchant_id AND s.psp_id = p.id AND s.deleted_at IS NULL)
+        OR EXISTS (SELECT 1 FROM billing.payments y WHERE y.merchant_id = p.merchant_id AND y.psp_id = p.id AND y.deleted_at IS NULL))::boolean AS has_data
 FROM billing.psps p
 LEFT JOIN billing.psp_freshness f ON f.merchant_id = p.merchant_id AND f.psp_id = p.id
 LEFT JOIN billing.webhook_health w ON w.merchant_id = p.merchant_id AND w.psp_id = p.id
@@ -134,3 +136,16 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid
 INSERT INTO billing.host_outbox (merchant_id, event_type, subject_type, subject_id, occurred_at, data, dedupe_key)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(event_type)::text, 'psp', sqlc.arg(psp_id)::uuid, sqlc.arg(occurred_at)::timestamptz, sqlc.arg(data)::jsonb, sqlc.arg(dedupe_key)::text)
 ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
+
+-- What awaits each PSP at now, per currency: its subscriptions unverified
+-- awaiting it, and, while it is stale, its active ones whose renewal came due.
+-- name: ListPSPAwaiting :many
+SELECT s.psp_id, m.currency, count(*)::bigint AS subscriptions, COALESCE(sum(m.mrr), 0)::bigint AS mrr
+FROM billing.subscriptions s
+JOIN billing.subscription_mrr m ON m.merchant_id = s.merchant_id AND m.subscription_id = s.id
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.deleted_at IS NULL AND s.collection_policy <> 'engine' AND m.mrr > 0
+  AND ((s.status = 'unverified' AND s.unverified_reason = 'awaiting_provider')
+       OR (s.status = 'active' AND s.current_period_ends_at <= sqlc.arg(now)::timestamptz
+           AND EXISTS (SELECT 1 FROM billing.psp_freshness f WHERE f.merchant_id = s.merchant_id AND f.psp_id = s.psp_id AND f.stale_since IS NOT NULL)))
+GROUP BY s.psp_id, m.currency
+ORDER BY s.psp_id, m.currency;

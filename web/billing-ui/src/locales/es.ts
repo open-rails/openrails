@@ -105,6 +105,7 @@ export const es: BillingUiMessageBundle = {
     browsePlans: "Ver planes",
     fallbackName: "Suscripción",
     renews: "Se renueva el {date}",
+    lastPayment: "Activa, último pago el {date}",
     endsOn: "Acceso hasta el {date}",
     noMorePayments: "No habrá más pagos",
     endedOn: "Finalizó el {date}",
@@ -289,8 +290,10 @@ export const es: BillingUiMessageBundle = {
       "La facturación no está disponible temporalmente. Inténtalo pronto.",
     internal_error: "Algo falló de nuestro lado. Inténtalo de nuevo.",
     card_declined: "La tarjeta fue rechazada.",
-    ccbill_email_required: "Verifica tu correo electrónico para pagar con CCBill.",
-    ccbill_username_required: "Elige un nombre de usuario para pagar con CCBill.",
+    ccbill_email_required:
+      "Verifica tu correo electrónico para pagar con CCBill.",
+    ccbill_username_required:
+      "Elige un nombre de usuario para pagar con CCBill.",
     customer_email_required:
       "Verifica tu correo electrónico y elige un nombre de usuario para pagar con CCBill.",
     payment_provider_rejected: "El proveedor de pagos rechazó la solicitud.",

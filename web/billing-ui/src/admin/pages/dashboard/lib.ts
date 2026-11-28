@@ -222,7 +222,8 @@ export function dimValueLabel(dim: string, value: MetricsCell): string {
 // pivotTimeSeries turns tabular rows into recharts rows keyed by bucket, one
 // series per measure × dimension-value combination. Server-zero-filled
 // buckets render as-is; combos absent for a bucket fill 0 so stacks align.
-// A ratio with nothing to divide by is no data, not 0%: it stays null.
+// A ratio with nothing to divide by is no data, not 0%: it stays null; so
+// does a value the server reports missing past a stale PSP's known-through.
 export function pivotTimeSeries(
   result: MetricsResult,
   currency?: string
@@ -265,7 +266,8 @@ export function pivotTimeSeries(
         series.set(identity, item)
       }
       const cell = row[m.index]
-      const empty = m.unit === "ratio" ? null : 0
+      const missing = !!result.complete_through && t >= result.complete_through
+      const empty = m.unit === "ratio" || missing ? null : 0
       entry[item.key] = cell === null ? empty : Number(cell)
       entry[exactKey(item.key)] = cell ?? empty
     }
@@ -411,7 +413,12 @@ export function funnelSteps(
   let reached = 0
   for (let i = keys.length - 1; i >= 0; i--) {
     reached += at.get(keys[i]) ?? 0
-    steps.unshift({ key: keys[i], value: reached, ofFirst: null, fromPrevious: null })
+    steps.unshift({
+      key: keys[i],
+      value: reached,
+      ofFirst: null,
+      fromPrevious: null,
+    })
   }
   const first = steps[0]?.value ?? 0
   steps.forEach((step, i) => {

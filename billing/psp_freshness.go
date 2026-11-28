@@ -1,6 +1,10 @@
 package billing
 
-import "time"
+import (
+	"time"
+
+	"github.com/open-rails/openrails/catalog"
+)
 
 // PSPFreshness is how far OpenRails' record of one PSP is complete: its
 // known-through, and why the record stops there. A renewal due after a PSP's
@@ -27,6 +31,29 @@ type PSPFreshness struct {
 	FailingSince *time.Time `json:"failing_since"`
 	// CatchUp is what the last catch-up read found in its gap; null before one.
 	CatchUp *PSPCatchUp `json:"catch_up"`
+	// HasData is a PSP holding subscriptions or payments.
+	HasData bool `json:"has_data"`
+	// Awaiting is what waits on the provider, per currency: subscriptions
+	// unverified awaiting it, and a stale PSP's active ones whose renewal
+	// came due. Counted beside at-risk, never in it.
+	Awaiting []PSPAwaiting `json:"awaiting"`
+}
+
+// PSPAwaiting is the subscriptions and their MRR in one currency whose state
+// awaits their provider.
+type PSPAwaiting struct {
+	Currency      catalog.Currency `json:"currency"`
+	Subscriptions int64            `json:"subscriptions"`
+	MRR           int64            `json:"mrr,string"`
+}
+
+// PSPKnownThrough is one PSP's known-through, as every metrics read reports
+// it.
+type PSPKnownThrough struct {
+	PSPID PSPID  `json:"psp_id"`
+	Key   string `json:"key"`
+	Rail  Rail   `json:"rail"`
+	PSPFreshness
 }
 
 // PSPKnownThroughSource is the evidence a PSP's known-through comes from.

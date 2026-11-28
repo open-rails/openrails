@@ -137,6 +137,57 @@ func (q *Queries) ListCatchUpSubscriptions(ctx context.Context, arg ListCatchUpS
 	return items, nil
 }
 
+const listPSPAwaiting = `-- name: ListPSPAwaiting :many
+SELECT s.psp_id, m.currency, count(*)::bigint AS subscriptions, COALESCE(sum(m.mrr), 0)::bigint AS mrr
+FROM billing.subscriptions s
+JOIN billing.subscription_mrr m ON m.merchant_id = s.merchant_id AND m.subscription_id = s.id
+WHERE s.merchant_id = $1::uuid AND s.deleted_at IS NULL AND s.collection_policy <> 'engine' AND m.mrr > 0
+  AND ((s.status = 'unverified' AND s.unverified_reason = 'awaiting_provider')
+       OR (s.status = 'active' AND s.current_period_ends_at <= $2::timestamptz
+           AND EXISTS (SELECT 1 FROM billing.psp_freshness f WHERE f.merchant_id = s.merchant_id AND f.psp_id = s.psp_id AND f.stale_since IS NOT NULL)))
+GROUP BY s.psp_id, m.currency
+ORDER BY s.psp_id, m.currency
+`
+
+type ListPSPAwaitingParams struct {
+	MerchantID uuid.UUID
+	Now        time.Time
+}
+
+type ListPSPAwaitingRow struct {
+	PspID         uuid.UUID
+	Currency      string
+	Subscriptions int64
+	Mrr           int64
+}
+
+// What awaits each PSP at now, per currency: its subscriptions unverified
+// awaiting it, and, while it is stale, its active ones whose renewal came due.
+func (q *Queries) ListPSPAwaiting(ctx context.Context, arg ListPSPAwaitingParams) ([]ListPSPAwaitingRow, error) {
+	rows, err := q.db.Query(ctx, listPSPAwaiting, arg.MerchantID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPSPAwaitingRow
+	for rows.Next() {
+		var i ListPSPAwaitingRow
+		if err := rows.Scan(
+			&i.PspID,
+			&i.Currency,
+			&i.Subscriptions,
+			&i.Mrr,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPSPFreshness = `-- name: ListPSPFreshness :many
 SELECT p.id AS psp_id, p.key, p.rail, p.superseded_at,
        f.read_at, f.failing_since, f.failed_at, f.failure, f.imported_through, f.stale_since, f.notified_at, f.caught_up_at, f.catch_up,
@@ -146,7 +197,9 @@ SELECT p.id AS psp_id, p.key, p.rail, p.superseded_at,
                   AND s.collection_policy <> 'engine' AND s.status IN ('active', 'past_due', 'awaiting_method', 'unverified'))::boolean AS live_subscriptions,
        EXISTS (SELECT 1 FROM billing.reconciliation_findings r
                 WHERE r.merchant_id = p.merchant_id AND r.finding_type = 'life.webhooks.silent' AND r.subject_key = 'psp:' || p.id::text
-                  AND r.status IN ('requires_review', 'reconcile_required'))::boolean AS webhooks_silent
+                  AND r.status IN ('requires_review', 'reconcile_required'))::boolean AS webhooks_silent,
+       (EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id = p.merchant_id AND s.psp_id = p.id AND s.deleted_at IS NULL)
+        OR EXISTS (SELECT 1 FROM billing.payments y WHERE y.merchant_id = p.merchant_id AND y.psp_id = p.id AND y.deleted_at IS NULL))::boolean AS has_data
 FROM billing.psps p
 LEFT JOIN billing.psp_freshness f ON f.merchant_id = p.merchant_id AND f.psp_id = p.id
 LEFT JOIN billing.webhook_health w ON w.merchant_id = p.merchant_id AND w.psp_id = p.id
@@ -178,6 +231,7 @@ type ListPSPFreshnessRow struct {
 	LastPullAt        *time.Time
 	LiveSubscriptions bool
 	WebhooksSilent    bool
+	HasData           bool
 }
 
 // Known-through per PSP: the evidence of each of the merchant's PSPs. A PSP
@@ -210,6 +264,7 @@ func (q *Queries) ListPSPFreshness(ctx context.Context, arg ListPSPFreshnessPara
 			&i.LastPullAt,
 			&i.LiveSubscriptions,
 			&i.WebhooksSilent,
+			&i.HasData,
 		); err != nil {
 			return nil, err
 		}

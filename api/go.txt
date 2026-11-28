@@ -2990,7 +2990,10 @@ pkg openrails/billing, type MetricsResult struct
 pkg openrails/billing, type MetricsResult struct, Columns []MetricsColumn `json:"columns"`
 pkg openrails/billing, type MetricsResult struct, CompareRange *MetricsResultRange `json:"compare_range,omitempty"`
 pkg openrails/billing, type MetricsResult struct, CompareRows [][]any `json:"compare_rows,omitempty"`
+pkg openrails/billing, type MetricsResult struct, CompleteThrough *time.Time `json:"complete_through"`
+pkg openrails/billing, type MetricsResult struct, Freshness []PSPKnownThrough `json:"freshness"`
 pkg openrails/billing, type MetricsResult struct, Grain string `json:"grain,omitempty"`
+pkg openrails/billing, type MetricsResult struct, KnownThrough *time.Time `json:"known_through"`
 pkg openrails/billing, type MetricsResult struct, Range MetricsResultRange `json:"range"`
 pkg openrails/billing, type MetricsResult struct, Rows [][]any `json:"rows"`
 pkg openrails/billing, type MetricsResult struct, Timezone string `json:"timezone"`
@@ -3121,6 +3124,10 @@ pkg openrails/billing, type PSPAccount struct, ClientAccnum string `json:"client
 pkg openrails/billing, type PSPAccount struct, ClientSubacc string `json:"client_subacc,omitempty"`
 pkg openrails/billing, type PSPAccount struct, GatewayID string `json:"gateway_id,omitempty"`
 pkg openrails/billing, type PSPAccount struct, Treasury string `json:"treasury,omitempty"`
+pkg openrails/billing, type PSPAwaiting struct
+pkg openrails/billing, type PSPAwaiting struct, Currency catalog.Currency `json:"currency"`
+pkg openrails/billing, type PSPAwaiting struct, MRR int64 `json:"mrr,string"`
+pkg openrails/billing, type PSPAwaiting struct, Subscriptions int64 `json:"subscriptions"`
 pkg openrails/billing, type PSPCatchUp struct
 pkg openrails/billing, type PSPCatchUp struct, Canceled int64 `json:"canceled"`
 pkg openrails/billing, type PSPCatchUp struct, Failed int64 `json:"failed"`
@@ -3148,10 +3155,12 @@ pkg openrails/billing, type PSPFields struct, TokenizationURL string `json:"toke
 pkg openrails/billing, type PSPFields struct, WebhookOverlapExpiresAt *time.Time `json:"webhook_overlap_expires_at,omitempty"`
 pkg openrails/billing, type PSPFields struct, embedded PSPAccount
 pkg openrails/billing, type PSPFreshness struct
+pkg openrails/billing, type PSPFreshness struct, Awaiting []PSPAwaiting `json:"awaiting"`
 pkg openrails/billing, type PSPFreshness struct, CatchUp *PSPCatchUp `json:"catch_up"`
 pkg openrails/billing, type PSPFreshness struct, Cause PSPStaleCause `json:"cause"`
 pkg openrails/billing, type PSPFreshness struct, Current bool `json:"current"`
 pkg openrails/billing, type PSPFreshness struct, FailingSince *time.Time `json:"failing_since"`
+pkg openrails/billing, type PSPFreshness struct, HasData bool `json:"has_data"`
 pkg openrails/billing, type PSPFreshness struct, KnownThrough *time.Time `json:"known_through"`
 pkg openrails/billing, type PSPFreshness struct, LastReadAt *time.Time `json:"last_read_at"`
 pkg openrails/billing, type PSPFreshness struct, Severity PSPStaleSeverity `json:"severity"`
@@ -3245,6 +3254,11 @@ pkg openrails/billing, type PSPImportRule struct, Pattern string `json:"pattern,
 pkg openrails/billing, type PSPImportRule struct, Via PSPImportRuleVia `json:"via"`
 pkg openrails/billing, type PSPImportRuleVia string
 pkg openrails/billing, type PSPImportStatus string
+pkg openrails/billing, type PSPKnownThrough struct
+pkg openrails/billing, type PSPKnownThrough struct, Key string `json:"key"`
+pkg openrails/billing, type PSPKnownThrough struct, PSPID PSPID `json:"psp_id"`
+pkg openrails/billing, type PSPKnownThrough struct, Rail Rail `json:"rail"`
+pkg openrails/billing, type PSPKnownThrough struct, embedded PSPFreshness
 pkg openrails/billing, type PSPKnownThroughSource string
 pkg openrails/billing, type PSPListParams struct
 pkg openrails/billing, type PSPListParams struct, Archived *bool `form:"archived"`

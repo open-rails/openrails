@@ -127,6 +127,9 @@ func (s *Service) execute(ctx context.Context, plan *Plan) (*Result, error) {
 		res.CompareRange = &RangeOut{From: prev.From.UTC(), To: prev.To.UTC()}
 		res.CompareRows = prevRows
 	}
+	if err := s.freshness(ctx, plan, res); err != nil {
+		return nil, err
+	}
 	return res, nil
 }
 
