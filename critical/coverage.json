@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 924,
+  "scenario_count": 926,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2999,6 +2999,11 @@
       "name": "Over an imported book whose PSP cannot be read, every metrics read reports its known-through and what awaits it: cash and payments after it are missing, not zero, MRR keeps its last known level, a rebill due in the gap is in no rebill count, at-risk counts none of it, and the result is as of its known-through"
     },
     {
+      "id": "OR-J42-S45",
+      "journey": "J42",
+      "name": "A stale PSP with data and no evidence reads a null known-through, never a zero instant: a metrics figure is incomplete after the other PSPs' earliest known-through and as of their latest, and with none dated it carries neither"
+    },
+    {
       "id": "OR-J28-S09",
       "journey": "J28",
       "name": "An NMI delivery signed under any nonce is accepted, with no replay window; a replay or retry of its event applies nothing"
@@ -3082,6 +3087,11 @@
       "id": "OR-J15-S79",
       "journey": "J15",
       "name": "A live PSP whose reads fail for a day is stale through its last read: the rows past its deadline keep their state, one awaiting it is not at risk, a warning past NMI's deadline is told once by event and email, and when it answers the catch-up records what the gap hid and tells it recovered"
+    },
+    {
+      "id": "OR-J15-S80",
+      "journey": "J15",
+      "name": "An upgrade dates each PSP an import brought before imports recorded their as_of from what it stored: the as_of it stamped on an accepted schedule, else its records' latest instant, and says which; such a PSP is stale from it and never reads undated, and a PSP no import brought is left current"
     },
     {
       "id": "OR-J28-S13",

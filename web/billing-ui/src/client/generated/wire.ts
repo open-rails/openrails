@@ -1756,7 +1756,7 @@ export type PSPCredential = {
 
 export type PSPFreshness = {
   known_through: string | null
-  source: "import" | "none" | "now" | "read" | "webhook"
+  source: "import" | "import_records" | "none" | "now" | "read" | "webhook"
   current: boolean
   stale_since: string | null
   cause: "catching_up" | "credentials_refused" | "imported" | "not_configured" | "unreachable" | "webhooks_silent"
@@ -1855,7 +1855,7 @@ export type PSPKnownThrough = {
   key: string
   rail: "ccbill" | "nmi" | "solana" | "stripe"
   known_through: string | null
-  source: "import" | "none" | "now" | "read" | "webhook"
+  source: "import" | "import_records" | "none" | "now" | "read" | "webhook"
   current: boolean
   stale_since: string | null
   cause: "catching_up" | "credentials_refused" | "imported" | "not_configured" | "unreachable" | "webhooks_silent"

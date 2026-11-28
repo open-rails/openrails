@@ -94,7 +94,7 @@ var excludedColumns = map[string]string{
 	"merchants":                         "id slug status permission_group_id tenant_id created_at updated_at deleted_at retired_at group_release_completed_at catalog_revision slug_changed_at",
 	"merchant_slug_aliases":             "slug merchant_id expires_at created_at",
 	"webhook_health":                    "merchant_id psp_id custodian_id last_accepted_at last_pull_at created_at updated_at",
-	"psp_freshness":                     "merchant_id psp_id read_at failing_since failed_at failure imported_through stale_since notified_at caught_up_at catch_up created_at updated_at",
+	"psp_freshness":                     "merchant_id psp_id read_at failing_since failed_at failure imported_through imported_from stale_since notified_at caught_up_at catch_up created_at updated_at",
 	"webhook_health_daily":              "merchant_id psp_id custodian_id day_at rejected drift",
 	"leases":                            "merchant_id id created_at last_sync_at settled_through_n closed_at receipts",
 	"lease_in_flight":                   "merchant_id lease_id customer_id limit_key unit amount updated_at",

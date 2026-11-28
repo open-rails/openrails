@@ -2989,8 +2989,14 @@
     "OR-J15-S79": [
       "TestKnownThrough/OR-J15-S79/a-live-psp-whose-reads-fail-for-a-day-is-stale-then-caught-up"
     ],
+    "OR-J15-S80": [
+      "TestKnownThroughUpgrade/OR-J15-S80/an-upgrade-dates-each-psp-an-earlier-import-brought-from-what-it-stored"
+    ],
     "OR-J42-S44": [
       "TestKnownThroughMetrics/OR-J42-S44/a-stale-psps-metrics-are-the-best-data-known-marked-never-read-as-churn"
+    ],
+    "OR-J42-S45": [
+      "TestKnownThroughMetrics/OR-J42-S45/a-psp-with-data-and-no-known-through-reads-null-and-dates-no-figure"
     ]
   }
 }

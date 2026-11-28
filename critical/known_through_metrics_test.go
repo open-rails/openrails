@@ -7,11 +7,104 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
 )
 
+// undateKnownThrough leaves alpha's PSP key as a book imported before its
+// as_of was recorded does once a read fails: stale, with no evidence.
+func undateKnownThrough(t *testing.T, a *authorityWorld, key string, failed time.Time) {
+	t.Helper()
+	var psp billing.PSPID
+	page, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+	require.NoError(t, err)
+	for _, item := range page.Items {
+		if item.Key == key {
+			psp = item.ID
+		}
+	}
+	require.False(t, psp.IsZero(), "no PSP %s", key)
+	table := pgx.Identifier{a.schema, "psp_freshness"}.Sanitize()
+	_, err = a.pool.Exec(t.Context(), "DELETE FROM "+table+" WHERE merchant_id = $1 AND psp_id = $2", a.alpha.MerchantID().UUID(), psp.UUID())
+	require.NoError(t, err)
+	_, err = a.pool.Exec(t.Context(), "INSERT INTO "+table+" (merchant_id, psp_id, failing_since, failed_at, failure, stale_since) VALUES ($1, $2, $3, $3, 'not_configured', $3)",
+		a.alpha.MerchantID().UUID(), psp.UUID(), failed)
+	require.NoError(t, err)
+}
+
+// freshnessOf is the entry of PSP key in a metrics read's freshness.
+func freshnessOf(t *testing.T, res *billing.MetricsResult, key string) billing.PSPKnownThrough {
+	t.Helper()
+	for _, f := range res.Freshness {
+		if f.Key == key {
+			return f
+		}
+	}
+	t.Fatalf("no freshness for %s", key)
+	return billing.PSPKnownThrough{}
+}
+
+// undatedReads queries a tile's and a chart's figures over window.
+func undatedReads(t *testing.T, client *openrails.Client, window *billing.MetricsRange) []*billing.MetricsResult {
+	t.Helper()
+	var out []*billing.MetricsResult
+	for _, q := range []billing.QueryMetricsParams{
+		{Measures: []string{"mrr"}, Range: window},
+		{Measures: []string{"cash"}, Range: window},
+		{Measures: []string{"cash", "payments"}, By: []string{"time"}, Grain: "day", Range: window},
+	} {
+		res, err := client.QueryMetrics(t.Context(), q)
+		require.NoError(t, err)
+		out = append(out, res)
+	}
+	return out
+}
+
 func TestKnownThroughMetrics(t *testing.T) {
+	t.Run("OR-J42-S45/a-psp-with-data-and-no-known-through-reads-null-and-dates-no-figure", func(t *testing.T) {
+		a, p := newNMIWorld(t, unconnectedNMIs("nmi", "legacy"))
+		legacy := importNMIBookAs(t, a, p, "legacy", 5*24*time.Hour)
+		a.clock.Advance(24 * time.Hour)
+		b := importNMIBookAs(t, a, p, "nmi", 3*24*time.Hour)
+		fleet := quietFleet(t, a.world)
+		for _, key := range []string{"nmi", "legacy"} {
+			require.Eventually(t, func() bool { return pspFreshness(t, a.alpha, key).Cause == billing.PSPImported }, 20*time.Second, 20*time.Millisecond,
+				"the import finds %s cannot be read", key)
+		}
+		catchUpsSettled(t, fleet)
+		require.True(t, legacy.asOf.Before(b.asOf))
+		// The legacy book's as_of was never recorded.
+		undateKnownThrough(t, a, "legacy", a.clock.Now().UTC())
+		f := pspFreshness(t, a.alpha, "legacy")
+		require.True(t, f.HasData)
+		require.False(t, f.Current)
+		require.Nil(t, f.KnownThrough, "no evidence: null, never a zero instant")
+		require.Equal(t, billing.KnownThroughNone, f.Source)
+		require.Equal(t, billing.PSPNotConfigured, f.Cause)
+
+		now := a.clock.Now().UTC()
+		window := &billing.MetricsRange{From: legacy.asOf.Add(-30 * 24 * time.Hour).Format(time.RFC3339), To: now.Add(time.Second).Format(time.RFC3339)}
+		for _, res := range undatedReads(t, a.alpha, window) {
+			require.Nil(t, freshnessOf(t, res, "legacy").KnownThrough)
+			require.NotNil(t, res.CompleteThrough)
+			require.True(t, res.CompleteThrough.Equal(b.asOf), "the undated PSP does not drag the figure's incomplete-after to %s", res.CompleteThrough)
+			require.NotNil(t, res.KnownThrough)
+			require.True(t, res.KnownThrough.Equal(b.asOf), "as of the latest known-through there is, not %s", res.KnownThrough)
+		}
+
+		// With no PSP dated, nothing dates the figures.
+		undateKnownThrough(t, a, "nmi", a.clock.Now().UTC())
+		for _, res := range undatedReads(t, a.alpha, window) {
+			for _, f := range res.Freshness {
+				require.True(t, f.HasData)
+				require.Nil(t, f.KnownThrough, "%s has no known-through", f.Key)
+			}
+			require.Nil(t, res.CompleteThrough, "no zero instant: %v", res.CompleteThrough)
+			require.Nil(t, res.KnownThrough)
+		}
+	})
+
 	t.Run("OR-J42-S44/a-stale-psps-metrics-are-the-best-data-known-marked-never-read-as-churn", func(t *testing.T) {
 		a, _, b, _ := staleImport(t)
 		now := a.clock.Now().UTC()
