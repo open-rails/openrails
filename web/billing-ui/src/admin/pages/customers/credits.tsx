@@ -218,6 +218,9 @@ function CreditSupport({
                       <AdminMessage id={"Refunded"} />
                     </TableHead>
                     <TableHead>
+                      <AdminMessage id={"Refunding"} />
+                    </TableHead>
+                    <TableHead>
                       <AdminMessage id={"State"} />
                     </TableHead>
                     <TableHead>
@@ -245,6 +248,7 @@ function CreditSupport({
                         grant.expired_amount,
                         grant.revoked_amount,
                         grant.refunded_amount,
+                        grant.refunding_amount,
                       ].map((amount, index) => (
                         <TableCell key={index} className="tabular-nums">
                           {formatScaledAmount(amount, grant.currency, units)}
