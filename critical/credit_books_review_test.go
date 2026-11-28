@@ -307,6 +307,17 @@ func partialRecoveriesEndExact(t *testing.T) {
 		require.EqualValues(t, -1_000_000, glBalance(t, w, "promotional_credit"), "as the repayment left it")
 		require.Zero(t, glBalance(t, w, "chargebacks"))
 		balance(t, s.a.alpha, s.customer, 44_000_000, 0, 44_000_000)
+		transactions, err := s.a.alpha.ListBalanceTransactions(t.Context(), s.customer, billing.BalanceTransactionListParams{Currency: "USD"})
+		require.NoError(t, err)
+		amounts := map[billing.BalanceTransactionType][]int64{}
+		for _, entry := range transactions.Items {
+			require.NotEqual(t, billing.BalanceTransactionType("credit_refund_funding"), entry.Type)
+			if entry.CreditGrantID != nil && *entry.CreditGrantID == lot {
+				amounts[entry.Type] = append(amounts[entry.Type], entry.Amount)
+			}
+		}
+		require.Equal(t, []int64{11_000_000}, amounts[billing.BalanceTransactionOwedReopened])
+		require.Equal(t, []int64{-11_000_000, -11_000_000}, amounts[billing.BalanceTransactionOwedRepayment])
 		booksAudited(t, w)
 	})
 }

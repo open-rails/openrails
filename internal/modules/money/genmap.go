@@ -91,6 +91,13 @@ func balanceTransactionFromTransfer(r gen.BillingLedgerTransfer) billing.Balance
 		txType, amount = billing.BalanceTransactionRefund, -amount
 	case "credit_refund_restore":
 		txType = billing.BalanceTransactionRefundReversed
+	case "credit_refund_funding":
+		// A refund owes again the debt its lot's units repaid (repaid_owed);
+		// undoing it repays that debt again.
+		txType = billing.BalanceTransactionOwedReopened
+		if r.Source != "repaid_owed" {
+			txType, amount = billing.BalanceTransactionOwedRepayment, -amount
+		}
 	case "credit_spend":
 		txType, amount = billing.BalanceTransactionSpend, -amount
 	case "credit_expire":
