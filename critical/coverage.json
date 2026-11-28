@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 920,
+  "scenario_count": 923,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2896,7 +2896,7 @@
     {
       "id": "OR-J42-S14",
       "journey": "J42",
-      "name": "A provider subscription OpenRails could not confirm is at risk while unverified and recovered when a read verifies its renewal"
+      "name": "A provider subscription a read could not confirm is at risk while unverified and unconfirmed, and recovered when a read verifies its renewal; awaiting its provider's read it is not at risk"
     },
     {
       "id": "OR-J42-S15",
@@ -3062,6 +3062,21 @@
       "id": "OR-J15-S76",
       "journey": "J15",
       "name": "An overdue NMI schedule NMI no longer holds ends, and its cycle is missed as schedule_gone"
+    },
+    {
+      "id": "OR-J15-S77",
+      "journey": "J15",
+      "name": "An NMI book imported without credentials and read 24 days after its as_of keeps its subscriptions active with access: no renewal is overdue, no rebill missed, no MRR at risk and no customer told; the PSP reports itself stale, known through the as_of, imported, as information"
+    },
+    {
+      "id": "OR-J15-S78",
+      "journey": "J15",
+      "name": "Connecting an imported PSP reads its gap before detection resumes: the renewals NMI made are recorded without passing through unverified, the PSP is current with a catch-up summary from the as_of, and a later stalled renewal is unverified and unconfirmed"
+    },
+    {
+      "id": "OR-J15-S79",
+      "journey": "J15",
+      "name": "A live PSP whose reads fail for a day is stale through its last read: the rows past its deadline keep their state, one awaiting it is not at risk, a warning past NMI's deadline is told once by event and email, and when it answers the catch-up records what the gap hid and tells it recovered"
     },
     {
       "id": "OR-J28-S13",

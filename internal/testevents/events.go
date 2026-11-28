@@ -60,6 +60,9 @@ func Hosts(ctx context.Context, c Reader, kind billing.HostEventType) (*billing.
 			case billing.HostEventDestructiveHoldOpened, billing.HostEventDestructiveHoldCleared:
 				event.DestructiveHold = new(billing.DestructiveHoldEvent)
 				payload = event.DestructiveHold
+			case billing.HostEventPSPStale, billing.HostEventPSPRecovered:
+				event.PSP = new(billing.PSPHostEvent)
+				payload = event.PSP
 			default:
 				return nil, fmt.Errorf("unknown test host event %q", event.Type)
 			}

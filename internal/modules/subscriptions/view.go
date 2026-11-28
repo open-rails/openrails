@@ -46,6 +46,10 @@ func SubscriptionView(sub *models.Subscription, price *models.Price, dunning *bi
 		v := string(*sub.CancelType)
 		out.CancelType = &v
 	}
+	if sub.UnverifiedReason != nil {
+		v := billing.UnverifiedReason(*sub.UnverifiedReason)
+		out.UnverifiedReason = &v
+	}
 	return out
 }
 

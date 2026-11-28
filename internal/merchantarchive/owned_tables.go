@@ -98,6 +98,7 @@ var ownedTables = []string{
 	"psp_import_records",
 	"psp_imports",
 	"provisioning_tokens",
+	"psp_freshness",
 	"psp_refresh_watermarks",
 	"psps",
 	"rebill_cycles",

@@ -19,6 +19,7 @@ sql:
       - "internal/migrate/postgres/0014_books_measures.up.sql"
       - "internal/migrate/postgres/0015_deposits_and_reserves.up.sql"
       - "internal/migrate/postgres/0016_import_history.up.sql"
+      - "internal/migrate/postgres/0017_known_through.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

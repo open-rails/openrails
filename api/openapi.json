@@ -22257,6 +22257,9 @@
           "armed": {
             "type": "boolean"
           },
+          "freshness": {
+            "$ref": "#/components/schemas/PSPFreshness"
+          },
           "gateway_id": {
             "type": "string"
           },
@@ -22324,10 +22327,44 @@
           "archived",
           "open_obligations",
           "armed",
+          "freshness",
           "credentials",
           "revision",
           "created_at",
           "updated_at"
+        ]
+      },
+      "PSPCatchUp": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "through": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "renewed": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "canceled": {
+            "type": "integer"
+          },
+          "unconfirmed": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from",
+          "through",
+          "renewed",
+          "failed",
+          "canceled",
+          "unconfirmed"
         ]
       },
       "PSPCredential": {
@@ -22351,6 +22388,108 @@
         "required": [
           "configured",
           "validated_at"
+        ]
+      },
+      "PSPFreshness": {
+        "type": "object",
+        "properties": {
+          "known_through": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "import",
+              "none",
+              "now",
+              "read",
+              "webhook"
+            ]
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "stale_since": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cause": {
+            "type": "string",
+            "enum": [
+              "catching_up",
+              "credentials_refused",
+              "imported",
+              "not_configured",
+              "unreachable",
+              "webhooks_silent"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "info",
+              "warning"
+            ]
+          },
+          "last_read_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failing_since": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "catch_up": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PSPCatchUp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "known_through",
+          "source",
+          "current",
+          "stale_since",
+          "cause",
+          "severity",
+          "last_read_at",
+          "failing_since",
+          "catch_up"
         ]
       },
       "PSPImport": {
@@ -26756,6 +26895,20 @@
               "unverified"
             ]
           },
+          "unverified_reason": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "awaiting_provider",
+                  "unconfirmed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "scheduled_change": {
             "oneOf": [
               {
@@ -26911,6 +27064,7 @@
           "rail",
           "rail_subscription_id",
           "status",
+          "unverified_reason",
           "scheduled_change",
           "payment_method_id",
           "mandate_id",

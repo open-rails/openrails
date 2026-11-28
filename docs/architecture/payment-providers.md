@@ -157,6 +157,7 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   fetches, probes, verifier reads, pulls and imports each give it an
   `EvidenceBundle`; only `ApplyDecision` changes a subscription.
 - **Missed callbacks**: the due pass moves a provider-billed renewal unpaid past its rail's deadline to `unverified`, access kept: `reconcile.NMIRebillDeadline` (24 h) for an NMI schedule, `reconcile.PeriodGrace` (48 h) for Stripe and CCBill. `trg_subscriptions_track_unverified` queues it in `subscription_verifications`; the `Verifier` reads queued ids at once, 50 per request, and `openrails.subscription_verification_retry` again any not read for an hour. An NMI cycle the read leaves with no attempt is decided from NMI's transactions for it (`life.rebill.missed`): a found charge is recorded, a reversed or unrecorded one never recharged, a gone schedule ended, a proven skip collected (`CollectSkippedRenewal`). `openrails.charge_attributions` and `openrails provider-refresh` (from `psp_refresh_watermarks`) read the rest; `life.webhooks.silent` fires when webhooks stop but pulls find charges.
+- **Known-through** (`reconcile.PSPFreshness`, `billing.PSPFreshness`, each PSP's `freshness` in `ListPSPs`): the instant through which OpenRails' record of a PSP is complete. A PSP whose reads succeed is current: through now. A failed read (`reconcile.RecordPSPRead`: `not_configured` when no credentials arm a reader, `credentials_refused`, `unreachable`) opens a stale episode (`psp_freshness.stale_since`); its known-through is then its latest evidence: the last read before it, its last verified webhook (`webhook_health`), or the `as_of` of the latest book naming it. A book queues `openrails.psp_catch_up`, which finds an unarmed PSP stale at once (`imported` while it was never read). While stale, the due pass asks about none of its renewals and neither retries nor reads past grace its `past_due` rows: they keep their last known state and access. Its catch-up, queued by the due pass an hour after the last failed read and by a read that succeeds, reads every renewal the due pass skipped and every `unverified` row (`Verifier.CatchUp`) before detection resumes, then ends the episode with what the gap hid (`catch_up`: renewals paid and failed, subscriptions canceled, rows still unconfirmed). Severity follows impact: `critical` when the provider refuses the credentials, `warning` once a PSP with live subscriptions has been unreadable past its rail's renewal deadline, `info` otherwise (an import onboarded, a catch-up). An episode reaching `warning` or `critical` writes `psp.stale` and emails `alert_email` once; its end then writes `psp.recovered` with the catch-up and emails again. A current PSP with an open `life.webhooks.silent` finding is reported `webhooks_silent`.
 - **Proposals**: only `proposals.Executor` applies a `pull.*` finding's `change`,
   one approval run per approve call, reversed by `openrails undo-run`.
 - **Parking**: an unmapped price, an unlinked customer or a customer already
@@ -180,7 +181,7 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   disarmed (`consistency.duplicate_gateway_account`). Objects OpenRails creates
   at NMI and Stripe carry the book id (`internal/booktag`).
 
-Other tables: `provider_bills`, `provider_charge_attributions`, `provider_listed_rebills`, `webhook_health`,
+Other tables: `provider_bills`, `provider_charge_attributions`, `provider_listed_rebills`, `psp_freshness`, `webhook_health`,
 `webhook_health_daily`, `nmi_bulk_checkpoints`,
 `solana_subscriptions`, `solana_pay_references`, `solana_pay_receipts`.
 
@@ -292,6 +293,7 @@ An operation's wake is queued by the write that leaves it live, at its due time;
 Checks:
 - `OperationWakes.Pass` uses `ListOverdueProviderOperations` past `OperationWakeGrace`; OR-J04-S60 requeues a lost wake.
 - OR-J15-S07: a verification burst reads only flagged subscriptions; OR-J15-S72: a complete refresh queues no due work.
+- `ListStalePSPs` reads only stale PSPs (`psp_freshness_stale_idx`); a catch-up reads one PSP's skipped and unverified rows. OR-J15-S77 (an imported book without credentials is stale, its renewals not overdue); OR-J15-S78 (connecting it reads the gap before detection); OR-J15-S79 (a day of failed reads, told once, then caught up).
 
 ### 8. Abuse protection
 

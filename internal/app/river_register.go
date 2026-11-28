@@ -58,6 +58,11 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		}
 		r.Verifier.Start()
 	}
+	// A stale PSP's catch-up, queued by an import, a read that succeeds while
+	// it is stale, and the due pass every hour.
+	if err := addWorker(workers, &riverjobs.PSPCatchUpWorker{Verifier: r.Verifier}); err != nil {
+		return fmt.Errorf("add PSP catch-up worker: %w", err)
+	}
 	refresh, paced := r.refreshWorkers(clock)
 	if err := addWorker(workers, refresh); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
@@ -198,7 +203,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}
 	// Every due scan, in turn, at the top of each hour. Renewals, retries,
 	// delinquency and lapses are critical: a day overdue fails job progress.
-	dunning := &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, Lifecycle: r.SubscriptionLifecycleService, Log: r.Log}
+	dunning := &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, Lifecycle: r.SubscriptionLifecycleService,
+		Readers: &r.Verifier.Builder, Log: r.Log}
 	balances := &riverjobs.BalanceWatchWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
 	delinquency := &riverjobs.DelinquencyWorker{DB: r.DB, Clock: clock, Log: r.Log}
 	expiry := &riverjobs.InvoiceExpiryWorker{DB: r.DB, Invoices: r.Invoices, Clock: clock}

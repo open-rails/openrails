@@ -1013,8 +1013,8 @@ func (p *healthPass) unverifiedFindings(ctx context.Context, scope Scope, now ti
 	}
 	markTruncated(ctx, len(rows), findingUnverifiedUnresolved, findingUnverifiedBacklog)
 	type backlog struct {
-		count  int
-		oldest time.Time
+		count, awaiting int
+		oldest          time.Time
 	}
 	accounts := map[uuid.UUID]*backlog{}
 	var out []ConvergeFinding
@@ -1027,6 +1027,12 @@ func (p *healthPass) unverifiedFindings(ctx context.Context, scope Scope, now ti
 		b.count++
 		if r.UnverifiedAt.Before(b.oldest) {
 			b.oldest = r.UnverifiedAt
+		}
+		// A row awaiting its provider is our stale record, reported as its
+		// PSP's known-through; only a read that could not tell escalates.
+		if r.UnverifiedReason == string(billing.UnverifiedAwaitingProvider) {
+			b.awaiting++
+			continue
 		}
 		if now.Sub(r.UnverifiedAt) < unverifiedUnresolvedAfter {
 			continue
@@ -1051,7 +1057,7 @@ func (p *healthPass) unverifiedFindings(ctx context.Context, scope Scope, now ti
 		out = append(out, ConvergeFinding{
 			Type: findingUnverifiedBacklog, Shape: ShapeMismatch, Class: ClassAuto, Severity: severity,
 			SubjectKey: "psp:" + psp.String(), Provider: "self",
-			Evidence: map[string]any{"psp_id": psp.String(), "count": b.count, "oldest_since": b.oldest.UTC(), "oldest_age_seconds": int64(age.Seconds())},
+			Evidence: map[string]any{"psp_id": psp.String(), "count": b.count, "awaiting_provider": b.awaiting, "oldest_since": b.oldest.UTC(), "oldest_age_seconds": int64(age.Seconds())},
 		})
 	}
 	return out, nil
