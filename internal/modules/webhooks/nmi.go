@@ -1179,7 +1179,6 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 	if _, err := s.normalizedRail(); err != nil {
 		return err
 	}
-	var voidedSubscriptionID *uuid.UUID
 	if s.PaymentService != nil && txnID != "" {
 		originalPayment, paymentErr := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(s.Rail), txnID)
 		if paymentErr != nil && !db.IsNotFound(paymentErr) {
@@ -1203,10 +1202,6 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 					return fmt.Errorf("record void reversal: %w", refundErr)
 				}
 			}
-			if originalPayment.SubscriptionID != nil {
-				id := *originalPayment.SubscriptionID
-				voidedSubscriptionID = &id
-			}
 		} else {
 			// The void may race the sale webhook: a retryable error (NMI
 			// redelivers on non-2xx) applies it once the sale lands.
@@ -1215,19 +1210,6 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 			}
 			s.Log.WarnContext(ctx, "Unable to resolve original payment for NMI void", "transaction_id", txnID)
 			return fmt.Errorf("unable to resolve original payment for NMI void transaction %q", txnID)
-		}
-	}
-	if voidedSubscriptionID != nil && s.SubscriptionLifecycleService != nil {
-		rail := models.Rail(s.Rail)
-		reason := "NMI void processed"
-		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-			SubscriptionID: voidedSubscriptionID,
-			Rail:           &rail,
-			CancelType:     models.CancelTypeMerchant,
-			CancelFeedback: &reason,
-			RevokeAccess:   true,
-		}); err != nil {
-			return fmt.Errorf("cancel membership after NMI void: %w", err)
 		}
 	}
 

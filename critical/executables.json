@@ -461,6 +461,9 @@
       "TestRefundRecovery/OR-J20-S09/a-full-dashboard-refund-ends-the-nmi-engine-membership/full-refund",
       "TestRefundRecovery/OR-J20-S09/a-full-dashboard-refund-ends-the-nmi-engine-membership/partial-refund"
     ],
+    "OR-J20-S10": [
+      "TestRefundRecovery/OR-J20-S10/a-late-nmi-void-revokes-only-the-period-its-sale-paid-for"
+    ],
     "OR-J20-S05": [
       "TestCCBillRefunds/OR-J20-S05/each-partial-refund-of-a-sale-is-booked-once"
     ],
@@ -1708,6 +1711,9 @@
     "OR-J38-S47": [
       "TestProviderTime/OR-J38-S47/a-missed-ccbill-cancellation-read-on-a-paced-day-keeps-the-paid-period"
     ],
+    "OR-J38-S48": [
+      "TestCCBillIdentity/OR-J38-S48/a-notice-for-a-subscription-openrails-does-not-hold-answers-200-and-a-rebill-retries-until-it-books"
+    ],
     "OR-J28-S11": [
       "TestProviderTime/OR-J28-S11/a-ccbill-account-another-merchant-declares-is-refused-before-a-probe"
     ],
@@ -2818,6 +2824,9 @@
     ],
     "OR-J37-S74": [
       "TestSolanaPulls/OR-J37-S74/a-confirmed-pull-its-fork-drops-books-nothing-and-is-signed-again-only-after-its-blockhash-expires"
+    ],
+    "OR-J37-S75": [
+      "TestSolanaContracts/OR-J37-S75/an-unpaid-reference-is-read-less-often-as-it-ages"
     ],
     "OR-J38-S86": [
       "TestCCBillCallbackEvidence/OR-J38-S86/a-back-dated-rebill-callback-no-read-lists-is-raised-once-after-36-hours"

@@ -55,9 +55,12 @@ func webhookSecretKey(rail string) string {
 	return ""
 }
 
+// PreviousWebhookSecretKeys names the webhook secret slots retained during rotation.
+var PreviousWebhookSecretKeys = []string{"webhook_signing_secret_previous", "webhook_token_previous"}
+
 // suppliedPrevious refuses a _previous webhook secret: rotation retains it.
 func suppliedPrevious(credentials map[string]string) error {
-	for _, key := range []string{"webhook_signing_secret_previous", "webhook_token_previous"} {
+	for _, key := range PreviousWebhookSecretKeys {
 		if _, supplied := credentials[key]; supplied {
 			return apperr.Invalidf("%s is retained by rotation and cannot be supplied", key).WithParam("credentials")
 		}

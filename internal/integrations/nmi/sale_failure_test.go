@@ -99,3 +99,25 @@ func TestDirectDispatchBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestPaymentSourceUpdateResponseClassification(t *testing.T) {
+	for _, code := range []int{420, 300} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseForm(); err != nil {
+					t.Error(err)
+				}
+				if r.Form.Get("recurring") != "update_subscription" {
+					t.Errorf("unexpected request: %v", r.Form)
+				}
+				_, _ = fmt.Fprintf(w, "response=3&response_code=%d&responsetext=Refused", code)
+			}))
+			defer gateway.Close()
+			client := &NMIClient{Log: slog.Default(), SecurityKey: "key", DirectPostURL: gateway.URL, LoopbackFixture: true}
+			err := client.UpdateSubscriptionPaymentSource(t.Context(), "subscription", "vault")
+			if err == nil || IsTransportAmbiguous(err) != (code == 420) {
+				t.Fatalf("response %d: %v", code, err)
+			}
+		})
+	}
+}
