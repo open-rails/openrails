@@ -102,6 +102,7 @@ export const ko: BillingUiMessageBundle = {
     browsePlans: "요금제 보기",
     fallbackName: "구독",
     renews: "{date}에 갱신",
+    lastPayment: "활성, 마지막 결제 {date}",
     endsOn: "{date}까지 이용 가능",
     noMorePayments: "추가 결제 없음",
     endedOn: "{date}에 종료됨",

@@ -1079,6 +1079,8 @@ return shop.QueryMetrics(ctx, billing.QueryMetricsParams{
 
 A fact is one measure split by its outcome or kind: `cash` by `cash_kind`, `payments` by `payment_kind`, `attempts`, `purchases` and `rebills` by `outcome`, `mrr_movements` and `subscriber_movements` by `movement`; rates such as `refund_rate` and `rebill_rate` divide its slices. Recurring measures (`mrr`, `subscribers`, `subscriber_churn_rate`, `nrr`, `grr`, `cohort_retention`, `arpa`, `ltv`, `scheduled_mrr`) read the MRR rollups; `subscriber_churn_rate` is the period's own churn as a monthly rate at any grain, `ltv` divides ARPA by the monthly churn of the trailing three months, NRR and GRR read monthly with grain `month`, `subscribers` without a currency counts each customer once, and `scheduled_mrr` looks ahead with `range.next` (`{"next": "12w"}`). `grain: "auto"` picks day, week or month from the range, and `compare` is `previous_period` or `previous_year`. Money is split by currency unless one is named.
 
+Every result carries each PSP's known-through (`Freshness`): where a PSP cannot be read, OpenRails' record of it ends there, and the result says so instead of reading the gap as churn. `CompleteThrough` is the earliest such instant; when every PSP with data is stale, `KnownThrough` is what the data is as of. In a time series, `cash` and `payments` buckets after it are null (unknown, never zero), a renewal due in the gap counts in no rebill measure, and each PSP's `Awaiting` holds the subscriptions and MRR waiting on it, which at-risk MRR never counts.
+
 An unknown measure or a bad combination is a `400` naming what is wrong and what is allowed, so a caller (an agent included) can correct itself.
 
 ## Alerts

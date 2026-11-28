@@ -539,6 +539,24 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
         enabled,
         meta: { errorAction: "Load the metrics schema" },
       }),
+    // Each PSP's known-through, as every metrics read reports it.
+    metricsFreshness: () =>
+      queryOptions({
+        queryKey: [...queryKeys.dashboard(), "freshness"],
+        queryFn: async ({ signal }) => {
+          const result = await metricsQuery(
+            { measures: ["payments"], range: { last: "1d" } },
+            signal
+          )
+          return {
+            freshness: result.freshness ?? [],
+            completeThrough: result.complete_through ?? null,
+            knownThrough: result.known_through ?? null,
+          }
+        },
+        refetchInterval: 60_000,
+        retry: false,
+      }),
     widgetMetrics: (query?: QueryMetricsParams) =>
       queryOptions({
         queryKey: [...queryKeys.dashboard(), "metrics", query ?? "unselected"],

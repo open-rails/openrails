@@ -293,7 +293,7 @@ var Dimensions = []Dimension{
 	{Name: "finding_group", Description: "orphaned (payment without access) | freeloader (access without payment) | duplicate_coverage (the same coverage paid twice) | other", Values: []string{"orphaned", "freeloader", "duplicate_coverage", "other"}},
 	{Name: "severity", Description: "finding severity", Values: []string{"critical", "high", "medium", "low"}},
 	{Name: "finding_status", Description: "requires_review (needs a person; the console's bell counts these) | reconcile_required (OpenRails is repairing it)", Values: []string{"requires_review", "reconcile_required"}},
-	{Name: "risk_reason", Description: "why MRR is at risk: past_due | needs_payment_method | unverified | card_expiring (its card expires before the renewal) | delinquent (its customer, in its currency); card_expiring and delinquent are read now only; on at_risk_recovery_rate, the reason the case entered with", Values: riskReasonValues()},
+	{Name: "risk_reason", Description: "why MRR is at risk: past_due | needs_payment_method | unverified (a read of its provider could not confirm it; awaiting the provider is no risk) | card_expiring (its card expires before the renewal) | delinquent (its customer, in its currency); card_expiring and delinquent are read now only; on at_risk_recovery_rate, the reason the case entered with", Values: riskReasonValues()},
 }
 
 // A payment settles its whole invoice, not each line independently. Attribute
@@ -851,7 +851,9 @@ var rebillCycles = fmt.Sprintf(`(SELECT c.merchant_id, c.id, c.subscription_id, 
 
 // Each rebill cycle with its first attempt, the attempt that collected it and
 // when it closes: collected, the subscription canceled, or 15 days past due
-// (the dunning window is at most 14). ListRenewals derives the same facts.
+// (the dunning window is at most 14). ListRenewals derives the same facts. A
+// cycle due after its stale PSP's known-through is left out: nobody could
+// see it.
 var rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner, c.due_at, c.currency, c.missed_at, c.miss_reason,
 		f.outcome AS first_attempt_outcome, f.decline_cause AS first_cause, f.reason AS first_reason, f.attempted_at AS first_at,
 		f.card_brand AS first_card_brand, f.card_bin AS first_card_bin, f.token_type AS first_token_type, f.transaction_link AS first_transaction_link,
@@ -879,7 +881,8 @@ var rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner, 
 		FROM billing.payment_attempts a
 		WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id AND a.outcome = 'approved'
 		ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
-	LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id AND s.deleted_at IS NULL) cy`
+	LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id AND s.deleted_at IS NULL
+	WHERE NOT ` + pastKnownThrough("c.merchant_id", "c.psp_id", "c.due_at") + `) cy`
 
 // rebillOutcome is a cycle as of the range end: approved when its first try
 // collected it, recovered when a later one did, lost when it closed
@@ -1197,7 +1200,7 @@ var declared = []Measure{
 		Formula:     "subscribers: cohort members with MRR at the end of month k / members acquired; mrr: cohort MRR at the end of month k / at the end of month 0",
 		Dims:        []string{"currency", "cohort", "months_since_start", "basis"}},
 	{Name: "mrr_at_risk", Class: ClassSnapshot, Family: FamRisk, Money: true, Unit: UnitMoney, Direction: DownIsGood,
-		Description: "MRR of subscriptions at risk at t, by risk_reason; without it each subscription counts once whatever its reasons. Now (t at or after the query's instant) it reads state: past_due, needs_payment_method, unverified, card_expiring and delinquent; a past t reads the at-risk cases, which keep the subscription's own status reasons",
+		Description: "MRR of subscriptions at risk at t, by risk_reason; without it each subscription counts once whatever its reasons. Now (t at or after the query's instant) it reads state: past_due, needs_payment_method, unverified (a read could not confirm it), card_expiring and delinquent; a past t reads the at-risk cases, which keep the subscription's own status reasons. What awaits a stale PSP is no risk: the result's freshness counts it as awaiting",
 		Formula:     "SUM(MRR of the at-risk episodes open at t); now, SUM(MRR of the subscriptions state puts at risk)",
 		Expr:        `x.amount`,
 		Dims:        []string{"currency", "risk_reason"}},

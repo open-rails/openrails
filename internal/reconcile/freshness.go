@@ -13,6 +13,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
@@ -130,22 +131,74 @@ func RecordPSPImported(ctx context.Context, txdb *db.DB, mid, psp uuid.UUID, asO
 }
 
 // PSPFreshness reads the known-through of the merchant's PSPs at now (one,
-// when psp is set), each keyed by its id.
+// when psp is set), each keyed by its id, with what awaits each.
 func PSPFreshness(ctx context.Context, q *gen.Queries, mid uuid.UUID, psp *uuid.UUID, now time.Time) (map[uuid.UUID]billing.PSPFreshness, []gen.ListPSPFreshnessRow, error) {
 	rows, err := q.ListPSPFreshness(ctx, gen.ListPSPFreshnessParams{MerchantID: mid, PspID: psp})
 	if err != nil {
 		return nil, nil, fmt.Errorf("known-through: %w", err)
 	}
+	awaiting, err := q.ListPSPAwaiting(ctx, gen.ListPSPAwaitingParams{MerchantID: mid, Now: now})
+	if err != nil {
+		return nil, nil, fmt.Errorf("known-through: awaiting: %w", err)
+	}
 	out := make(map[uuid.UUID]billing.PSPFreshness, len(rows))
 	for _, row := range rows {
-		out[row.PspID] = PSPFreshnessOf(row, now)
+		f := PSPFreshnessOf(row, now)
+		f.Awaiting = []billing.PSPAwaiting{}
+		for _, a := range awaiting {
+			if a.PspID == row.PspID {
+				f.Awaiting = append(f.Awaiting, billing.PSPAwaiting{Currency: catalog.Currency(a.Currency), Subscriptions: a.Subscriptions, MRR: a.Mrr})
+			}
+		}
+		out[row.PspID] = f
 	}
 	return out, rows, nil
 }
 
+// KnownThroughs is every PSP's known-through at now, in the merchant's PSP
+// order, superseded PSPs without data aside; with the earliest known-through
+// of a stale PSP with data (nil when each is current) and, when every PSP
+// with data is stale, the latest of theirs.
+func KnownThroughs(ctx context.Context, q *gen.Queries, mid uuid.UUID, now time.Time) (list []billing.PSPKnownThrough, complete, through *time.Time, err error) {
+	fresh, rows, err := PSPFreshness(ctx, q, mid, nil, now)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	list = []billing.PSPKnownThrough{}
+	current := false
+	for _, row := range rows {
+		f := fresh[row.PspID]
+		if row.SupersededAt != nil && !f.HasData {
+			continue
+		}
+		list = append(list, billing.PSPKnownThrough{PSPID: billing.PSPID(row.PspID), Key: row.Key, Rail: billing.Rail(row.Rail), PSPFreshness: f})
+		if !f.HasData {
+			continue
+		}
+		if f.Current {
+			current = true
+			continue
+		}
+		at := time.Time{}
+		if f.KnownThrough != nil {
+			at = *f.KnownThrough
+		}
+		if complete == nil || at.Before(*complete) {
+			complete = &at
+		}
+		if through == nil || at.After(*through) {
+			through = &at
+		}
+	}
+	if current {
+		through = nil
+	}
+	return list, complete, through, nil
+}
+
 // PSPFreshnessOf is a PSP's known-through at now from its evidence.
 func PSPFreshnessOf(row gen.ListPSPFreshnessRow, now time.Time) billing.PSPFreshness {
-	f := billing.PSPFreshness{LastReadAt: row.ReadAt, FailingSince: row.FailingSince, StaleSince: row.StaleSince}
+	f := billing.PSPFreshness{LastReadAt: row.ReadAt, FailingSince: row.FailingSince, StaleSince: row.StaleSince, HasData: row.HasData, Awaiting: []billing.PSPAwaiting{}}
 	if len(row.CatchUp) > 0 {
 		var c billing.PSPCatchUp
 		if json.Unmarshal(row.CatchUp, &c) == nil {

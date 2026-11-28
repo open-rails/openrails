@@ -105,6 +105,7 @@ export const en = {
     browsePlans: "Browse plans",
     fallbackName: "Subscription",
     renews: "Renews {date}",
+    lastPayment: "Active, last payment {date}",
     endsOn: "Access until {date}",
     noMorePayments: "No further payments",
     endedOn: "Ended {date}",

@@ -134,6 +134,9 @@ export interface DashboardView {
   range: DashboardRange
   currency?: string
   compare?: Compare
+  // asof "now" keeps a preset ending today when every PSP's data is out of
+  // date; otherwise such a page ends where the data does.
+  asof?: "now"
 }
 
 // widgetQuery is the query a widget runs on a dashboard showing view;

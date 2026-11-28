@@ -27,7 +27,8 @@ import {
 import type { Compare, Widget } from "#orck/admin/lib/api/metrics"
 import { currencyScale } from "#orck/admin/lib/format"
 
-import { metricsRange, type DashboardRange } from "./range"
+import { metricsRange, rangeDates, type DashboardRange } from "./range"
+import { FreshnessBanner } from "./freshness-banner"
 import { RangePicker } from "./range-picker"
 import { useRegistry } from "./registry"
 import { useDashboardView } from "./use-range"
@@ -271,7 +272,19 @@ function MetricsDashboard() {
     view.currency && currencies.includes(view.currency)
       ? view.currency
       : currencies[0]
-  const shown = { ...view, currency }
+  // When every PSP with data is out of date, a preset ends where the data
+  // does, unless the page asks for now.
+  const fresh = useQuery({
+    ...adminQueries.metricsFreshness(),
+    enabled: !!data && !empty,
+  })
+  const knownThrough = fresh.data?.knownThrough ?? null
+  const asOf = !!knownThrough && view.asof !== "now" && !("from" in view.range)
+  const shown = {
+    ...view,
+    currency,
+    range: asOf ? rangeDates(view.range, new Date(knownThrough!)) : view.range,
+  }
 
   React.useEffect(
     () => () => {
@@ -471,6 +484,14 @@ function MetricsDashboard() {
     <div className="flex flex-col gap-4">
       {header}
       <PaymentSetup />
+      {fresh.data ? (
+        <FreshnessBanner
+          freshness={fresh.data.freshness}
+          knownThrough={knownThrough}
+          asOf={asOf}
+          onAsOf={(on) => setView({ asof: on ? undefined : "now" })}
+        />
+      ) : null}
       {empty ? (
         <p className="text-sm text-muted-foreground">
           <AdminMessage id={"Nothing to show yet. Add products in "} />

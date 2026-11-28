@@ -98,6 +98,7 @@ export const zh: BillingUiMessageBundle = {
     browsePlans: "浏览套餐",
     fallbackName: "订阅",
     renews: "{date} 续订",
+    lastPayment: "有效，最近一次付款 {date}",
     endsOn: "可使用至 {date}",
     noMorePayments: "不再付款",
     endedOn: "已于 {date} 结束",

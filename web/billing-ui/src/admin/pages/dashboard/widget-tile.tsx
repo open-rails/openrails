@@ -314,7 +314,10 @@ function TileBody({
     )
   }
   if (!data) return null
-  return (
+  const incomplete =
+    !!data.complete_through &&
+    Date.parse(data.range.to) > Date.parse(data.complete_through)
+  const view = (
     <WidgetVizView
       viz={widget.viz}
       result={data}
@@ -322,5 +325,26 @@ function TileBody({
       spark={spark}
       registry={registry}
     />
+  )
+  if (!incomplete) return view
+  // A stale PSP's data ends inside the range: the figure is what is known.
+  return (
+    <div className="flex h-full flex-col gap-1">
+      <div className="min-h-0 flex-1">{view}</div>
+      <IncompleteNote at={data.complete_through!} />
+    </div>
+  )
+}
+
+function IncompleteNote({ at }: { at: string }) {
+  return (
+    <span className="text-xs text-muted-foreground" data-incomplete={at}>
+      <AdminMessage id={"Incomplete after "} />
+      {new Date(at).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })}
+    </span>
   )
 }

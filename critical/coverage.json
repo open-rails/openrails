@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 923,
+  "scenario_count": 924,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2992,6 +2992,11 @@
       "id": "OR-J42-S43",
       "journey": "J42",
       "name": "An imported subscription stops adding MRR at its paid-through end, though its cancel was recorded years later; a chargeback ends it at once; one paid through no later than its start adds nothing"
+    },
+    {
+      "id": "OR-J42-S44",
+      "journey": "J42",
+      "name": "Over an imported book whose PSP cannot be read, every metrics read reports its known-through and what awaits it: cash and payments after it are missing, not zero, MRR keeps its last known level, a rebill due in the gap is in no rebill count, at-risk counts none of it, and the result is as of its known-through"
     },
     {
       "id": "OR-J28-S09",

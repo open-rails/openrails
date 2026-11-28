@@ -1668,6 +1668,9 @@ export type MetricsResult = {
   rows: unknown[][]
   compare_range?: MetricsResultRange
   compare_rows?: unknown[][]
+  freshness: PSPKnownThrough[]
+  complete_through: string | null
+  known_through: string | null
 }
 
 export type MetricsResultRange = {
@@ -1731,6 +1734,12 @@ export type PSP = {
   updated_at: string
 }
 
+export type PSPAwaiting = {
+  currency: string
+  subscriptions: number
+  mrr: string
+}
+
 export type PSPCatchUp = {
   from: string
   through: string
@@ -1755,6 +1764,8 @@ export type PSPFreshness = {
   last_read_at: string | null
   failing_since: string | null
   catch_up: PSPCatchUp | null
+  has_data: boolean
+  awaiting: PSPAwaiting[]
 }
 
 export type PSPImport = {
@@ -1837,6 +1848,23 @@ export type PSPImportRule = {
   pattern?: string
   via: "customer_id" | "directory" | "mapping"
   mapping?: string
+}
+
+export type PSPKnownThrough = {
+  psp_id: string
+  key: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  known_through: string | null
+  source: "import" | "none" | "now" | "read" | "webhook"
+  current: boolean
+  stale_since: string | null
+  cause: "catching_up" | "credentials_refused" | "imported" | "not_configured" | "unreachable" | "webhooks_silent"
+  severity: "critical" | "info" | "warning"
+  last_read_at: string | null
+  failing_since: string | null
+  catch_up: PSPCatchUp | null
+  has_data: boolean
+  awaiting: PSPAwaiting[]
 }
 
 export type PSPPaymentConfig = {
