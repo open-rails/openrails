@@ -309,7 +309,9 @@ Checks:
 Destructive types (`IsDestructiveIntentType`: NMI subscription deletes, CCBill
 cancels, card deletes) pass the merchant's destructive arming (`destructive.Gate`
 on `merchant_controls.destructive_armed`; it starts disarmed, so nothing
-destructive runs and pulls stay advisory until an operator arms it), the producer
+destructive runs and pulls stay advisory until an operator arms it; a card
+delete the customer or an operator explicitly asked for, and a customer's
+accepted cancel, skip the arming but still pass the write posture), the producer
 `RateCeiling` (`PerActorHourlyCeiling` 5; per merchant `PerMerchantHourlyCeiling`
 15 for user and admin origins, `PerMerchantSystemHourlyCeiling` 50 for system)
 and the `VolumeBreaker`; a held one parks unsent. Every convergence cancel
