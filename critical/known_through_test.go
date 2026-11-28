@@ -29,6 +29,8 @@ type legacyNMIBook struct {
 	schedules []string
 	subs      []billing.SubscriptionID
 	dues      []time.Time
+	// seeded counts each row's moves to unverified the import made.
+	seeded []int
 }
 
 // unconnectedNMI declares alpha's NMI PSP without credentials, as an import
@@ -79,6 +81,7 @@ func importNMIBook(t *testing.T, a *authorityWorld, p *nmiJournal, offsets ...ti
 		sub := onlySubscription(t, a.alpha, customer)
 		require.Equal(t, billing.SubscriptionActive, sub.Status)
 		b.subs = append(b.subs, sub.ID)
+		b.seeded = append(b.seeded, unverifiedTransitions(t, a.world, sub.ID))
 	}
 	return b
 }
@@ -188,7 +191,7 @@ func TestKnownThrough(t *testing.T) {
 			require.Positive(t, sub.MRR.Amount)
 			require.Nil(t, sub.MRRRisk, "our staleness puts no MRR at risk")
 			require.True(t, entitled(t, a.alpha, b.customers[i], "nmi:member"), "access stays")
-			require.Zero(t, unverifiedTransitions(t, a.world, id))
+			require.Equal(t, b.seeded[i], unverifiedTransitions(t, a.world, id), "never unverified after the import")
 			renewals, err := a.alpha.ListRenewals(t.Context(), billing.RenewalListParams{SubscriptionID: id})
 			require.NoError(t, err)
 			for _, renewal := range renewals.Items {
@@ -238,7 +241,7 @@ func TestKnownThrough(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, billing.SubscriptionActive, sub.Status)
 			require.True(t, sub.CurrentPeriodEndsAt.Equal(b.dues[i].Add(720*time.Hour)), "the renewal NMI holds is recorded: %s", sub.CurrentPeriodEndsAt)
-			require.Zero(t, unverifiedTransitions(t, a.world, id), "read before detection resumed: never unverified")
+			require.Equal(t, b.seeded[i], unverifiedTransitions(t, a.world, id), "read before detection resumed: never unverified")
 		}
 		require.Empty(t, pspEvents(t, a.alpha, billing.HostEventPSPStale))
 		require.Empty(t, pspEvents(t, a.alpha, billing.HostEventPSPRecovered), "an episode never told is not told recovered")
@@ -334,7 +337,7 @@ func TestKnownThrough(t *testing.T) {
 			require.Equal(t, billing.SubscriptionActive, sub.Status)
 			require.True(t, sub.CurrentPeriodEndsAt.Equal(b.dues[i].Add(720*time.Hour)), "the renewal the gap hid is recorded")
 		}
-		require.Zero(t, unverifiedTransitions(t, a.world, b.subs[2]), "the stale PSP's renewal was read, never inferred")
+		require.Equal(t, b.seeded[2], unverifiedTransitions(t, a.world, b.subs[2]), "the stale PSP's renewal was read, never inferred")
 		require.Empty(t, riskCases(t, a.world, a.alpha, b.subs[1]), "its wait for the provider was never at risk")
 		f = pspFreshness(t, a.alpha, "nmi")
 		require.NotNil(t, f.CatchUp)

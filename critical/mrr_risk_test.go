@@ -273,7 +273,9 @@ func TestMRRRisk(t *testing.T) {
 	})
 
 	t.Run("OR-J42-S14/unverified-enters-and-leaves", func(t *testing.T) {
-		a, accounts, sub := stripeMembership(t)
+		// Its renewal comes after the period: the world runs in the past, so
+		// no payment is dated in the database's future.
+		a, accounts, sub := stripeMembership(t, func(w *world) { w.clock.Advance(-40 * 24 * time.Hour) })
 		old := accounts.accounts["sk_test_old"].core
 		remote := *sub.RailSubscriptionID
 		// OpenRails heard nothing past the period's end: the row is unverified,
