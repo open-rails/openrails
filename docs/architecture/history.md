@@ -50,7 +50,7 @@ Checks:
 - `go run ./scripts/contracts` shows no removed or changed line here.
 
 ### 6. Data lifecycle
-`change_log` is permanent and append-only (`immutable_change_log`, `immutable_change_log_truncate`): a merchant purge keeps it, the merchant archive moves it, and a restore adds the archive's entries to the destination's own, once per merchant. `operation_log` rows are deleted 25 months (761 days) after `occurred_at`, in the hourly cleanup's bounded batches; no update reaches one (`immutable_operation_log`). Neither is partitioned.
+`change_log` is permanent and append-only (`immutable_change_log`, `immutable_change_log_truncate`): a merchant purge keeps it, the merchant archive moves it, and a restore adds the archive's entries to the destination's own, once per merchant. `operation_log` rows are deleted 25 months (761 days) after `occurred_at`, in the hourly cleanup's bounded batches; no update or truncate reaches one (`immutable_operation_log`, `immutable_operation_log_truncate`), and a delete is refused unless the cleanup or a merchant purge makes it (`retained_operation_log`). Neither is partitioned.
 
 Checks:
 - `internal/retention/tables.go` classes `change_log` `Permanent` and `operation_log` `Rows`; both are in `internal/merchantarchive/owned_tables.go`.

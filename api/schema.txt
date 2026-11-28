@@ -19,7 +19,8 @@ migration 0015_deposits_and_reserves.up.sql sha256:2345658c4a3f9fbbdabd1a00aa87f
 migration 0016_import_history.up.sql sha256:d93ddf39d190cbfa6054687c6b792e5332a89bb821b2b56e86e44b96a6d35090
 migration 0017_known_through.up.sql sha256:d480fa70ea1a83b9654f4011f6434f5b8f96a6b2be9f0c551142fb1706527eb5
 migration 0018_imported_known_through.up.sql sha256:7c0547c340bbe151baf5562ebbffca5dc8fb681351ae40d84a7b63554339ff3f
-migration 0019_operation_log_expired.up.sql sha256:f5c9d8d76e4172505f0915c0ba1f2856b478d746b09c41edb1965afc22a5d499
+migration 0019_operation_log_delete_guard.up.sql sha256:0c5ee5e3aba04f3b347a4d6f794e22274770aaca40fe46807c57a4407ea9ebf4
+migration 0020_operation_log_expired.up.sql sha256:f5c9d8d76e4172505f0915c0ba1f2856b478d746b09c41edb1965afc22a5d499
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1827,6 +1828,7 @@ table billing.operation_log
   index CREATE INDEX operation_log_subscription_id_idx ON billing.operation_log USING btree (merchant_id, subscription_id, occurred_at DESC, id DESC) WHERE (subscription_id IS NOT NULL)
   trigger CREATE TRIGGER immutable_operation_log BEFORE UPDATE ON billing.operation_log FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER immutable_operation_log_truncate BEFORE TRUNCATE ON billing.operation_log FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER retained_operation_log BEFORE DELETE ON billing.operation_log FOR EACH ROW EXECUTE FUNCTION billing.guard_operation_log_delete()
 
 table billing.owed_items
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -4757,6 +4759,28 @@ function billing.guard_notification_event()
           RAISE EXCEPTION 'notification events are immutable' USING ERRCODE='23514';
       END IF;
       RETURN NEW;
+  END;
+  $function$
+
+function billing.guard_operation_log_delete()
+  CREATE OR REPLACE FUNCTION billing.guard_operation_log_delete()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF current_setting('openrails.retention_table', true) IS NOT DISTINCT FROM 'operation_log'
+         AND OLD.occurred_at < now() - interval '761 days' THEN
+          RETURN OLD;
+      END IF;
+      IF EXISTS (
+          SELECT 1 FROM billing.maintenance_runs r
+           WHERE r.merchant_id = OLD.merchant_id AND r.kind = 'merchant_purge' AND r.status = 'running'
+             AND r.xmin = pg_current_xact_id_if_assigned()::xid
+      ) THEN
+          RETURN OLD;
+      END IF;
+      RAISE EXCEPTION 'operation_log rows are deleted only by retention, 761 days after occurred_at, or by a merchant purge' USING ERRCODE='23514';
   END;
   $function$
 

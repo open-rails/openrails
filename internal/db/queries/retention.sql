@@ -220,13 +220,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
     LIMIT sqlc.arg(row_limit)::int
 );
 
--- name: DeleteOperationLogBefore :execrows
+-- Counted on the database clock, the one billing.guard_operation_log_delete reads.
+-- name: DeleteOperationLogPastRetention :execrows
 DELETE FROM billing.operation_log
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND id IN (
     SELECT ol.id FROM billing.operation_log ol
     WHERE ol.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND ol.occurred_at < sqlc.arg(cutoff)::timestamptz
+      AND ol.occurred_at < now() - make_interval(days => sqlc.arg(retention_days)::int)
     ORDER BY ol.occurred_at
     LIMIT sqlc.arg(row_limit)::int
 );

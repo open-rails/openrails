@@ -21,7 +21,8 @@ sql:
       - "internal/migrate/postgres/0016_import_history.up.sql"
       - "internal/migrate/postgres/0017_known_through.up.sql"
       - "internal/migrate/postgres/0018_imported_known_through.up.sql"
-      - "internal/migrate/postgres/0019_operation_log_expired.up.sql"
+      - "internal/migrate/postgres/0019_operation_log_delete_guard.up.sql"
+      - "internal/migrate/postgres/0020_operation_log_expired.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

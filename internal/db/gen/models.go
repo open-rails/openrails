@@ -1283,7 +1283,7 @@ type BillingNotificationIssueRevision struct {
 	SourceEvent *uuid.UUID
 }
 
-// Operations history: each phase of each provider operation OpenRails ran (attempting before the provider call, then its result or a hold), who wanted it and where it was sent. Attempting and result entries are written ahead, on their own, and never rolled back; a hold commits with the intent's transition. Append-only: only retention and a merchant purge delete. Retention: rows are deleted 25 months (761 days) after occurred_at.
+// Operations history: each phase of each provider operation OpenRails ran (attempting before the provider call, then its result or a hold), who wanted it and where it was sent. Attempting and result entries are written ahead, on their own, and never rolled back; a hold commits with the intent's transition. Append-only: update and truncate are refused, and a delete is refused unless retention or a merchant purge makes it (billing.guard_operation_log_delete). Retention: rows are deleted 25 months (761 days) after occurred_at.
 type BillingOperationLog struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID

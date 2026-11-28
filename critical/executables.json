@@ -2004,6 +2004,9 @@
     "OR-J43-S12": [
       "TestOperationsHistory/OR-J43-S12/a-price-migrations-source-archive-waits-for-the-catalog-lock"
     ],
+    "OR-J43-S14": [
+      "TestOperationsHistory/OR-J43-S14/the-operations-history-refuses-a-delete-retention-did-not-make"
+    ],
     "OR-J43-S15": [
       "TestOperationsHistory/OR-J43-S15/an-operation-is-never-sent-stale-or-again-without-a-read"
     ],
