@@ -1669,7 +1669,8 @@ type ListDueDunningSubscriptionsParams struct {
 // network advice deferred to its next renewal, or a held engine case whose
 // merchant is now armed, due to end), and engine
 // collections due, including one whose stored method is unusable, which
-// admission routes to awaiting_method (never the default card). Most overdue
+// admission routes to awaiting_method (never the default card). A stale PSP's
+// provider-billed rows wait: neither retried nor read past grace. Most overdue
 // first, a page after the (due instant, id) cursor: a row the pass left due is
 // behind the cursor, so it never hides later due work.
 func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDunningSubscriptionsParams) ([]BillingSubscription, error) {

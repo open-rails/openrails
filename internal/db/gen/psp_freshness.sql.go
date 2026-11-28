@@ -12,6 +12,131 @@ import (
 	"github.com/google/uuid"
 )
 
+const completePSPCatchUp = `-- name: CompletePSPCatchUp :execrows
+UPDATE billing.psp_freshness
+SET stale_since = NULL, notified_at = NULL, failing_since = NULL, failed_at = NULL, failure = NULL,
+    read_at = greatest(read_at, $1::timestamptz),
+    caught_up_at = $1::timestamptz, catch_up = $2::jsonb, updated_at = now()
+WHERE merchant_id = $3::uuid AND psp_id = $4::uuid
+  AND stale_since = $5::timestamptz
+`
+
+type CompletePSPCatchUpParams struct {
+	Through    time.Time
+	CatchUp    []byte
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	StaleSince time.Time
+}
+
+// A catch-up read the gap through through: the stale episode ends.
+func (q *Queries) CompletePSPCatchUp(ctx context.Context, arg CompletePSPCatchUpParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completePSPCatchUp,
+		arg.Through,
+		arg.CatchUp,
+		arg.MerchantID,
+		arg.PspID,
+		arg.StaleSince,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const enqueuePSPHostEvent = `-- name: EnqueuePSPHostEvent :exec
+INSERT INTO billing.host_outbox (merchant_id, event_type, subject_type, subject_id, occurred_at, data, dedupe_key)
+VALUES ($1::uuid, $2::text, 'psp', $3::uuid, $4::timestamptz, $5::jsonb, $6::text)
+ON CONFLICT (merchant_id, dedupe_key) DO NOTHING
+`
+
+type EnqueuePSPHostEventParams struct {
+	MerchantID uuid.UUID
+	EventType  string
+	PspID      uuid.UUID
+	OccurredAt time.Time
+	Data       []byte
+	DedupeKey  string
+}
+
+func (q *Queries) EnqueuePSPHostEvent(ctx context.Context, arg EnqueuePSPHostEventParams) error {
+	_, err := q.db.Exec(ctx, enqueuePSPHostEvent,
+		arg.MerchantID,
+		arg.EventType,
+		arg.PspID,
+		arg.OccurredAt,
+		arg.Data,
+		arg.DedupeKey,
+	)
+	return err
+}
+
+const listCatchUpSubscriptions = `-- name: ListCatchUpSubscriptions :many
+SELECT s.id, s.current_period_ends_at
+FROM billing.subscriptions s
+WHERE s.merchant_id = $1::uuid AND s.psp_id = $2::uuid
+  AND s.deleted_at IS NULL AND s.collection_policy <> 'engine' AND s.rail_subscription_id IS NOT NULL
+  AND (s.status = 'unverified'
+       OR (s.status = 'active'
+           AND ((s.rail = 'nmi' AND s.current_period_ends_at < $3::timestamptz)
+                OR (s.rail <> 'nmi' AND s.current_period_ends_at < $4::timestamptz))
+           AND NOT EXISTS (
+               SELECT 1 FROM billing.payments p
+               WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
+                 AND p.deleted_at IS NULL AND p.status = 'succeeded'
+                 AND p.purchased_at >= s.current_period_ends_at)))
+  AND (COALESCE(s.current_period_ends_at, '0001-01-01 00:00:00+00'::timestamptz), s.id) > ($5::timestamptz, $6::uuid)
+ORDER BY COALESCE(s.current_period_ends_at, '0001-01-01 00:00:00+00'::timestamptz), s.id
+LIMIT $7::int
+`
+
+type ListCatchUpSubscriptionsParams struct {
+	MerchantID       uuid.UUID
+	PspID            uuid.UUID
+	NmiOverdueBefore time.Time
+	OverdueBefore    time.Time
+	AfterDueAt       time.Time
+	AfterID          uuid.UUID
+	RowLimit         int32
+}
+
+type ListCatchUpSubscriptionsRow struct {
+	ID                  uuid.UUID
+	CurrentPeriodEndsAt *time.Time
+}
+
+// What a catch-up reads: the PSP's provider-billed subscriptions the overdue
+// detector skipped while it was stale (a renewal past its rail's deadline with
+// no payment since) and its unverified ones, oldest period first, a page
+// after the (period end, id) cursor.
+func (q *Queries) ListCatchUpSubscriptions(ctx context.Context, arg ListCatchUpSubscriptionsParams) ([]ListCatchUpSubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, listCatchUpSubscriptions,
+		arg.MerchantID,
+		arg.PspID,
+		arg.NmiOverdueBefore,
+		arg.OverdueBefore,
+		arg.AfterDueAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCatchUpSubscriptionsRow
+	for rows.Next() {
+		var i ListCatchUpSubscriptionsRow
+		if err := rows.Scan(&i.ID, &i.CurrentPeriodEndsAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPSPFreshness = `-- name: ListPSPFreshness :many
 SELECT p.id AS psp_id, p.key, p.rail, p.superseded_at,
        f.read_at, f.failing_since, f.failed_at, f.failure, f.imported_through, f.stale_since, f.notified_at, f.caught_up_at, f.catch_up,
@@ -55,6 +180,9 @@ type ListPSPFreshnessRow struct {
 	WebhooksSilent    bool
 }
 
+// Known-through per PSP: the evidence of each of the merchant's PSPs. A PSP
+// with no stale episode is complete through now; a stale one through its
+// latest evidence.
 func (q *Queries) ListPSPFreshness(ctx context.Context, arg ListPSPFreshnessParams) ([]ListPSPFreshnessRow, error) {
 	rows, err := q.db.Query(ctx, listPSPFreshness, arg.MerchantID, arg.PspID)
 	if err != nil {
@@ -64,143 +192,33 @@ func (q *Queries) ListPSPFreshness(ctx context.Context, arg ListPSPFreshnessPara
 	var items []ListPSPFreshnessRow
 	for rows.Next() {
 		var i ListPSPFreshnessRow
-		if err := rows.Scan(&i.PspID, &i.Key, &i.Rail, &i.SupersededAt, &i.ReadAt, &i.FailingSince, &i.FailedAt, &i.Failure, &i.ImportedThrough, &i.StaleSince, &i.NotifiedAt, &i.CaughtUpAt, &i.CatchUp, &i.LastAcceptedAt, &i.LastPullAt, &i.LiveSubscriptions, &i.WebhooksSilent); err != nil {
+		if err := rows.Scan(
+			&i.PspID,
+			&i.Key,
+			&i.Rail,
+			&i.SupersededAt,
+			&i.ReadAt,
+			&i.FailingSince,
+			&i.FailedAt,
+			&i.Failure,
+			&i.ImportedThrough,
+			&i.StaleSince,
+			&i.NotifiedAt,
+			&i.CaughtUpAt,
+			&i.CatchUp,
+			&i.LastAcceptedAt,
+			&i.LastPullAt,
+			&i.LiveSubscriptions,
+			&i.WebhooksSilent,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
 	}
-	return items, rows.Err()
-}
-
-const recordPSPReadSucceeded = `-- name: RecordPSPReadSucceeded :one
-INSERT INTO billing.psp_freshness (merchant_id, psp_id, read_at)
-VALUES ($1::uuid, $2::uuid, $3::timestamptz)
-ON CONFLICT (merchant_id, psp_id) DO UPDATE SET
-    read_at = CASE WHEN psp_freshness.stale_since IS NULL THEN greatest(psp_freshness.read_at, EXCLUDED.read_at) ELSE psp_freshness.read_at END,
-    failing_since = NULL, failed_at = NULL, failure = NULL, updated_at = now()
-RETURNING stale_since
-`
-
-type RecordPSPReadSucceededParams struct {
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-	ReadAt     time.Time
-}
-
-func (q *Queries) RecordPSPReadSucceeded(ctx context.Context, arg RecordPSPReadSucceededParams) (*time.Time, error) {
-	row := q.db.QueryRow(ctx, recordPSPReadSucceeded, arg.MerchantID, arg.PspID, arg.ReadAt)
-	var stale_since *time.Time
-	err := row.Scan(&stale_since)
-	return stale_since, err
-}
-
-const recordPSPReadFailed = `-- name: RecordPSPReadFailed :one
-INSERT INTO billing.psp_freshness (merchant_id, psp_id, failing_since, failed_at, failure, stale_since)
-VALUES ($1::uuid, $2::uuid, $3::timestamptz, $3::timestamptz, $4::text, $3::timestamptz)
-ON CONFLICT (merchant_id, psp_id) DO UPDATE SET
-    failing_since = COALESCE(psp_freshness.failing_since, EXCLUDED.failing_since),
-    failed_at = greatest(psp_freshness.failed_at, EXCLUDED.failed_at),
-    failure = EXCLUDED.failure,
-    stale_since = COALESCE(psp_freshness.stale_since, EXCLUDED.stale_since),
-    updated_at = now()
-RETURNING stale_since
-`
-
-type RecordPSPReadFailedParams struct {
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-	FailedAt   time.Time
-	Failure    string
-}
-
-func (q *Queries) RecordPSPReadFailed(ctx context.Context, arg RecordPSPReadFailedParams) (*time.Time, error) {
-	row := q.db.QueryRow(ctx, recordPSPReadFailed, arg.MerchantID, arg.PspID, arg.FailedAt, arg.Failure)
-	var stale_since *time.Time
-	err := row.Scan(&stale_since)
-	return stale_since, err
-}
-
-const recordPSPImported = `-- name: RecordPSPImported :exec
-INSERT INTO billing.psp_freshness (merchant_id, psp_id, imported_through)
-VALUES ($1::uuid, $2::uuid, $3::timestamptz)
-ON CONFLICT (merchant_id, psp_id) DO UPDATE SET
-    imported_through = greatest(psp_freshness.imported_through, EXCLUDED.imported_through),
-    updated_at = now()
-`
-
-type RecordPSPImportedParams struct {
-	MerchantID      uuid.UUID
-	PspID           uuid.UUID
-	ImportedThrough time.Time
-}
-
-func (q *Queries) RecordPSPImported(ctx context.Context, arg RecordPSPImportedParams) error {
-	_, err := q.db.Exec(ctx, recordPSPImported, arg.MerchantID, arg.PspID, arg.ImportedThrough)
-	return err
-}
-
-const lockPSPFreshness = `-- name: LockPSPFreshness :one
-SELECT merchant_id, psp_id, read_at, failing_since, failed_at, failure, imported_through, stale_since, notified_at, caught_up_at, catch_up, created_at, updated_at FROM billing.psp_freshness
-WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
-FOR UPDATE
-`
-
-type LockPSPFreshnessParams struct {
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-}
-
-func (q *Queries) LockPSPFreshness(ctx context.Context, arg LockPSPFreshnessParams) (BillingPspFreshness, error) {
-	row := q.db.QueryRow(ctx, lockPSPFreshness, arg.MerchantID, arg.PspID)
-	var i BillingPspFreshness
-	err := row.Scan(&i.MerchantID, &i.PspID, &i.ReadAt, &i.FailingSince, &i.FailedAt, &i.Failure, &i.ImportedThrough, &i.StaleSince, &i.NotifiedAt, &i.CaughtUpAt, &i.CatchUp, &i.CreatedAt, &i.UpdatedAt)
-	return i, err
-}
-
-const markPSPStaleNotified = `-- name: MarkPSPStaleNotified :execrows
-UPDATE billing.psp_freshness SET notified_at = $1::timestamptz, updated_at = now()
-WHERE merchant_id = $2::uuid AND psp_id = $3::uuid
-  AND stale_since = $4::timestamptz AND notified_at IS NULL
-`
-
-type MarkPSPStaleNotifiedParams struct {
-	NotifiedAt time.Time
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-	StaleSince time.Time
-}
-
-func (q *Queries) MarkPSPStaleNotified(ctx context.Context, arg MarkPSPStaleNotifiedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markPSPStaleNotified, arg.NotifiedAt, arg.MerchantID, arg.PspID, arg.StaleSince)
-	if err != nil {
-		return 0, err
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
-	return result.RowsAffected(), nil
-}
-
-const completePSPCatchUp = `-- name: CompletePSPCatchUp :execrows
-UPDATE billing.psp_freshness
-SET stale_since = NULL, notified_at = NULL, failing_since = NULL, failed_at = NULL, failure = NULL,
-    read_at = greatest(read_at, $1::timestamptz),
-    caught_up_at = $1::timestamptz, catch_up = $2::jsonb, updated_at = now()
-WHERE merchant_id = $3::uuid AND psp_id = $4::uuid
-  AND stale_since = $5::timestamptz
-`
-
-type CompletePSPCatchUpParams struct {
-	Through    time.Time
-	CatchUp    []byte
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-	StaleSince time.Time
-}
-
-func (q *Queries) CompletePSPCatchUp(ctx context.Context, arg CompletePSPCatchUpParams) (int64, error) {
-	result, err := q.db.Exec(ctx, completePSPCatchUp, arg.Through, arg.CatchUp, arg.MerchantID, arg.PspID, arg.StaleSince)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	return items, nil
 }
 
 const listStalePSPs = `-- name: ListStalePSPs :many
@@ -224,8 +242,15 @@ type ListStalePSPsRow struct {
 	PspID      uuid.UUID
 }
 
+// CROSS-MERCHANT: the PSPs in a stale episode due to be tried again: none
+// failed since retry_before. A page after the cursor.
 func (q *Queries) ListStalePSPs(ctx context.Context, arg ListStalePSPsParams) ([]ListStalePSPsRow, error) {
-	rows, err := q.db.Query(ctx, listStalePSPs, arg.RetryBefore, arg.AfterMerchantID, arg.AfterPspID, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listStalePSPs,
+		arg.RetryBefore,
+		arg.AfterMerchantID,
+		arg.AfterPspID,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -238,58 +263,92 @@ func (q *Queries) ListStalePSPs(ctx context.Context, arg ListStalePSPsParams) ([
 		}
 		items = append(items, i)
 	}
-	return items, rows.Err()
-}
-
-const listCatchUpSubscriptions = `-- name: ListCatchUpSubscriptions :many
-SELECT s.id, s.current_period_ends_at
-FROM billing.subscriptions s
-WHERE s.merchant_id = $1::uuid AND s.psp_id = $2::uuid
-  AND s.deleted_at IS NULL AND s.collection_policy <> 'engine' AND s.rail_subscription_id IS NOT NULL
-  AND (s.status = 'unverified'
-       OR (s.status = 'active'
-           AND ((s.rail = 'nmi' AND s.current_period_ends_at < $3::timestamptz)
-                OR (s.rail <> 'nmi' AND s.current_period_ends_at < $4::timestamptz))
-           AND NOT EXISTS (
-               SELECT 1 FROM billing.payments p
-               WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
-                 AND p.deleted_at IS NULL AND p.status = 'succeeded'
-                 AND p.purchased_at >= s.current_period_ends_at)))
-  AND (COALESCE(s.current_period_ends_at, '0001-01-01 00:00:00+00'::timestamptz), s.id) > ($5::timestamptz, $6::uuid)
-ORDER BY COALESCE(s.current_period_ends_at, '0001-01-01 00:00:00+00'::timestamptz), s.id
-LIMIT $7::int
-`
-
-type ListCatchUpSubscriptionsParams struct {
-	MerchantID       uuid.UUID
-	PspID            uuid.UUID
-	NmiOverdueBefore time.Time
-	OverdueBefore    time.Time
-	AfterDueAt       time.Time
-	AfterID          uuid.UUID
-	RowLimit         int32
-}
-
-type ListCatchUpSubscriptionsRow struct {
-	ID                  uuid.UUID
-	CurrentPeriodEndsAt *time.Time
-}
-
-func (q *Queries) ListCatchUpSubscriptions(ctx context.Context, arg ListCatchUpSubscriptionsParams) ([]ListCatchUpSubscriptionsRow, error) {
-	rows, err := q.db.Query(ctx, listCatchUpSubscriptions, arg.MerchantID, arg.PspID, arg.NmiOverdueBefore, arg.OverdueBefore, arg.AfterDueAt, arg.AfterID, arg.RowLimit)
-	if err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var items []ListCatchUpSubscriptionsRow
-	for rows.Next() {
-		var i ListCatchUpSubscriptionsRow
-		if err := rows.Scan(&i.ID, &i.CurrentPeriodEndsAt); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
+	return items, nil
+}
+
+const lockPSPFreshness = `-- name: LockPSPFreshness :one
+SELECT merchant_id, psp_id, read_at, failing_since, failed_at, failure, imported_through, stale_since, notified_at, caught_up_at, catch_up, created_at, updated_at FROM billing.psp_freshness
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
+FOR UPDATE
+`
+
+type LockPSPFreshnessParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+func (q *Queries) LockPSPFreshness(ctx context.Context, arg LockPSPFreshnessParams) (BillingPspFreshness, error) {
+	row := q.db.QueryRow(ctx, lockPSPFreshness, arg.MerchantID, arg.PspID)
+	var i BillingPspFreshness
+	err := row.Scan(
+		&i.MerchantID,
+		&i.PspID,
+		&i.ReadAt,
+		&i.FailingSince,
+		&i.FailedAt,
+		&i.Failure,
+		&i.ImportedThrough,
+		&i.StaleSince,
+		&i.NotifiedAt,
+		&i.CaughtUpAt,
+		&i.CatchUp,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markPSPStaleNotified = `-- name: MarkPSPStaleNotified :execrows
+UPDATE billing.psp_freshness SET notified_at = $1::timestamptz, updated_at = now()
+WHERE merchant_id = $2::uuid AND psp_id = $3::uuid
+  AND stale_since = $4::timestamptz AND notified_at IS NULL
+`
+
+type MarkPSPStaleNotifiedParams struct {
+	NotifiedAt time.Time
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	StaleSince time.Time
+}
+
+// The stale episode's notice is queued once.
+func (q *Queries) MarkPSPStaleNotified(ctx context.Context, arg MarkPSPStaleNotifiedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markPSPStaleNotified,
+		arg.NotifiedAt,
+		arg.MerchantID,
+		arg.PspID,
+		arg.StaleSince,
+	)
+	if err != nil {
+		return 0, err
 	}
-	return items, rows.Err()
+	return result.RowsAffected(), nil
+}
+
+const markSubscriptionsUnconfirmed = `-- name: MarkSubscriptionsUnconfirmed :execrows
+UPDATE billing.subscriptions
+SET unverified_reason = 'unconfirmed', updated_at = $1::timestamptz
+WHERE merchant_id = $2::uuid AND id = ANY($3::uuid[])
+  AND status = 'unverified' AND unverified_reason = 'awaiting_provider' AND deleted_at IS NULL
+`
+
+type MarkSubscriptionsUnconfirmedParams struct {
+	ReadAt     time.Time
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+// A read of the provider that could not tell: the unverified rows it read
+// are unconfirmed, no longer awaiting it.
+func (q *Queries) MarkSubscriptionsUnconfirmed(ctx context.Context, arg MarkSubscriptionsUnconfirmedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markSubscriptionsUnconfirmed, arg.ReadAt, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const pSPCatchUpSummary = `-- name: PSPCatchUpSummary :one
@@ -324,50 +383,100 @@ type PSPCatchUpSummaryRow struct {
 	Unconfirmed int64
 }
 
+// What the gap from..through hid, as the catch-up's reads recorded it: the
+// PSP's renewals paid and failed in it, its subscriptions canceled in it, and
+// those still unconfirmed.
 func (q *Queries) PSPCatchUpSummary(ctx context.Context, arg PSPCatchUpSummaryParams) (PSPCatchUpSummaryRow, error) {
-	row := q.db.QueryRow(ctx, pSPCatchUpSummary, arg.MerchantID, arg.PspID, arg.FromAt, arg.Through)
+	row := q.db.QueryRow(ctx, pSPCatchUpSummary,
+		arg.MerchantID,
+		arg.PspID,
+		arg.FromAt,
+		arg.Through,
+	)
 	var i PSPCatchUpSummaryRow
-	err := row.Scan(&i.Renewed, &i.Failed, &i.Canceled, &i.Unconfirmed)
+	err := row.Scan(
+		&i.Renewed,
+		&i.Failed,
+		&i.Canceled,
+		&i.Unconfirmed,
+	)
 	return i, err
 }
 
-const markSubscriptionsUnconfirmed = `-- name: MarkSubscriptionsUnconfirmed :execrows
-UPDATE billing.subscriptions
-SET unverified_reason = 'unconfirmed', updated_at = $1::timestamptz
-WHERE merchant_id = $2::uuid AND id = ANY($3::uuid[])
-  AND status = 'unverified' AND unverified_reason = 'awaiting_provider' AND deleted_at IS NULL
+const recordPSPImported = `-- name: RecordPSPImported :exec
+INSERT INTO billing.psp_freshness (merchant_id, psp_id, imported_through)
+VALUES ($1::uuid, $2::uuid, $3::timestamptz)
+ON CONFLICT (merchant_id, psp_id) DO UPDATE SET
+    imported_through = greatest(psp_freshness.imported_through, EXCLUDED.imported_through),
+    updated_at = now()
 `
 
-type MarkSubscriptionsUnconfirmedParams struct {
-	ReadAt     time.Time
-	MerchantID uuid.UUID
-	Ids        []uuid.UUID
+type RecordPSPImportedParams struct {
+	MerchantID      uuid.UUID
+	PspID           uuid.UUID
+	ImportedThrough time.Time
 }
 
-func (q *Queries) MarkSubscriptionsUnconfirmed(ctx context.Context, arg MarkSubscriptionsUnconfirmedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markSubscriptionsUnconfirmed, arg.ReadAt, arg.MerchantID, arg.Ids)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const enqueuePSPHostEvent = `-- name: EnqueuePSPHostEvent :exec
-INSERT INTO billing.host_outbox (merchant_id, event_type, subject_type, subject_id, occurred_at, data, dedupe_key)
-VALUES ($1::uuid, $2::text, 'psp', $3::uuid, $4::timestamptz, $5::jsonb, $6::text)
-ON CONFLICT (merchant_id, dedupe_key) DO NOTHING
-`
-
-type EnqueuePSPHostEventParams struct {
-	MerchantID uuid.UUID
-	EventType  string
-	PspID      uuid.UUID
-	OccurredAt time.Time
-	Data       []byte
-	DedupeKey  string
-}
-
-func (q *Queries) EnqueuePSPHostEvent(ctx context.Context, arg EnqueuePSPHostEventParams) error {
-	_, err := q.db.Exec(ctx, enqueuePSPHostEvent, arg.MerchantID, arg.EventType, arg.PspID, arg.OccurredAt, arg.Data, arg.DedupeKey)
+// A declared book naming the PSP landed what it held as of imported_through.
+func (q *Queries) RecordPSPImported(ctx context.Context, arg RecordPSPImportedParams) error {
+	_, err := q.db.Exec(ctx, recordPSPImported, arg.MerchantID, arg.PspID, arg.ImportedThrough)
 	return err
+}
+
+const recordPSPReadFailed = `-- name: RecordPSPReadFailed :one
+INSERT INTO billing.psp_freshness (merchant_id, psp_id, failing_since, failed_at, failure, stale_since)
+VALUES ($1::uuid, $2::uuid, $3::timestamptz, $3::timestamptz, $4::text, $3::timestamptz)
+ON CONFLICT (merchant_id, psp_id) DO UPDATE SET
+    failing_since = COALESCE(psp_freshness.failing_since, EXCLUDED.failing_since),
+    failed_at = greatest(psp_freshness.failed_at, EXCLUDED.failed_at),
+    failure = EXCLUDED.failure,
+    stale_since = COALESCE(psp_freshness.stale_since, EXCLUDED.stale_since),
+    updated_at = now()
+RETURNING stale_since
+`
+
+type RecordPSPReadFailedParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	FailedAt   time.Time
+	Failure    string
+}
+
+// A provider read of the PSP failed at failed_at: the failure is recorded and
+// a stale episode opens, unless one is open.
+func (q *Queries) RecordPSPReadFailed(ctx context.Context, arg RecordPSPReadFailedParams) (*time.Time, error) {
+	row := q.db.QueryRow(ctx, recordPSPReadFailed,
+		arg.MerchantID,
+		arg.PspID,
+		arg.FailedAt,
+		arg.Failure,
+	)
+	var stale_since *time.Time
+	err := row.Scan(&stale_since)
+	return stale_since, err
+}
+
+const recordPSPReadSucceeded = `-- name: RecordPSPReadSucceeded :one
+INSERT INTO billing.psp_freshness (merchant_id, psp_id, read_at)
+VALUES ($1::uuid, $2::uuid, $3::timestamptz)
+ON CONFLICT (merchant_id, psp_id) DO UPDATE SET
+    read_at = CASE WHEN psp_freshness.stale_since IS NULL THEN greatest(psp_freshness.read_at, EXCLUDED.read_at) ELSE psp_freshness.read_at END,
+    failing_since = NULL, failed_at = NULL, failure = NULL, updated_at = now()
+RETURNING stale_since
+`
+
+type RecordPSPReadSucceededParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	ReadAt     time.Time
+}
+
+// A provider read of the PSP succeeded at read_at: its failure clears. While
+// stale, the record stays complete only through what it was: the catch-up
+// that reads the gap moves it. Returns the stale episode, NULL while current.
+func (q *Queries) RecordPSPReadSucceeded(ctx context.Context, arg RecordPSPReadSucceededParams) (*time.Time, error) {
+	row := q.db.QueryRow(ctx, recordPSPReadSucceeded, arg.MerchantID, arg.PspID, arg.ReadAt)
+	var stale_since *time.Time
+	err := row.Scan(&stale_since)
+	return stale_since, err
 }

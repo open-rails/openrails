@@ -17,6 +17,7 @@ migration 0013_mrr_from_facts.up.sql sha256:b2ffa04bddd9972d347bfc0ceb7ce97fd2ef
 migration 0014_books_measures.up.sql sha256:fd19d9cdd4aa630365eadfa680cd70c95cece7811f41178c29f5151924bf2035
 migration 0015_deposits_and_reserves.up.sql sha256:2345658c4a3f9fbbdabd1a00aa87fc4de9709e6a356a71f4b06f80042b5b7c7d
 migration 0016_import_history.up.sql sha256:d93ddf39d190cbfa6054687c6b792e5332a89bb821b2b56e86e44b96a6d35090
+migration 0017_known_through.up.sql sha256:d480fa70ea1a83b9654f4011f6434f5b8f96a6b2be9f0c551142fb1706527eb5
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -922,9 +923,9 @@ table billing.host_outbox
   column data jsonb NOT NULL DEFAULT '{}'::jsonb
   column dedupe_key text NOT NULL
   column recorded_at timestamp with time zone NOT NULL DEFAULT clock_timestamp()
-  constraint host_outbox_currency_check CHECK ((((currency IS NULL) = (event_type = ANY (ARRAY['product.entitlements_changed'::text, 'customer.network_linked'::text, 'customer.network_unlinked'::text, 'mandate.revoked'::text, 'destructive.hold_opened'::text, 'destructive.hold_cleared'::text]))) AND ((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))))
+  constraint host_outbox_currency_check CHECK ((((currency IS NULL) = (event_type = ANY (ARRAY['product.entitlements_changed'::text, 'customer.network_linked'::text, 'customer.network_unlinked'::text, 'mandate.revoked'::text, 'destructive.hold_opened'::text, 'destructive.hold_cleared'::text, 'psp.stale'::text, 'psp.recovered'::text]))) AND ((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))))
   constraint host_outbox_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint host_outbox_payload_check CHECK ((((event_type = 'payment.settled'::text) AND (subject_type = 'payment'::text) AND (payment_id IS NOT NULL) AND (subject_id = payment_id) AND (amount IS NOT NULL) AND (amount > 0) AND (data = '{}'::jsonb)) OR ((event_type = ANY (ARRAY['delinquency.grace'::text, 'delinquency.entered'::text, 'delinquency.cleared'::text, 'balance.low'::text, 'balance.depleted'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'product.entitlements_changed'::text) AND (subject_type = 'product'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['invoice.completed'::text, 'invoice.requires_action'::text, 'invoice.payment_failed'::text, 'invoice.canceled'::text, 'invoice.expired'::text, 'invoice.voided'::text])) AND (subject_type = 'invoice'::text) AND (payment_id IS NULL) AND (amount IS NOT NULL) AND (amount >= 0) AND (currency IS NOT NULL)) OR ((event_type = ANY (ARRAY['customer.network_linked'::text, 'customer.network_unlinked'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'mandate.revoked'::text) AND (subject_type = 'mandate'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['destructive.hold_opened'::text, 'destructive.hold_cleared'::text])) AND (subject_type = 'destructive_hold'::text) AND (payment_id IS NULL) AND (amount IS NULL) AND (currency IS NULL) AND (jsonb_typeof(data) = 'object'::text))))
+  constraint host_outbox_payload_check CHECK ((((event_type = 'payment.settled'::text) AND (subject_type = 'payment'::text) AND (payment_id IS NOT NULL) AND (subject_id = payment_id) AND (amount IS NOT NULL) AND (amount > 0) AND (data = '{}'::jsonb)) OR ((event_type = ANY (ARRAY['delinquency.grace'::text, 'delinquency.entered'::text, 'delinquency.cleared'::text, 'balance.low'::text, 'balance.depleted'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'product.entitlements_changed'::text) AND (subject_type = 'product'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['invoice.completed'::text, 'invoice.requires_action'::text, 'invoice.payment_failed'::text, 'invoice.canceled'::text, 'invoice.expired'::text, 'invoice.voided'::text])) AND (subject_type = 'invoice'::text) AND (payment_id IS NULL) AND (amount IS NOT NULL) AND (amount >= 0) AND (currency IS NOT NULL)) OR ((event_type = ANY (ARRAY['customer.network_linked'::text, 'customer.network_unlinked'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'mandate.revoked'::text) AND (subject_type = 'mandate'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['destructive.hold_opened'::text, 'destructive.hold_cleared'::text])) AND (subject_type = 'destructive_hold'::text) AND (payment_id IS NULL) AND (amount IS NULL) AND (currency IS NULL) AND (jsonb_typeof(data) = 'object'::text)) OR ((event_type = ANY (ARRAY['psp.stale'::text, 'psp.recovered'::text])) AND (subject_type = 'psp'::text) AND (payment_id IS NULL) AND (amount IS NULL) AND (currency IS NULL) AND (jsonb_typeof(data) = 'object'::text))))
   constraint host_outbox_payment_id_fkey FOREIGN KEY (merchant_id, payment_id) REFERENCES billing.payments(merchant_id, id) ON DELETE CASCADE
   constraint host_outbox_pkey PRIMARY KEY (merchant_id, id)
   index CREATE UNIQUE INDEX host_outbox_dedupe_key_key ON billing.host_outbox USING btree (merchant_id, dedupe_key)
@@ -2687,6 +2688,28 @@ table billing.psp_customers
   index CREATE UNIQUE INDEX psp_customers_pkey ON billing.psp_customers USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX psp_customers_psp_id_remote_customer_ref_key ON billing.psp_customers USING btree (merchant_id, psp_id, remote_customer_ref)
 
+table billing.psp_freshness
+  column merchant_id uuid NOT NULL
+  column psp_id uuid NOT NULL
+  column read_at timestamp with time zone
+  column failing_since timestamp with time zone
+  column failed_at timestamp with time zone
+  column failure text
+  column imported_through timestamp with time zone
+  column stale_since timestamp with time zone
+  column notified_at timestamp with time zone
+  column caught_up_at timestamp with time zone
+  column catch_up jsonb
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint psp_freshness_catch_up_check CHECK ((((caught_up_at IS NULL) = (catch_up IS NULL)) AND ((catch_up IS NULL) OR (jsonb_typeof(catch_up) = 'object'::text))))
+  constraint psp_freshness_failure_check CHECK ((((failing_since IS NULL) = (failure IS NULL)) AND ((failed_at IS NULL) = (failure IS NULL)) AND ((failing_since IS NULL) OR (failed_at >= failing_since)) AND ((failure IS NULL) OR (failure = ANY (ARRAY['not_configured'::text, 'credentials_refused'::text, 'unreachable'::text])))))
+  constraint psp_freshness_notified_check CHECK (((notified_at IS NULL) OR (stale_since IS NOT NULL)))
+  constraint psp_freshness_pkey PRIMARY KEY (merchant_id, psp_id)
+  constraint psp_freshness_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
+  index CREATE UNIQUE INDEX psp_freshness_pkey ON billing.psp_freshness USING btree (merchant_id, psp_id)
+  index CREATE INDEX psp_freshness_stale_idx ON billing.psp_freshness USING btree (merchant_id, psp_id) WHERE (stale_since IS NOT NULL)
+
 table billing.psp_import_basis
   column merchant_id uuid NOT NULL
   column import_id uuid NOT NULL
@@ -3353,6 +3376,7 @@ table billing.subscriptions
   column rail_subscription_key text GENERATED ALWAYS AS (billing.rail_subscription_key(rail, rail_subscription_id)) STORED
   column retry_advised_at timestamp with time zone
   column checkout_invoice_id uuid
+  column unverified_reason text
   constraint subscriptions_access_duration_hours_snapshot_check CHECK (((access_duration_hours_snapshot IS NULL) OR (access_duration_hours_snapshot > 0)))
   constraint subscriptions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text, 'provider'::text, 'abandoned'::text])))
   constraint subscriptions_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
@@ -3382,6 +3406,7 @@ table billing.subscriptions
   constraint subscriptions_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'awaiting_method'::text, 'canceled'::text, 'unverified'::text])))
   constraint subscriptions_stop_pending_canceled_check CHECK (((status = 'canceled'::text) OR (deletion_scheduled_at IS NULL)))
   constraint subscriptions_transient_retries_check CHECK ((transient_retries >= 0))
+  constraint subscriptions_unverified_reason_check CHECK ((((status = 'unverified'::text) = (unverified_reason IS NOT NULL)) AND ((unverified_reason IS NULL) OR (unverified_reason = ANY (ARRAY['awaiting_provider'::text, 'unconfirmed'::text])))))
   constraint subscriptions_valid_period_check CHECK (((current_period_starts_at IS NULL) OR (current_period_ends_at IS NULL) OR (current_period_starts_at < current_period_ends_at)))
   constraint trg_subscriptions_track_unverified TRIGGER DEFERRABLE INITIALLY DEFERRED
   index CREATE INDEX subscriptions_canceled_at_id_idx ON billing.subscriptions USING btree (merchant_id, canceled_at DESC, id DESC) WHERE ((deleted_at IS NULL) AND (canceled_at IS NOT NULL))
@@ -3419,6 +3444,8 @@ table billing.subscriptions
   trigger CREATE TRIGGER subscriptions_mark_stored_card_check AFTER INSERT OR UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscription_marks_stored_card_check()
   trigger CREATE TRIGGER subscriptions_release_ownership_claims AFTER UPDATE OF status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.release_ended_ownership_claims()
   trigger CREATE TRIGGER subscriptions_row_version BEFORE UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_row_version()
+  trigger CREATE TRIGGER subscriptions_track_mrr_risk AFTER UPDATE OF unverified_reason ON billing.subscriptions FOR EACH ROW WHEN (((old.status = new.status) AND (old.unverified_reason IS DISTINCT FROM new.unverified_reason))) EXECUTE FUNCTION billing.subscriptions_track_mrr_risk()
+  trigger CREATE TRIGGER subscriptions_unverified_reason BEFORE INSERT OR UPDATE OF status, unverified_reason ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_unverified_reason()
   trigger CREATE TRIGGER subscriptions_void_renewal_invoices AFTER UPDATE OF status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.void_ended_renewal_invoices()
   trigger CREATE TRIGGER trg_subscriptions_billing_changes AFTER UPDATE OF payment_method_id, next_retry_at, last_retry_at, retry_attempts, transient_retries, grace_ends_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_record_billing_change()
   trigger CREATE TRIGGER trg_subscriptions_set_tier_group BEFORE INSERT OR UPDATE OF product_id, tier_group, status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_set_tier_group()
@@ -4187,7 +4214,7 @@ function billing.event_subject_id(text,uuid)
       SELECT CASE WHEN id IS NULL THEN NULL ELSE
         CASE kind WHEN 'payment' THEN 'pay_' WHEN 'product' THEN 'prod_'
         WHEN 'subscription' THEN 'sub_' WHEN 'invoice' THEN 'in_'
-        WHEN 'mandate' THEN 'mdt_' WHEN 'destructive_hold' THEN 'dsh_' ELSE '' END || id::text END
+        WHEN 'mandate' THEN 'mdt_' WHEN 'destructive_hold' THEN 'dsh_' WHEN 'psp' THEN 'psp_' ELSE '' END || id::text END
   $function$
 
 function billing.eventlog_immutable()
@@ -4411,6 +4438,7 @@ function billing.guard_billing_restore_receipt()
                     'provider_listed_rebills',
                     'provider_schedules',
                     'psp_customers',
+                    'psp_freshness',
                     'psp_refresh_watermarks',
                     'psps',
                     'rebill_cycles',
@@ -6064,7 +6092,7 @@ function billing.subscription_risk(billing.subscriptions,bigint,text[])
       ELSE array_remove(ARRAY[
           CASE WHEN s.status = 'past_due' THEN 'past_due' END,
           CASE WHEN s.status = 'awaiting_method' THEN 'needs_payment_method' END,
-          CASE WHEN s.status = 'unverified' THEN 'unverified' END]::text[], NULL)
+          CASE WHEN s.status = 'unverified' AND s.unverified_reason = 'unconfirmed' THEN 'unverified' END]::text[], NULL)
   END
   $function$
 
@@ -6249,6 +6277,21 @@ function billing.subscriptions_track_mrr()
   END;
   $function$
 
+function billing.subscriptions_track_mrr_risk()
+  CREATE OR REPLACE FUNCTION billing.subscriptions_track_mrr_risk()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF NEW.price_id IS NULL OR billing.billing_restore_active(NEW.merchant_id) THEN
+          RETURN NULL;
+      END IF;
+      PERFORM billing.refresh_subscription_mrr(NEW, NEW.updated_at, 'renewed');
+      RETURN NULL;
+  END;
+  $function$
+
 function billing.subscriptions_track_unverified()
   CREATE OR REPLACE FUNCTION billing.subscriptions_track_unverified()
    RETURNS trigger
@@ -6273,6 +6316,21 @@ function billing.subscriptions_track_unverified()
           DELETE FROM billing.subscription_verifications WHERE merchant_id = NEW.merchant_id AND subscription_id = NEW.id;
       END IF;
       RETURN NULL;
+  END;
+  $function$
+
+function billing.subscriptions_unverified_reason()
+  CREATE OR REPLACE FUNCTION billing.subscriptions_unverified_reason()
+   RETURNS trigger
+   LANGUAGE plpgsql
+  AS $function$
+  BEGIN
+      IF NEW.status <> 'unverified' THEN
+          NEW.unverified_reason := NULL;
+      ELSIF TG_OP = 'INSERT' OR OLD.status <> 'unverified' THEN
+          NEW.unverified_reason := COALESCE(NEW.unverified_reason, 'awaiting_provider');
+      END IF;
+      RETURN NEW;
   END;
   $function$
 

@@ -1920,6 +1920,31 @@ type BillingPspCustomer struct {
 	UpdatedAt         time.Time
 }
 
+// What OpenRails has read of each PSP, the evidence its known-through is derived from: the last provider read that succeeded, the failure of the reads since, the latest import's evidence instant, and the stale episode (stale_since) during which nothing infers from the PSP's silence. A PSP with no row has never been read, imported or found unreadable.
+type BillingPspFreshness struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	// The last provider read of the PSP that succeeded.
+	ReadAt *time.Time
+	// The first failed read since read_at; NULL while reads succeed.
+	FailingSince *time.Time
+	// The last failed read; a stale PSP is tried again an hour after it.
+	FailedAt *time.Time
+	// Why its reads fail: not_configured (no credentials to read with), credentials_refused (the provider refused them) or unreachable (the provider did not answer).
+	Failure *string
+	// The evidence instant (as_of) of the latest declared book naming the PSP.
+	ImportedThrough *time.Time
+	// When the PSP's record stopped being complete through now; NULL while it is. The overdue detector and the passes that infer from absence skip its subscriptions until a catch-up read clears it.
+	StaleSince *time.Time
+	// When the stale episode's psp.stale event and alert were queued, once it reached warning or critical; its end then queues psp.recovered.
+	NotifiedAt *time.Time
+	CaughtUpAt *time.Time
+	// What the last catch-up read found in the gap: from, through, and the renewals paid, failed, canceled and still unconfirmed.
+	CatchUp   []byte
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 // One read-only pull of a PSP's catalog, customers, subscriptions and transaction history, and the merchant's rules for linking them to customers. history_through is how far the transaction history has been read. Deleting the import deletes its records.
 type BillingPspImport struct {
 	MerchantID     uuid.UUID
@@ -2375,7 +2400,7 @@ type BillingSubscriptionMrr struct {
 	RecordedProductID uuid.UUID
 	RecordedPriceID   uuid.UUID
 	RecordedMrr       int64
-	// Why the subscription's MRR is at risk now from its status: past_due, needs_payment_method and unverified, in that order; empty when it is not at risk or adds no MRR. Canceled at its period end, it keeps them until its MRR ends. card_expiring and delinquent are read from state (billing.mrr_risk_now).
+	// Why the subscription's MRR is at risk now from its status: past_due, needs_payment_method and unverified (unconfirmed: awaiting its provider is none), in that order; empty when it is not at risk or adds no MRR. Canceled at its period end, it keeps them until its MRR ends. card_expiring and delinquent are read from state (billing.mrr_risk_now).
 	Risk []string
 	// The reasons its open risk episodes record.
 	RecordedRisk []string
@@ -2509,21 +2534,4 @@ type BillingWebhookHealthDaily struct {
 	DayAt       time.Time
 	Rejected    int64
 	Drift       int64
-}
-
-// What OpenRails has read of each PSP, the evidence its known-through is derived from.
-type BillingPspFreshness struct {
-	MerchantID      uuid.UUID
-	PspID           uuid.UUID
-	ReadAt          *time.Time
-	FailingSince    *time.Time
-	FailedAt        *time.Time
-	Failure         *string
-	ImportedThrough *time.Time
-	StaleSince      *time.Time
-	NotifiedAt      *time.Time
-	CaughtUpAt      *time.Time
-	CatchUp         []byte
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
 }

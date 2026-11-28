@@ -1273,7 +1273,8 @@ type ListOverdueRenewalsRow struct {
 // An active provider-billed subscription with no renewal payment whose paid
 // period ended before its rail's cutoff: nmi_overdue_before for an NMI
 // schedule, overdue_before for the rest. A clock reading only: the due pass
-// asks the provider (RenewalOverdue -> unverified). Oldest lapse first, a page
+// asks the provider (RenewalOverdue -> unverified). A stale PSP's renewals
+// are not overdue: its record ends before them. Oldest lapse first, a page
 // after the (period end, id) cursor.
 func (q *Queries) ListOverdueRenewals(ctx context.Context, arg ListOverdueRenewalsParams) ([]ListOverdueRenewalsRow, error) {
 	rows, err := q.db.Query(ctx, listOverdueRenewals,
@@ -1291,7 +1292,12 @@ func (q *Queries) ListOverdueRenewals(ctx context.Context, arg ListOverdueRenewa
 	var items []ListOverdueRenewalsRow
 	for rows.Next() {
 		var i ListOverdueRenewalsRow
-		if err := rows.Scan(&i.ID, &i.PspID, &i.Rail, &i.CurrentPeriodEndsAt); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.PspID,
+			&i.Rail,
+			&i.CurrentPeriodEndsAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
