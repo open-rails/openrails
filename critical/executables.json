@@ -1194,6 +1194,9 @@
     "OR-J22-S53": [
       "TestCreditExpiry/OR-J22-S53/a-reinstated-lapsing-lot-still-expires"
     ],
+    "OR-J22-S54": [
+      "TestCredits/OR-J22-S54/a-grant-that-has-already-expired-or-overflows-is-refused"
+    ],
     "OR-J26-S54": [
       "TestUsageBillingContracts/OR-J26-S54/a-running-charge-is-billed-through-the-bill-date-before-its-daily-posting"
     ],

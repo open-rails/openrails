@@ -105,6 +105,10 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 	if errors.As(err, &refused) && errors.Is(refused.Err, money.ErrIdempotencyKeyReused) {
 		return nil, apperr.New(http.StatusUnprocessableEntity, billing.CodeIdempotencyKeyReused, refused.Err.Error()).WithParam(apperr.ItemParam(refused.Index, "source_id"))
 	}
+	var invalid *apperr.Error
+	if errors.As(err, &refused) && errors.As(refused.Err, &invalid) && invalid.Param != "" {
+		return nil, invalid.WithParam(apperr.ItemParam(refused.Index, invalid.Param))
+	}
 	if err != nil {
 		return nil, err
 	}
