@@ -102,14 +102,14 @@ A purchased lot exists only for a succeeded payment and in the same transaction
 (`Fund` checks `payment.Status`). A provider reversal withdraws credit when it is
 recorded (`syncPurchasedCreditRefund`), whichever path reported it. A pending
 refund takes its credit off the balance when it is requested; a refused one gives
-it back and expires the lot if it lapsed meanwhile.
+it back, straight to `units_expired` if the lot lapsed meanwhile.
 
 Checks:
 - `Fund` refuses a payment that is not `succeeded`, is a reversal, or differs in
   customer or currency.
 - `recordRefund`, `CompleteRefundReservation`, `LinkRefundedPayment` and
   `PaymentService.Create` call `syncPurchasedCreditRefund` in their transaction.
-- OR-J22-S07: a pending credit-line refund takes the whole lot off the balance when it is requested; OR-J22-S51: a refused one gives it back.
+- OR-J22-S07: a pending credit-line refund takes the whole lot off the balance when it is requested; OR-J22-S51: a refused one gives it back; OR-J22-S52: to `units_expired` once the lot lapsed.
 
 ### 3. Exact money
 Lots and spends are `int64` native units in one currency; a purchased lot is in
@@ -199,5 +199,3 @@ Checks:
 Gaps:
 - No scenario buys a customer-chosen deposit (`customer_amount`, `from_payment`).
 - Credit refunds are tested only on Stripe; no NMI-funded lot is reversed.
-- Spend reads grow with a customer's lifetime lots: a spent lot with no expiry
-  stays in every `ListSpendableCreditLots` read.
