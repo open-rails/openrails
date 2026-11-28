@@ -89,9 +89,11 @@ var AllTransferTypes = []TransferType{Deposit, CreditRefund, CreditRefundRestore
 // balance, and debt it paid.
 var fundingTransfers = map[TransferType]bool{Deposit: true, CreditReinstate: true, CreditRefundRestore: true, OwedPayment: true}
 
-// quietTransfers are the refunds, chargebacks and revocations: a balance
-// they leave depleted is not told so.
-var quietTransfers = map[TransferType]bool{CreditRefund: true, CreditRefundFunding: true, CreditRevoke: true, OwedReopened: true}
+// quietTransfers are the refunds, chargebacks and revocations that take units
+// off a balance: a balance they leave depleted is not told so. A transfer that
+// raises what is owed is not quiet: it moves the floor, and the look announces
+// a credit line it uses up.
+var quietTransfers = map[TransferType]bool{CreditRefund: true, CreditRevoke: true}
 
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
 // ledger_transfers_credit_grant_id_transfer_type_key. A reinstated lot can be

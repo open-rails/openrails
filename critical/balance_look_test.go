@@ -199,7 +199,7 @@ func TestBalanceLooks(t *testing.T) {
 		require.EqualValues(t, 1000, lotExpired(t, w.alpha, lot))
 		balance(t, w.alpha, customer, 300, 0, 300)
 	})
-	t.Run("OR-J25-S44/a-revocation-that-empties-the-balance-sends-no-depleted-notice-a-lapse-does", func(t *testing.T) {
+	t.Run("OR-J25-S44/a-revocation-or-refund-that-empties-the-balance-sends-no-depleted-notice-a-lapse-does", func(t *testing.T) {
 		w, fleet := setup(t)
 		customer, lot := watchedCustomer(t, w, fleet, 1000, nil)
 		_, err := w.alpha.RevokeCreditGrant(t.Context(), "", lot, billing.RevokeCreditGrantParams{Reason: "critical adjustment"})
@@ -226,6 +226,31 @@ func TestBalanceLooks(t *testing.T) {
 			" WHERE customer_id = $1 AND event_type = 'balance_depleted'", customer2.UUID()).Scan(&notices, &expired))
 		require.Equal(t, 1, notices)
 		require.Equal(t, 1, expired)
+
+		m := newMixedSale(t, lowAt600)
+		w = m.a.world
+		fleet = quietFleet(t, w)
+		customer = m.customer
+		payment := m.buy(t, "watched-pack-refund")
+		require.Eventually(t, func() bool {
+			var stored bool
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT floor_amount IS NOT NULL FROM "+pgx.Identifier{w.schema, "balance_watches"}.Sanitize()+
+				" WHERE customer_id = $1", customer.UUID()).Scan(&stored))
+			return stored
+		}, 10*time.Second, 20*time.Millisecond, "the funding's look stores the lines")
+		settled(t, fleet, customer)
+		balance(t, w.alpha, customer, 25_000_000, 0, 25_000_000)
+		_, err = w.alpha.RefundPayment(t.Context(), "watched-pack-return", payment, billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Return the credit pack"})
+		require.NoError(t, err)
+		settled(t, fleet, customer)
+		balance(t, w.alpha, customer, 0, 0, 0)
+		require.Empty(t, balanceOutbox(t, w, customer, "balance.depleted"))
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "notification_events"}.Sanitize()+
+			" WHERE customer_id = $1 AND event_type IN ('balance_depleted', 'balance_low')", customer.UUID()).Scan(&notices))
+		require.Zero(t, notices)
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT depleted_at IS NOT NULL FROM "+pgx.Identifier{w.schema, "balance_watches"}.Sanitize()+
+			" WHERE customer_id = $1", customer.UUID()).Scan(&depleted))
+		require.True(t, depleted)
 	})
 	t.Run("OR-J25-S37/a-pass-that-waited-behind-a-look-leaves-the-watch-it-moved", func(t *testing.T) {
 		w, fleet := setup(t)

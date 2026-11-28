@@ -68,6 +68,10 @@ lapse or where a running charge's accrual crosses a line. It posts no running
 charge: the daily posting does.
 A refund, chargeback or revocation that leaves the balance depleted marks the
 crossing's notices sent without sending them (`WatchChange`, `SilenceBalanceWatchNotices`).
+It is judged against the floor the last look stored, so a chargeback or refund
+that reopens debt (`owed_reopened`, the `repaid_owed` leg of
+`credit_refund_funding`) is not silenced: when that debt uses up the credit
+line, the next look announces it.
 Only spending and lapses tell the customer the balance ran out; a look that
 expired the lot that emptied it sends `balance_depleted` with reason `expired`.
 A balance is low once what the customer may spend is at or under an amount:
