@@ -408,6 +408,13 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		}
 	}
 
+	sweep("delete operation log entries", &result.OperationLog, guarded("operation_log",
+		func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+			return q.DeleteOperationLogPastRetention(ctx, gen.DeleteOperationLogPastRetentionParams{
+				MerchantID: mid, RetentionDays: retention.Days(retention.ProviderWrites), RowLimit: limit,
+			})
+		}))
+
 	// Subscription status history.
 	sweep("delete subscription transitions", &result.SubscriptionTransitions, guarded("subscription_status_transitions",
 		func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
@@ -480,15 +487,10 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		})
 	})
 
-	// Finished outbox intents and the operations history. Intents that are the
+	// Finished outbox intents. Intents that are the
 	// record of money, a membership or an erasure are not outbox types.
 	sweep("delete finished outbox intents", &result.ProviderIntents, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteFinishedOutboxIntentsBefore(ctx, gen.DeleteFinishedOutboxIntentsBeforeParams{
-			MerchantID: mid, Cutoff: now.Add(-retention.ProviderWrites), RowLimit: limit,
-		})
-	})
-	sweep("delete operation log entries", &result.OperationLog, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.DeleteOperationLogBefore(ctx, gen.DeleteOperationLogBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.ProviderWrites), RowLimit: limit,
 		})
 	})

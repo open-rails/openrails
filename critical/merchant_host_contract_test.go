@@ -175,6 +175,9 @@ func TestMerchantHost(t *testing.T) {
 		_, err = a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "stripe_fee_reads"}.Sanitize()+" (merchant_id, psp_id, ref, kind, due_at) VALUES ($1, $2, 'ch_purged', 'payment', 'infinity')",
 			merchant, psp.ID.UUID())
 		require.NoError(t, err)
+		_, err = a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+` (merchant_id, actor, source, object_type, object_id, action, changes, rail, psp_id)
+			VALUES ($1, 'system', 'intent', 'provider_intent', 'op_purged', 'attempting', '{"version": 1}', 'stripe', $2)`, merchant, psp.ID.UUID())
+		require.NoError(t, err)
 		documents := func() []any {
 			listed, err := a.deps.Vault.Logical().ListWithContext(t.Context(), a.cfg.Vault.KVMount+"/metadata/openrails/merchants/"+merchant.String()+"/psps")
 			require.NoError(t, err)
@@ -212,6 +215,10 @@ func TestMerchantHost(t *testing.T) {
 		require.Equal(t, inventory.TotalRows, purged.Rows)
 		require.Equal(t, 1, inventory.RowCounts["stripe_fee_reads"])
 		require.Zero(t, feeReads(), "a fee read waiting on its PSP goes with the merchant")
+		require.Equal(t, 1, inventory.RowCounts["operation_log"])
+		var logged int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+" WHERE merchant_id=$1", merchant).Scan(&logged))
+		require.Zero(t, logged, "the purge deletes the operations history its guard refuses anyone else")
 		var deleted bool
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT deleted_at IS NOT NULL FROM "+pgx.Identifier{a.schema, "merchants"}.Sanitize()+" WHERE id=$1", merchant).Scan(&deleted))
 		require.True(t, deleted, "the purge tombstones the merchant")

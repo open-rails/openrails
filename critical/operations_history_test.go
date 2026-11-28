@@ -434,6 +434,42 @@ FROM `+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+` WHERE merchant_id 
 		require.Equal(t, source.ID, changeOf(t, retired[0]).Move.PriceID)
 	})
 
+	t.Run("OR-J43-S14/the-operations-history-refuses-a-delete-retention-did-not-make", func(t *testing.T) {
+		a, _ := newPSPWorld(t)
+		psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+		require.NoError(t, err)
+		merchant := a.alpha.MerchantID().UUID()
+		log := pgx.Identifier{a.schema, "operation_log"}.Sanitize()
+		entry := func(object string, at time.Time) {
+			_, err := a.pool.Exec(t.Context(), "INSERT INTO "+log+` (merchant_id, occurred_at, actor, source, object_type, object_id, action, changes, rail, psp_id)
+				VALUES ($1, $2, 'system', 'intent', 'provider_intent', $3, 'attempting', '{"version": 1}', 'stripe', $4)`, merchant, at, object, psp.ID.UUID())
+			require.NoError(t, err)
+		}
+		kept := func() []string {
+			rows, err := a.pool.Query(t.Context(), "SELECT object_id FROM "+log+" WHERE merchant_id = $1 ORDER BY object_id", merchant)
+			require.NoError(t, err)
+			ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+			require.NoError(t, err)
+			return ids
+		}
+		entry("op_old", time.Now().Add(-800*24*time.Hour))
+		entry("op_recent", time.Now().Add(-24*time.Hour))
+		for _, object := range []string{"op_old", "op_recent"} {
+			_, err := a.pool.Exec(t.Context(), "DELETE FROM "+log+" WHERE merchant_id = $1 AND object_id = $2", merchant, object)
+			require.ErrorContains(t, err, "operation_log rows are deleted only by retention", object)
+		}
+		require.Equal(t, []string{"op_old", "op_recent"}, kept(), "a plain delete removes nothing")
+		// A purge's run lets only the purge's own transaction delete: a run left
+		// running after it committed opens nothing.
+		_, err = a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "maintenance_runs"}.Sanitize()+" (merchant_id, kind, actor) VALUES ($1, 'merchant_purge', 'critical operator')", merchant)
+		require.NoError(t, err)
+		_, err = a.pool.Exec(t.Context(), "DELETE FROM "+log+" WHERE merchant_id = $1 AND object_id = 'op_recent'", merchant)
+		require.ErrorContains(t, err, "operation_log rows are deleted only by retention", "another transaction's purge run")
+
+		runRegistered(t, startFleet(t, a.world), "openrails.cleanup_expired_data", 1)
+		require.Equal(t, []string{"op_recent"}, kept(), "retention deletes only what is past its period")
+	})
+
 	t.Run("OR-J43-S13/a-parked-or-stale-claim-never-counts-as-sent", func(t *testing.T) {
 		a, journal := newNMIWorld(t)
 		enableLifecycleMaintenance(t, a)
