@@ -65,7 +65,7 @@ func importNMIBook(t *testing.T, a *authorityWorld, p *nmiJournal, offsets ...ti
 func importNMIBookAs(t *testing.T, a *authorityWorld, p *nmiJournal, key string, offsets ...time.Duration) legacyNMIBook {
 	t.Helper()
 	p.core.AddPlan(nmimock.Plan{ID: "monthly", Name: "Monthly", Amount: "10.00", Days: 30})
-	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: key + "-membership", DisplayName: "NMI membership", Entitlements: []string{"nmi:member"}})
+	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: key + "-membership", DisplayName: "NMI membership", Entitlements: []string{key + ":member"}})
 	require.NoError(t, err)
 	// Declared terms stand in while NMI cannot be read.
 	price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: key + "-monthly", PSP: key, PlanID: "monthly",

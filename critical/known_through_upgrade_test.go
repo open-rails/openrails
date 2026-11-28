@@ -48,6 +48,10 @@ func TestKnownThroughUpgrade(t *testing.T) {
 		subscribe := func(psp, rail, authority, status string, started time.Time, canceled *time.Time) (uuid.UUID, uuid.UUID) {
 			t.Helper()
 			customer, sub := uuid.New(), uuid.New()
+			policy := "provider"
+			if rail == "nmi" {
+				policy = "nmi_schedule"
+			}
 			exec("INSERT INTO "+table("customers")+" (id, merchant_id, created_at, last_seen_at) VALUES ($1, $2, $3, $3)", customer, m, started)
 			periodStart, periodEnd := started, started.Add(720*time.Hour)
 			for periodEnd.Before(now) && canceled == nil {
@@ -60,8 +64,8 @@ func TestKnownThroughUpgrade(t *testing.T) {
 			}
 			exec("INSERT INTO "+table("subscriptions")+` (id, merchant_id, customer_id, product_id, price_id, status, rail, collection_policy, rail_subscription_id, psp_id,
 				started_at, current_period_starts_at, current_period_ends_at, canceled_at, ended_at, cancel_type, cancel_feedback, created_at, updated_at, facts_authority)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, 'provider', $8, $9, $10, $11, $12, $13, $13, $14, $15, $10, $10, $16)`,
-				sub, m, customer, product, price, status, rail, "sub-"+sub.String()[:8], psps[psp], started, periodStart, periodEnd, canceled, cancelType, feedback, authority)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $17, $8, $9, $10, $11, $12, $13, $13, $14, $15, $10, $10, $16)`,
+				sub, m, customer, product, price, status, rail, "sub-"+sub.String()[:8], psps[psp], started, periodStart, periodEnd, canceled, cancelType, feedback, authority, policy)
 			return sub, customer
 		}
 
