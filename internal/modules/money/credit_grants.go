@@ -168,6 +168,13 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 			return &current, nil
 		}
 		if current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
+			lot, err := s.db.Gen(ctx).GetCreditLot(ctx, gen.GetCreditLotParams{MerchantID: mid.UUID(), ID: grantID})
+			if err != nil {
+				return nil, err
+			}
+			if lot.UnitsRefunding > 0 {
+				return nil, ErrCreditGrantHeld
+			}
 			return nil, ErrCreditGrantUnavailable
 		}
 	}
@@ -216,6 +223,14 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 				result = &current
 				return nil
 			}
+			lot, err := q.GetCreditLot(ctx, gen.GetCreditLotParams{MerchantID: mid.UUID(), ID: grantID})
+			if err != nil {
+				return err
+			}
+			// A refund of the lot's payment in flight settles first.
+			if lot.UnitsRefunding > 0 {
+				return ErrCreditGrantHeld
+			}
 			if current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
 				return ErrCreditGrantUnavailable
 			}
@@ -229,14 +244,6 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 			}
 			if current = creditGrantFromRow(row, s.now()); current.RemainingAmount <= 0 {
 				return ErrCreditGrantUnavailable
-			}
-			lot, err := q.GetCreditLot(ctx, gen.GetCreditLotParams{MerchantID: mid.UUID(), ID: grantID})
-			if err != nil {
-				return err
-			}
-			// A refund of the lot's payment in flight settles first.
-			if lot.UnitsRefunding > 0 {
-				return ErrCreditGrantHeld
 			}
 			bal, err := s.deriveBalance(ctx, q, mid.UUID(), customer, row.Unit)
 			if err != nil {

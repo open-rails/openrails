@@ -117,6 +117,8 @@ func mixedPendingRefund(t *testing.T) {
 	// $10 is the credit line's whole amount: all 25 credits left the balance
 	// when the refund was asked for.
 	balance(t, a.alpha, m.customer, 5_000_000, 0, 5_000_000)
+	_, err = a.alpha.RevokeCreditGrant(t.Context(), "", paymentLot(t, a.alpha, m.customer, payment), billing.RevokeCreditGrantParams{Reason: "abuse"})
+	requireCode(t, err, billing.CodeCreditGrantHeld)
 
 	compute, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "compute", DisplayName: "Compute"})
 	require.NoError(t, err)
