@@ -168,6 +168,9 @@ func mixedRefusedRefund(t *testing.T) {
 	a, p := m.a, m.p
 	payment := m.buy(t, "mixed-refused-refund")
 	balance(t, a.alpha, m.customer, 25_000_000, 0, 25_000_000)
+	updated, err := a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "balance_watches"}.Sanitize()+" SET funded_at = NULL WHERE merchant_id = $1 AND customer_id = $2", a.alpha.MerchantID().UUID(), m.customer.UUID())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, updated.RowsAffected())
 	p.mu.Lock()
 	p.refuseRefund = true
 	p.mu.Unlock()
@@ -183,6 +186,9 @@ func mixedRefusedRefund(t *testing.T) {
 	}
 	require.NoError(t, rows.Err())
 	require.Equal(t, []string{"failed"}, statuses, "the provider refused the refund")
+	var funded bool
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT funded_at IS NOT NULL FROM "+pgx.Identifier{a.schema, "balance_watches"}.Sanitize()+" WHERE merchant_id = $1 AND customer_id = $2", a.alpha.MerchantID().UUID(), m.customer.UUID()).Scan(&funded))
+	require.True(t, funded, "the restore re-armed the balance notices")
 	read, err := a.alpha.GetPayment(t.Context(), payment)
 	require.NoError(t, err)
 	require.Zero(t, read.AmountRefunded)
