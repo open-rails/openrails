@@ -91,11 +91,15 @@ export function FreshnessBanner({
             ) : f.known_through ? (
               <>
                 <AdminMessage id={": data through "} />
-                {day(f.known_through)}, {daysOld(f.known_through, now)}
+                {day(f.known_through)}
+                {f.source === "import_records" ? (
+                  <AdminMessage id={" (latest imported record)"} />
+                ) : null}
+                , {daysOld(f.known_through, now)}
                 <AdminMessage id={" days old; "} />
               </>
             ) : (
-              <AdminMessage id={": no data read yet; "} />
+              <AdminMessage id={": data through an unknown date; "} />
             )}
             {text(cause.what)}
             {since}. {cause.fix ? text(cause.fix) : null}

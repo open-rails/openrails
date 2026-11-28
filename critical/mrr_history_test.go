@@ -480,6 +480,13 @@ func TestMRRHistoryUpgrade(t *testing.T) {
 // history, for an upgrade to run over.
 func beforeImportHistory(t *testing.T) (*pgxpool.Pool, string, *slog.Logger) {
 	t.Helper()
+	return schemaBefore(t, "0016_")
+}
+
+// schemaBefore builds a schema with every migration before first, for an
+// upgrade to run over.
+func schemaBefore(t *testing.T, first string) (*pgxpool.Pool, string, *slog.Logger) {
+	t.Helper()
 	ctx := t.Context()
 	dsn := os.Getenv("OPENRAILS_CRITICAL_DSN")
 	require.NotEmpty(t, dsn, "OPENRAILS_CRITICAL_DSN must name a disposable PostgreSQL database; critical scenarios never skip")
@@ -498,7 +505,7 @@ func beforeImportHistory(t *testing.T) (*pgxpool.Pool, string, *slog.Logger) {
 	names, err := fs.Glob(postgresmigrations.FS, "*.up.sql")
 	require.NoError(t, err)
 	for _, name := range names {
-		if name >= "0016_" {
+		if name >= first {
 			continue
 		}
 		data, err := fs.ReadFile(postgresmigrations.FS, name)

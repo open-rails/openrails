@@ -39,7 +39,6 @@ var excludedTables = map[string]string{
 	"event_store":                       "the deployment's event store identity",
 	"merchant_controls":                 "operator controls: export sets the source's writes readonly, restore the destination's; never moved",
 	"webhook_health":                    "telemetry", "webhook_health_daily": "telemetry",
-	"psp_freshness":                 "the source deployment's read evidence: the destination reads its PSPs afresh",
 	"leases":                        "gate leases: a live one refuses the archive, and gates sync new ones at the destination",
 	"lease_in_flight":               "what live gates report in flight: a live lease refuses the archive, and gates report afresh at the destination",
 	"payment_attempts":              "decline analytics, kept 25 months; money is payments and provider_intents",
@@ -94,7 +93,6 @@ var excludedColumns = map[string]string{
 	"merchants":                         "id slug status permission_group_id tenant_id created_at updated_at deleted_at retired_at group_release_completed_at catalog_revision slug_changed_at",
 	"merchant_slug_aliases":             "slug merchant_id expires_at created_at",
 	"webhook_health":                    "merchant_id psp_id custodian_id last_accepted_at last_pull_at created_at updated_at",
-	"psp_freshness":                     "merchant_id psp_id read_at failing_since failed_at failure imported_through stale_since notified_at caught_up_at catch_up created_at updated_at",
 	"webhook_health_daily":              "merchant_id psp_id custodian_id day_at rejected drift",
 	"leases":                            "merchant_id id created_at last_sync_at settled_through_n closed_at receipts",
 	"lease_in_flight":                   "merchant_id lease_id customer_id limit_key unit amount updated_at",
@@ -152,6 +150,9 @@ var omittedColumns = map[string]string{
 	"price_migrations": "destructive_action_id",
 	// Derived from the lines: a restored open invoice is not found by it.
 	"invoices": "lines_digest",
+	// The source's reads: the destination reads its PSPs afresh. What an
+	// import brought, and when, moves.
+	"psp_freshness": "read_at failing_since failed_at failure stale_since notified_at caught_up_at catch_up",
 	// When time alone next changes a customer's delinquency: restore schedules
 	// every customer again.
 	"customer_delinquency": "next_evaluation_at",

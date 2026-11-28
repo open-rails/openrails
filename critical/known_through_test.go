@@ -41,28 +41,47 @@ func unconnectedNMI(w *world) {
 	setCfgMerchant(&w.cfg, "alpha", m)
 }
 
+// unconnectedNMIs declares alpha's NMI PSPs under keys, none with
+// credentials.
+func unconnectedNMIs(keys ...string) func(*world) {
+	return func(w *world) {
+		m := cfgMerchant(w.cfg, "alpha")
+		m.PSPs = billing.PSPs{}
+		for _, key := range keys {
+			m.PSPs[key] = openrails.NMIPSP{GatewayID: "critical-" + key, Environment: billing.EnvironmentTest}.PSPConfig()
+		}
+		setCfgMerchant(&w.cfg, "alpha", m)
+	}
+}
+
 // importNMIBook imports one monthly NMI member per offset, paid through now
 // plus it, with its schedule and first sale at NMI.
 func importNMIBook(t *testing.T, a *authorityWorld, p *nmiJournal, offsets ...time.Duration) legacyNMIBook {
 	t.Helper()
+	return importNMIBookAs(t, a, p, "nmi", offsets...)
+}
+
+// importNMIBookAs is importNMIBook into alpha's NMI PSP key.
+func importNMIBookAs(t *testing.T, a *authorityWorld, p *nmiJournal, key string, offsets ...time.Duration) legacyNMIBook {
+	t.Helper()
 	p.core.AddPlan(nmimock.Plan{ID: "monthly", Name: "Monthly", Amount: "10.00", Days: 30})
-	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-membership", DisplayName: "NMI membership", Entitlements: []string{"nmi:member"}})
+	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: key + "-membership", DisplayName: "NMI membership", Entitlements: []string{key + ":member"}})
 	require.NoError(t, err)
 	// Declared terms stand in while NMI cannot be read.
-	price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "nmi-monthly", PSP: "nmi", PlanID: "monthly",
+	price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: key + "-monthly", PSP: key, PlanID: "monthly",
 		Currency: "USD", UnitAmount: ptr(int64(10_000_000)), BillingIntervalHours: ptr(720)})
 	require.NoError(t, err)
 	b := legacyNMIBook{asOf: a.clock.Now().Truncate(time.Second)}
-	book := billing.DeclaredBilling{AsOf: b.asOf, DefaultPSP: billing.PSPRef{Key: "nmi"}}
+	book := billing.DeclaredBilling{AsOf: b.asOf, DefaultPSP: billing.PSPRef{Key: key}}
 	for i, offset := range offsets {
 		due := b.asOf.Add(offset)
 		started := due.Add(-720 * time.Hour)
 		vaultID := p.core.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
 		vault := p.core.Vault(vaultID)
-		schedule := p.core.AddSchedule(nmimock.Schedule{Vault: vaultID, Plan: "monthly", Amount: "10.00", Days: 30, Created: started, NextBilling: due, Order: fmt.Sprintf("legacy-member-%d", i)})
+		source := fmt.Sprintf("legacy-%s-member-%d", key, i)
+		schedule := p.core.AddSchedule(nmimock.Schedule{Vault: vaultID, Plan: "monthly", Amount: "10.00", Days: 30, Created: started, NextBilling: due, Order: source})
 		initial := p.core.AddScheduleSale(schedule, started)
 		customer := billing.CustomerID(uuid.New())
-		source := fmt.Sprintf("legacy-member-%d", i)
 		book.Customers = append(book.Customers, billing.DeclaredCustomer{Customer: customer})
 		book.PaymentMethods = append(book.PaymentMethods, billing.DeclaredPaymentMethod{Customer: customer, Rail: "nmi", RailCustomerRef: vaultID, RailMethodRef: vault.BillingID,
 			RecurringTransactionID: initial.TransactionID, CreatedAt: started, Card: &billing.CardDetails{Brand: ptr("visa"), Last4: ptr("4242")}})

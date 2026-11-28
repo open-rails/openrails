@@ -12,7 +12,7 @@ import (
 type PSPFreshness struct {
 	// KnownThrough is the instant through which the record is complete: now
 	// while the PSP is current, else its latest evidence (a read, a webhook
-	// or an import); null when there is none.
+	// or an import); null when there is none, even for a PSP holding data.
 	KnownThrough *time.Time `json:"known_through"`
 	// Source is the evidence KnownThrough comes from.
 	Source PSPKnownThroughSource `json:"source"`
@@ -68,6 +68,10 @@ const (
 	KnownThroughWebhook PSPKnownThroughSource = "webhook"
 	// KnownThroughImport: the evidence instant of what an import brought.
 	KnownThroughImport PSPKnownThroughSource = "import"
+	// KnownThroughImportRecords: the latest instant the records an import
+	// brought carry, the import having recorded no evidence instant; the
+	// record is complete through at least it.
+	KnownThroughImportRecords PSPKnownThroughSource = "import_records"
 	// KnownThroughNone: nothing was ever read or imported of it.
 	KnownThroughNone PSPKnownThroughSource = "none"
 )

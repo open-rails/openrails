@@ -190,7 +190,7 @@ func (q *Queries) ListPSPAwaiting(ctx context.Context, arg ListPSPAwaitingParams
 
 const listPSPFreshness = `-- name: ListPSPFreshness :many
 SELECT p.id AS psp_id, p.key, p.rail, p.superseded_at,
-       f.read_at, f.failing_since, f.failed_at, f.failure, f.imported_through, f.stale_since, f.notified_at, f.caught_up_at, f.catch_up,
+       f.read_at, f.failing_since, f.failed_at, f.failure, f.imported_through, f.imported_from, f.stale_since, f.notified_at, f.caught_up_at, f.catch_up,
        w.last_accepted_at, w.last_pull_at,
        EXISTS (SELECT 1 FROM billing.subscriptions s
                 WHERE s.merchant_id = p.merchant_id AND s.psp_id = p.id AND s.deleted_at IS NULL
@@ -223,6 +223,7 @@ type ListPSPFreshnessRow struct {
 	FailedAt          *time.Time
 	Failure           *string
 	ImportedThrough   *time.Time
+	ImportedFrom      *string
 	StaleSince        *time.Time
 	NotifiedAt        *time.Time
 	CaughtUpAt        *time.Time
@@ -256,6 +257,7 @@ func (q *Queries) ListPSPFreshness(ctx context.Context, arg ListPSPFreshnessPara
 			&i.FailedAt,
 			&i.Failure,
 			&i.ImportedThrough,
+			&i.ImportedFrom,
 			&i.StaleSince,
 			&i.NotifiedAt,
 			&i.CaughtUpAt,
@@ -325,7 +327,7 @@ func (q *Queries) ListStalePSPs(ctx context.Context, arg ListStalePSPsParams) ([
 }
 
 const lockPSPFreshness = `-- name: LockPSPFreshness :one
-SELECT merchant_id, psp_id, read_at, failing_since, failed_at, failure, imported_through, stale_since, notified_at, caught_up_at, catch_up, created_at, updated_at FROM billing.psp_freshness
+SELECT merchant_id, psp_id, read_at, failing_since, failed_at, failure, imported_through, stale_since, notified_at, caught_up_at, catch_up, created_at, updated_at, imported_from FROM billing.psp_freshness
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
 FOR UPDATE
 `
@@ -352,6 +354,7 @@ func (q *Queries) LockPSPFreshness(ctx context.Context, arg LockPSPFreshnessPara
 		&i.CatchUp,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ImportedFrom,
 	)
 	return i, err
 }
@@ -404,6 +407,18 @@ func (q *Queries) MarkSubscriptionsUnconfirmed(ctx context.Context, arg MarkSubs
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const openRestoredPSPEpisodes = `-- name: OpenRestoredPSPEpisodes :exec
+UPDATE billing.psp_freshness SET stale_since = imported_through, updated_at = now()
+WHERE merchant_id = $1::uuid AND stale_since IS NULL AND read_at IS NULL AND imported_through IS NOT NULL
+`
+
+// A restored archive's PSPs an import brought are stale from it: the
+// destination has read none of them.
+func (q *Queries) OpenRestoredPSPEpisodes(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, openRestoredPSPEpisodes, merchantID)
+	return err
 }
 
 const pSPCatchUpSummary = `-- name: PSPCatchUpSummary :one
@@ -459,10 +474,11 @@ func (q *Queries) PSPCatchUpSummary(ctx context.Context, arg PSPCatchUpSummaryPa
 }
 
 const recordPSPImported = `-- name: RecordPSPImported :exec
-INSERT INTO billing.psp_freshness (merchant_id, psp_id, imported_through)
-VALUES ($1::uuid, $2::uuid, $3::timestamptz)
+INSERT INTO billing.psp_freshness (merchant_id, psp_id, imported_through, imported_from)
+VALUES ($1::uuid, $2::uuid, $3::timestamptz, 'as_of')
 ON CONFLICT (merchant_id, psp_id) DO UPDATE SET
     imported_through = greatest(psp_freshness.imported_through, EXCLUDED.imported_through),
+    imported_from = CASE WHEN psp_freshness.imported_through > EXCLUDED.imported_through THEN psp_freshness.imported_from ELSE 'as_of' END,
     updated_at = now()
 `
 

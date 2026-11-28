@@ -22459,6 +22459,7 @@
             "type": "string",
             "enum": [
               "import",
+              "import_records",
               "none",
               "now",
               "read",
@@ -23028,6 +23029,7 @@
             "type": "string",
             "enum": [
               "import",
+              "import_records",
               "none",
               "now",
               "read",

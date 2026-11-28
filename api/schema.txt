@@ -18,6 +18,7 @@ migration 0014_books_measures.up.sql sha256:fd19d9cdd4aa630365eadfa680cd70c95cec
 migration 0015_deposits_and_reserves.up.sql sha256:2345658c4a3f9fbbdabd1a00aa87fc4de9709e6a356a71f4b06f80042b5b7c7d
 migration 0016_import_history.up.sql sha256:d93ddf39d190cbfa6054687c6b792e5332a89bb821b2b56e86e44b96a6d35090
 migration 0017_known_through.up.sql sha256:d480fa70ea1a83b9654f4011f6434f5b8f96a6b2be9f0c551142fb1706527eb5
+migration 0018_imported_known_through.up.sql sha256:7c0547c340bbe151baf5562ebbffca5dc8fb681351ae40d84a7b63554339ff3f
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -2702,8 +2703,11 @@ table billing.psp_freshness
   column catch_up jsonb
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  column imported_from text
   constraint psp_freshness_catch_up_check CHECK ((((caught_up_at IS NULL) = (catch_up IS NULL)) AND ((catch_up IS NULL) OR (jsonb_typeof(catch_up) = 'object'::text))))
   constraint psp_freshness_failure_check CHECK ((((failing_since IS NULL) = (failure IS NULL)) AND ((failed_at IS NULL) = (failure IS NULL)) AND ((failing_since IS NULL) OR (failed_at >= failing_since)) AND ((failure IS NULL) OR (failure = ANY (ARRAY['not_configured'::text, 'credentials_refused'::text, 'unreachable'::text])))))
+  constraint psp_freshness_imported_check CHECK (((imported_through IS NULL) = (imported_from IS NULL)))
+  constraint psp_freshness_imported_from_check CHECK ((imported_from = ANY (ARRAY['as_of'::text, 'latest_record'::text])))
   constraint psp_freshness_notified_check CHECK (((notified_at IS NULL) OR (stale_since IS NOT NULL)))
   constraint psp_freshness_pkey PRIMARY KEY (merchant_id, psp_id)
   constraint psp_freshness_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT

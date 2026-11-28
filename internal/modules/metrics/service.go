@@ -82,17 +82,51 @@ func (s *Service) Zone(ctx context.Context) (*time.Location, error) {
 }
 
 // Execute runs a validated plan and returns the merged tabular result; a
-// plan reading the MRR facts or the live revenue schedules may be answered
-// from the cache (Cache).
+// plan reading the MRR facts or the live revenue schedules may take its
+// figures from the cache (Cache). Every read reports the known-throughs at
+// it: they are never cached.
 func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
+	var res *Result
 	if s.cacheable(plan, mid.UUID()) {
-		return s.cache.do(ctx, cacheKey(s.db.DataPool().Schema(), mid.UUID(), plan), func(ctx context.Context) (*Result, error) { return s.execute(ctx, plan) })
+		res, err = s.cache.do(ctx, cacheKey(s.db.DataPool().Schema(), mid.UUID(), plan), func(ctx context.Context) (*Result, error) { return s.execute(ctx, plan) })
+		res = clone(res)
+	} else {
+		res, err = s.execute(ctx, plan)
 	}
-	return s.execute(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.freshness(ctx, plan, res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// clone is a copy of res whose rows the caller may change: a computation
+// answers every caller waiting on it with one result.
+func clone(res *Result) *Result {
+	if res == nil {
+		return nil
+	}
+	out := *res
+	out.Rows = cloneRows(res.Rows)
+	out.CompareRows = cloneRows(res.CompareRows)
+	return &out
+}
+
+func cloneRows(rows [][]any) [][]any {
+	if rows == nil {
+		return nil
+	}
+	out := make([][]any, len(rows))
+	for i, row := range rows {
+		out[i] = append([]any(nil), row...)
+	}
+	return out
 }
 
 func (s *Service) execute(ctx context.Context, plan *Plan) (*Result, error) {
@@ -126,9 +160,6 @@ func (s *Service) execute(ctx context.Context, plan *Plan) (*Result, error) {
 		}
 		res.CompareRange = &RangeOut{From: prev.From.UTC(), To: prev.To.UTC()}
 		res.CompareRows = prevRows
-	}
-	if err := s.freshness(ctx, plan, res); err != nil {
-		return nil, err
 	}
 	return res, nil
 }

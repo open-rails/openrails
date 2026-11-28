@@ -157,8 +157,9 @@ func PSPFreshness(ctx context.Context, q *gen.Queries, mid uuid.UUID, psp *uuid.
 
 // KnownThroughs is every PSP's known-through at now, in the merchant's PSP
 // order, superseded PSPs without data aside; with the earliest known-through
-// of a stale PSP with data (nil when each is current) and, when every PSP
-// with data is stale, the latest of theirs.
+// of a stale PSP with data and, when every PSP with data is stale, the latest
+// of theirs. A stale PSP with data and no known-through dates neither: it is
+// in list with a nil one.
 func KnownThroughs(ctx context.Context, q *gen.Queries, mid uuid.UUID, now time.Time) (list []billing.PSPKnownThrough, complete, through *time.Time, err error) {
 	fresh, rows, err := PSPFreshness(ctx, q, mid, nil, now)
 	if err != nil {
@@ -179,15 +180,15 @@ func KnownThroughs(ctx context.Context, q *gen.Queries, mid uuid.UUID, now time.
 			current = true
 			continue
 		}
-		at := time.Time{}
-		if f.KnownThrough != nil {
-			at = *f.KnownThrough
+		at := f.KnownThrough
+		if at == nil {
+			continue
 		}
 		if complete == nil || at.Before(*complete) {
-			complete = &at
+			complete = at
 		}
 		if through == nil || at.After(*through) {
-			through = &at
+			through = at
 		}
 	}
 	if current {
@@ -226,7 +227,7 @@ func latestEvidence(row gen.ListPSPFreshnessRow) (*time.Time, billing.PSPKnownTh
 	for _, e := range []struct {
 		at     *time.Time
 		source billing.PSPKnownThroughSource
-	}{{row.ImportedThrough, billing.KnownThroughImport}, {row.LastAcceptedAt, billing.KnownThroughWebhook},
+	}{{row.ImportedThrough, importSource(row.ImportedFrom)}, {row.LastAcceptedAt, billing.KnownThroughWebhook},
 		{row.LastPullAt, billing.KnownThroughRead}, {row.ReadAt, billing.KnownThroughRead}} {
 		if e.at != nil && (at == nil || e.at.After(*at)) {
 			v := e.at.UTC()
@@ -234,6 +235,15 @@ func latestEvidence(row gen.ListPSPFreshnessRow) (*time.Time, billing.PSPKnownTh
 		}
 	}
 	return at, source
+}
+
+// importSource is the source an import's evidence instant is: its as_of, or
+// its records' latest instant when it recorded none.
+func importSource(from *string) billing.PSPKnownThroughSource {
+	if from != nil && *from == "latest_record" {
+		return billing.KnownThroughImportRecords
+	}
+	return billing.KnownThroughImport
 }
 
 // staleCause is why a stale PSP is, from its evidence.

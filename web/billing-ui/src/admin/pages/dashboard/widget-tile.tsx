@@ -34,7 +34,7 @@ import {
 
 import { cn } from "#orck/admin/lib/utils"
 
-import { deepLinkFor } from "./lib"
+import { deepLinkFor, undatedPSPs } from "./lib"
 import { ProgramsView } from "./programs"
 import {
   rangeDates,
@@ -314,9 +314,12 @@ function TileBody({
     )
   }
   if (!data) return null
-  const incomplete =
-    !!data.complete_through &&
+  const after =
+    data.complete_through &&
     Date.parse(data.range.to) > Date.parse(data.complete_through)
+      ? data.complete_through
+      : null
+  const undated = undatedPSPs(data)
   const view = (
     <WidgetVizView
       viz={widget.viz}
@@ -326,25 +329,48 @@ function TileBody({
       registry={registry}
     />
   )
-  if (!incomplete) return view
-  // A stale PSP's data ends inside the range: the figure is what is known.
+  if (!after && undated.length === 0) return view
+  // A stale PSP's data ends inside the range, or has no known date: the
+  // figure is what is known.
   return (
     <div className="flex h-full flex-col gap-1">
       <div className="min-h-0 flex-1">{view}</div>
-      <IncompleteNote at={data.complete_through!} />
+      <IncompleteNote at={after} undated={undated} />
     </div>
   )
 }
 
-function IncompleteNote({ at }: { at: string }) {
+function IncompleteNote({
+  at,
+  undated,
+}: {
+  at: string | null
+  undated: string[]
+}) {
   return (
-    <span className="text-xs text-muted-foreground" data-incomplete={at}>
-      <AdminMessage id={"Incomplete after "} />
-      {new Date(at).toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })}
+    <span
+      className="text-xs text-muted-foreground"
+      data-incomplete={at ?? "undated"}
+    >
+      {at ? (
+        <>
+          <AdminMessage id={"Incomplete after "} />
+          {new Date(at).toLocaleDateString(undefined, {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          })}
+          {undated.length > 0 ? "; " : null}
+        </>
+      ) : (
+        <AdminMessage id={"Incomplete: "} />
+      )}
+      {undated.length > 0 ? (
+        <>
+          <AdminMessage id={"undated data from "} />
+          {undated.join(", ")}
+        </>
+      ) : null}
     </span>
   )
 }

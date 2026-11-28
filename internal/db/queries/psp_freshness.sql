@@ -3,7 +3,7 @@
 -- latest evidence.
 -- name: ListPSPFreshness :many
 SELECT p.id AS psp_id, p.key, p.rail, p.superseded_at,
-       f.read_at, f.failing_since, f.failed_at, f.failure, f.imported_through, f.stale_since, f.notified_at, f.caught_up_at, f.catch_up,
+       f.read_at, f.failing_since, f.failed_at, f.failure, f.imported_through, f.imported_from, f.stale_since, f.notified_at, f.caught_up_at, f.catch_up,
        w.last_accepted_at, w.last_pull_at,
        EXISTS (SELECT 1 FROM billing.subscriptions s
                 WHERE s.merchant_id = p.merchant_id AND s.psp_id = p.id AND s.deleted_at IS NULL
@@ -46,11 +46,18 @@ RETURNING stale_since;
 
 -- A declared book naming the PSP landed what it held as of imported_through.
 -- name: RecordPSPImported :exec
-INSERT INTO billing.psp_freshness (merchant_id, psp_id, imported_through)
-VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(imported_through)::timestamptz)
+INSERT INTO billing.psp_freshness (merchant_id, psp_id, imported_through, imported_from)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(imported_through)::timestamptz, 'as_of')
 ON CONFLICT (merchant_id, psp_id) DO UPDATE SET
     imported_through = greatest(psp_freshness.imported_through, EXCLUDED.imported_through),
+    imported_from = CASE WHEN psp_freshness.imported_through > EXCLUDED.imported_through THEN psp_freshness.imported_from ELSE 'as_of' END,
     updated_at = now();
+
+-- A restored archive's PSPs an import brought are stale from it: the
+-- destination has read none of them.
+-- name: OpenRestoredPSPEpisodes :exec
+UPDATE billing.psp_freshness SET stale_since = imported_through, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND stale_since IS NULL AND read_at IS NULL AND imported_through IS NOT NULL;
 
 -- name: LockPSPFreshness :one
 SELECT * FROM billing.psp_freshness
