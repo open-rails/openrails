@@ -603,6 +603,8 @@ WHERE s.status = 'active'
   AND s.collection_policy <> 'engine'
   AND s.deleted_at IS NULL
   AND s.merchant_id > sqlc.arg(after_merchant_id)::uuid
+  AND NOT EXISTS (SELECT 1 FROM billing.psp_freshness f
+                  WHERE f.merchant_id = s.merchant_id AND f.psp_id = s.psp_id AND f.stale_since IS NOT NULL)
   AND NOT EXISTS (
       SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
@@ -615,15 +617,18 @@ LIMIT sqlc.arg(merchant_limit)::int;
 -- An active provider-billed subscription with no renewal payment whose paid
 -- period ended before its rail's cutoff: nmi_overdue_before for an NMI
 -- schedule, overdue_before for the rest. A clock reading only: the due pass
--- asks the provider (RenewalOverdue -> unverified). Oldest lapse first, a page
+-- asks the provider (RenewalOverdue -> unverified). A stale PSP's renewals
+-- are not overdue: its record ends before them. Oldest lapse first, a page
 -- after the (period end, id) cursor.
 -- name: ListOverdueRenewals :many
-SELECT s.id, s.rail, s.current_period_ends_at
+SELECT s.id, s.psp_id, s.rail, s.current_period_ends_at
 FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.deleted_at IS NULL
   AND s.status = 'active'
   AND s.collection_policy <> 'engine'
+  AND NOT EXISTS (SELECT 1 FROM billing.psp_freshness f
+                  WHERE f.merchant_id = s.merchant_id AND f.psp_id = s.psp_id AND f.stale_since IS NOT NULL)
   AND ((s.rail = 'nmi' AND s.current_period_ends_at < sqlc.arg(nmi_overdue_before)::timestamptz)
        OR (s.rail <> 'nmi' AND s.current_period_ends_at < sqlc.arg(overdue_before)::timestamptz))
   AND (s.current_period_ends_at, s.id) > (sqlc.arg(after_due_at)::timestamptz, sqlc.arg(after_id)::uuid)
@@ -942,7 +947,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 -- LIFE life.unverified.*: unverified subscriptions with the instant they became
 -- unverified, oldest first, capped.
 -- name: ListUnverifiedSubscriptions :many
-SELECT s.id, s.psp_id, s.rail,
+SELECT s.id, s.psp_id, s.rail, s.unverified_reason::text AS unverified_reason,
        COALESCE(v.unverified_at, s.updated_at)::timestamptz AS unverified_at,
        COALESCE(v.reads, 0)::int AS reads, v.last_read_at
 FROM billing.subscriptions s
@@ -951,7 +956,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'unverified'
-ORDER BY 4, s.id
+ORDER BY 5, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- LIFE life.dunning.funnel: live subscriptions by lifecycle state and the age of

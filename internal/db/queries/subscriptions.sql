@@ -546,6 +546,7 @@ FROM (
                 AND i.intent_type = 'manual_rebill'
                 AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))
        AND NOT EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = s.merchant_id AND c.rebills_held)
+       AND NOT EXISTS (SELECT 1 FROM billing.psp_freshness f WHERE f.merchant_id = s.merchant_id AND f.psp_id = s.psp_id AND f.stale_since IS NOT NULL)
     UNION ALL
     SELECT s.merchant_id
       FROM billing.subscriptions s
@@ -562,7 +563,9 @@ FROM (
      WHERE s.grace_ends_at IS NOT NULL
        AND s.grace_ends_at <= sqlc.arg(now)::timestamptz
        AND s.status = 'past_due' AND s.next_retry_at IS NULL
-       AND (s.collection_policy <> 'engine' OR (sqlc.arg(include_engine)::boolean AND (s.retry_advised_at IS NOT NULL OR EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = s.merchant_id AND c.destructive_armed))))
+       AND ((s.collection_policy <> 'engine'
+             AND NOT EXISTS (SELECT 1 FROM billing.psp_freshness f WHERE f.merchant_id = s.merchant_id AND f.psp_id = s.psp_id AND f.stale_since IS NOT NULL))
+            OR (sqlc.arg(include_engine)::boolean AND (s.retry_advised_at IS NOT NULL OR EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = s.merchant_id AND c.destructive_armed))))
        AND s.deleted_at IS NULL
     UNION ALL
     SELECT s.merchant_id
@@ -591,7 +594,8 @@ LIMIT sqlc.arg(merchant_limit)::int;
 -- network advice deferred to its next renewal, or a held engine case whose
 -- merchant is now armed, due to end), and engine
 -- collections due, including one whose stored method is unusable, which
--- admission routes to awaiting_method (never the default card). Most overdue
+-- admission routes to awaiting_method (never the default card). A stale PSP's
+-- provider-billed rows wait: neither retried nor read past grace. Most overdue
 -- first, a page after the (due instant, id) cursor: a row the pass left due is
 -- behind the cursor, so it never hides later due work.
 SELECT * FROM billing.subscriptions sub
@@ -605,6 +609,8 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid
            AND (sub.status='active' OR (sub.status='past_due' AND sub.next_retry_at <= sqlc.arg(now)::timestamptz))
            AND NOT EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
   AND sub.deleted_at IS NULL
+  AND NOT (sub.collection_policy <> 'engine' AND sub.status = 'past_due'
+           AND EXISTS (SELECT 1 FROM billing.psp_freshness f WHERE f.merchant_id = sub.merchant_id AND f.psp_id = sub.psp_id AND f.stale_since IS NOT NULL))
   -- A merchant's held rebills wait: neither its retries nor its engine
   -- renewals are due.
   AND NOT (((sub.status='past_due' AND sub.next_retry_at IS NOT NULL) OR (sub.collection_policy='engine' AND sub.status='active'))

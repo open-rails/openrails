@@ -112,6 +112,9 @@ type Subscription struct {
 	CancelFeedback *string     `json:"cancel_feedback"` // User's cancellation message
 	CancelType     *CancelType `json:"cancel_type"`     // Who/what caused cancellation
 	CanceledAt     *time.Time  `json:"canceled_at"`
+	// UnverifiedReason is why an unverified row is (awaiting_provider or
+	// unconfirmed), kept by the database; nil otherwise.
+	UnverifiedReason *string `json:"unverified_reason"`
 
 	// DeletionScheduledAt is set when an NMI-backed cancellation defers the
 	// rail-side delete until shortly before the paid period ends. While set,

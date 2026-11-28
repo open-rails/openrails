@@ -58,6 +58,8 @@ type PSP struct {
 	// credential set resolves, as purchase asks. Customers' payment pages
 	// offer armed PSPs alone.
 	Armed bool `json:"armed"`
+	// Freshness is how far OpenRails' record of the PSP is complete.
+	Freshness PSPFreshness `json:"freshness"`
 	PSPFields
 	Credentials map[string]PSPCredential `json:"credentials"`
 	// Revision advances with every change; an update may name the revision

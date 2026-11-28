@@ -104,24 +104,50 @@ func (b MerchantFetcherBuilder) Build(ctx context.Context, mid billing.MerchantI
 // ok=false when the PSP cannot arm (its WARN is logged): nothing is read, so
 // nothing is decided.
 func (b MerchantFetcherBuilder) BuildPSP(ctx context.Context, mid billing.MerchantID, pspID uuid.UUID) (MerchantPullClients, Provider, bool) {
+	out, provider, arming := b.ArmPSP(ctx, mid, pspID)
+	return out, provider, arming == PSPArmed
+}
+
+// PSPArming is whether a PSP's reader armed.
+type PSPArming int
+
+const (
+	PSPArmed PSPArming = iota
+	// PSPUnarmed: its credentials do not resolve (or it is not declared).
+	PSPUnarmed
+	// PSPArmingUnavailable: the merchant's configuration could not be read;
+	// a later attempt may arm it.
+	PSPArmingUnavailable
+)
+
+// ArmPSP is BuildPSP telling an unarmed PSP from configuration that could
+// not be read.
+func (b MerchantFetcherBuilder) ArmPSP(ctx context.Context, mid billing.MerchantID, pspID uuid.UUID) (MerchantPullClients, Provider, PSPArming) {
 	out := newPullClients()
 	if b.Merchants == nil {
-		return out, "", false
+		return out, "", PSPUnarmed
 	}
 	scope, ok, err := b.Merchants.PSPScopeByID(ctx, mid, pspID)
-	if err != nil || !ok {
-		if err == nil {
-			err = errors.New("PSP is not declared for this merchant")
-		}
-		b.Log.WarnContext(ctx, "provider pull: PSP not armed — its objects are not read", logx.Err(err), "merchant_id", mid.String(), "psp_id", pspID.String())
-		return out, "", false
+	if err != nil {
+		b.Log.WarnContext(ctx, "provider pull: PSP not armed — merchant configuration unavailable", logx.Err(err), "merchant_id", mid.String(), "psp_id", pspID.String())
+		return out, "", PSPArmingUnavailable
+	}
+	if !ok {
+		b.Log.WarnContext(ctx, "provider pull: PSP not armed — its objects are not read", logx.Err(errors.New("PSP is not declared for this merchant")), "merchant_id", mid.String(), "psp_id", pspID.String())
+		return out, "", PSPUnarmed
 	}
 	provider := Provider(scope.Rail)
 	out.Coverage[provider] = PSPCoverage{Declared: 1, Pulled: 1, Binding: PSPBinding{ID: scope.ID, Rail: scope.Rail, AccountID: scope.AccountID}}
 	b.arm(ctx, mid, scope, &out)
 	_, fetches := out.Fetchers[provider]
 	_, probes := out.Probers[provider]
-	return out, provider, fetches || probes
+	switch {
+	case fetches || probes:
+		return out, provider, PSPArmed
+	case out.Unavailable[provider]:
+		return out, provider, PSPArmingUnavailable
+	}
+	return out, provider, PSPUnarmed
 }
 
 func newPullClients() MerchantPullClients {

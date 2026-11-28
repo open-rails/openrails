@@ -20,6 +20,9 @@ import (
 // (*http.Client).Do.
 var ErrProviderReadOnly = errors.New("stripe: provider writes are blocked (readonly)")
 
+// ErrKeyRefused is Stripe refusing a read's key (401) or its permission (403).
+var ErrKeyRefused = errors.New("stripe refused the key")
+
 // DefaultTimeout is applied when a caller passes timeout <= 0.
 const DefaultTimeout = 20 * time.Second
 

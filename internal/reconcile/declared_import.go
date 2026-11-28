@@ -186,9 +186,17 @@ func ImportDeclaredSubscriptions(
 	// Every declared row is a provider row and must name its account.
 	// billingimport resolves it first; this guard keeps a direct caller from
 	// reaching the DB constraint with a bare FK error.
+	imported := map[uuid.UUID]bool{}
 	for i := range facts {
 		if facts[i].PspID == uuid.Nil {
 			return nil, fmt.Errorf("declared import: subscription %q names no PSP; a declared provider row must state the account it came from", facts[i].SourceID)
+		}
+		// The book is what we know of its PSPs as of asOf.
+		if psp := facts[i].PspID; !imported[psp] {
+			imported[psp] = true
+			if err := RecordPSPImported(ctx, database, merchantID, psp, asOf); err != nil {
+				return nil, fmt.Errorf("declared import: record what PSP %s brought: %w", psp, err)
+			}
 		}
 	}
 	out := make(map[string]DeclaredOutcome, len(facts))

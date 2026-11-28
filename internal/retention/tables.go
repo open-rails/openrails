@@ -149,6 +149,7 @@ var Tables = map[string]Table{
 	"money_settings":             {Class: State},
 	"balance_watches":            {Class: State},
 	"psp_refresh_watermarks":     {Class: State},
+	"psp_freshness":              {Class: State},
 	"webhook_health":             {Class: State},
 	"nmi_bulk_checkpoints":       {Class: State},
 	"subscription_mrr":           {Class: State},

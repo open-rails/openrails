@@ -8,9 +8,11 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/reconcile"
 )
 
 // ListPSPs handles GET /v1/merchant/psps.
@@ -96,18 +98,29 @@ func UpdatePSP(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// markArmed sets each PSP's Armed as the payment page decides it.
+// markArmed sets each PSP's Armed as the payment page decides it, and its
+// known-through.
 func markArmed(r *httprequest.Request, svc *merchants.Service, id billing.MerchantID, psps []billing.PSP) error {
 	ids := make([]billing.PSPID, 0, len(psps))
 	for _, p := range psps {
 		ids = append(ids, p.ID)
 	}
-	armed, err := svc.ArmedPSPs(r.Request.Context(), id, ids, pspArmed(r.State.RailConfigs))
+	ctx := r.Request.Context()
+	armed, err := svc.ArmedPSPs(ctx, id, ids, pspArmed(r.State.RailConfigs))
+	if err != nil {
+		return err
+	}
+	fresh, _, err := reconcile.PSPFreshness(ctx, r.State.DB.Gen(ctx), id.UUID(), nil, r.Clock.Now())
 	if err != nil {
 		return err
 	}
 	for i := range psps {
 		psps[i].Armed = armed[psps[i].ID]
+		f, ok := fresh[psps[i].ID.UUID()]
+		if !ok {
+			f = reconcile.PSPFreshnessOf(gen.ListPSPFreshnessRow{}, r.Clock.Now())
+		}
+		psps[i].Freshness = f
 	}
 	return nil
 }

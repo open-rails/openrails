@@ -1185,6 +1185,8 @@ WHERE s.status = 'active'
   AND s.collection_policy <> 'engine'
   AND s.deleted_at IS NULL
   AND s.merchant_id > $3::uuid
+  AND NOT EXISTS (SELECT 1 FROM billing.psp_freshness f
+                  WHERE f.merchant_id = s.merchant_id AND f.psp_id = s.psp_id AND f.stale_since IS NOT NULL)
   AND NOT EXISTS (
       SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
@@ -1231,12 +1233,14 @@ func (q *Queries) ListOverdueRenewalMerchants(ctx context.Context, arg ListOverd
 }
 
 const listOverdueRenewals = `-- name: ListOverdueRenewals :many
-SELECT s.id, s.rail, s.current_period_ends_at
+SELECT s.id, s.psp_id, s.rail, s.current_period_ends_at
 FROM billing.subscriptions s
 WHERE s.merchant_id = $1::uuid
   AND s.deleted_at IS NULL
   AND s.status = 'active'
   AND s.collection_policy <> 'engine'
+  AND NOT EXISTS (SELECT 1 FROM billing.psp_freshness f
+                  WHERE f.merchant_id = s.merchant_id AND f.psp_id = s.psp_id AND f.stale_since IS NOT NULL)
   AND ((s.rail = 'nmi' AND s.current_period_ends_at < $2::timestamptz)
        OR (s.rail <> 'nmi' AND s.current_period_ends_at < $3::timestamptz))
   AND (s.current_period_ends_at, s.id) > ($4::timestamptz, $5::uuid)
@@ -1261,6 +1265,7 @@ type ListOverdueRenewalsParams struct {
 
 type ListOverdueRenewalsRow struct {
 	ID                  uuid.UUID
+	PspID               uuid.UUID
 	Rail                string
 	CurrentPeriodEndsAt *time.Time
 }
@@ -1268,7 +1273,8 @@ type ListOverdueRenewalsRow struct {
 // An active provider-billed subscription with no renewal payment whose paid
 // period ended before its rail's cutoff: nmi_overdue_before for an NMI
 // schedule, overdue_before for the rest. A clock reading only: the due pass
-// asks the provider (RenewalOverdue -> unverified). Oldest lapse first, a page
+// asks the provider (RenewalOverdue -> unverified). A stale PSP's renewals
+// are not overdue: its record ends before them. Oldest lapse first, a page
 // after the (period end, id) cursor.
 func (q *Queries) ListOverdueRenewals(ctx context.Context, arg ListOverdueRenewalsParams) ([]ListOverdueRenewalsRow, error) {
 	rows, err := q.db.Query(ctx, listOverdueRenewals,
@@ -1286,7 +1292,12 @@ func (q *Queries) ListOverdueRenewals(ctx context.Context, arg ListOverdueRenewa
 	var items []ListOverdueRenewalsRow
 	for rows.Next() {
 		var i ListOverdueRenewalsRow
-		if err := rows.Scan(&i.ID, &i.Rail, &i.CurrentPeriodEndsAt); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.PspID,
+			&i.Rail,
+			&i.CurrentPeriodEndsAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -2148,7 +2159,7 @@ func (q *Queries) ListUnverifiedSubscriptionIDsIn(ctx context.Context, arg ListU
 }
 
 const listUnverifiedSubscriptions = `-- name: ListUnverifiedSubscriptions :many
-SELECT s.id, s.psp_id, s.rail,
+SELECT s.id, s.psp_id, s.rail, s.unverified_reason::text AS unverified_reason,
        COALESCE(v.unverified_at, s.updated_at)::timestamptz AS unverified_at,
        COALESCE(v.reads, 0)::int AS reads, v.last_read_at
 FROM billing.subscriptions s
@@ -2157,7 +2168,7 @@ WHERE s.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'unverified'
-ORDER BY 4, s.id
+ORDER BY 5, s.id
 LIMIT $3::int
 `
 
@@ -2168,12 +2179,13 @@ type ListUnverifiedSubscriptionsParams struct {
 }
 
 type ListUnverifiedSubscriptionsRow struct {
-	ID           uuid.UUID
-	PspID        uuid.UUID
-	Rail         string
-	UnverifiedAt time.Time
-	Reads        int32
-	LastReadAt   *time.Time
+	ID               uuid.UUID
+	PspID            uuid.UUID
+	Rail             string
+	UnverifiedReason string
+	UnverifiedAt     time.Time
+	Reads            int32
+	LastReadAt       *time.Time
 }
 
 // LIFE life.unverified.*: unverified subscriptions with the instant they became
@@ -2191,6 +2203,7 @@ func (q *Queries) ListUnverifiedSubscriptions(ctx context.Context, arg ListUnver
 			&i.ID,
 			&i.PspID,
 			&i.Rail,
+			&i.UnverifiedReason,
 			&i.UnverifiedAt,
 			&i.Reads,
 			&i.LastReadAt,

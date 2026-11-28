@@ -60,6 +60,11 @@ const (
 	// once per crossing, re-armed by a funding.
 	HostEventBalanceLow      HostEventType = "balance.low"
 	HostEventBalanceDepleted HostEventType = "balance.depleted"
+	// A PSP's record went stale past its renewal deadline or its provider
+	// refused the credentials (psp.stale), and was caught up (psp.recovered):
+	// once per crossing.
+	HostEventPSPStale     HostEventType = "psp.stale"
+	HostEventPSPRecovered HostEventType = "psp.recovered"
 )
 
 // BalanceHostEvent is balance.low or balance.depleted: the customer's balance
@@ -146,4 +151,6 @@ type HostEvent struct {
 	Mandate *MandateHostEvent `json:"mandate"`
 	// Balance is set for balance.low and balance.depleted.
 	Balance *BalanceHostEvent `json:"balance"`
+	// PSP is set for psp.stale and psp.recovered.
+	PSP *PSPHostEvent `json:"psp"`
 }

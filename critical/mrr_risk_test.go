@@ -273,14 +273,26 @@ func TestMRRRisk(t *testing.T) {
 	})
 
 	t.Run("OR-J42-S14/unverified-enters-and-leaves", func(t *testing.T) {
-		a, accounts, sub := stripeMembership(t)
+		// Its renewal comes after the period: the world runs in the past, so
+		// no payment is dated in the database's future.
+		a, accounts, sub := stripeMembership(t, func(w *world) { w.clock.Advance(-40 * 24 * time.Hour) })
 		old := accounts.accounts["sk_test_old"].core
 		remote := *sub.RailSubscriptionID
-		// Stripe renewed it; OpenRails heard nothing, so the period's end
-		// leaves the row unverified until a read confirms it.
-		old.RenewSubscription(remote, true)
+		// OpenRails heard nothing past the period's end: the row is unverified,
+		// awaiting Stripe, and Stripe's read cannot tell.
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()) + 49*time.Hour)
 		fleet := startFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		require.Eventually(t, func() bool {
+			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+			return err == nil && current.Status == billing.SubscriptionUnverified && current.UnverifiedReason != nil && *current.UnverifiedReason == billing.UnverifiedUnconfirmed
+		}, 20*time.Second, 20*time.Millisecond, "a read that cannot tell leaves it unconfirmed")
+		risk := mrrRiskOf(t, a.alpha, sub.ID)
+		require.NotNil(t, risk, "unconfirmed is at risk")
+		require.Equal(t, []billing.MRRRiskReason{billing.MRRRiskUnverified}, risk.Reasons)
+		// Stripe renews it; the hourly retry's read verifies it.
+		old.RenewSubscription(remote, true)
+		a.clock.Advance(time.Hour + time.Minute)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.Eventually(t, func() bool {
 			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)

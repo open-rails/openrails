@@ -21,6 +21,7 @@ type (
 	DeliveryArgs = alertjob.DeliveryArgs
 	HoldAlert    = alertjob.HoldAlert
 	FindingAlert = alertjob.FindingAlert
+	PSPAlert     = alertjob.PSPAlert
 )
 
 // Channels snapshots the destinations of a's alert: the alert email, and the
@@ -82,6 +83,9 @@ func (s *Service) Deliver(ctx context.Context, a DeliveryArgs) error {
 			Summary:       fmt.Sprintf("A %s destructive-action ceiling tripped. New actions remain held until an authorized operator clears incident %s.", h.Scope, h.ID),
 			DashboardLink: s.opsLink("destructive_hold=" + h.ID.String()), FiredAt: h.OpenedAt}
 		key = "destructive-hold:" + h.ID.String()
+	case a.PSP != nil:
+		alert = s.pspAlert(*a.PSP)
+		key = "psp:" + a.PSP.ID.String() + ":" + strconv.FormatInt(a.PSP.StaleSince.UnixMicro(), 10) + ":" + strconv.FormatBool(a.PSP.Recovered)
 	case a.Finding != nil:
 		row, current, err := s.episode(ctx, *a.Finding)
 		if err != nil || !current {

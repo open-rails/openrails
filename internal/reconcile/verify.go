@@ -327,24 +327,38 @@ func (v *Verifier) verifyBatch(ctx context.Context, mid billing.MerchantID, ids 
 		lc := v.lifecycle()
 		var readErr error
 		for _, group := range byPSP(subs) {
-			readErr = errors.Join(readErr, v.verifyPSP(ctx, mid, lc, group, now))
+			err := v.verifyPSP(ctx, mid, lc, group, now)
+			recordReads(ctx, v.DB, mid, group, now, err)
+			readErr = errors.Join(readErr, err)
 		}
-		recordReads(ctx, v.DB, mid, subs, now, readErr)
 		return readErr
 	})
 }
 
 // verifyPSP reads one PSP's rows with that PSP's own credentials, archived or
-// not. A PSP that cannot arm reads nothing, so nothing is decided.
+// not, and records the read of the PSP. A PSP that cannot arm reads nothing,
+// so nothing is decided.
 func (v *Verifier) verifyPSP(ctx context.Context, mid billing.MerchantID, lc *subscriptions.SubscriptionLifecycleService, subs []*models.Subscription, now time.Time) error {
 	psp := subs[0].PspID
-	armed, provider, ok := v.Builder.BuildPSP(ctx, mid, psp)
-	if !ok {
-		return fmt.Errorf("verify: PSP %s is not armed; its rows stay unverified", psp)
+	armed, provider, arming := v.Builder.ArmPSP(ctx, mid, psp)
+	if arming == PSPArmingUnavailable {
+		return fmt.Errorf("verify: PSP %s: merchant configuration unavailable; its rows stay unverified", psp)
 	}
+	var err error
+	if arming == PSPUnarmed {
+		err = fmt.Errorf("verify: PSP %s: %w; its rows stay unverified", psp, ErrPSPNotArmed)
+	} else {
+		err = readPSP(ctx, v.DB, lc, armed, provider, psp, subs, now)
+	}
+	recordPSPReads(ctx, v.DB, mid.UUID(), psp, now, err)
+	return err
+}
+
+// readPSP reads one armed PSP's rows and applies what the provider says.
+func readPSP(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, armed MerchantPullClients, provider Provider, psp uuid.UUID, subs []*models.Subscription, now time.Time) error {
 	if provider == ProviderNMI {
 		reader, _ := NMIReader(armed)
-		return resolveNMIBatch(ctx, v.DB, lc, reader, psp, subs, now)
+		return resolveNMIBatch(ctx, database, lc, reader, psp, subs, now)
 	}
 	prober := armed.Probers[provider]
 	if prober == nil {
@@ -361,7 +375,7 @@ func (v *Verifier) verifyPSP(ctx context.Context, mid billing.MerchantID, lc *su
 		}
 		snaps[sub.ID] = snap
 	}
-	return errors.Join(readErr, applyVerified(ctx, v.DB, lc, provider, psp, subs, snaps, now, nil))
+	return errors.Join(readErr, applyVerified(ctx, database, lc, provider, psp, subs, snaps, now, nil))
 }
 
 // byPSP groups rows by the PSP that owns them, in first-seen order.
@@ -399,7 +413,8 @@ func loadUnverified(ctx context.Context, database *db.DB, mid billing.MerchantID
 	return out, nil
 }
 
-// recordReads stamps the provider reads on the rows' verification records.
+// recordReads stamps the provider reads on the rows' verification records. A
+// read that succeeded leaves a row it could not settle unconfirmed.
 func recordReads(ctx context.Context, database *db.DB, mid billing.MerchantID, subs []*models.Subscription, now time.Time, readErr error) {
 	ids := make([]uuid.UUID, 0, len(subs))
 	for _, s := range subs {
@@ -414,6 +429,12 @@ func recordReads(ctx context.Context, database *db.DB, mid billing.MerchantID, s
 		MerchantID: mid.UUID(), SubscriptionIds: ids, ReadAt: now, LastError: msg,
 	}); err != nil {
 		database.Log.WarnContext(ctx, "verify: could not record the reads", logx.Err(err))
+	}
+	if readErr != nil {
+		return
+	}
+	if _, err := database.Gen(ctx).MarkSubscriptionsUnconfirmed(ctx, gen.MarkSubscriptionsUnconfirmedParams{MerchantID: mid.UUID(), Ids: ids, ReadAt: now}); err != nil {
+		database.Log.WarnContext(ctx, "verify: could not mark the reads unconfirmed", logx.Err(err))
 	}
 }
 

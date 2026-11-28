@@ -2979,6 +2979,15 @@
     ],
     "OR-J08-S75": [
       "TestInvoiceExpiryMigration/OR-J08-S75/an-upgrade-clears-every-merchant-invoices-expiry-and-keeps-a-purchases"
+    ],
+    "OR-J15-S77": [
+      "TestKnownThrough/OR-J15-S77/an-imported-book-without-credentials-read-24-days-on-keeps-its-subscriptions-and-reports-its-known-through"
+    ],
+    "OR-J15-S78": [
+      "TestKnownThrough/OR-J15-S78/connecting-an-imported-psp-reads-its-gap-before-detection-resumes"
+    ],
+    "OR-J15-S79": [
+      "TestKnownThrough/OR-J15-S79/a-live-psp-whose-reads-fail-for-a-day-is-stale-then-caught-up"
     ]
   }
 }

@@ -1,6 +1,6 @@
 # OpenRails River jobs
 
-OpenRails registers 27 core River job kinds. Seven have recurring schedules.
+OpenRails registers 28 core River job kinds. Seven have recurring schedules.
 A kind identifies the worker that handles a job, and
 a queue controls which workers can take it. A shared River fleet can also
 contain AuthKit or host application jobs. [Worker registrations](../internal/app/river_register.go) ·
@@ -27,6 +27,7 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) �
 | --- | --- | --- | --- |
 | `openrails.balance_look` | `billing` | A balance change crosses a watched threshold, or the previous look schedules the next check | Checks one customer balance for expiring credits and low or depleted balance notices. [Worker](../internal/river/jobs_balance_watch.go) · [Scheduling](../internal/modules/money/balance_watch.go) |
 | `openrails.charge_attributions` | `billing` | A billing import declares charges that need provider evidence | Reads or waits for provider charge facts, then records each charge against its declared subscription. [Worker](../internal/river/jobs_charge_attributions.go) · [Import trigger](../internal/billingimport/billingimport.go) |
+| `openrails.psp_catch_up` | `billing` | A billing or PSP import names the PSP; a read of a stale PSP succeeds; the due pass, an hour after a stale PSP's last failed read | Arms the PSP: one that cannot be read is recorded stale; a stale one has the renewals the due pass skipped and its unverified rows read, then is current with what the gap hid. [Worker](../internal/river/jobs_psp_catch_up.go) · [Catch-up](../internal/reconcile/catch_up.go) |
 | `openrails.contact_erasures` | `billing` | A SCIM erasure that waits on the merchant's erasure budget or hold commits a job in the same transaction; clearing the erasure hold brings it forward | Runs the merchant's waiting contact erasures, oldest first, within its erasure budget while the hold is clear, and looks again every 10 minutes while any wait. [Worker](../internal/river/jobs_contact_erasures.go) · [Drain](../internal/scim/erasure.go) |
 | `openrails.customer_converge` | `billing` | A customer-affecting mutation commits a job in the same transaction | Reconciles grant effects, references, duplicate charges, findings, and access-ended notices for one customer. [Worker](../internal/river/jobs_customer_converge.go) · [Enqueue](../internal/convergejob/convergejob.go) |
 | `openrails.customer_message` | `billing` | Queued in the transaction that records its billing fact (`billingfact.Record`) | Sends one customer message, or records why not; a failed send is retried with backoff, ten attempts in all. [Worker](../internal/river/jobs_customer_messages.go) · [Send](../internal/modules/messages/send.go) |

@@ -1713,6 +1713,7 @@ export type PSP = {
   archived: boolean
   open_obligations: number
   armed: boolean
+  freshness: PSPFreshness
   gateway_id?: string
   account_id?: string
   client_accnum?: string
@@ -1730,9 +1731,30 @@ export type PSP = {
   updated_at: string
 }
 
+export type PSPCatchUp = {
+  from: string
+  through: string
+  renewed: number
+  failed: number
+  canceled: number
+  unconfirmed: number
+}
+
 export type PSPCredential = {
   configured: boolean
   validated_at: string | null
+}
+
+export type PSPFreshness = {
+  known_through: string | null
+  source: "import" | "none" | "now" | "read" | "webhook"
+  current: boolean
+  stale_since: string | null
+  cause: "catching_up" | "credentials_refused" | "imported" | "not_configured" | "unreachable" | "webhooks_silent"
+  severity: "critical" | "info" | "warning"
+  last_read_at: string | null
+  failing_since: string | null
+  catch_up: PSPCatchUp | null
 }
 
 export type PSPImport = {
@@ -2548,6 +2570,7 @@ export type Subscription = {
   rail: "ccbill" | "nmi" | "solana" | "stripe"
   rail_subscription_id: string | null
   status: "active" | "awaiting_method" | "canceled" | "past_due" | "pending" | "unverified"
+  unverified_reason: "awaiting_provider" | "unconfirmed" | null
   scheduled_change: ScheduledChange | null
   payment_method_id: string | null
   mandate_id: string | null
