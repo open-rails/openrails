@@ -3046,7 +3046,7 @@
     {
       "id": "OR-J38-S48",
       "journey": "J38",
-      "name": "A CCBill notice for a subscription OpenRails does not hold answers 200 and changes nothing; a rebill for one is recorded once for review"
+      "name": "A CCBill notice for a subscription OpenRails does not hold answers 200 and changes nothing; a rebill for one keeps retrying and is booked once when the subscription lands"
     },
     {
       "id": "OR-J28-S11",

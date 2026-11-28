@@ -1478,12 +1478,10 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 
 	var blocked error
 	var sub *models.Subscription
-	var subscriptionNotFound bool
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := db.NewWithPgxTx(s.Log, tx)
 		var err error
 		if sub, err = subscriptions.NewSubscriptionRepo(d).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), railSubID); err != nil {
-			subscriptionNotFound = db.IsNotFound(err)
 			return fmt.Errorf("failed to get subscription for renewal: %w", err)
 		}
 		at := ccbillEventPurchasedAt(data.Timestamp)
@@ -1528,10 +1526,6 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 			Operation: "provider_bill_unresolved", TransactionID: transactionID, Err: err,
 			Metadata: map[string]any{"rail_subscription_id": railSubID, "next_renewal_date": data.NextRenewalDate}}); holdErr != nil {
 			return holdErr
-		}
-		if subscriptionNotFound {
-			s.Log.WarnContext(ctx, "CCBill notice names a subscription OpenRails does not hold; answered without effect", "eventType", s.Data.EventType, "rail_subscription_id", railSubID)
-			return nil
 		}
 		return err
 	}
