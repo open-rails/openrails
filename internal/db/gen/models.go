@@ -1932,7 +1932,7 @@ type BillingPspFreshness struct {
 	FailedAt *time.Time
 	// Why its reads fail: not_configured (no credentials to read with), credentials_refused (the provider refused them) or unreachable (the provider did not answer).
 	Failure *string
-	// The evidence instant (as_of) of the latest declared book naming the PSP.
+	// The evidence instant of the latest import naming the PSP; imported_from says how it was found.
 	ImportedThrough *time.Time
 	// When the PSP's record stopped being complete through now; NULL while it is. The overdue detector and the passes that infer from absence skip its subscriptions until a catch-up read clears it.
 	StaleSince *time.Time
@@ -1943,6 +1943,8 @@ type BillingPspFreshness struct {
 	CatchUp   []byte
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// How imported_through was found: as_of, an import's own evidence instant; latest_record, for an import that recorded none, the latest event the provider reported of what it brought (a subscription's start or a payment): complete through at least it.
+	ImportedFrom *string
 }
 
 // One read-only pull of a PSP's catalog, customers, subscriptions and transaction history, and the merchant's rules for linking them to customers. history_through is how far the transaction history has been read. Deleting the import deletes its records.
