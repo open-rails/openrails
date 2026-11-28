@@ -139,9 +139,6 @@ func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 	if err := FromJSONB(p.Metadata, &m.Metadata, "payments.metadata"); err != nil {
 		return nil, err
 	}
-	if err := FromJSONB(p.CreditGrantSnapshot, &m.CreditGrantSnapshot, "payments.credit_grant_snapshot"); err != nil {
-		return nil, err
-	}
 	if p.Rail != nil {
 		m.Rail = Rail(*p.Rail)
 	}

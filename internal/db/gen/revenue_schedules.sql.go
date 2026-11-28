@@ -433,7 +433,7 @@ func (q *Queries) ListInvoiceApplications(ctx context.Context, arg ListInvoiceAp
 }
 
 const listInvoiceReceipts = `-- name: ListInvoiceReceipts :many
-SELECT p.id, p.channel, p.rail, p.transaction_id, p.amount, p.list_amount, p.currency, p.status, p.subscription_id, p.refunded_payment_id, p.discount_code, p.discount_reason, p.discount_metadata, p.metadata, p.purchased_at, p.created_at, p.card_brand, p.card_last4, p.merchant_id, p.customer_id, p.psp_id, p.attempt_kind, p.failure_code, p.failure_reason, p.reversal_kind, p.token_type, p.deleted_at, p.destructive_run_id, p.destructive_run_class, p.money_movement, p.credit_grant_snapshot, p.invoice_id, p.ledger_transfer_id, p.quantity, p.refund_reason, p.payment_method_id FROM billing.payments p
+SELECT p.id, p.channel, p.rail, p.transaction_id, p.amount, p.list_amount, p.currency, p.status, p.subscription_id, p.refunded_payment_id, p.discount_code, p.discount_reason, p.discount_metadata, p.metadata, p.purchased_at, p.created_at, p.card_brand, p.card_last4, p.merchant_id, p.customer_id, p.psp_id, p.attempt_kind, p.failure_code, p.failure_reason, p.reversal_kind, p.token_type, p.deleted_at, p.destructive_run_id, p.destructive_run_class, p.money_movement, p.invoice_id, p.ledger_transfer_id, p.quantity, p.refund_reason, p.payment_method_id FROM billing.payments p
 JOIN billing.invoices o ON o.merchant_id = p.merchant_id AND o.id = p.invoice_id
 WHERE p.merchant_id = $1::uuid AND p.invoice_id = $2::uuid
   AND p.amount > 0 AND p.refunded_payment_id IS NULL AND p.reversal_kind IS NULL
@@ -490,7 +490,6 @@ func (q *Queries) ListInvoiceReceipts(ctx context.Context, arg ListInvoiceReceip
 			&i.DestructiveRunID,
 			&i.DestructiveRunClass,
 			&i.MoneyMovement,
-			&i.CreditGrantSnapshot,
 			&i.InvoiceID,
 			&i.LedgerTransferID,
 			&i.Quantity,

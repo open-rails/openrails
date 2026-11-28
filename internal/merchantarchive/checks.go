@@ -347,28 +347,15 @@ var referenceChecks = []rowCheck{
        OR prices.currency <> ALL(` + registryCurrencies + `)
        OR (prices.customer_amount IS NULL AND prices.amount<=0)))))`},
 
-	// A native lot retains its payment's accepted promise. The product's current
-	// benefit is deliberately irrelevant to previously purchased credit.
-	{"payments", `credit_grant_snapshot IS NOT NULL AND status='succeeded' AND NOT EXISTS (
-  SELECT 1 FROM billing.credit_grants g JOIN billing.invoice_lines l ON l.merchant_id=$1 AND l.invoice_id=payments.invoice_id AND l.product_id=g.product_id
-  WHERE g.merchant_id=$1 AND g.payment_id=payments.id AND g.source_id=payments.id::text
-    AND g.customer_id=payments.customer_id AND g.product_id=l.product_id
-    AND g.unit=payments.credit_grant_snapshot->>'currency' AND g.units=(payments.credit_grant_snapshot->>'amount')::bigint
-    AND g.paid_amount=payments.amount AND g.paid_currency=payments.currency AND payments.amount>0
-    AND g.starts_at=(payments.credit_grant_snapshot->>'starts_at')::timestamptz
-    AND g.expires_at=(payments.credit_grant_snapshot->>'expires_at')::timestamptz)`},
-	// An invoice's lot keeps its line's promise instead: the frozen benefit per
+	// A purchased lot keeps its invoice line's promise: the frozen benefit per
 	// unit, and the line's amount as what was paid for it.
 	{"credit_grants", `payment_id IS NOT NULL AND NOT EXISTS (
   SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=credit_grants.payment_id
     AND p.status='succeeded' AND p.customer_id=credit_grants.customer_id AND p.currency=credit_grants.paid_currency
-    AND ((p.credit_grant_snapshot IS NOT NULL
-        AND (p.credit_grant_snapshot->>'amount')::bigint=credit_grants.units
-        AND p.amount=credit_grants.paid_amount)
-      OR EXISTS (SELECT 1 FROM billing.invoice_lines l WHERE l.merchant_id=$1 AND l.invoice_id=p.invoice_id
+    AND EXISTS (SELECT 1 FROM billing.invoice_lines l WHERE l.merchant_id=$1 AND l.invoice_id=p.invoice_id
         AND l.product_id=credit_grants.product_id AND l.credit_grant IS NOT NULL
         AND (l.credit_grant->>'amount')::bigint*COALESCE(l.quantity,1)=credit_grants.units
-        AND l.amount=credit_grants.paid_amount)))`},
+        AND l.amount=credit_grants.paid_amount))`},
 
 	{"provider_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
           (m.id::text=(CASE WHEN provider_intents.intent_type='initial_membership' THEN provider_intents.payload->'terms'->>'payment_method_id' ELSE provider_intents.payload->>'payment_method_id' END) OR

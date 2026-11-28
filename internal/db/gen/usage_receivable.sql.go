@@ -152,7 +152,7 @@ func (q *Queries) ListUsagePaymentReopenings(ctx context.Context, arg ListUsageP
 }
 
 const listUsagePaymentReversals = `-- name: ListUsagePaymentReversals :many
-SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, invoice_id, ledger_transfer_id, quantity, refund_reason, payment_method_id FROM billing.payments
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, invoice_id, ledger_transfer_id, quantity, refund_reason, payment_method_id FROM billing.payments
 WHERE merchant_id = $1::uuid AND refunded_payment_id = $2::uuid
   AND reversal_kind IN ('refund', 'chargeback', 'dispute_reversal') AND status = 'succeeded' AND deleted_at IS NULL
 ORDER BY created_at, id
@@ -205,7 +205,6 @@ func (q *Queries) ListUsagePaymentReversals(ctx context.Context, arg ListUsagePa
 			&i.DestructiveRunID,
 			&i.DestructiveRunClass,
 			&i.MoneyMovement,
-			&i.CreditGrantSnapshot,
 			&i.InvoiceID,
 			&i.LedgerTransferID,
 			&i.Quantity,

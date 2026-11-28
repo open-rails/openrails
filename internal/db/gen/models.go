@@ -1403,8 +1403,6 @@ type BillingPayment struct {
 	DestructiveRunClass *string
 	// rail|none — positive marker for real money movement at the payment rail. 'rail' rows carry a rail-issued transaction_id and are the ONLY rows the host settlement feed publishes; 'none' rows are bookkeeping (attempt anchors, declines, placeholders). Fail-closed default: undeclared = 'none'.
 	MoneyMovement string
-	// Accepted credit promise and first successful fulfillment dates; independent of subsequent catalog edits.
-	CreditGrantSnapshot []byte
 	// Required immutable bill identity for every payment and reversal. Prices and products belong to the invoice lines.
 	InvoiceID *uuid.UUID
 	// The owed payment that settled a usage invoice's charge or remittance. A balance repayment moves no money and is only its ledger transfer.

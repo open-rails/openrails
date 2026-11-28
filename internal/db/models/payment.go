@@ -98,8 +98,6 @@ type Payment struct {
 	DiscountMetadata map[string]any `json:"discount_metadata,omitempty"`
 	Metadata         map[string]any `json:"metadata,omitempty"`
 
-	CreditGrantSnapshot *CreditGrantSnapshot `json:"credit_grant_snapshot,omitempty"`
-
 	PurchasedAt time.Time `json:"purchased_at"`
 	CreatedAt   time.Time `json:"created_at"`
 
