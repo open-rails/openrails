@@ -282,7 +282,7 @@ In `internal/retention` (`tables.go`; `OutboxIntentTypes` in `retention.go`), in
 
 Checks:
 - Each table comment's `Retention:` sentence matches its `tables.go` rule (`State` tables carry none).
-- `provider_intents_updated_at_idx`, `DeleteFinishedOutboxIntentsBefore` and `OutboxIntentTypes` list the same types; nothing checks it.
+- `DeleteFinishedOutboxIntentsBefore` and the cleanup's merchant discovery list exactly `OutboxIntentTypes`, and `provider_intents_updated_at_idx` covers it; `TestOutboxIntentTypesAreOneList` checks both, and that a handler runs each type.
 - OR-J29-S06: retention and export refuse to discard unresolved money; `immutable_operation_log` blocks log edits.
 - OR-J43-S08: an operation's `attempting` entry is written before its provider call and outlives a crash; OR-J43-S11: the breaker counts an in-flight attempt only once `sent_attempt` names it.
 

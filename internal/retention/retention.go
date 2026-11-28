@@ -96,20 +96,17 @@ func Days(period time.Duration) int32 {
 // to a provider: once finished, nothing reads them back, and they are deleted
 // after ProviderWrites. Every other intent type is the record of money moved
 // or refused, a membership enrolled, a card erased or a checkout origin
-// registered, and is permanent. The partial index
-// provider_intents_updated_at_idx and the cleanup query
-// DeleteFinishedOutboxIntentsBefore list the same types; nothing checks them.
+// registered, and is permanent: nmi_recurring_confirmation runs a card
+// transaction, and price_migration_push is the record of a price migration's
+// command. The cleanup queries list exactly these types and the partial index
+// provider_intents_updated_at_idx covers them; TestOutboxIntentTypesAreOneList
+// (internal/app) checks both, and that a handler runs each.
 var OutboxIntentTypes = []string{
 	"nmi_delete_subscription",
 	"stripe_cancel_subscription",
 	"stripe_resume_subscription",
 	"ccbill_cancel_subscription",
-	"nmi_payment_method_update",
 	"nmi_payment_source_update",
 	"nmi_card_vault",
-	"network_token",
-	"stripe_archive_price",
-	"stripe_archive_product",
-	"solana_sunset_plan",
 	"account_updater",
 }

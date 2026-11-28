@@ -131,7 +131,7 @@ WHERE merchant_id = $1::uuid
     WHERE pi.merchant_id = $1::uuid
       AND pi.status IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
       AND pi.destructive_run_id IS NULL
-      AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'stripe_resume_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'account_updater')
+      AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'stripe_resume_subscription', 'ccbill_cancel_subscription', 'nmi_payment_source_update', 'nmi_card_vault', 'account_updater')
       AND pi.updated_at < $2::timestamptz
     ORDER BY pi.updated_at
     LIMIT $3::int
@@ -555,7 +555,7 @@ FROM (
       WHERE ($1::uuid IS NULL OR pi.merchant_id > $1::uuid)
         AND pi.status IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
         AND pi.destructive_run_id IS NULL
-        AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'stripe_resume_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'account_updater')
+        AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'stripe_resume_subscription', 'ccbill_cancel_subscription', 'nmi_payment_source_update', 'nmi_card_vault', 'account_updater')
         AND pi.updated_at < $11::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
