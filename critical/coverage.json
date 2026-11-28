@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 919,
+  "scenario_count": 920,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2981,12 +2981,17 @@
     {
       "id": "OR-J42-S41",
       "journey": "J42",
-      "name": "An upgrade turns each opening an import wrote into its subscriptions' history from their start, gives an ended import its history, and keeps the live movements after it"
+      "name": "An upgrade turns each opening an import wrote into its subscriptions' history from their start, gives an ended import its history to its paid-through end, and keeps the live movements after it"
     },
     {
       "id": "OR-J42-S42",
       "journey": "J42",
       "name": "An upgrade turns the openings of more customers than PostgreSQL's default lock table holds into history without a lock per customer"
+    },
+    {
+      "id": "OR-J42-S43",
+      "journey": "J42",
+      "name": "An imported subscription stops adding MRR at its paid-through end, though its cancel was recorded years later; a chargeback ends it at once; one paid through no later than its start adds nothing"
     },
     {
       "id": "OR-J28-S09",

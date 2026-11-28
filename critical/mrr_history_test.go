@@ -267,6 +267,42 @@ func TestMRRHistory(t *testing.T) {
 			require.Equal(t, booked, imported, "%v by %v", q.Measures, q.By)
 		}
 	})
+
+	t.Run("OR-J42-S43/an-ended-subscription-stops-adding-mrr-at-its-paid-through-end", func(t *testing.T) {
+		iw := bootImportWorld(t, "ccbill")
+		price := ccbillMemberPrice(t, iw.alpha)
+		now := iw.clock.Now().UTC().Truncate(time.Second)
+		t0 := now.Add(-2400 * day)
+		cleanup := now.Add(-290 * day)
+		// Lapsed years before a cleanup marked it canceled; charged back
+		// before the end of what it paid for; paid for nothing, canceled later.
+		lapsed, disputed, unpaid := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
+		lapsedEnd, disputedStart := t0.Add(30*day), t0.Add(400*day)
+		disputedAt, disputedEnd := disputedStart.Add(10*day), disputedStart.Add(30*day)
+		res, err := iw.alpha.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: now, DefaultPSP: billing.PSPRef{Key: "ccbill"},
+			Customers: []billing.DeclaredCustomer{{Customer: lapsed}, {Customer: disputed}, {Customer: unpaid}},
+			Subscriptions: []billing.DeclaredSubscription{
+				{SourceID: "lapsed", Customer: lapsed, Price: price, Rail: "ccbill", RailSubscriptionID: "910000000000000431", StartedAt: t0, PaidThrough: &lapsedEnd,
+					Cancel: billing.CancelEvidence{Kind: "user_canceled", At: cleanup}},
+				{SourceID: "disputed", Customer: disputed, Price: price, Rail: "ccbill", RailSubscriptionID: "910000000000000432", StartedAt: disputedStart, PaidThrough: &disputedEnd,
+					Cancel: billing.CancelEvidence{Kind: "chargeback", At: disputedAt}},
+				{SourceID: "unpaid", Customer: unpaid, Price: price, Rail: "ccbill", RailSubscriptionID: "910000000000000433", StartedAt: t0, PaidThrough: &t0,
+					Cancel: billing.CancelEvidence{Kind: "user_canceled", At: cleanup}},
+			}})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"lapsed", "disputed", "unpaid"}, res.Imported, "%v", res.Reasons)
+
+		moves := mrrMoves(t, iw.world, iw.alpha, lapsed)
+		require.Equal(t, []string{mrrKind("USD", "new", ccbillMemberMRR) + " " + stamp(t0), mrrKind("USD", "churn", -ccbillMemberMRR) + " " + stamp(lapsedEnd)}, at(moves),
+			"a cancel recorded after its service lapsed churns where its service ended")
+		require.True(t, *moves[1].Voluntary, "the customer canceled")
+		moves = mrrMoves(t, iw.world, iw.alpha, disputed)
+		require.Equal(t, []string{mrrKind("USD", "new", ccbillMemberMRR) + " " + stamp(disputedStart), mrrKind("USD", "churn", -ccbillMemberMRR) + " " + stamp(disputedAt)}, at(moves),
+			"a chargeback ends it at once")
+		require.False(t, *moves[1].Voluntary)
+		require.Equal(t, "chargeback", moves[1].Cause)
+		require.Empty(t, mrrMoves(t, iw.world, iw.alpha, unpaid), "paid through no later than its start: it added nothing")
+	})
 }
 
 // An upgrade turns each opening an import wrote into its subscriptions'
@@ -288,10 +324,10 @@ func TestMRRHistoryUpgrade(t *testing.T) {
 		exec("INSERT INTO "+table("prices")+" (id, merchant_id, product_id, key, amount, currency, archived, billing_interval_hours) VALUES ($1, $2, $3, 'member', 10000000, 'USD', false, 720)",
 			price, m, product)
 		date := func(month time.Month, day int) time.Time { return time.Date(2025, month, day, 10, 0, 0, 0, time.UTC) }
-		live, ended := uuid.New(), uuid.New()
-		liveSub, endedSub := uuid.New(), uuid.New()
-		for _, c := range []uuid.UUID{live, ended} {
-			exec("INSERT INTO "+table("customers")+" (id, merchant_id, created_at, last_seen_at) VALUES ($1, $2, $3, $3)", c, m, date(1, 1))
+		live, ended, lapsed := uuid.New(), uuid.New(), uuid.New()
+		liveSub, endedSub, lapsedSub := uuid.New(), uuid.New(), uuid.New()
+		for _, c := range []uuid.UUID{live, ended, lapsed} {
+			exec("INSERT INTO "+table("customers")+" (id, merchant_id, created_at, last_seen_at) VALUES ($1, $2, $3, $3)", c, m, date(1, 1).AddDate(-6, 0, 0))
 		}
 		insert := "INSERT INTO " + table("subscriptions") + ` (id, merchant_id, customer_id, product_id, price_id, status, rail, collection_policy, rail_subscription_id, psp_id,
 			started_at, current_period_starts_at, current_period_ends_at, canceled_at, ended_at, cancel_type, cancel_feedback, created_at, updated_at)
@@ -307,6 +343,11 @@ func TestMRRHistoryUpgrade(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx, insert, endedSub, m, ended, product, price, "canceled", "930000000000000002", psp, date(1, 15), date(4, 15), date(5, 15), date(5, 15), date(5, 15),
 			"user", "imported: declared user_canceled", date(5, 15))
+		require.NoError(t, err)
+		// Paid through March 2019; a cleanup marked it canceled in February 2025.
+		lapsedStart, lapsedEnd, cleanup := date(2, 1).AddDate(-6, 0, 0), date(3, 1).AddDate(-6, 0, 0), date(2, 6)
+		_, err = tx.Exec(ctx, insert, lapsedSub, m, lapsed, product, price, "canceled", "930000000000000003", psp, lapsedStart, lapsedStart, lapsedEnd, cleanup, cleanup,
+			"user", "imported: declared user_canceled", cleanup)
 		require.NoError(t, err)
 		require.NoError(t, tx.Commit(ctx))
 		// Then live: the customer cancels.
@@ -339,6 +380,8 @@ func TestMRRHistoryUpgrade(t *testing.T) {
 			"the opening is its history from its start; the live churn stands")
 		require.Equal(t, []string{mrrKind("USD", "new", 10_000_000) + " " + stamp(date(1, 15)), mrrKind("USD", "churn", -10_000_000) + " " + stamp(date(5, 15))}, kinds(ended),
 			"the ended membership gains its history")
+		require.Equal(t, []string{mrrKind("USD", "new", 10_000_000) + " " + stamp(lapsedStart), mrrKind("USD", "churn", -10_000_000) + " " + stamp(lapsedEnd)}, kinds(lapsed),
+			"a cancel recorded after its service lapsed churns where its service ended")
 		var openings, importCauses int
 		require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FILTER (WHERE kind = 'opening'), count(*) FILTER (WHERE cause = 'import') FROM "+table("mrr_movements")+" WHERE merchant_id = $1", m).
 			Scan(&openings, &importCauses))

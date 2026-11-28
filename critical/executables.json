@@ -1675,6 +1675,9 @@
     "OR-J42-S42": [
       "TestMRRHistoryUpgrade/OR-J42-S42/an-upgrade-turns-thousands-of-openings-into-history-without-a-lock-per-customer"
     ],
+    "OR-J42-S43": [
+      "TestMRRHistory/OR-J42-S43/an-ended-subscription-stops-adding-mrr-at-its-paid-through-end"
+    ],
     "OR-J42-S36": [
       "TestMRRFacts/OR-J42-S36/at-risk-mrr-follows-a-price-change-during-a-case"
     ],
