@@ -40,3 +40,43 @@ func TestAOneOffToolsStripeWriteIsSentOnItsPSPsCheck(t *testing.T) {
 	require.NoError(t, response.Body.Close())
 	require.Len(t, stripe.Submitted("/v1/refunds"), 1)
 }
+
+func TestPSPDeclarationPreviousWebhookSecretNeedsOverlapExpiry(t *testing.T) {
+	const previous = "previous-webhook-secret-at-least-32-characters"
+	for _, tc := range []struct {
+		name             string
+		rail             billing.Rail
+		previous, expiry string
+		refused          bool
+	}{
+		{"missing expiry", billing.RailNMI, previous, "", true},
+		{"invalid expiry", billing.RailCCBill, previous, "invalid", true},
+		{"valid expiry", billing.RailNMI, previous, "2026-12-01T00:00:00Z", false},
+		{"empty previous secret", billing.RailNMI, "", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			accountID, previousKey := "overlap", "webhook_signing_secret_previous"
+			secrets := map[string]string{}
+			if tc.rail == billing.RailCCBill {
+				accountID, previousKey = "999999-0000", "webhook_token_previous"
+				secrets["salt"] = "test-salt"
+			}
+			secrets[previousKey] = tc.previous
+			settings := map[string]any{}
+			if tc.expiry != "" {
+				settings[merchants.WebhookOverlapExpiresKey] = tc.expiry
+			}
+			doc := billing.MerchantDocument{DisplayName: "Overlap", PSPs: billing.PSPs{"overlap": {
+				Rail: tc.rail, AccountID: accountID, Secrets: secrets, Settings: settings,
+			}}}
+			served, refused := ScopeDeclaration(nil, doc)
+			if tc.refused {
+				require.Equal(t, "psps.overlap.webhook_overlap_expires_at (RFC 3339) is required with secrets."+previousKey, refused[merchantdocs.PSPDoc("overlap")])
+				require.NotContains(t, served.PSPs, "overlap")
+			} else {
+				require.Empty(t, refused)
+				require.Contains(t, served.PSPs, "overlap")
+			}
+		})
+	}
+}

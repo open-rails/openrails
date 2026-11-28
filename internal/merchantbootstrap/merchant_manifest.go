@@ -307,6 +307,15 @@ func validatePSPDeclaration(key string, account billing.PSPConfig) (billing.PSPC
 	if rail == string(models.RailCCBill) && len(account.Secrets) > 0 && strings.TrimSpace(account.Secrets["salt"]) == "" {
 		return account, fmt.Errorf("psps.%s.secrets.salt is required", key)
 	}
+	for name, secret := range account.Secrets {
+		previous := strings.ToLower(strings.TrimSpace(name))
+		if (previous == "webhook_signing_secret_previous" || previous == "webhook_token_previous") && strings.TrimSpace(secret) != "" {
+			raw, _ := account.Settings[merchants.WebhookOverlapExpiresKey].(string)
+			if _, err := time.Parse(time.RFC3339, strings.TrimSpace(raw)); err != nil {
+				return account, fmt.Errorf("psps.%s.webhook_overlap_expires_at (RFC 3339) is required with secrets.%s", key, previous)
+			}
+		}
+	}
 	if rail == string(models.RailStripe) {
 		if raw, ok := account.Settings["publishable_key"]; ok {
 			value, _ := raw.(string)
