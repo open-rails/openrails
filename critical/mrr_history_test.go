@@ -290,7 +290,7 @@ func TestMRRHistoryUpgrade(t *testing.T) {
 		names, err := fs.Glob(postgresmigrations.FS, "*.up.sql")
 		require.NoError(t, err)
 		for _, name := range names {
-			if name >= "0015_" {
+			if name >= "0016_" {
 				continue
 			}
 			data, err := fs.ReadFile(postgresmigrations.FS, name)
