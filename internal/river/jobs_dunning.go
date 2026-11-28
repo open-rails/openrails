@@ -81,7 +81,10 @@ type DunningWorker struct {
 	// provider-intent fleet performs the accepted charge and receipt recovery.
 	EngineCollections *money.MoneyService
 	Lifecycle         *subscriptions.SubscriptionLifecycleService
-	Log               *slog.Logger
+	// Readers arms a PSP's reader: an overdue renewal is asked about only
+	// where its PSP can be read. Zero arms nothing and asks anyway.
+	Readers *reconcile.MerchantFetcherBuilder
+	Log     *slog.Logger
 }
 
 // storeArmsNMI reports whether the merchant-secrets store can arm an NMI
@@ -104,9 +107,11 @@ func (w *DunningWorker) now() time.Time {
 	return time.Now()
 }
 
-// Pass runs the due work, then asks the provider about overdue renewals.
+// Pass runs the due work, queues the catch-up of each stale PSP, then asks
+// the provider about overdue renewals of the PSPs that are not stale.
 func (w *DunningWorker) Pass(ctx context.Context) error {
-	return errors.Join(w.due(ctx), w.overdueRenewals(ctx, w.now().UTC()))
+	now := w.now().UTC()
+	return errors.Join(w.due(ctx), queueCatchUps(ctx, w.DB, now), w.overdueRenewals(ctx, now))
 }
 
 func (w *DunningWorker) due(ctx context.Context) error {
@@ -264,7 +269,8 @@ func (w *DunningWorker) DueBy(ctx context.Context, at time.Time) (bool, error) {
 // rail's deadline to unverified, access kept: reconcile.NMIRebillDeadline for
 // an NMI schedule, reconcile.PeriodGrace for Stripe and CCBill. A clock
 // reading is not evidence, so it only asks the provider: the verifier reads
-// the row at once. The row leaves the due set.
+// the row at once. The row leaves the due set. A stale PSP's renewals are
+// not overdue; a PSP found unreadable here goes stale and its rows wait.
 func (w *DunningWorker) overdueRenewals(ctx context.Context, now time.Time) error {
 	if w.Lifecycle == nil {
 		return errors.New("overdue renewals: lifecycle not wired")
@@ -305,6 +311,7 @@ func (w *DunningWorker) overdueMerchantRenewals(ctx context.Context, mid uuid.UU
 	var merchantErr error
 	var afterAt time.Time
 	afterID := uuid.Nil
+	readable := map[uuid.UUID]bool{}
 	for {
 		rows, err := w.DB.Gen(ctx).ListOverdueRenewals(ctx, gen.ListOverdueRenewalsParams{
 			MerchantID: mid, NmiOverdueBefore: cutoffs.nmi, OverdueBefore: cutoffs.other, AfterDueAt: afterAt, AfterID: afterID, RowLimit: subscriptions.DueDunningBatch,
@@ -313,6 +320,14 @@ func (w *DunningWorker) overdueMerchantRenewals(ctx context.Context, mid uuid.UU
 			return errors.Join(merchantErr, err)
 		}
 		for _, row := range rows {
+			ok, seen := readable[row.PspID]
+			if !seen {
+				ok = w.pspReadable(ctx, mid, row.PspID)
+				readable[row.PspID] = ok
+			}
+			if !ok {
+				continue
+			}
 			if _, err := w.Lifecycle.AskProviderOverdueRenewal(ctx, w.DB, row.ID, *row.CurrentPeriodEndsAt); err != nil {
 				merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", row.ID, err))
 			}
@@ -323,6 +338,25 @@ func (w *DunningWorker) overdueMerchantRenewals(ctx context.Context, mid uuid.UU
 		last := rows[len(rows)-1]
 		afterAt, afterID = *last.CurrentPeriodEndsAt, last.ID
 	}
+}
+
+// pspReadable reports whether psp's reader arms. One that cannot goes stale:
+// what OpenRails knows of it stops at its last evidence, and its renewals are
+// not overdue. Configuration that could not be read is asked again next pass.
+func (w *DunningWorker) pspReadable(ctx context.Context, mid, psp uuid.UUID) bool {
+	if w.Readers == nil {
+		return true
+	}
+	_, _, arming := w.Readers.ArmPSP(ctx, billing.MerchantID(mid), psp)
+	switch arming {
+	case reconcile.PSPArmed:
+		return true
+	case reconcile.PSPUnarmed:
+		if err := reconcile.RecordPSPRead(ctx, w.DB, mid, psp, w.now().UTC(), reconcile.ErrPSPNotArmed); err != nil {
+			w.Log.WarnContext(ctx, "overdue renewals: could not record the unreadable PSP", logx.Err(err), "psp_id", psp)
+		}
+	}
+	return false
 }
 
 // FindingDuePassRefused is a subscription the due pass could not process.

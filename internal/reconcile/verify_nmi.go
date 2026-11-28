@@ -455,6 +455,7 @@ func (v *Verifier) bulkReadPSP(ctx context.Context, mid billing.MerchantID, psp 
 	errs := applyVerified(ctx, v.DB, lc, ProviderNMI, psp, subs, snaps, now, client)
 	errs = errors.Join(errs, resolveNMIBatch(ctx, v.DB, lc, client, psp, fallback, now))
 	recordReads(ctx, v.DB, mid, subs, now, errs)
+	recordPSPReads(ctx, v.DB, mid.UUID(), psp, now, errs)
 	if errs != nil {
 		return errs
 	}

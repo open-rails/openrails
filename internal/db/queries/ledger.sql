@@ -8,12 +8,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND account_type = sqlc.arg(account_type)::text
   AND currency = sqlc.arg(currency)::text
   AND customer_id IS NOT DISTINCT FROM sqlc.narg(customer_id)::uuid
-  AND psp_id IS NOT DISTINCT FROM sqlc.narg(psp_id)::uuid;
+  AND psp_id IS NOT DISTINCT FROM sqlc.narg(psp_id)::uuid
+  AND bank_account_id IS NOT DISTINCT FROM sqlc.narg(bank_account_id)::uuid;
 
 -- ListOpenGeneralLedgerAccounts: the merchant-wide general-ledger accounts
 -- open.
 -- name: ListOpenGeneralLedgerAccounts :many
-SELECT account_type, currency, psp_id
+SELECT account_type, currency, psp_id, bank_account_id
 FROM billing.ledger_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND book = 'general' AND customer_id IS NULL;
@@ -29,6 +30,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price->>'currency' IS NOT NU
 -- name: ListGeneralLedgerPSPs :many
 SELECT id FROM billing.psps WHERE merchant_id = sqlc.arg(merchant_id)::uuid ORDER BY id;
 
+-- ListGeneralLedgerBankAccounts: the merchant's bank accounts, each with bank
+-- cash in its currency.
+-- name: ListGeneralLedgerBankAccounts :many
+SELECT id, currency FROM billing.bank_accounts WHERE merchant_id = sqlc.arg(merchant_id)::uuid ORDER BY id;
+
 -- ListPSPImportCurrencies: the currencies a PSP import's records name.
 -- name: ListPSPImportCurrencies :many
 SELECT DISTINCT (data->>'currency')::text AS currency FROM billing.psp_import_records
@@ -37,11 +43,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND import_id = sqlc.arg(import_
 
 -- name: InsertLedgerAccount :one
 INSERT INTO billing.ledger_accounts (
-    merchant_id, book, class, customer_id, psp_id, account_type, currency,
+    merchant_id, book, class, customer_id, psp_id, bank_account_id, account_type, currency,
     debits_must_not_exceed_credits, credits_must_not_exceed_debits
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(book)::text, sqlc.arg(class)::text,
-    sqlc.narg(customer_id)::uuid, sqlc.narg(psp_id)::uuid,
+    sqlc.narg(customer_id)::uuid, sqlc.narg(psp_id)::uuid, sqlc.narg(bank_account_id)::uuid,
     sqlc.arg(account_type)::text, sqlc.arg(currency)::text,
     sqlc.arg(debits_must_not_exceed_credits)::boolean, sqlc.arg(credits_must_not_exceed_debits)::boolean
 )
@@ -210,6 +216,7 @@ FROM (
     FROM billing.ledger_accounts a
     LEFT JOIN billing.ledger_type_totals t ON t.merchant_id = a.merchant_id AND t.book = a.book AND t.currency = a.currency
         AND t.account_type = a.account_type AND t.psp_id IS NOT DISTINCT FROM a.psp_id
+        AND t.bank_account_id IS NOT DISTINCT FROM a.bank_account_id
     WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
       AND a.book = 'general' AND a.customer_id IS NULL
 ) balances
@@ -220,34 +227,36 @@ ORDER BY book, currency;
 -- ListLedgerSignBreaches: general-ledger accounts across their sign rule, a
 -- customer's by its counters, a merchant-wide one by its type total.
 -- name: ListLedgerSignBreaches :many
-SELECT currency::text AS currency, account_type::text AS account_type, psp_id, customer_id,
+SELECT currency::text AS currency, account_type::text AS account_type, psp_id, bank_account_id, customer_id,
        credits_posted::bigint AS credits_posted, debits_posted::bigint AS debits_posted
 FROM (
-    SELECT a.currency, a.account_type, a.psp_id, a.customer_id,
+    SELECT a.currency, a.account_type, a.psp_id, a.bank_account_id, a.customer_id,
            a.debits_must_not_exceed_credits AS dmnec, a.credits_must_not_exceed_debits AS cmned,
            COALESCE(CASE WHEN a.customer_id IS NULL THEN t.credits_posted ELSE a.credits_posted END, 0) AS credits_posted,
            COALESCE(CASE WHEN a.customer_id IS NULL THEN t.debits_posted ELSE a.debits_posted END, 0) AS debits_posted
     FROM billing.ledger_accounts a
     LEFT JOIN billing.ledger_type_totals t ON a.customer_id IS NULL AND t.merchant_id = a.merchant_id AND t.book = a.book
         AND t.currency = a.currency AND t.account_type = a.account_type AND t.psp_id IS NOT DISTINCT FROM a.psp_id
+        AND t.bank_account_id IS NOT DISTINCT FROM a.bank_account_id
     WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.book = 'general'
 ) balances
 WHERE dmnec AND debits_posted > credits_posted OR cmned AND credits_posted > debits_posted
-ORDER BY currency, account_type, psp_id, customer_id;
+ORDER BY currency, account_type, psp_id, bank_account_id, customer_id;
 
 -- ListLedgerSideWarnings: merchant-wide general-ledger accounts with no sign
 -- rule whose type total sits on the side opposite their class's normal one.
 -- name: ListLedgerSideWarnings :many
-SELECT a.currency, a.account_type, a.class, a.psp_id, t.credits_posted, t.debits_posted
+SELECT a.currency, a.account_type, a.class, a.psp_id, a.bank_account_id, t.credits_posted, t.debits_posted
 FROM billing.ledger_accounts a
 JOIN billing.ledger_type_totals t ON t.merchant_id = a.merchant_id AND t.book = a.book AND t.currency = a.currency
     AND t.account_type = a.account_type AND t.psp_id IS NOT DISTINCT FROM a.psp_id
+    AND t.bank_account_id IS NOT DISTINCT FROM a.bank_account_id
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND a.book = 'general' AND a.customer_id IS NULL
   AND NOT a.debits_must_not_exceed_credits AND NOT a.credits_must_not_exceed_debits
   AND CASE WHEN a.class IN ('asset', 'contra_revenue', 'expense') THEN t.credits_posted > t.debits_posted
            ELSE t.debits_posted > t.credits_posted END
-ORDER BY a.currency, a.account_type, a.psp_id;
+ORDER BY a.currency, a.account_type, a.psp_id, a.bank_account_id;
 
 -- ListLedgerCounterDrifts rebuilds account counters from the immutable
 -- transfer log and returns every account whose maintained projection differs.
@@ -303,17 +312,17 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- log and returns every key whose kept total differs; a missing row keeps 0.
 -- name: ListLedgerTypeTotalDrifts :many
 WITH legs AS (
-    SELECT t.book, t.currency, a.account_type, a.psp_id,
+    SELECT t.book, t.currency, a.account_type, a.psp_id, a.bank_account_id,
            CASE WHEN a.id = t.credit_account_id THEN t.amount ELSE 0 END AS credit,
            CASE WHEN a.id = t.debit_account_id THEN t.amount ELSE 0 END AS debit
     FROM billing.ledger_transfers t
     JOIN billing.ledger_accounts a ON a.merchant_id = t.merchant_id AND a.id IN (t.debit_account_id, t.credit_account_id)
     WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid
 ), sides AS (
-    SELECT book, currency, account_type, psp_id, 0::bigint AS stored_credits, 0::bigint AS stored_debits, credit AS logged_credits, debit AS logged_debits
+    SELECT book, currency, account_type, psp_id, bank_account_id, 0::bigint AS stored_credits, 0::bigint AS stored_debits, credit AS logged_credits, debit AS logged_debits
     FROM legs
     UNION ALL
-    SELECT book, currency, account_type, psp_id, credits_posted, debits_posted, 0, 0
+    SELECT book, currency, account_type, psp_id, bank_account_id, credits_posted, debits_posted, 0, 0
     FROM billing.ledger_type_totals
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 )
@@ -321,14 +330,15 @@ SELECT book::text AS book,
        currency::text AS currency,
        account_type::text AS account_type,
        psp_id,
+       bank_account_id,
        SUM(stored_credits)::bigint AS stored_credits,
        SUM(logged_credits)::bigint AS logged_credits,
        SUM(stored_debits)::bigint AS stored_debits,
        SUM(logged_debits)::bigint AS logged_debits
 FROM sides
-GROUP BY book, currency, account_type, psp_id
+GROUP BY book, currency, account_type, psp_id, bank_account_id
 HAVING SUM(stored_credits) <> SUM(logged_credits) OR SUM(stored_debits) <> SUM(logged_debits)
-ORDER BY book, currency, account_type, psp_id;
+ORDER BY book, currency, account_type, psp_id, bank_account_id;
 
 -- ListLedgerDailyDrifts recomputes ledger_daily from the transfer log and
 -- returns every bucket whose kept amounts differ; a missing row keeps 0.
@@ -336,18 +346,18 @@ ORDER BY book, currency, account_type, psp_id;
 WITH legs AS (
     SELECT t.book, t.currency, a.account_type,
            date_bin('15 minutes', t.effective_at, '2000-01-01 00:00:00+00'::timestamptz) AS bucket_at,
-           t.transfer_type, a.psp_id, t.product_id,
+           t.transfer_type, a.psp_id, a.bank_account_id, t.product_id,
            CASE WHEN a.id = t.credit_account_id THEN t.amount ELSE 0 END AS credit,
            CASE WHEN a.id = t.debit_account_id THEN t.amount ELSE 0 END AS debit
     FROM billing.ledger_transfers t
     JOIN billing.ledger_accounts a ON a.merchant_id = t.merchant_id AND a.id IN (t.debit_account_id, t.credit_account_id)
     WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid
 ), sides AS (
-    SELECT book, currency, account_type, bucket_at, transfer_type, psp_id, product_id,
+    SELECT book, currency, account_type, bucket_at, transfer_type, psp_id, bank_account_id, product_id,
            0::bigint AS stored_credits, 0::bigint AS stored_debits, credit AS logged_credits, debit AS logged_debits
     FROM legs
     UNION ALL
-    SELECT book, currency, account_type, bucket_at, transfer_type, psp_id, product_id, credits, debits, 0, 0
+    SELECT book, currency, account_type, bucket_at, transfer_type, psp_id, bank_account_id, product_id, credits, debits, 0, 0
     FROM billing.ledger_daily
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 )
@@ -357,15 +367,16 @@ SELECT book::text AS book,
        bucket_at::timestamptz AS bucket_at,
        transfer_type::text AS transfer_type,
        psp_id,
+       bank_account_id,
        product_id,
        SUM(stored_credits)::bigint AS stored_credits,
        SUM(logged_credits)::bigint AS logged_credits,
        SUM(stored_debits)::bigint AS stored_debits,
        SUM(logged_debits)::bigint AS logged_debits
 FROM sides
-GROUP BY book, currency, account_type, bucket_at, transfer_type, psp_id, product_id
+GROUP BY book, currency, account_type, bucket_at, transfer_type, psp_id, bank_account_id, product_id
 HAVING SUM(stored_credits) <> SUM(logged_credits) OR SUM(stored_debits) <> SUM(logged_debits)
-ORDER BY book, currency, account_type, bucket_at, transfer_type, psp_id, product_id;
+ORDER BY book, currency, account_type, bucket_at, transfer_type, psp_id, bank_account_id, product_id;
 
 -- name: GetLedgerUnitScale :one
 -- The scale the units book counts a merchant's unit at, once it counts it.

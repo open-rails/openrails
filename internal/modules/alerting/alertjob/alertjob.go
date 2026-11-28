@@ -45,6 +45,7 @@ type DeliveryArgs struct {
 	MerchantID uuid.UUID     `json:"merchant_id"`
 	Hold       *HoldAlert    `json:"hold,omitempty"`
 	Finding    *FindingAlert `json:"finding,omitempty"`
+	PSP        *PSPAlert     `json:"psp,omitempty"`
 	Channel    *ChannelRef   `json:"channel,omitempty"`
 }
 
@@ -53,6 +54,23 @@ type HoldAlert struct {
 	ID       uuid.UUID `json:"id"`
 	Scope    string    `json:"scope"`
 	OpenedAt time.Time `json:"opened_at"`
+}
+
+// PSPAlert is a PSP's stale episode crossing into warning or critical, or its
+// recovery with what the catch-up found: once per crossing.
+type PSPAlert struct {
+	ID           uuid.UUID  `json:"id"`
+	Key          string     `json:"key"`
+	Rail         string     `json:"rail"`
+	Cause        string     `json:"cause"`
+	Severity     string     `json:"severity"`
+	StaleSince   time.Time  `json:"stale_since"`
+	KnownThrough *time.Time `json:"known_through,omitempty"`
+	Recovered    bool       `json:"recovered,omitempty"`
+	Renewed      int64      `json:"renewed,omitempty"`
+	Failed       int64      `json:"failed,omitempty"`
+	Canceled     int64      `json:"canceled,omitempty"`
+	Unconfirmed  int64      `json:"unconfirmed,omitempty"`
 }
 
 // FindingAlert is one notification episode of a finding: the notified_at its
@@ -74,11 +92,19 @@ func (DeliveryArgs) InsertOpts() river.InsertOpts {
 
 // Valid reports whether a names its merchant and exactly one source.
 func (a DeliveryArgs) Valid() bool {
+	sources := 0
+	for _, set := range []bool{a.Hold != nil, a.Finding != nil, a.PSP != nil} {
+		if set {
+			sources++
+		}
+	}
 	switch {
-	case a.MerchantID == uuid.Nil || (a.Hold == nil) == (a.Finding == nil):
+	case a.MerchantID == uuid.Nil || sources != 1:
 		return false
 	case a.Hold != nil:
 		return a.Hold.ID != uuid.Nil
+	case a.PSP != nil:
+		return a.PSP.ID != uuid.Nil
 	default:
 		return a.Finding.ID != uuid.Nil
 	}

@@ -4924,8 +4924,7 @@
           "root": "root:customer:read"
         },
         "x-openrails-errors": [
-          "invalid_param",
-          "service_credential_customer_scope_denied"
+          "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -5111,8 +5110,7 @@
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_param",
-          "invalid_query",
-          "service_credential_customer_scope_denied"
+          "invalid_query"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -5173,8 +5171,7 @@
           "root": "root:entitlements:read"
         },
         "x-openrails-errors": [
-          "invalid_param",
-          "service_credential_customer_scope_denied"
+          "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
@@ -5307,8 +5304,7 @@
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_param",
-          "invalid_query",
-          "service_credential_customer_scope_denied"
+          "invalid_query"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -5320,7 +5316,7 @@
           "admin"
         ],
         "operationId": "CreateProductAccess",
-        "description": "CreateProductAccess grants 1 to billing.MaxBatchItems products free, across any customers, all or none; the answer is in request order. Each grant is a window of its product: the customer holds the product's current keys while it is live. idempotencyKey is required: a retry with it replays the first answer and grants nothing again.",
+        "description": "CreateProductAccess grants 1 to billing.MaxBatchItems products free, across any customers, all or none; the answer is in request order. Each grant is a window of its product: the customer holds the product's current keys while it is live. idempotencyKey is required: a retry with it replays the first answer and grants nothing again; a retry with other items or terms is idempotency_key_reused. A retry after staff removed a window it granted (revoked before it started) is resource_conflict; grant again under a new key.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -5379,8 +5375,8 @@
           "idempotency_key_required",
           "idempotency_key_reused",
           "invalid_param",
-          "resource_not_found",
-          "service_credential_customer_scope_denied"
+          "resource_conflict",
+          "resource_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -13883,6 +13879,13 @@
         "properties": {
           "timezone": {
             "type": "string"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "accrual",
+              "cash"
+            ]
           }
         }
       },
@@ -21966,6 +21969,9 @@
               "stripe",
               "visa_vamp"
             ]
+          },
+          "per": {
+            "type": "string"
           }
         },
         "required": [
@@ -22045,13 +22051,44 @@
               "type": "array",
               "items": {}
             }
+          },
+          "freshness": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PSPKnownThrough"
+            }
+          },
+          "complete_through": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "known_through": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "timezone",
           "range",
           "columns",
-          "rows"
+          "rows",
+          "freshness",
+          "complete_through",
+          "known_through"
         ]
       },
       "MetricsResultRange": {
@@ -22251,6 +22288,9 @@
           "armed": {
             "type": "boolean"
           },
+          "freshness": {
+            "$ref": "#/components/schemas/PSPFreshness"
+          },
           "gateway_id": {
             "type": "string"
           },
@@ -22318,10 +22358,64 @@
           "archived",
           "open_obligations",
           "armed",
+          "freshness",
           "credentials",
           "revision",
           "created_at",
           "updated_at"
+        ]
+      },
+      "PSPAwaiting": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "subscriptions": {
+            "type": "integer"
+          },
+          "mrr": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "currency",
+          "subscriptions",
+          "mrr"
+        ]
+      },
+      "PSPCatchUp": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "through": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "renewed": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "canceled": {
+            "type": "integer"
+          },
+          "unconfirmed": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from",
+          "through",
+          "renewed",
+          "failed",
+          "canceled",
+          "unconfirmed"
         ]
       },
       "PSPCredential": {
@@ -22345,6 +22439,120 @@
         "required": [
           "configured",
           "validated_at"
+        ]
+      },
+      "PSPFreshness": {
+        "type": "object",
+        "properties": {
+          "known_through": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "import",
+              "import_records",
+              "none",
+              "now",
+              "read",
+              "webhook"
+            ]
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "stale_since": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cause": {
+            "type": "string",
+            "enum": [
+              "catching_up",
+              "credentials_refused",
+              "imported",
+              "not_configured",
+              "unreachable",
+              "webhooks_silent"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "info",
+              "warning"
+            ]
+          },
+          "last_read_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failing_since": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "catch_up": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PSPCatchUp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "has_data": {
+            "type": "boolean"
+          },
+          "awaiting": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PSPAwaiting"
+            }
+          }
+        },
+        "required": [
+          "known_through",
+          "source",
+          "current",
+          "stale_since",
+          "cause",
+          "severity",
+          "last_read_at",
+          "failing_since",
+          "catch_up",
+          "has_data",
+          "awaiting"
         ]
       },
       "PSPImport": {
@@ -22786,6 +22994,138 @@
         "required": [
           "fact",
           "via"
+        ]
+      },
+      "PSPKnownThrough": {
+        "type": "object",
+        "properties": {
+          "psp_id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
+          },
+          "known_through": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "import",
+              "import_records",
+              "none",
+              "now",
+              "read",
+              "webhook"
+            ]
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "stale_since": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cause": {
+            "type": "string",
+            "enum": [
+              "catching_up",
+              "credentials_refused",
+              "imported",
+              "not_configured",
+              "unreachable",
+              "webhooks_silent"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "info",
+              "warning"
+            ]
+          },
+          "last_read_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failing_since": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "catch_up": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PSPCatchUp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "has_data": {
+            "type": "boolean"
+          },
+          "awaiting": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PSPAwaiting"
+            }
+          }
+        },
+        "required": [
+          "psp_id",
+          "key",
+          "rail",
+          "known_through",
+          "source",
+          "current",
+          "stale_since",
+          "cause",
+          "severity",
+          "last_read_at",
+          "failing_since",
+          "catch_up",
+          "has_data",
+          "awaiting"
         ]
       },
       "PSPPaymentConfig": {
@@ -26750,6 +27090,20 @@
               "unverified"
             ]
           },
+          "unverified_reason": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "awaiting_provider",
+                  "unconfirmed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "scheduled_change": {
             "oneOf": [
               {
@@ -26905,6 +27259,7 @@
           "rail",
           "rail_subscription_id",
           "status",
+          "unverified_reason",
           "scheduled_change",
           "payment_method_id",
           "mandate_id",

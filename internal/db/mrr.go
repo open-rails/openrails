@@ -7,15 +7,13 @@ import (
 )
 
 // MRRCauseGUC names, for the rest of a transaction, what moves MRR when its
-// triggers cannot tell from the rows: an import adopting subscriptions
-// (opening movements) or an undo restoring them (corrections).
+// triggers cannot tell from the rows: an undo restoring subscriptions
+// (corrections). An import writes its history itself
+// (billing.record_mrr_history).
 const MRRCauseGUC = "openrails.mrr_cause"
 
-// The causes MRRCauseGUC may name.
-const (
-	MRRCauseImport = "import"
-	MRRCauseUndo   = "undo"
-)
+// MRRCauseUndo is the cause MRRCauseGUC may name.
+const MRRCauseUndo = "undo"
 
 // SetMRRCause names cause for the MRR the caller's transaction moves.
 func SetMRRCause(ctx context.Context, q *gen.Queries, cause string) error {

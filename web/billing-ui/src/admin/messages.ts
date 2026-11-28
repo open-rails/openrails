@@ -1121,4 +1121,32 @@ export const billingAdminMessages = {
   "not armed": "not armed",
   "No new payment uses it: its credentials are incomplete or do not resolve.":
     "No new payment uses it: its credentials are incomplete or do not resolve.",
+  ": data through ": ": data through ",
+  " days old; ": " days old; ",
+  " (latest imported record)": " (latest imported record)",
+  ": data through an unknown date; ": ": data through an unknown date; ",
+  " since ": " since ",
+  " subscriptions, ": " subscriptions, ",
+  " MRR awaiting ": " MRR awaiting ",
+  "Showing data as of ": "Showing data as of ",
+  "Show to now": "Show to now",
+  "Show as of ": "Show as of ",
+  "Incomplete after ": "Incomplete after ",
+  "Incomplete: ": "Incomplete: ",
+  "undated data from ": "undated data from ",
+  "imported, not connected": "imported, not connected",
+  "Connect it to bring the data up to date.":
+    "Connect it to bring the data up to date.",
+  "no credentials": "no credentials",
+  "Add its credentials.": "Add its credentials.",
+  "the provider refuses its credentials":
+    "the provider refuses its credentials",
+  "Update its credentials.": "Update its credentials.",
+  "the provider is not answering": "the provider is not answering",
+  "Catch-up is automatic once it answers.":
+    "Catch-up is automatic once it answers.",
+  "reading the gap now": "reading the gap now",
+  "webhooks silent while reads succeed": "webhooks silent while reads succeed",
+  "Register its webhook endpoint again.":
+    "Register its webhook endpoint again.",
 } as const

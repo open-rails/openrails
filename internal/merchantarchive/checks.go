@@ -69,7 +69,6 @@ var excludedTables = map[string]string{
 	"provider_catalog_objects":      "provider observations; the destination observes again",
 	"provider_listed_rebills":       "provider observations: the rebills a CCBill read listed; the destination reads again",
 	"parked_provider_subscriptions": "converge working state: the next provider event parks again",
-	"mrr_risk_due":                  "MRR risk work queue: the destination's next change of a card or delinquency queues again",
 	"ledger_type_totals":            "derived: the transfers rebuild it as they are restored, and the restore check proves it",
 	"ledger_daily":                  "derived: the transfers rebuild it as they are restored, and the restore check proves it",
 	"ledger_rollup_pending":         "transaction scratch, empty at commit",
@@ -121,8 +120,8 @@ var excludedColumns = map[string]string{
 	"customer_paid_totals":    "merchant_id customer_id currency net_paid_amount first_paid_at",
 	"network_activity_daily":  "merchant_id psp_id rail network currency day_at sales sales_amount refunds refund_amount chargebacks chargeback_amount fraud_chargebacks fraud_chargeback_amount fraud_reports fraud_report_amount",
 	"balance_watches":         "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at",
-	"ledger_type_totals":      "merchant_id book currency account_type psp_id credits_posted debits_posted",
-	"ledger_daily":            "merchant_id book currency account_type bucket_at transfer_type psp_id product_id credits debits",
+	"ledger_type_totals":      "merchant_id book currency account_type psp_id bank_account_id credits_posted debits_posted",
+	"ledger_daily":            "merchant_id book currency account_type bucket_at transfer_type psp_id bank_account_id product_id credits debits",
 	"ledger_rollup_pending":   "merchant_id transfer_id",
 	"provider_listed_rebills": "merchant_id psp_id transaction_key subscription_key amount listed_at",
 }
@@ -136,8 +135,10 @@ var omittedColumns = map[string]string{
 	// Credential evidence belongs to the source deployment's configuration;
 	// the destination validates and fingerprints its own.
 	// live is generated from environment.
-	"psps":          "credentials_validated_at webhook_endpoint_id webhook_digest credential_fingerprint credential_duplicate_at live",
-	"subscriptions": "destructive_run_class lifecycle_rev row_version rail_subscription_key",
+	"psps": "credentials_validated_at webhook_endpoint_id webhook_digest credential_fingerprint credential_duplicate_at live",
+	// unverified_reason is our read evidence: the restored row awaits its
+	// provider until the destination reads it.
+	"subscriptions": "destructive_run_class lifecycle_rev row_version rail_subscription_key unverified_reason",
 	// Generated from the recorded columns.
 	"subscription_mrr": "dirty",
 	"payments":         "destructive_run_class",
@@ -149,6 +150,9 @@ var omittedColumns = map[string]string{
 	"price_migrations": "destructive_action_id",
 	// Derived from the lines: a restored open invoice is not found by it.
 	"invoices": "lines_digest",
+	// The source's reads: the destination reads its PSPs afresh. What an
+	// import brought, and when, moves.
+	"psp_freshness": "read_at failing_since failed_at failure stale_since notified_at caught_up_at catch_up",
 	// When time alone next changes a customer's delinquency: restore schedules
 	// every customer again.
 	"customer_delinquency": "next_evaluation_at",

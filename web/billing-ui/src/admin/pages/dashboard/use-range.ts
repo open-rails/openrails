@@ -33,6 +33,7 @@ export function useDashboardView(): [
       range: rangeFromParams(params),
       currency: params.get("currency") ?? undefined,
       compare: compare === "previous_year" ? compare : undefined,
+      asof: params.get("asof") === "now" ? "now" : undefined,
     },
     (change) => {
       const next = new URLSearchParams(params)

@@ -299,9 +299,9 @@ func Restore(ctx context.Context, database *db.DB, clock clockwork.Clock, id bil
 		if err := q.RebuildUsageDue(ctx, gen.RebuildUsageDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err
 		}
-		// The source's queued risk changes stay there: every customer whose
-		// MRR could be at risk is re-evaluated.
-		if err := q.QueueRestoredMRRRisk(ctx, gen.QueueRestoredMRRRiskParams{MerchantID: id.UUID(), At: restoreNow.UTC()}); err != nil {
+		// A PSP an import brought is stale from it until the destination
+		// reads the gap.
+		if err := q.OpenRestoredPSPEpisodes(ctx, id.UUID()); err != nil {
 			return err
 		}
 		// The source's wakes stay in its River schema.
@@ -433,6 +433,10 @@ func exportWhere(table string) string {
 	// limits, carry their usage and staff adjustments to the destination.
 	if table == "limit_windows" {
 		where += " AND (t.window_ends_at IS NULL OR t.window_ends_at > now())"
+	}
+	// Only what an import brought: reads are the source's.
+	if table == "psp_freshness" {
+		where += " AND t.imported_through IS NOT NULL"
 	}
 	return where
 }

@@ -5,7 +5,7 @@ OpenRails records each committed billing fact in an ordered, retained event log 
 ## Concepts
 
 - **Fact**: one immutable row of the event log, id `hev_…` (source `host`) or `ntf_…` (source `notification`).
-- **Host event**: a typed financial transition (`billing.HostEventType`): `payment.settled`, `invoice.*`, `delinquency.*`, `balance.low`, `balance.depleted`, `product.entitlements_changed`, `mandate.revoked`, `destructive.hold_opened`, `destructive.hold_cleared`.
+- **Host event**: a typed financial transition (`billing.HostEventType`): `payment.settled`, `invoice.*`, `delinquency.*`, `balance.low`, `balance.depleted`, `product.entitlements_changed`, `mandate.revoked`, `destructive.hold_opened`, `destructive.hold_cleared`, `psp.stale`, `psp.recovered` (`billing.PSPHostEvent`, once per crossing of a PSP's stale episode: [payment providers](payment-providers.md#staying-in-sync)).
 - **Notification fact**: a customer-facing fact (`models.NotificationEventType`), e.g. `payment_method_failed`, `premium_ended`, `usage_charged`, `balance_low`.
 - **Cursor**: an opaque position in one merchant's stream, bound to its epoch, merchant and type filter.
 

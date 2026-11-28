@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 899,
+  "scenario_count": 928,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1169,6 +1169,11 @@
       "name": "A canceled unresolved renewal retains its access revocation evidence through terminal completion and archive restore"
     },
     {
+      "id": "OR-J31-S16",
+      "journey": "J31",
+      "name": "A restored archive keeps what an import brought of each PSP and when: the destination reads the PSP stale from the import's as_of, known through it, never undated, and none of the source's reads move"
+    },
+    {
       "id": "OR-J32-S01",
       "journey": "J32",
       "name": "Provision find list and rename merchant retain stable identity"
@@ -1202,6 +1207,11 @@
       "id": "OR-J32-S07",
       "journey": "J32",
       "name": "A merchant purge whose deletion from the event store fails commits and queues the job that deletes it, which River retries until the store takes it"
+    },
+    {
+      "id": "OR-J32-S08",
+      "journey": "J32",
+      "name": "With Vault holding merchant configuration, the operator CLI's merchants create claims the name, writes the display name --display-name gives into the merchant's Vault document and exits 0; run again it reports the merchant unchanged, and merchants get reads the display name back"
     },
     {
       "id": "OR-J34-S01",
@@ -1752,6 +1762,31 @@
       "id": "OR-J38-S13",
       "journey": "J38",
       "name": "A provider answer no attempt can read fails the import after five attempts with its error, deletable"
+    },
+    {
+      "id": "OR-J38-S14",
+      "journey": "J38",
+      "name": "A Stripe subscription that ended before the import lands canceled at its ended_at for its cancellation reason, with every invoice it paid"
+    },
+    {
+      "id": "OR-J38-S15",
+      "journey": "J38",
+      "name": "A CCBill member who left lands canceled from its signup to its expiry, voluntary when it canceled, with its rebills, priced by its signup when it never rebilled"
+    },
+    {
+      "id": "OR-J38-S16",
+      "journey": "J38",
+      "name": "An NMI schedule paused long ago lands canceled where its paid time ended, not at the import"
+    },
+    {
+      "id": "OR-J38-S17",
+      "journey": "J38",
+      "name": "A Stripe subscription that paid for nothing (its first payment expired, or canceled before it) lands ended at its start and adds no MRR"
+    },
+    {
+      "id": "OR-J38-S18",
+      "journey": "J38",
+      "name": "A deleted NMI schedule is inferred from its recurring sales: ended only, marked inferred, priced by the one provider price they match, its sales its payments; a run no price matches stays history"
     },
     {
       "id": "OR-J38-S42",
@@ -2529,6 +2564,11 @@
       "name": "Exact checks and prefix pages stay on their indexes for a customer holding 10,000 of 40,000 products"
     },
     {
+      "id": "OR-J27-S17",
+      "journey": "J27",
+      "name": "A live access window wider than its grant is cut back to the grant's dates"
+    },
+    {
       "id": "OR-J04-S42",
       "journey": "J04",
       "name": "An engine renewal is billed by the next hourly billing pass; its renewal grace reaches two passes past the due instant, so access holds across the gap"
@@ -2806,7 +2846,7 @@
     {
       "id": "OR-J42-S02",
       "journey": "J42",
-      "name": "A cancellation at period end is scheduled churn with MRR unchanged; a resume reverses it; its end churns, dated at the end"
+      "name": "A cancellation at period end shows its scheduled churn on the subscription and in the scheduled-change filter, its MRR unchanged; a resume clears both"
     },
     {
       "id": "OR-J42-S03",
@@ -2821,12 +2861,12 @@
     {
       "id": "OR-J42-S05",
       "journey": "J42",
-      "name": "A CCBill upgrade replacing its subscription nets to one expansion; an imported subscription opens MRR rather than counting as new"
+      "name": "A CCBill upgrade replacing its subscription nets to one expansion; an imported subscription is new at its own start, not at the import"
     },
     {
       "id": "OR-J42-S06",
       "journey": "J42",
-      "name": "MRR at a past local day's start, across a daylight-saving change, read from 15-minute buckets equals its movements; with sequential scans off each report read, the scheduled ones included, and the due read still plan on an index"
+      "name": "MRR at a past local day's start, across a daylight-saving change, is the movements before it, and the metrics read the day's movements in the merchant's zone"
     },
     {
       "id": "OR-J42-S07",
@@ -2836,7 +2876,7 @@
     {
       "id": "OR-J42-S08",
       "journey": "J42",
-      "name": "A prune is a correction, not churn, and supersedes the pruned subscription's scheduled churn; undoing it is a correction back that schedules the churn again"
+      "name": "A prune is a correction, not churn, and removes the pruned subscription's scheduled churn; undoing it is a correction back that writes the churn again"
     },
     {
       "id": "OR-J42-S09",
@@ -2856,67 +2896,117 @@
     {
       "id": "OR-J42-S13",
       "journey": "J42",
-      "name": "A card that expires before the renewal it pays for enters at risk on the period change that passes its expiry and leaves when the account updater refreshes it"
+      "name": "A card that expires before the renewal it pays for puts the subscription's MRR at risk now, read from state with no job and no case; a new expiry clears it at once, and no past read holds it"
     },
     {
       "id": "OR-J42-S14",
       "journey": "J42",
-      "name": "A provider subscription OpenRails could not confirm is at risk while unverified and recovered when a read verifies its renewal"
+      "name": "A provider subscription a read could not confirm is at risk while unverified and unconfirmed, and recovered when a read verifies its renewal; awaiting its provider's read it is not at risk"
     },
     {
       "id": "OR-J42-S15",
       "journey": "J42",
-      "name": "Usage delinquency puts the customer's subscription MRR in the currency at risk with the overdue amount beside it; paying the debt recovers it"
-    },
-    {
-      "id": "OR-J42-S16",
-      "journey": "J42",
-      "name": "The risk drain holds a customer's subscriptions while an NMI decline for the same customer queues it and waits: both commit, and the decline, queued after the claim, is re-evaluated by the next drain"
+      "name": "Usage delinquency puts the customer's subscription MRR in the currency at risk now, read from state with no case; paying the debt clears it"
     },
     {
       "id": "OR-J42-S17",
       "journey": "J42",
-      "name": "A subscription at risk canceled at period end keeps its case open while it adds MRR; a resume continues the same case; canceled again, the end closes it churned, voluntary, once, at the end"
+      "name": "A subscription at risk for its status canceled at period end adds its MRR and stays at risk until the end, its case written closed churned, voluntary, at the end; a resume reopens the same case; canceled again, the end closes it with nothing run"
     },
     {
       "id": "OR-J42-S18",
       "journey": "J42",
-      "name": "A new default card that expires before the renewal puts the subscription following the default at risk through the queued change; an NMI schedule naming no card of its own is never at risk on the default"
+      "name": "A new default card that expires before the renewal puts the subscription following the default at risk at once, read from state; an NMI schedule naming no card of its own is never at risk on the default"
     },
     {
       "id": "OR-J42-S19",
       "journey": "J42",
-      "name": "An upgrade of a subscription at risk closes its case superseded, counted in no recovery rate, and its replacement opens its own case"
+      "name": "An upgrade of a subscription whose card expires before the renewal moves its at-risk MRR to the replacement, read from state, with no case for the card and no recovery rate"
     },
     {
       "id": "OR-J42-S21",
       "journey": "J42",
-      "name": "A merchant archive carries an open risk case, its episodes and at-risk MRR; the restore queues every customer with MRR, whom the target's drain re-evaluates"
-    },
-    {
-      "id": "OR-J42-S22",
-      "journey": "J42",
-      "name": "A customer whose risk evaluation fails alone is set aside with an mrr.risk.evaluation_failed finding while the rest of the merchant drains; set aside, it is skipped; a later evaluation takes its changes and closes the finding"
+      "name": "A merchant archive carries an open risk case and its episodes: the restore reads the same at-risk MRR now and at a past instant"
     },
     {
       "id": "OR-J42-S23",
       "journey": "J42",
-      "name": "A subscription at risk for its card, canceled at period end, still reads its card: a new expiry clears card_expiring and the case closes recovered"
+      "name": "A subscription whose card expires, canceled at period end, is at risk for the card until a new expiry clears it at once, with no case"
     },
     {
       "id": "OR-J42-S30",
       "journey": "J42",
-      "name": "Every MRR measure, by itself, by each dimension it declares, by two, and filtered by currency and by product, over time and not, in UTC and in a non-UTC zone, plans on indexes with sequential scans off: no relation is scanned whole, every scan's index condition names the merchant, and a rollup kept by time is read by its time"
+      "name": "Every MRR measure, by itself, by each dimension it declares, by two, and filtered by currency and by product, over time and not, ending now and in the past, in UTC and in a non-UTC zone, reads with sequential scans off: no relation is scanned whole, every scan's index condition names the merchant, and each movement, line, case and episode read is an index-only range scan bounded by its instant that runs once, never per edge"
     },
     {
       "id": "OR-J42-S32",
       "journey": "J42",
-      "name": "MRR leaving a product, a currency and a customer settles: a customer's euro plan ends while its dollar plan stays (it stays one customer), another's only plan ends at once, and the first's last plan churns at its period's end through the billing pass's MRR scan; the product totals and the distinct customers fall to none and agree with their flows"
+      "name": "MRR leaving a product, a currency and a customer settles: a customer's euro plan ends while its dollar plan stays (it stays one customer), another's only plan ends at once, and the first's last plan churns at its period's end with nothing run; each product's MRR and the distinct customers fall to none"
     },
     {
       "id": "OR-J42-S33",
       "journey": "J42",
       "name": "A full refund that revokes access ends a subscription whose MRR counted its customer: the refund finalizes, its replay returns the same refund, and the customer leaves the distinct customers once, as one churn, with nothing below zero"
+    },
+    {
+      "id": "OR-J42-S34",
+      "journey": "J42",
+      "name": "A cancellation at period end is a churn movement written at the cancel and dated at the end: MRR holds until then, even read at an instant past it, and drops at the end with no job; a resume before the end removes it"
+    },
+    {
+      "id": "OR-J42-S35",
+      "journey": "J42",
+      "name": "An add-on bought before a cancellation's end turns that end's churn into contraction: the customer stays one, and no churn is read"
+    },
+    {
+      "id": "OR-J42-S36",
+      "journey": "J42",
+      "name": "At-risk MRR follows a change of the subscription's MRR during its case: past reads give the new amount after the change, the case's episodes end at the old amount and begin at the new, and the recovery rate counts the amount recovered"
+    },
+    {
+      "id": "OR-J42-S37",
+      "journey": "J42",
+      "name": "Migration 0013 over a book the rollups recorded (upgrades, an add-on, cancellations at period end taken and still ahead, resumes, at-risk cases of every reason, a scheduled downgrade, two currencies) keeps every MRR measure equal, read in UTC and New York; ends still ahead become scheduled movements, card_expiring and delinquent cases end superseded, and a later write settles on the converted book"
+    },
+    {
+      "id": "OR-J42-S38",
+      "journey": "J42",
+      "name": "An imported subscription is new at its own start and churns at its end, voluntary when the customer canceled; a live one is new at its start; nothing is booked at the import"
+    },
+    {
+      "id": "OR-J42-S39",
+      "journey": "J42",
+      "name": "A customer imported from two rails in two passes reads as one timeline: the second pass writes the first's movements again, its churn now a contraction"
+    },
+    {
+      "id": "OR-J42-S40",
+      "journey": "J42",
+      "name": "MRR, subscribers, churn rate, NRR, GRR, movements and cohort retention over imported months equal the same history booked live"
+    },
+    {
+      "id": "OR-J42-S41",
+      "journey": "J42",
+      "name": "An upgrade turns each opening an import wrote into its subscriptions' history from their start, gives an ended import its history to its paid-through end, and keeps the live movements after it"
+    },
+    {
+      "id": "OR-J42-S42",
+      "journey": "J42",
+      "name": "An upgrade turns the openings of more customers than PostgreSQL's default lock table holds into history without a lock per customer"
+    },
+    {
+      "id": "OR-J42-S43",
+      "journey": "J42",
+      "name": "An imported subscription stops adding MRR at its paid-through end, though its cancel was recorded years later; a chargeback ends it at once; one paid through no later than its start adds nothing"
+    },
+    {
+      "id": "OR-J42-S44",
+      "journey": "J42",
+      "name": "Over an imported book whose PSP cannot be read, every metrics read reports its known-through and what awaits it: cash and payments after it are missing, not zero, MRR keeps its last known level, a rebill due in the gap is in no rebill count, at-risk counts none of it, and the result is as of its known-through"
+    },
+    {
+      "id": "OR-J42-S45",
+      "journey": "J42",
+      "name": "A stale PSP with data and no evidence reads a null known-through, never a zero instant: a metrics figure is incomplete after the other PSPs' earliest known-through and as of their latest, and with none dated it carries neither"
     },
     {
       "id": "OR-J28-S09",
@@ -2987,6 +3077,26 @@
       "id": "OR-J15-S76",
       "journey": "J15",
       "name": "An overdue NMI schedule NMI no longer holds ends, and its cycle is missed as schedule_gone"
+    },
+    {
+      "id": "OR-J15-S77",
+      "journey": "J15",
+      "name": "An NMI book imported without credentials and read 24 days after its as_of keeps its subscriptions active with access: no renewal is overdue, no rebill missed, no MRR at risk and no customer told; the PSP reports itself stale, known through the as_of, imported, as information"
+    },
+    {
+      "id": "OR-J15-S78",
+      "journey": "J15",
+      "name": "Connecting an imported PSP reads its gap before detection resumes: the renewals NMI made are recorded without passing through unverified, the PSP is current with a catch-up summary from the as_of, and a later stalled renewal is unverified and unconfirmed"
+    },
+    {
+      "id": "OR-J15-S79",
+      "journey": "J15",
+      "name": "A live PSP whose reads fail for a day is stale through its last read: the rows past its deadline keep their state, one awaiting it is not at risk, a warning past NMI's deadline is told once by event and email, and when it answers the catch-up records what the gap hid and tells it recovered"
+    },
+    {
+      "id": "OR-J15-S80",
+      "journey": "J15",
+      "name": "An upgrade dates each PSP an import brought before imports recorded their as_of from what it stored: the as_of it stamped on an accepted schedule, else its records' latest instant, and says which; such a PSP is stale from it and never reads undated, and a PSP no import brought is left current"
     },
     {
       "id": "OR-J28-S13",
@@ -3287,6 +3397,21 @@
       "id": "OR-J53-S09",
       "journey": "J53",
       "name": "NMI's own transaction history is no measure: the schema names no nmi_history measure or nmi_kind dimension, and a query naming nmi_history_authorizations is refused unknown_measure"
+    },
+    {
+      "id": "OR-J53-S10",
+      "journey": "J53",
+      "name": "Over a known history (a subscription, a one-time purchase, a partial refund, a chargeback and its won dispute, Stripe's fees) in a New York merchant, recognized_revenue by month and account equals the general ledger's income-statement transfers grouped by New York months, cash by kind equals the payments and the fees, deferred revenue at each month's start equals the transfers before it, and the waterfall predicts what the recognition job posts"
+    },
+    {
+      "id": "OR-J53-S11",
+      "journey": "J53",
+      "name": "Credit bought, spent and lapsed is credits sold, usage revenue and breakage, its money held at the pack's rate until it lapses; usage owed beyond the balance is usage revenue and receivable until remitted, then cash; each equals the books"
+    },
+    {
+      "id": "OR-J53-S12",
+      "journey": "J53",
+      "name": "accounting.basis cash leads the overview with cash collected and the accrual default with recognised revenue, both bases answering on either; a balance read across accounts is refused with dimension_required; the migration drops saved widgets naming outstanding_credit_liability, outstanding_owed, stream or credits_sold by customer, and deletes a layout it empties"
     },
     {
       "id": "OR-J43-S01",
@@ -3769,6 +3894,21 @@
       "name": "Staff partial and full refunds of revoked or spent purchased credit return 409 resource_conflict and move nothing"
     },
     {
+      "id": "OR-J40-S60",
+      "journey": "J40",
+      "name": "A Stripe payout is read with its balance transactions and bank account expanded and its reserve lines a hundred at a time, at the pinned API version, writing nothing; its cents post as exact micros"
+    },
+    {
+      "id": "OR-J40-S61",
+      "journey": "J40",
+      "name": "A payout leaves cash clearing for cash in transit and lands in its bank account on its arrival date in the accounting timezone; its reserve line is held and a later one released; a payout that fails after landing and one canceled before come back; a read again posts nothing new; a read that keeps failing waits for books.payout.unread; a provider figure at a source of unknown basis is refused"
+    },
+    {
+      "id": "OR-J40-S62",
+      "journey": "J40",
+      "name": "After a known history of a sale, a reserve held and released, two payouts landing and a manual payout failing, each day in the accounting timezone moves each payout account as the history says, each day's legs balance, and ledger-audit is clean; the merchant's archive carries its bank accounts and payout books to an empty deployment"
+    },
+    {
       "id": "OR-J04-S80",
       "journey": "J04",
       "name": "Two billing passes started together: one runs its scans and the other exits without a report; the running pass holds a lease row, not a database session"
@@ -4077,6 +4217,11 @@
       "id": "OR-J40-S29",
       "journey": "J40",
       "name": "A merchant's refund of a usage invoice's payment, made through OpenRails or observed from the provider, records and leaves its owed settled; a chargeback after a refund owes again only what the refund left, keeps it if the refund settles later, and its won dispute settles it and gives the loss back"
+    },
+    {
+      "id": "OR-J40-S50",
+      "journey": "J40",
+      "name": "Every books measure (recognized_revenue, balance, credits_sold, cash with its fees, scheduled_revenue) by each of its dimensions, by time and not, in two zones, plans with no sequential scan of payments, revenue schedules or the books' rollups and no read of ledger_transfers, and a month and a balance read in the past read the same once later postings land"
     },
     {
       "id": "OR-J47-S01",

@@ -148,16 +148,18 @@ export function QueryBuilder({
   ]
   const keep = (next: Draft): Draft => {
     // Dimensions and the filter follow the measures: one they no longer
-    // share is dropped.
+    // share is dropped, and a measure read per a dimension (a balance per
+    // account) is split by it.
     const shared = registry.dims(next.measures)
-    return {
-      ...next,
-      dims: next.dims.filter((d) => shared.includes(d)),
-      filter:
-        next.filter && shared.includes(next.filter.dim)
-          ? next.filter
-          : undefined,
+    const filter =
+      next.filter && shared.includes(next.filter.dim) ? next.filter : undefined
+    let dims = next.dims.filter((d) => shared.includes(d))
+    for (const name of next.measures) {
+      const per = registry.measure(name)?.per
+      if (per && !dims.includes(per) && filter?.dim !== per)
+        dims = [...dims, per]
     }
+    return { ...next, dims, filter }
   }
   const setMeasure = (i: number, name: string) => {
     const measures = [...draft.measures]

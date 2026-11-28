@@ -9,11 +9,8 @@ import (
 	"os"
 	"strings"
 
-	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
-
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -92,9 +89,8 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 					defer release()
 				}
 			} else {
-				cfg := hostconfig.Engine(cmd.Context())
 				var cleanup func()
-				client, cleanup, err = localMerchantConfigurationClient(cmd.Context(), cfg, slug)
+				client, cleanup, err = localMerchantConfigurationClient(cmd.Context(), slug)
 				if cleanup != nil {
 					defer cleanup()
 				}
@@ -126,7 +122,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 // Local administration needs the database and the merchant's configuration
 // (Vault, or the manifest at its conventional path), not payment-provider
 // clients, workers, or standalone authentication infrastructure.
-func localMerchantConfigurationClient(ctx context.Context, cfg *billing.Config, slug string) (*openrails.Client, func(), error) {
+func localMerchantConfigurationClient(ctx context.Context, slug string) (*openrails.Client, func(), error) {
 	database, err := openCLIDB(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -140,20 +136,12 @@ func localMerchantConfigurationClient(ctx context.Context, cfg *billing.Config, 
 	if err != nil {
 		return nil, cleanup, err
 	}
-	vault, err := cliVault(ctx)
+	rt, closeMerchants, err := openCLIMerchants(ctx, database, selected.ID)
 	if err != nil {
 		return nil, cleanup, err
 	}
-	opened, err := boot.OneOffMerchants(ctx, cfg, database, vault, selected.ID, nil, "")
-	if err != nil {
-		return nil, cleanup, err
-	}
-	merchantsSvc := opened.Service
-	cleanup = func() { opened.Close(); database.Close() }
-	rt := &app.Runtime{DB: database, Config: cfg, Merchants: merchantsSvc, MerchantConfig: merchantsSvc.Config(), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database), Log: slog.Default()}
-	if err := rt.WireOneOffDestructiveAdmissions(ctx); err != nil {
-		return nil, cleanup, err
-	}
+	cleanup = func() { closeMerchants(); database.Close() }
+	rt.MoneyService, rt.EntitlementService = money.NewMoneyService(database), entitlements.NewEntitlementService(database)
 	table := &router.Table{Log: slog.Default()}
 	httproutes.RegisterStaffRoutesUnder(router.NewMux(table, "/v1", rt), rt, httproutes.HostOptions(), "/v1/merchant/configuration")
 	return inprocessClient(inprocess.NewTransport(table.Handler()), selected.ID), cleanup, nil

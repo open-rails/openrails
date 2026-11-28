@@ -75,7 +75,7 @@ func (im *Importer) AdoptNMISubscription(ctx context.Context, pspID uuid.UUID, s
 	}
 	record := gen.BillingPspImportRecord{Kind: string(billing.PSPImportSubscription), Ref: st.ref, CustomerRef: &st.customerRef, Data: raw, State: string(billing.PSPImportLinked)}
 	l := lander{im: im, scope: scope, prices: prices, asOf: im.now()}
-	declared, _, reason, err := l.subscription(billing.CustomerID(customer), record, map[string]customerData{st.customerRef: cards}, rebills{})
+	declared, _, reason, err := l.subscription(billing.CustomerID(customer), record, map[string]customerData{st.customerRef: cards}, rebills{}, time.Time{})
 	if err != nil {
 		return err
 	}

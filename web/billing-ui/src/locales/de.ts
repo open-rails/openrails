@@ -105,6 +105,7 @@ export const de: BillingUiMessageBundle = {
     browsePlans: "Pläne ansehen",
     fallbackName: "Abonnement",
     renews: "Verlängert sich am {date}",
+    lastPayment: "Aktiv, letzte Zahlung am {date}",
     endsOn: "Zugriff bis {date}",
     noMorePayments: "Keine weiteren Zahlungen",
     endedOn: "Beendet am {date}",
@@ -293,8 +294,10 @@ export const de: BillingUiMessageBundle = {
     internal_error:
       "Bei uns ist etwas schiefgelaufen. Bitte versuche es erneut.",
     card_declined: "Die Karte wurde abgelehnt.",
-    ccbill_email_required: "Bestätige deine E-Mail-Adresse, um mit CCBill zu bezahlen.",
-    ccbill_username_required: "Lege einen Benutzernamen fest, um mit CCBill zu bezahlen.",
+    ccbill_email_required:
+      "Bestätige deine E-Mail-Adresse, um mit CCBill zu bezahlen.",
+    ccbill_username_required:
+      "Lege einen Benutzernamen fest, um mit CCBill zu bezahlen.",
     customer_email_required:
       "Bestätige deine E-Mail-Adresse und lege einen Benutzernamen fest, um mit CCBill zu bezahlen.",
     payment_provider_rejected:

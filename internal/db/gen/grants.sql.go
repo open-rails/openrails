@@ -1318,6 +1318,21 @@ func (q *Queries) ListUnretractedTerminations(ctx context.Context, arg ListUnret
 	return items, nil
 }
 
+const lockAccessGrantKey = `-- name: LockAccessGrantKey :exec
+SELECT pg_advisory_xact_lock(hashtextextended('access-grant-key:' || $1::uuid::text || ':' || $2::text, 0))
+`
+
+type LockAccessGrantKeyParams struct {
+	MerchantID     uuid.UUID
+	IdempotencyKey string
+}
+
+// Requests under one product-access Idempotency-Key run one at a time.
+func (q *Queries) LockAccessGrantKey(ctx context.Context, arg LockAccessGrantKeyParams) error {
+	_, err := q.db.Exec(ctx, lockAccessGrantKey, arg.MerchantID, arg.IdempotencyKey)
+	return err
+}
+
 const lockImportedGrantSource = `-- name: LockImportedGrantSource :exec
 SELECT pg_advisory_xact_lock(hashtextextended('imported-grant:' || $1::uuid::text || ':' || $2::text, 0))
 `

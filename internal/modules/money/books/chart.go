@@ -61,6 +61,7 @@ const (
 	System   Scope = "system"   // one per merchant and currency
 	Customer Scope = "customer" // one per customer and currency
 	PSP      Scope = "psp"      // one per PSP and currency
+	Bank     Scope = "bank"     // one per bank account and currency
 )
 
 // AccountType is an account's role in its book: ledger_accounts.account_type.
@@ -81,6 +82,9 @@ const (
 // The general ledger's accounts.
 const (
 	CashClearing          AccountType = "cash_clearing"
+	CashInTransit         AccountType = "cash_in_transit"
+	ProcessorReserve      AccountType = "processor_reserve"
+	BankCash              AccountType = "bank_cash"
 	ExternalReceipts      AccountType = "external_receipts"
 	UsageReceivable       AccountType = "usage_receivable"
 	AllowanceDoubtful     AccountType = "allowance_doubtful"
@@ -131,6 +135,10 @@ var chart = []Account{
 	{Type: UnitsRefunded, Book: Units, Class: Retired, Scope: System},
 
 	{Type: CashClearing, Book: General, Class: Asset, Scope: PSP},
+	// A payout never lands or returns more than was sent.
+	{Type: CashInTransit, Book: General, Class: Asset, Scope: PSP, CreditsMustNotExceedDebits: true},
+	{Type: ProcessorReserve, Book: General, Class: Asset, Scope: PSP},
+	{Type: BankCash, Book: General, Class: Asset, Scope: Bank},
 	{Type: ExternalReceipts, Book: General, Class: Asset, Scope: System},
 	{Type: UsageReceivable, Book: General, Class: Asset, Scope: Customer, CreditsMustNotExceedDebits: true},
 	{Type: AllowanceDoubtful, Book: General, Class: ContraAsset, Scope: System, DebitsMustNotExceedCredits: true},
@@ -203,7 +211,16 @@ const (
 	BadDebtRecovered         TransferType = "bad_debt_recovery"
 	ProcessorFee             TransferType = "processor_fee"
 	ChargebackFee            TransferType = "chargeback_fee"
-	OpeningBalance           TransferType = "opening_balance"
+	// PayoutSent moves a payout from its PSP's cash clearing to cash in
+	// transit; CashDeposited lands it in a bank account. A failed payout
+	// posts both back.
+	PayoutSent    TransferType = "payout_sent"
+	CashDeposited TransferType = "cash_deposited"
+	// ReserveHeld moves what a PSP holds back from its cash clearing to its
+	// processor reserve; ReserveReleased returns it.
+	ReserveHeld     TransferType = "reserve_held"
+	ReserveReleased TransferType = "reserve_released"
+	OpeningBalance  TransferType = "opening_balance"
 )
 
 // GeneralTransferTypes is the general ledger's whole vocabulary.
@@ -212,5 +229,6 @@ var GeneralTransferTypes = []TransferType{
 	RefundDeferred, RefundRecognized, ChargebackDeferred, ChargebackRecognized, DisputeWon,
 	CreditReleased, CreditBreakage, CreditForfeited, CreditForfeitReversed, PromotionalCreditApplied,
 	UsageAccrued, UsageCollected, UsageRepaid, UsageWaived, UsageReopened, UsageReversed,
-	BadDebtWrittenOff, BadDebtRecovered, ProcessorFee, ChargebackFee, OpeningBalance,
+	BadDebtWrittenOff, BadDebtRecovered, ProcessorFee, ChargebackFee,
+	PayoutSent, CashDeposited, ReserveHeld, ReserveReleased, OpeningBalance,
 }

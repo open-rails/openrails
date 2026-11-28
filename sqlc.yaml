@@ -15,6 +15,12 @@ sql:
       - "internal/migrate/postgres/0010_amount_low_balance.up.sql"
       - "internal/migrate/postgres/0011_customer_destructive_reservations.up.sql"
       - "internal/migrate/postgres/0012_merchant_invoices_open.up.sql"
+      - "internal/migrate/postgres/0013_mrr_from_facts.up.sql"
+      - "internal/migrate/postgres/0014_books_measures.up.sql"
+      - "internal/migrate/postgres/0015_deposits_and_reserves.up.sql"
+      - "internal/migrate/postgres/0016_import_history.up.sql"
+      - "internal/migrate/postgres/0017_known_through.up.sql"
+      - "internal/migrate/postgres/0018_imported_known_through.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

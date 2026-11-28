@@ -80,6 +80,11 @@ type DeclaredSubscriptionFact struct {
 type DeclaredOutcome struct {
 	Code   string // imported | already_present | blocked
 	Reason string
+	// SubscriptionID is the row an imported fact created.
+	SubscriptionID uuid.UUID
+	// ServiceEndedAt is when an imported ended fact's paid service ended,
+	// where its MRR ends (DeclaredSubscriptionFact.ServiceEnd).
+	ServiceEndedAt *time.Time
 }
 
 const (
@@ -181,9 +186,17 @@ func ImportDeclaredSubscriptions(
 	// Every declared row is a provider row and must name its account.
 	// billingimport resolves it first; this guard keeps a direct caller from
 	// reaching the DB constraint with a bare FK error.
+	imported := map[uuid.UUID]bool{}
 	for i := range facts {
 		if facts[i].PspID == uuid.Nil {
 			return nil, fmt.Errorf("declared import: subscription %q names no PSP; a declared provider row must state the account it came from", facts[i].SourceID)
+		}
+		// The book is what we know of its PSPs as of asOf.
+		if psp := facts[i].PspID; !imported[psp] {
+			imported[psp] = true
+			if err := RecordPSPImported(ctx, database, merchantID, psp, asOf); err != nil {
+				return nil, fmt.Errorf("declared import: record what PSP %s brought: %w", psp, err)
+			}
 		}
 	}
 	out := make(map[string]DeclaredOutcome, len(facts))
@@ -513,11 +526,35 @@ func ImportDeclaredSubscriptions(
 			}
 		}
 		out[f.SourceID] = DeclaredOutcome{Code: outcome}
+		if outcome == DeclaredImported {
+			o := DeclaredOutcome{Code: outcome, SubscriptionID: subID}
+			if f.CancelKind != DeclaredCancelNone {
+				end := f.ServiceEnd()
+				o.ServiceEndedAt = &end
+			}
+			out[f.SourceID] = o
+		}
 	}
 	if book.needsAdmission() {
 		return out, ErrDeclaredAdmission
 	}
 	return out, book.end(ctx, database)
+}
+
+// ServiceEnd is when an ended fact's paid service ended: its paid-through
+// end, whether it was canceled for that end or recorded canceled after it
+// lapsed; an immediate end (a chargeback or a provider's termination) at its
+// cancel when that came first; without a paid-through end, its cancel.
+func (f *DeclaredSubscriptionFact) ServiceEnd() time.Time {
+	cancel := f.CancelAt.UTC()
+	if f.PaidThrough == nil || f.PaidThrough.IsZero() {
+		return cancel
+	}
+	end := f.PaidThrough.UTC()
+	if f.CancelKind != DeclaredCancelUser && cancel.Before(end) {
+		return cancel
+	}
+	return end
 }
 
 // insertDeclaredCanceled writes an explicitly-canceled fact directly: settled

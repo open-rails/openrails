@@ -253,6 +253,9 @@ func (p *HTTPStripeLivenessProber) ProbeSubscription(ctx context.Context, railSu
 		if resp.StatusCode == http.StatusNotFound && json.Unmarshal(body, &envelope) == nil && envelope.Error.Code == "resource_missing" {
 			return StripeLivenessRecord{Found: false}, nil
 		}
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return StripeLivenessRecord{}, fmt.Errorf("stripe subscription probe failed (%d): %w: %s", resp.StatusCode, stripeapi.ErrKeyRefused, ParseStripeAPIError(body))
+		}
 		return StripeLivenessRecord{}, fmt.Errorf("stripe subscription probe failed (%d): %s", resp.StatusCode, ParseStripeAPIError(body))
 	}
 	rec, err := parseStripeLivenessSubscription(body)

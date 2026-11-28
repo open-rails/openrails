@@ -223,7 +223,7 @@ func (s *SubscriptionService) filters(ctx context.Context, f GetSubscriptionsFil
 		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore,
 		CanceledAfter: f.CanceledAfter, CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore,
 		ScheduledChangeBefore: f.ScheduledChangeBefore, AtRisk: f.AtRisk || f.RiskReason != "", RiskReason: string(f.RiskReason),
-		Dunning: f.Dunning, Sort: f.Sort,
+		Dunning: f.Dunning, Sort: f.Sort, At: s.now(),
 	}, nil
 }
 

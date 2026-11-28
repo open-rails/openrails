@@ -234,6 +234,11 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 		}
 		through = until
 	}
+	if scope.Rail == "nmi" {
+		if err := im.inferSchedules(ctx, row); err != nil {
+			return err
+		}
+	}
 	newly, err := im.link(ctx, row)
 	if err != nil {
 		return err
@@ -431,15 +436,31 @@ func (im *Importer) eachRecord(ctx context.Context, row gen.BillingPspImport, ki
 	}
 }
 
-// stage upserts what a source read.
+// stage upserts what a source read; merged records fill in after the rest.
 func (im *Importer) stage(ctx context.Context, row gen.BillingPspImport, recs []staged) error {
+	whole, partial := make([]staged, 0, len(recs)), []staged(nil)
+	for _, r := range recs {
+		if r.merge {
+			partial = append(partial, r)
+		} else {
+			whole = append(whole, r)
+		}
+	}
+	if err := im.stageBatches(ctx, row, whole, false); err != nil {
+		return err
+	}
+	return im.stageBatches(ctx, row, partial, true)
+}
+
+func (im *Importer) stageBatches(ctx context.Context, row gen.BillingPspImport, recs []staged, merge bool) error {
 	for start := 0; start < len(recs); start += stageBatch {
 		chunk := recs[start:min(start+stageBatch, len(recs))]
 		p := gen.UpsertPSPImportRecordsParams{MerchantID: row.MerchantID, ImportID: row.ID}
 		seen := map[string]bool{}
 		for _, r := range chunk {
 			key := string(r.kind) + "\x1f" + r.ref
-			if r.ref == "" || seen[key] {
+			// A merged record may take several reads in one batch.
+			if r.ref == "" || seen[key] && !merge {
 				continue
 			}
 			seen[key] = true
@@ -458,9 +479,38 @@ func (im *Importer) stage(ctx context.Context, row gen.BillingPspImport, recs []
 		if len(p.Refs) == 0 {
 			continue
 		}
-		if err := im.DB.Gen(ctx).UpsertPSPImportRecords(ctx, p); err != nil {
+		var err error
+		if merge {
+			err = im.mergeRecords(ctx, gen.MergePSPImportRecordsParams(p))
+		} else {
+			err = im.DB.Gen(ctx).UpsertPSPImportRecords(ctx, p)
+		}
+		if err != nil {
 			return fmt.Errorf("stage records: %w", err)
 		}
+	}
+	return nil
+}
+
+// mergeRecords merges partial reads one at a time where a batch names a
+// record twice: one INSERT cannot touch a row twice.
+func (im *Importer) mergeRecords(ctx context.Context, p gen.MergePSPImportRecordsParams) error {
+	for from := 0; from < len(p.Refs); {
+		seen, to := map[string]bool{}, from
+		for ; to < len(p.Refs); to++ {
+			key := p.Kinds[to] + "\x1f" + p.Refs[to]
+			if seen[key] {
+				break
+			}
+			seen[key] = true
+		}
+		batch := gen.MergePSPImportRecordsParams{MerchantID: p.MerchantID, ImportID: p.ImportID, Kinds: p.Kinds[from:to], Refs: p.Refs[from:to],
+			CustomerRefs: p.CustomerRefs[from:to], SubscriptionRefs: p.SubscriptionRefs[from:to], OccurredAts: p.OccurredAts[from:to],
+			Facts: p.Facts[from:to], Data: p.Data[from:to]}
+		if err := im.DB.Gen(ctx).MergePSPImportRecords(ctx, batch); err != nil {
+			return err
+		}
+		from = to
 	}
 	return nil
 }

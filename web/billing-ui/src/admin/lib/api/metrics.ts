@@ -4,6 +4,7 @@ import type {
   DisputeStanding,
   ListPage,
   MetricsSchema,
+  PSPKnownThrough,
 } from "#orck/client/generated/wire"
 import type { AdminClient } from "./client"
 
@@ -13,6 +14,7 @@ export type {
   MetricsMeasure,
   MetricsSchema,
   MetricsThreshold,
+  PSPKnownThrough,
 } from "#orck/client/generated/wire"
 
 export interface MetricsRange {
@@ -63,6 +65,12 @@ export interface MetricsResult {
   rows: MetricsCell[][]
   compare_range?: { from: string; to: string }
   compare_rows?: MetricsCell[][]
+  // Each PSP's known-through. Past complete_through the result is
+  // incomplete; known_through is what it is as of when every PSP with data
+  // is stale.
+  freshness?: PSPKnownThrough[]
+  complete_through?: string | null
+  known_through?: string | null
 }
 
 // A kpi is a tile's value, its change and a sparkline; a heading is a

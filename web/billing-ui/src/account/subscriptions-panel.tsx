@@ -73,6 +73,7 @@ export function SubscriptionsPanel({
     message: string
   } | null>(null)
   const [notice, announce] = useNotice()
+  const [now] = React.useState(() => Date.now())
 
   const rows = React.useMemo(() => {
     const list = state.subscriptions ?? []
@@ -147,15 +148,25 @@ export function SubscriptionsPanel({
               s.price?.billing_interval_hours ||
               s.price?.billing_interval_months
             )
+          // A renewal date already passed says when it was last paid, not
+          // when it renews: the provider's next charge may not be known yet.
+          const lastPaid =
+            renews &&
+            s.current_period_ends_at &&
+            Date.parse(s.current_period_ends_at) <= now
+              ? formatDate(s.current_period_starts_at, locale)
+              : null
           const when = !live
             ? s.status === "canceled"
               ? t("subscriptions.noMorePayments")
               : endedAt && t("subscriptions.endedOn", { date: endedAt })
-            : renews && periodEnd
-              ? t("subscriptions.renews", { date: periodEnd })
-              : accessEnd
-                ? t("subscriptions.endsOn", { date: accessEnd })
-                : t("subscriptions.noMorePayments")
+            : lastPaid
+              ? t("subscriptions.lastPayment", { date: lastPaid })
+              : renews && periodEnd
+                ? t("subscriptions.renews", { date: periodEnd })
+                : accessEnd
+                  ? t("subscriptions.endsOn", { date: accessEnd })
+                  : t("subscriptions.noMorePayments")
           const paidWith = !renews
             ? null
             : s.rail === "solana"

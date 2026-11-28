@@ -60,6 +60,10 @@ type Plan struct {
 	// ImplicitCurrency: currency was added as a group-by because a money measure
 	// is present without a single-currency filter.
 	ImplicitCurrency bool
+	// AsOf is the instant the query is answered at: a fact counts once it is
+	// dated by it (a scheduled movement waits for its date), and at-risk MRR
+	// from it on reads state.
+	AsOf time.Time
 }
 
 // zone is the plan's calendar, UTC when none was named.
@@ -286,6 +290,14 @@ func ValidateIn(q *Query, now time.Time, zone *time.Location) (*Plan, *Validatio
 		filters[name] = vals
 	}
 
+	for _, m := range measures {
+		if m.Per != "" && !contains(dims, m.Per) && len(filters[m.Per]) != 1 {
+			add(FieldError{Code: "dimension_required", Param: "by",
+				Message: fmt.Sprintf("measure %q adds unlike things across %s: group by %q or filter it to one value", m.Name, m.Per, m.Per),
+				Valid:   m.values[m.Per]})
+		}
+	}
+
 	for i, o := range q.Order {
 		if (o.Measure == "") == (o.Dimension == "") {
 			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("order[%d]", i),
@@ -350,7 +362,7 @@ func ValidateIn(q *Query, now time.Time, zone *time.Location) (*Plan, *Validatio
 		Measures: measures, Dims: dims, HasTime: hasTime, Grain: grain,
 		From: from, To: to, Zone: zone, Buckets: buckets, Filters: filters,
 		Order: q.Order, Limit: limit, Compare: q.Compare,
-		ImplicitCurrency: implicitCurrency,
+		ImplicitCurrency: implicitCurrency, AsOf: now.UTC(),
 	}
 	// History names no invoker: by invoker, usage is read from raw events.
 	if plan.ReadsUsage() && plan.byInvoker() && !from.IsZero() {

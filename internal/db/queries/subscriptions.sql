@@ -313,12 +313,18 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id):
 ORDER BY sub.canceled_at DESC, sub.id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
--- The subscriptions whose MRR is scheduled to change by scheduled_change_before,
--- read from mrr_scheduled's index: the same filters and orders as above.
+-- The subscriptions whose MRR is scheduled to change by scheduled_change_before:
+-- a cancellation at period end ending by then (subscription_mrr's index of
+-- ends) or a scheduled change a renewal bills by then. The same filters and
+-- orders as above.
 -- name: ListScheduledSubscriptionsPage :many
-SELECT sub.* FROM billing.mrr_scheduled e
-JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
-WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.status = 'scheduled' AND e.effective_at <= sqlc.arg(scheduled_change_before)::timestamptz
+SELECT sub.* FROM billing.subscriptions sub
+WHERE sub.id IN (SELECT m.subscription_id FROM billing.subscription_mrr m
+                 WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.mrr > 0
+                   AND m.ends_at > sqlc.arg(at)::timestamptz AND m.ends_at <= sqlc.arg(scheduled_change_before)::timestamptz
+                 UNION ALL
+                 SELECT x.subscription_id FROM billing.mrr_scheduled_changes(sqlc.arg(merchant_id)::uuid) x
+                 WHERE x.effective_at <= sqlc.arg(scheduled_change_before)::timestamptz)
   AND sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
@@ -336,9 +342,13 @@ LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListScheduledSubscriptionsPageByPeriodEnd :many
 -- The subscriptions with a current period, the soonest end first.
-SELECT sub.* FROM billing.mrr_scheduled e
-JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
-WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.status = 'scheduled' AND e.effective_at <= sqlc.arg(scheduled_change_before)::timestamptz
+SELECT sub.* FROM billing.subscriptions sub
+WHERE sub.id IN (SELECT m.subscription_id FROM billing.subscription_mrr m
+                 WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.mrr > 0
+                   AND m.ends_at > sqlc.arg(at)::timestamptz AND m.ends_at <= sqlc.arg(scheduled_change_before)::timestamptz
+                 UNION ALL
+                 SELECT x.subscription_id FROM billing.mrr_scheduled_changes(sqlc.arg(merchant_id)::uuid) x
+                 WHERE x.effective_at <= sqlc.arg(scheduled_change_before)::timestamptz)
   AND sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
@@ -357,9 +367,13 @@ LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListScheduledSubscriptionsPageByCanceledAt :many
 -- The canceled subscriptions, the latest cancellation first.
-SELECT sub.* FROM billing.mrr_scheduled e
-JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
-WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.status = 'scheduled' AND e.effective_at <= sqlc.arg(scheduled_change_before)::timestamptz
+SELECT sub.* FROM billing.subscriptions sub
+WHERE sub.id IN (SELECT m.subscription_id FROM billing.subscription_mrr m
+                 WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.mrr > 0
+                   AND m.ends_at > sqlc.arg(at)::timestamptz AND m.ends_at <= sqlc.arg(scheduled_change_before)::timestamptz
+                 UNION ALL
+                 SELECT x.subscription_id FROM billing.mrr_scheduled_changes(sqlc.arg(merchant_id)::uuid) x
+                 WHERE x.effective_at <= sqlc.arg(scheduled_change_before)::timestamptz)
   AND sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
@@ -376,16 +390,19 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.status = 'scheduled' AND
 ORDER BY sub.canceled_at DESC, sub.id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
--- The subscriptions whose MRR is at risk (for risk_reason, when set), read
--- from subscription_mrr's index of at-risk rows: the same filters and orders.
+-- The subscriptions whose MRR is at risk at at (for risk_reason, when set), as
+-- state says (billing.mrr_risk_now): the same filters and orders.
 -- name: ListAtRiskSubscriptionsPage :many
-SELECT sub.* FROM billing.subscription_mrr r
-JOIN billing.subscriptions sub ON sub.merchant_id = r.merchant_id AND sub.id = r.subscription_id
-WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.risk <> '{}'
-  AND (sqlc.narg(risk_reason)::text IS NULL OR sqlc.narg(risk_reason)::text = ANY(r.risk))
-  AND (sqlc.narg(scheduled_change_before)::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
-      WHERE e.merchant_id = r.merchant_id AND e.subscription_id = r.subscription_id AND e.status = 'scheduled'
-        AND e.effective_at <= sqlc.narg(scheduled_change_before)::timestamptz))
+SELECT sub.* FROM billing.subscriptions sub
+WHERE sub.id IN (SELECT n.subscription_id FROM billing.mrr_risk_now(sqlc.arg(merchant_id)::uuid, sqlc.arg(at)::timestamptz) n
+                 WHERE sqlc.narg(risk_reason)::text IS NULL OR sqlc.narg(risk_reason)::text = ANY(n.reasons))
+  AND (sqlc.narg(scheduled_change_before)::timestamptz IS NULL OR sub.id IN (
+      SELECT m.subscription_id FROM billing.subscription_mrr m
+      WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.mrr > 0
+        AND m.ends_at > sqlc.arg(at)::timestamptz AND m.ends_at <= sqlc.narg(scheduled_change_before)::timestamptz
+      UNION ALL
+      SELECT x.subscription_id FROM billing.mrr_scheduled_changes(sqlc.arg(merchant_id)::uuid) x
+      WHERE x.effective_at <= sqlc.narg(scheduled_change_before)::timestamptz))
   AND sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
@@ -403,13 +420,16 @@ LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListAtRiskSubscriptionsPageByPeriodEnd :many
 -- The subscriptions with a current period, the soonest end first.
-SELECT sub.* FROM billing.subscription_mrr r
-JOIN billing.subscriptions sub ON sub.merchant_id = r.merchant_id AND sub.id = r.subscription_id
-WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.risk <> '{}'
-  AND (sqlc.narg(risk_reason)::text IS NULL OR sqlc.narg(risk_reason)::text = ANY(r.risk))
-  AND (sqlc.narg(scheduled_change_before)::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
-      WHERE e.merchant_id = r.merchant_id AND e.subscription_id = r.subscription_id AND e.status = 'scheduled'
-        AND e.effective_at <= sqlc.narg(scheduled_change_before)::timestamptz))
+SELECT sub.* FROM billing.subscriptions sub
+WHERE sub.id IN (SELECT n.subscription_id FROM billing.mrr_risk_now(sqlc.arg(merchant_id)::uuid, sqlc.arg(at)::timestamptz) n
+                 WHERE sqlc.narg(risk_reason)::text IS NULL OR sqlc.narg(risk_reason)::text = ANY(n.reasons))
+  AND (sqlc.narg(scheduled_change_before)::timestamptz IS NULL OR sub.id IN (
+      SELECT m.subscription_id FROM billing.subscription_mrr m
+      WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.mrr > 0
+        AND m.ends_at > sqlc.arg(at)::timestamptz AND m.ends_at <= sqlc.narg(scheduled_change_before)::timestamptz
+      UNION ALL
+      SELECT x.subscription_id FROM billing.mrr_scheduled_changes(sqlc.arg(merchant_id)::uuid) x
+      WHERE x.effective_at <= sqlc.narg(scheduled_change_before)::timestamptz))
   AND sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
@@ -428,13 +448,16 @@ LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListAtRiskSubscriptionsPageByCanceledAt :many
 -- The canceled subscriptions, the latest cancellation first.
-SELECT sub.* FROM billing.subscription_mrr r
-JOIN billing.subscriptions sub ON sub.merchant_id = r.merchant_id AND sub.id = r.subscription_id
-WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.risk <> '{}'
-  AND (sqlc.narg(risk_reason)::text IS NULL OR sqlc.narg(risk_reason)::text = ANY(r.risk))
-  AND (sqlc.narg(scheduled_change_before)::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
-      WHERE e.merchant_id = r.merchant_id AND e.subscription_id = r.subscription_id AND e.status = 'scheduled'
-        AND e.effective_at <= sqlc.narg(scheduled_change_before)::timestamptz))
+SELECT sub.* FROM billing.subscriptions sub
+WHERE sub.id IN (SELECT n.subscription_id FROM billing.mrr_risk_now(sqlc.arg(merchant_id)::uuid, sqlc.arg(at)::timestamptz) n
+                 WHERE sqlc.narg(risk_reason)::text IS NULL OR sqlc.narg(risk_reason)::text = ANY(n.reasons))
+  AND (sqlc.narg(scheduled_change_before)::timestamptz IS NULL OR sub.id IN (
+      SELECT m.subscription_id FROM billing.subscription_mrr m
+      WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.mrr > 0
+        AND m.ends_at > sqlc.arg(at)::timestamptz AND m.ends_at <= sqlc.narg(scheduled_change_before)::timestamptz
+      UNION ALL
+      SELECT x.subscription_id FROM billing.mrr_scheduled_changes(sqlc.arg(merchant_id)::uuid) x
+      WHERE x.effective_at <= sqlc.narg(scheduled_change_before)::timestamptz))
   AND sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
@@ -523,6 +546,7 @@ FROM (
                 AND i.intent_type = 'manual_rebill'
                 AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))
        AND NOT EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = s.merchant_id AND c.rebills_held)
+       AND NOT EXISTS (SELECT 1 FROM billing.psp_freshness f WHERE f.merchant_id = s.merchant_id AND f.psp_id = s.psp_id AND f.stale_since IS NOT NULL)
     UNION ALL
     SELECT s.merchant_id
       FROM billing.subscriptions s
@@ -539,7 +563,9 @@ FROM (
      WHERE s.grace_ends_at IS NOT NULL
        AND s.grace_ends_at <= sqlc.arg(now)::timestamptz
        AND s.status = 'past_due' AND s.next_retry_at IS NULL
-       AND (s.collection_policy <> 'engine' OR (sqlc.arg(include_engine)::boolean AND (s.retry_advised_at IS NOT NULL OR EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = s.merchant_id AND c.destructive_armed))))
+       AND ((s.collection_policy <> 'engine'
+             AND NOT EXISTS (SELECT 1 FROM billing.psp_freshness f WHERE f.merchant_id = s.merchant_id AND f.psp_id = s.psp_id AND f.stale_since IS NOT NULL))
+            OR (sqlc.arg(include_engine)::boolean AND (s.retry_advised_at IS NOT NULL OR EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = s.merchant_id AND c.destructive_armed))))
        AND s.deleted_at IS NULL
     UNION ALL
     SELECT s.merchant_id
@@ -568,7 +594,8 @@ LIMIT sqlc.arg(merchant_limit)::int;
 -- network advice deferred to its next renewal, or a held engine case whose
 -- merchant is now armed, due to end), and engine
 -- collections due, including one whose stored method is unusable, which
--- admission routes to awaiting_method (never the default card). Most overdue
+-- admission routes to awaiting_method (never the default card). A stale PSP's
+-- provider-billed rows wait: neither retried nor read past grace. Most overdue
 -- first, a page after the (due instant, id) cursor: a row the pass left due is
 -- behind the cursor, so it never hides later due work.
 SELECT * FROM billing.subscriptions sub
@@ -582,6 +609,8 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid
            AND (sub.status='active' OR (sub.status='past_due' AND sub.next_retry_at <= sqlc.arg(now)::timestamptz))
            AND NOT EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
   AND sub.deleted_at IS NULL
+  AND NOT (sub.collection_policy <> 'engine' AND sub.status = 'past_due'
+           AND EXISTS (SELECT 1 FROM billing.psp_freshness f WHERE f.merchant_id = sub.merchant_id AND f.psp_id = sub.psp_id AND f.stale_since IS NOT NULL))
   -- A merchant's held rebills wait: neither its retries nor its engine
   -- renewals are due.
   AND NOT (((sub.status='past_due' AND sub.next_retry_at IS NOT NULL) OR (sub.collection_policy='engine' AND sub.status='active'))

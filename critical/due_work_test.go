@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"slices"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/ccbillmock"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
@@ -202,12 +204,18 @@ func TestDueWork(t *testing.T) {
 			require.True(t, entitled(t, a.alpha, sub.CustomerID, "stripe:member"), "unverified keeps access")
 		})
 		t.Run("ccbill", func(t *testing.T) {
+			// A CCBill PSP OpenRails can read: one with only webhooks is
+			// stale, and its renewals are not overdue.
+			dataLink := ccbillmock.New()
+			t.Cleanup(dataLink.Close)
 			w := newWorld(t, func(w *world) {
-				declareCCBill(w, "")
+				declareCCBillAccount(w, fmt.Sprintf("%06d", 100000+rand.IntN(900000)), dataLink.URL())
 				w.posture = "full"
 			})
+			dataLink.SetClock(w.clock.Now)
 			paid := w.clock.Now().Truncate(time.Second).Add(24 * time.Hour)
-			customer, _, _ := importCCBillMember(t, w, "0223344556600000779", paid)
+			customer, sub, _ := importCCBillMember(t, w, "0223344556600000779", paid)
+			dataLink.AddMember(ccbillmock.Member{SubscriptionID: sub, Username: "member", Email: "member@critical.invalid", Signup: paid.Add(-720 * time.Hour)})
 			w.clock.Advance(paid.Add(47 * time.Hour).Sub(w.clock.Now()))
 			fleet := quietFleet(t, w)
 			runRegistered(t, fleet, "openrails.billing_pass", 1)

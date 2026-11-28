@@ -61,6 +61,10 @@ type MerchantConfiguration struct {
 	// never empty (UTC by default).
 	AccountingTimezone string `json:"accounting_timezone,omitempty"`
 
+	// AccountingBasis is the view of revenue the overview leads with; never
+	// empty (accrual by default).
+	AccountingBasis billing.AccountingBasis `json:"accounting_basis,omitempty"`
+
 	// BillingFields are the billing details a new card needs, defaults
 	// filled in.
 	BillingFields billing.BillingFieldSettings `json:"billing_fields"`

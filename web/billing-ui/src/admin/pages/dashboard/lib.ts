@@ -219,16 +219,27 @@ export function dimValueLabel(dim: string, value: MetricsCell): string {
   return IDENTIFIER_DIMS.has(dim) ? text : text.replaceAll("_", " ")
 }
 
+// undatedPSPs is the keys of the stale PSPs with data and no known-through:
+// the result is incomplete over its whole range for them.
+export function undatedPSPs(result: MetricsResult): string[] {
+  return (result.freshness ?? [])
+    .filter((f) => f.has_data && !f.current && !f.known_through)
+    .map((f) => f.key)
+}
+
 // pivotTimeSeries turns tabular rows into recharts rows keyed by bucket, one
 // series per measure × dimension-value combination. Server-zero-filled
 // buckets render as-is; combos absent for a bucket fill 0 so stacks align.
-// A ratio with nothing to divide by is no data, not 0%: it stays null.
+// A ratio with nothing to divide by is no data, not 0%: it stays null; so
+// does a value the server reports missing past a stale PSP's known-through,
+// or anywhere while one has none.
 export function pivotTimeSeries(
   result: MetricsResult,
   currency?: string
 ): Pivoted {
   const idx = indexColumns(result.columns)
   if (idx.time < 0) return { data: [], series: [] }
+  const undated = undatedPSPs(result).length > 0
   const buckets = new Map<string, Record<string, number | string | null>>()
   const series = new Map<string, PivotSeries>()
   for (const row of result.rows) {
@@ -265,7 +276,9 @@ export function pivotTimeSeries(
         series.set(identity, item)
       }
       const cell = row[m.index]
-      const empty = m.unit === "ratio" ? null : 0
+      const missing =
+        undated || (!!result.complete_through && t >= result.complete_through)
+      const empty = m.unit === "ratio" || missing ? null : 0
       entry[item.key] = cell === null ? empty : Number(cell)
       entry[exactKey(item.key)] = cell ?? empty
     }
@@ -411,7 +424,12 @@ export function funnelSteps(
   let reached = 0
   for (let i = keys.length - 1; i >= 0; i--) {
     reached += at.get(keys[i]) ?? 0
-    steps.unshift({ key: keys[i], value: reached, ofFirst: null, fromPrevious: null })
+    steps.unshift({
+      key: keys[i],
+      value: reached,
+      ofFirst: null,
+      fromPrevious: null,
+    })
   }
   const first = steps[0]?.value ?? 0
   steps.forEach((step, i) => {

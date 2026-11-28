@@ -112,7 +112,7 @@ services:
 
   # Mounts what OpenRails reads: KV v2 at kv (VAULT_KV_MOUNT=kv) and Transit
   # at transit, the default vault.transit_mount. In memory, Vault forgets them
-  # on restart: `task dev` runs this again; existing mounts are kept.
+  # on restart: `task dev:services` runs this again; existing mounts are kept.
   vault-init:
     image: hashicorp/vault@sha256:47f14a6acb98f48d798a07df7c83f23a6e636e1cf724c5f8ff165cb32667a1e2 # 2.1.1
     restart: "no"

@@ -13,6 +13,7 @@ export type AccessTenure = {
 
 export type AccountingSettings = {
   timezone?: string
+  basis?: "accrual" | "cash"
 }
 
 export type AdjustCustomerLimitParams = {
@@ -1643,6 +1644,7 @@ export type MetricsMeasure = {
   money?: boolean
   utc_days?: boolean
   program?: "acquirer" | "mastercard_ecp" | "mastercard_efm" | "stripe" | "visa_vamp"
+  per?: string
 }
 
 export type MetricsOrder = {
@@ -1666,6 +1668,9 @@ export type MetricsResult = {
   rows: unknown[][]
   compare_range?: MetricsResultRange
   compare_rows?: unknown[][]
+  freshness: PSPKnownThrough[]
+  complete_through: string | null
+  known_through: string | null
 }
 
 export type MetricsResultRange = {
@@ -1711,6 +1716,7 @@ export type PSP = {
   archived: boolean
   open_obligations: number
   armed: boolean
+  freshness: PSPFreshness
   gateway_id?: string
   account_id?: string
   client_accnum?: string
@@ -1728,9 +1734,38 @@ export type PSP = {
   updated_at: string
 }
 
+export type PSPAwaiting = {
+  currency: string
+  subscriptions: number
+  mrr: string
+}
+
+export type PSPCatchUp = {
+  from: string
+  through: string
+  renewed: number
+  failed: number
+  canceled: number
+  unconfirmed: number
+}
+
 export type PSPCredential = {
   configured: boolean
   validated_at: string | null
+}
+
+export type PSPFreshness = {
+  known_through: string | null
+  source: "import" | "import_records" | "none" | "now" | "read" | "webhook"
+  current: boolean
+  stale_since: string | null
+  cause: "catching_up" | "credentials_refused" | "imported" | "not_configured" | "unreachable" | "webhooks_silent"
+  severity: "critical" | "info" | "warning"
+  last_read_at: string | null
+  failing_since: string | null
+  catch_up: PSPCatchUp | null
+  has_data: boolean
+  awaiting: PSPAwaiting[]
 }
 
 export type PSPImport = {
@@ -1813,6 +1848,23 @@ export type PSPImportRule = {
   pattern?: string
   via: "customer_id" | "directory" | "mapping"
   mapping?: string
+}
+
+export type PSPKnownThrough = {
+  psp_id: string
+  key: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  known_through: string | null
+  source: "import" | "import_records" | "none" | "now" | "read" | "webhook"
+  current: boolean
+  stale_since: string | null
+  cause: "catching_up" | "credentials_refused" | "imported" | "not_configured" | "unreachable" | "webhooks_silent"
+  severity: "critical" | "info" | "warning"
+  last_read_at: string | null
+  failing_since: string | null
+  catch_up: PSPCatchUp | null
+  has_data: boolean
+  awaiting: PSPAwaiting[]
 }
 
 export type PSPPaymentConfig = {
@@ -2546,6 +2598,7 @@ export type Subscription = {
   rail: "ccbill" | "nmi" | "solana" | "stripe"
   rail_subscription_id: string | null
   status: "active" | "awaiting_method" | "canceled" | "past_due" | "pending" | "unverified"
+  unverified_reason: "awaiting_provider" | "unconfirmed" | null
   scheduled_change: ScheduledChange | null
   payment_method_id: string | null
   mandate_id: string | null

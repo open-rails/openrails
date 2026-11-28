@@ -46,10 +46,13 @@ type stripeCardJSON struct {
 }
 
 type stripeSubscriptionExtra struct {
-	Status               string            `json:"status"`
-	StartDate            int64             `json:"start_date"`
-	CanceledAt           int64             `json:"canceled_at"`
-	EndedAt              int64             `json:"ended_at"`
+	Status              string `json:"status"`
+	StartDate           int64  `json:"start_date"`
+	CanceledAt          int64  `json:"canceled_at"`
+	EndedAt             int64  `json:"ended_at"`
+	CancellationDetails struct {
+		Reason string `json:"reason"`
+	} `json:"cancellation_details"`
 	Metadata             map[string]string `json:"metadata"`
 	DefaultPaymentMethod json.RawMessage   `json:"default_payment_method"`
 	Items                struct {
@@ -190,14 +193,33 @@ func stripeSubscription(sub reconcile.RemoteSubscription, raw json.RawMessage) (
 	}
 	switch x.Status {
 	case "canceled":
-		data.Ended, data.UserCanceled, data.EndedAt = true, true, stripeTime(x.CanceledAt)
-		if ended := stripeTime(x.EndedAt); ended != nil {
-			data.EndedAt = ended
+		// Service ended at ended_at; canceled_at is when the cancel was made.
+		data.Ended, data.EndedAt, data.CanceledAt = true, stripeTime(x.EndedAt), stripeTime(x.CanceledAt)
+		if data.EndedAt == nil {
+			data.EndedAt = data.CanceledAt
 		}
-	case "incomplete_expired", "unpaid", "paused":
-		data.Ended, data.EndedAt = true, stripeTime(x.EndedAt)
+		data.EndKind = stripeEndKind(x.Status, x.CancellationDetails.Reason)
+	case "incomplete_expired":
+		// Its first payment never completed: it served nothing.
+		data.Ended, data.CanceledAt, data.EndKind = true, stripeTime(x.CanceledAt), stripeEndKind(x.Status, x.CancellationDetails.Reason)
+	case "unpaid", "paused":
+		// Stripe states no end: its last paid invoice does (the lander's).
+		data.Ended, data.EndKind = true, string(reconcile.DeclaredCancelProviderTerminated)
 	}
 	return staged{kind: billing.PSPImportSubscription, ref: sub.RailSubscriptionID, customerRef: sub.CustomerID, occurredAt: data.StartedAt, facts: f, data: data}, nil
+}
+
+// stripeEndKind is why an ended subscription ended: its first payment never
+// completed, a payment failed or was disputed, or someone asked (an old
+// subscription states no reason).
+func stripeEndKind(status, reason string) string {
+	switch {
+	case status == "incomplete_expired" || reason == "payment_failed":
+		return string(reconcile.DeclaredCancelProviderTerminated)
+	case reason == "payment_disputed":
+		return string(reconcile.DeclaredCancelChargeback)
+	}
+	return string(reconcile.DeclaredCancelUser)
 }
 
 func (s *stripeSource) history(ctx context.Context, since, until time.Time, _ bool) ([]staged, error) {

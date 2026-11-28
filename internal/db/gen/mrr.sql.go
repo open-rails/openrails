@@ -12,90 +12,36 @@ import (
 	"github.com/google/uuid"
 )
 
-const effectDueMRRRisk = `-- name: EffectDueMRRRisk :one
-SELECT billing.effect_due_mrr_risk($1::uuid, $2::int, $3::uuid)::int AS claimed
+const listMRRRiskNow = `-- name: ListMRRRiskNow :many
+SELECT n.subscription_id::uuid AS subscription_id, n.reasons::text[] AS reasons, n.since::timestamptz AS since
+FROM billing.mrr_risk_now($1::uuid, $2::timestamptz) n
+WHERE n.subscription_id = ANY($3::uuid[])
 `
 
-type EffectDueMRRRiskParams struct {
-	MerchantID uuid.UUID
-	Batch      int32
-	CustomerID *uuid.UUID
+type ListMRRRiskNowParams struct {
+	MerchantID      uuid.UUID
+	At              time.Time
+	SubscriptionIds []uuid.UUID
 }
 
-// Claims up to batch of the merchant's queued risk changes (customer_id's
-// alone, when named) that no other worker holds and none set aside, and
-// re-evaluates their customers; returns how many it claimed.
-func (q *Queries) EffectDueMRRRisk(ctx context.Context, arg EffectDueMRRRiskParams) (int32, error) {
-	row := q.db.QueryRow(ctx, effectDueMRRRisk, arg.MerchantID, arg.Batch, arg.CustomerID)
-	var claimed int32
-	err := row.Scan(&claimed)
-	return claimed, err
-}
-
-const effectDueSubscriptionMRR = `-- name: EffectDueSubscriptionMRR :one
-SELECT billing.effect_due_mrr($1::uuid, $2::uuid, $3::timestamptz)::boolean AS effected
-`
-
-type EffectDueSubscriptionMRRParams struct {
-	MerchantID     uuid.UUID
+type ListMRRRiskNowRow struct {
 	SubscriptionID uuid.UUID
-	At             time.Time
+	Reasons        []string
+	Since          time.Time
 }
 
-// One due subscription leaves MRR at its end; false when it is no longer due.
-func (q *Queries) EffectDueSubscriptionMRR(ctx context.Context, arg EffectDueSubscriptionMRRParams) (bool, error) {
-	row := q.db.QueryRow(ctx, effectDueSubscriptionMRR, arg.MerchantID, arg.SubscriptionID, arg.At)
-	var effected bool
-	err := row.Scan(&effected)
-	return effected, err
-}
-
-const listDueSubscriptionMRR = `-- name: ListDueSubscriptionMRR :many
-
-SELECT m.next_change_at::timestamptz AS next_change_at, m.merchant_id, m.subscription_id
-FROM billing.subscription_mrr m
-WHERE m.next_change_at <= $1::timestamptz
-  AND ($2::timestamptz IS NULL
-       OR (m.next_change_at, m.merchant_id, m.subscription_id) > ($2::timestamptz, $3::uuid, $4::uuid))
-ORDER BY m.next_change_at, m.merchant_id, m.subscription_id
-LIMIT $5::int
-`
-
-type ListDueSubscriptionMRRParams struct {
-	At                  time.Time
-	AfterAt             *time.Time
-	AfterMerchantID     *uuid.UUID
-	AfterSubscriptionID *uuid.UUID
-	RowLimit            int32
-}
-
-type ListDueSubscriptionMRRRow struct {
-	NextChangeAt   time.Time
-	MerchantID     uuid.UUID
-	SubscriptionID uuid.UUID
-}
-
-// billing.subscription_mrr, its movements and rollups. Triggers write them;
-// these are the reads and the due work.
-// CROSS-MERCHANT: subscriptions whose MRR time alone changes at or before
-// at, in due order. The read is indexed on next_change_at, so an idle pass
-// reads no row.
-func (q *Queries) ListDueSubscriptionMRR(ctx context.Context, arg ListDueSubscriptionMRRParams) ([]ListDueSubscriptionMRRRow, error) {
-	rows, err := q.db.Query(ctx, listDueSubscriptionMRR,
-		arg.At,
-		arg.AfterAt,
-		arg.AfterMerchantID,
-		arg.AfterSubscriptionID,
-		arg.RowLimit,
-	)
+// A page of subscriptions' reasons at risk at at, as state says, and since
+// when state says they hold; an open case dates them instead.
+func (q *Queries) ListMRRRiskNow(ctx context.Context, arg ListMRRRiskNowParams) ([]ListMRRRiskNowRow, error) {
+	rows, err := q.db.Query(ctx, listMRRRiskNow, arg.MerchantID, arg.At, arg.SubscriptionIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListDueSubscriptionMRRRow
+	var items []ListMRRRiskNowRow
 	for rows.Next() {
-		var i ListDueSubscriptionMRRRow
-		if err := rows.Scan(&i.NextChangeAt, &i.MerchantID, &i.SubscriptionID); err != nil {
+		var i ListMRRRiskNowRow
+		if err := rows.Scan(&i.SubscriptionID, &i.Reasons, &i.Since); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -106,61 +52,37 @@ func (q *Queries) ListDueSubscriptionMRR(ctx context.Context, arg ListDueSubscri
 	return items, nil
 }
 
-const listMRRRiskDueCustomers = `-- name: ListMRRRiskDueCustomers :many
-SELECT DISTINCT d.customer_id
-FROM billing.mrr_risk_due d
-WHERE d.merchant_id = $1::uuid AND (d.held_until IS NULL OR d.held_until <= now())
-ORDER BY d.customer_id
-LIMIT $2::int
+const listScheduledMRRChanges = `-- name: ListScheduledMRRChanges :many
+SELECT x.subscription_id::uuid AS subscription_id, x.effective_at::timestamptz AS effective_at, x.amount::bigint AS amount
+FROM billing.mrr_scheduled_changes($1::uuid) x
+WHERE x.subscription_id = ANY($2::uuid[])
 `
 
-type ListMRRRiskDueCustomersParams struct {
-	MerchantID uuid.UUID
-	RowLimit   int32
+type ListScheduledMRRChangesParams struct {
+	MerchantID      uuid.UUID
+	SubscriptionIds []uuid.UUID
 }
 
-// The merchant's customers with queued risk changes not set aside.
-func (q *Queries) ListMRRRiskDueCustomers(ctx context.Context, arg ListMRRRiskDueCustomersParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listMRRRiskDueCustomers, arg.MerchantID, arg.RowLimit)
+type ListScheduledMRRChangesRow struct {
+	SubscriptionID uuid.UUID
+	EffectiveAt    time.Time
+	Amount         int64
+}
+
+// A page of subscriptions' scheduled changes that move MRR, priced now.
+func (q *Queries) ListScheduledMRRChanges(ctx context.Context, arg ListScheduledMRRChangesParams) ([]ListScheduledMRRChangesRow, error) {
+	rows, err := q.db.Query(ctx, listScheduledMRRChanges, arg.MerchantID, arg.SubscriptionIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []ListScheduledMRRChangesRow
 	for rows.Next() {
-		var customer_id uuid.UUID
-		if err := rows.Scan(&customer_id); err != nil {
+		var i ListScheduledMRRChangesRow
+		if err := rows.Scan(&i.SubscriptionID, &i.EffectiveAt, &i.Amount); err != nil {
 			return nil, err
 		}
-		items = append(items, customer_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listMRRRiskDueMerchants = `-- name: ListMRRRiskDueMerchants :many
-SELECT DISTINCT d.merchant_id
-FROM billing.mrr_risk_due d
-ORDER BY d.merchant_id
-`
-
-// CROSS-MERCHANT: the merchants with queued risk changes, ids only. The queue
-// holds only changes not yet claimed.
-func (q *Queries) ListMRRRiskDueMerchants(ctx context.Context) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listMRRRiskDueMerchants)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var merchant_id uuid.UUID
-		if err := rows.Scan(&merchant_id); err != nil {
-			return nil, err
-		}
-		items = append(items, merchant_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -169,36 +91,35 @@ func (q *Queries) ListMRRRiskDueMerchants(ctx context.Context) ([]uuid.UUID, err
 }
 
 const listSubscriptionMRR = `-- name: ListSubscriptionMRR :many
-SELECT m.subscription_id, m.currency, m.mrr, m.recorded_risk::text[] AS risk,
-       e.kind AS scheduled_kind, e.mrr_delta AS scheduled_amount, e.effective_at AS scheduled_effective_at,
-       c.entry_reason AS risk_entry_reason, c.opened_at AS risk_since
+
+SELECT m.subscription_id, m.currency, m.mrr, m.ends_at, c.entry_reason AS risk_entry_reason, c.opened_at AS risk_since
 FROM billing.subscription_mrr m
-LEFT JOIN billing.mrr_scheduled e ON e.merchant_id = m.merchant_id AND e.subscription_id = m.subscription_id AND e.status = 'scheduled'
-LEFT JOIN billing.mrr_risk_cases c ON c.merchant_id = m.merchant_id AND c.subscription_id = m.subscription_id AND c.closed_at IS NULL
-WHERE m.merchant_id = $1::uuid AND m.subscription_id = ANY($2::uuid[])
+LEFT JOIN billing.mrr_risk_cases c ON c.merchant_id = m.merchant_id AND c.subscription_id = m.subscription_id
+    AND (c.closed_at IS NULL OR c.closed_at > $1::timestamptz)
+WHERE m.merchant_id = $2::uuid AND m.subscription_id = ANY($3::uuid[])
 `
 
 type ListSubscriptionMRRParams struct {
+	At              time.Time
 	MerchantID      uuid.UUID
 	SubscriptionIds []uuid.UUID
 }
 
 type ListSubscriptionMRRRow struct {
-	SubscriptionID       uuid.UUID
-	Currency             string
-	Mrr                  int64
-	Risk                 []string
-	ScheduledKind        *string
-	ScheduledAmount      *int64
-	ScheduledEffectiveAt *time.Time
-	RiskEntryReason      *string
-	RiskSince            *time.Time
+	SubscriptionID  uuid.UUID
+	Currency        string
+	Mrr             int64
+	EndsAt          *time.Time
+	RiskEntryReason *string
+	RiskSince       *time.Time
 }
 
-// The MRR of a page of subscriptions, each with its scheduled change and its
-// open risk case.
+// MRR facts: subscription_mrr, movements and their lines, risk cases and
+// episodes. Triggers write them; these are the reads.
+// A page of subscriptions' MRR rows, each with its risk case at at: open, or
+// closed at an end still ahead.
 func (q *Queries) ListSubscriptionMRR(ctx context.Context, arg ListSubscriptionMRRParams) ([]ListSubscriptionMRRRow, error) {
-	rows, err := q.db.Query(ctx, listSubscriptionMRR, arg.MerchantID, arg.SubscriptionIds)
+	rows, err := q.db.Query(ctx, listSubscriptionMRR, arg.At, arg.MerchantID, arg.SubscriptionIds)
 	if err != nil {
 		return nil, err
 	}
@@ -210,10 +131,7 @@ func (q *Queries) ListSubscriptionMRR(ctx context.Context, arg ListSubscriptionM
 			&i.SubscriptionID,
 			&i.Currency,
 			&i.Mrr,
-			&i.Risk,
-			&i.ScheduledKind,
-			&i.ScheduledAmount,
-			&i.ScheduledEffectiveAt,
+			&i.EndsAt,
 			&i.RiskEntryReason,
 			&i.RiskSince,
 		); err != nil {
@@ -227,46 +145,29 @@ func (q *Queries) ListSubscriptionMRR(ctx context.Context, arg ListSubscriptionM
 	return items, nil
 }
 
-const queueRestoredMRRRisk = `-- name: QueueRestoredMRRRisk :exec
-INSERT INTO billing.mrr_risk_due (merchant_id, customer_id, changed_at)
-SELECT DISTINCT m.merchant_id, m.customer_id, $1::timestamptz
-FROM billing.subscription_mrr m
-WHERE m.merchant_id = $2::uuid AND m.mrr > 0
+const recordMRRHistory = `-- name: RecordMRRHistory :exec
+SELECT billing.record_mrr_history($1::uuid, $2::uuid[],
+    $3::uuid[], $4::timestamptz[], $5::timestamptz)
 `
 
-type QueueRestoredMRRRiskParams struct {
-	At         time.Time
-	MerchantID uuid.UUID
+type RecordMRRHistoryParams struct {
+	MerchantID           uuid.UUID
+	SubscriptionIds      []uuid.UUID
+	EndedSubscriptionIds []uuid.UUID
+	EndedAts             []time.Time
+	AsOf                 time.Time
 }
 
-// A restore re-evaluates every customer with a subscription adding MRR: the
-// changes the source had queued stay at the source.
-func (q *Queries) QueueRestoredMRRRisk(ctx context.Context, arg QueueRestoredMRRRiskParams) error {
-	_, err := q.db.Exec(ctx, queueRestoredMRRRisk, arg.At, arg.MerchantID)
+// The MRR history of the subscriptions an import landed, as of its evidence
+// instant, the ended ones to when their paid service ended: each customer's
+// imported movements written again.
+func (q *Queries) RecordMRRHistory(ctx context.Context, arg RecordMRRHistoryParams) error {
+	_, err := q.db.Exec(ctx, recordMRRHistory,
+		arg.MerchantID,
+		arg.SubscriptionIds,
+		arg.EndedSubscriptionIds,
+		arg.EndedAts,
+		arg.AsOf,
+	)
 	return err
-}
-
-const setAsideMRRRiskCustomer = `-- name: SetAsideMRRRiskCustomer :execrows
-UPDATE billing.mrr_risk_due d
-SET held_until = now() + interval '1 hour'
-FROM (SELECT q.id FROM billing.mrr_risk_due q
-      WHERE q.merchant_id = $1::uuid AND q.customer_id = $2::uuid
-        AND (q.held_until IS NULL OR q.held_until <= now())
-      FOR UPDATE SKIP LOCKED) h
-WHERE d.merchant_id = $1::uuid AND d.id = h.id
-`
-
-type SetAsideMRRRiskCustomerParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-}
-
-// Sets aside a customer whose evaluation failed alone: drains skip its
-// queued changes for an hour, then try it again.
-func (q *Queries) SetAsideMRRRiskCustomer(ctx context.Context, arg SetAsideMRRRiskCustomerParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setAsideMRRRiskCustomer, arg.MerchantID, arg.CustomerID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }

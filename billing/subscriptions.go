@@ -103,6 +103,8 @@ type Subscription struct {
 	Rail               Rail               `json:"rail"`
 	RailSubscriptionID *string            `json:"rail_subscription_id"`
 	Status             SubscriptionStatus `json:"status"`
+	// UnverifiedReason is why an unverified subscription is; null otherwise.
+	UnverifiedReason *UnverifiedReason `json:"unverified_reason"`
 	// ScheduledChange is the change waiting for the next renewal, or null.
 	ScheduledChange *ScheduledChange `json:"scheduled_change"`
 	PaymentMethodID *PaymentMethodID `json:"payment_method_id"`

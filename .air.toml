@@ -14,7 +14,8 @@ cmd = "cd server && go build -buildvcs=false -o ../tmp/openrails ./cmd/openrails
 bin = "./tmp/openrails"
 args_bin = ["run-server"]
 
-include_ext = ["go"]
+# Migrations are embedded .sql files.
+include_ext = ["go", "sql"]
 exclude_dir = [
   ".cache",
   ".claude",
@@ -69,6 +70,8 @@ kill_delay = 500 # ms
   main_only = false
 
 [color]
+  # task dev pipes Air through tee into tmp/dev.log: color without a terminal.
+  mode = "always"
   # Customize each part's color. If no color found, use the raw app log.
   main = "magenta"
   watcher = "cyan"
@@ -76,8 +79,8 @@ kill_delay = 500 # ms
   runner = "green"
 
 [misc]
-  # Delete tmp directory on exit
-  clean_on_exit = true
+  # Keep tmp/dev.log, the last run's output, after Air exits.
+  clean_on_exit = false
 
 [screen]
   clear_on_rebuild = true

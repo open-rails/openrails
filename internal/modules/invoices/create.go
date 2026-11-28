@@ -321,7 +321,7 @@ func (s *Service) create(ctx context.Context, in CreateInput) (*Invoice, bool, e
 		}
 		// Spending a merchant's units is not a checkout: no facts.
 		if !unit {
-			if err := checkoutFacts(ctx, q, &params, in.Checkout); err != nil {
+			if err := checkoutFacts(ctx, q, &params, in.Checkout, now); err != nil {
 				return err
 			}
 		}

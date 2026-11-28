@@ -645,7 +645,7 @@ func TestDeclineCauses(t *testing.T) {
 
 		// The overview shows them: the rates as tiles, the decline mix and the
 		// cuts in Payment health, every one answering.
-		widgets := dashboard.DefaultWidgets(billing.DashboardProfile{Subscriptions: true, CardPayments: true})
+		widgets := dashboard.DefaultWidgets(billing.DashboardProfile{Subscriptions: true, CardPayments: true}, billing.AccountingAccrual)
 		shown := map[string]billing.DashboardWidget{}
 		for _, w := range widgets {
 			shown[w.ID] = w

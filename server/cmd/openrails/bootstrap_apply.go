@@ -12,7 +12,8 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/server/internal/bootstrap"
@@ -149,11 +150,6 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 	if err := resources.loadMerchants(ctx); err != nil {
 		return err
 	}
-	runtime := &app.Runtime{DB: resources.db, Config: cfg, Merchants: resources.directory, MerchantConfig: resources.directory.Config(), Log: slog.Default()}
-	if err := runtime.WireOneOffDestructiveAdmissions(ctx); err != nil {
-		return err
-	}
-	defer runtime.Close(context.WithoutCancel(ctx))
 	reconcileOpts.Merchants = resources.directory
 	return applyPushMerchantConfigManifest(ctx, cfg, resources.cp, manifest, out, reconcileOpts)
 }
@@ -185,33 +181,25 @@ func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) e
 		return fmt.Errorf("config not loaded; dump-merchant-config requires --config")
 	}
 
-	resources, err := openCLIControlPlane(ctx)
-	if err != nil {
-		return err
-	}
-	defer resources.close()
-
-	vault, err := cliVault(ctx)
-	if err != nil {
-		return err
-	}
-	manifest, err := bootstrap.DumpMerchantConfig(ctx, slog.Default(), cfg, vault, resources.cp, opts.slug)
-	if err != nil {
-		return err
-	}
-	encoded, err := bootstrap.MarshalMerchantManifest(manifest)
-	if err != nil {
-		return fmt.Errorf("marshal merchant config: %w", err)
-	}
-	if path := strings.TrimSpace(opts.out); path != "" {
-		if err := os.WriteFile(path, encoded, 0o600); err != nil {
-			return fmt.Errorf("write %s: %w", path, err)
+	return withCLIDirectory(cmd, func(ctx context.Context, _ *db.DB, directory *merchants.Service) error {
+		manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, directory, opts.slug)
+		if err != nil {
+			return err
 		}
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Merchant configuration written to %s.\n", path)
+		encoded, err := bootstrap.MarshalMerchantManifest(manifest)
+		if err != nil {
+			return fmt.Errorf("marshal merchant config: %w", err)
+		}
+		if path := strings.TrimSpace(opts.out); path != "" {
+			if err := os.WriteFile(path, encoded, 0o600); err != nil {
+				return fmt.Errorf("write %s: %w", path, err)
+			}
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Merchant configuration written to %s.\n", path)
+			return err
+		}
+		_, err = cmd.OutOrStdout().Write(encoded)
 		return err
-	}
-	_, err = cmd.OutOrStdout().Write(encoded)
-	return err
+	})
 }
 
 // applyStartupBootstrap applies the AuthKit authority manifest on the FIRST

@@ -34,21 +34,9 @@ var NeverRollbackableTables = map[string]string{
 	"mrr_movements":              "MRR history: an undo's restored subscriptions record their own corrections",
 	"mrr_movement_lines":         "MRR history, with its movements",
 	"subscription_mrr":           "trigger-maintained MRR projection of subscriptions; restoring a row desynchronises it from its movements",
-	"customer_mrr":               "trigger-maintained MRR projection; restoring a row desynchronises it from its movements",
-	"mrr_scheduled":              "MRR history: an undo's restored subscriptions schedule their own churn and changes",
-	"mrr_flows":                  "MRR rollup of the movements; restoring a row desynchronises it from them",
-	"mrr_totals":                 "MRR rollup of customer_mrr; restoring a row desynchronises it from them",
-	"mrr_product_flows":          "MRR rollup of the movements; restoring a row desynchronises it from them",
-	"mrr_cohort_flows":           "MRR rollup of the movements; restoring a row desynchronises it from them",
-	"mrr_streak_flows":           "MRR rollup of the movements; restoring a row desynchronises it from them",
-	"mrr_product_totals":         "MRR rollup of subscription_mrr; restoring a row desynchronises it from them",
-	"mrr_customer_totals":        "MRR rollup of customer_mrr; restoring a row desynchronises it from them",
-	"mrr_customer_flows":         "MRR rollup of the movements; restoring a row desynchronises it from them",
 	"subscription_cancellations": "cancel history: an undo's restored subscriptions record their own decisions",
 	"mrr_risk_cases":             "MRR risk history: an undo's restored subscriptions open their own cases",
 	"mrr_risk_episodes":          "MRR risk history, with its cases",
-	"mrr_risk_flows":             "MRR risk rollup of the cases; restoring a row desynchronises it from them",
-	"mrr_risk_totals":            "MRR risk rollup of subscription_mrr; restoring a row desynchronises it from them",
 }
 
 // maintenance_runs and destructive_run_before_images are absent on purpose: an

@@ -1,6 +1,6 @@
 # OpenRails River jobs
 
-OpenRails registers 27 core River job kinds. Seven have recurring schedules.
+OpenRails registers 28 core River job kinds. Seven have recurring schedules.
 A kind identifies the worker that handles a job, and
 a queue controls which workers can take it. A shared River fleet can also
 contain AuthKit or host application jobs. [Worker registrations](../internal/app/river_register.go) ·
@@ -19,7 +19,6 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) �
 | `openrails.billing_pass` | `billing` | At the top of each UTC hour | Runs the [hourly billing scans](#hourly-billing-scans) and records any critical work still overdue. [Worker](../internal/river/jobs_billing_pass.go) |
 | `openrails.cleanup_expired_data` | `billing` | Every hour, with continuation jobs for large passes | Deletes expired operational data. [Worker](../internal/river/jobs_cleanup.go) |
 | `openrails.merchant_health` | `billing` | Every hour | Evaluates payment and recovery health, held renewals, the unverified backlog, stuck or abandoned provider operations, and timed access lapses, for merchants with activity. [Worker](../internal/river/jobs_merchant_health.go) |
-| `openrails.mrr_risk` | `billing` | Every 30 seconds | Drains the MRR risk changes in `mrr_risk_due` that no drain woken by their database notification took. [Worker](../internal/river/jobs_mrr_risk.go) · [Drain](../internal/modules/subscriptions/mrr_risk.go) |
 | `openrails.stripe_webhook_reconcile` | `billing` | Every 24 hours. Per-PSP jobs also run on configuration changes, at boot when configuration differs, and at endpoint retirement. | Queues checks for active Stripe PSPs and registers, updates, or retires their managed webhook endpoints. [Worker](../internal/river/jobs_stripe_webhooks.go) · [Configuration trigger](../internal/app/stripe_webhook_follow.go) |
 
 ## Jobs queued as work arrives
@@ -28,6 +27,7 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) �
 | --- | --- | --- | --- |
 | `openrails.balance_look` | `billing` | A balance change crosses a watched threshold, or the previous look schedules the next check | Checks one customer balance for expiring credits and low or depleted balance notices. [Worker](../internal/river/jobs_balance_watch.go) · [Scheduling](../internal/modules/money/balance_watch.go) |
 | `openrails.charge_attributions` | `billing` | A billing import declares charges that need provider evidence | Reads or waits for provider charge facts, then records each charge against its declared subscription. [Worker](../internal/river/jobs_charge_attributions.go) · [Import trigger](../internal/billingimport/billingimport.go) |
+| `openrails.psp_catch_up` | `billing` | A billing or PSP import names the PSP; a read of a stale PSP succeeds; the due pass, an hour after a stale PSP's last failed read | Arms the PSP: one that cannot be read is recorded stale; a stale one has the renewals the due pass skipped and its unverified rows read, then is current with what the gap hid. [Worker](../internal/river/jobs_psp_catch_up.go) · [Catch-up](../internal/reconcile/catch_up.go) |
 | `openrails.contact_erasures` | `billing` | A SCIM erasure that waits on the merchant's erasure budget or hold commits a job in the same transaction; clearing the erasure hold brings it forward | Runs the merchant's waiting contact erasures, oldest first, within its erasure budget while the hold is clear, and looks again every 10 minutes while any wait. [Worker](../internal/river/jobs_contact_erasures.go) · [Drain](../internal/scim/erasure.go) |
 | `openrails.customer_converge` | `billing` | A customer-affecting mutation commits a job in the same transaction | Reconciles grant effects, references, duplicate charges, findings, and access-ended notices for one customer. [Worker](../internal/river/jobs_customer_converge.go) · [Enqueue](../internal/convergejob/convergejob.go) |
 | `openrails.customer_message` | `billing` | Queued in the transaction that records its billing fact (`billingfact.Record`) | Sends one customer message, or records why not; a failed send is retried with backoff, ten attempts in all. [Worker](../internal/river/jobs_customer_messages.go) · [Send](../internal/modules/messages/send.go) |
@@ -65,8 +65,8 @@ Each `openrails.billing_pass` job runs these scans in order within its own River
 | `openrails.usage_invoices` | Due usage bills and collections. [Source](../internal/river/jobs_usage_invoices.go) |
 | `openrails.stored_card_refresh_due` | Stored cards due for account updater checks before renewal. [Source](../internal/river/jobs_stored_card_refresh.go) |
 | `openrails.operation_wakes` | Live provider operations more than an hour overdue that need another wake. [Source](../internal/river/jobs_operation_wakes.go) |
-| `openrails.mrr_due` | Subscriptions canceled at period end whose end has come: each leaves MRR, dated at its end. The read is indexed on the change instant. [Source](../internal/river/jobs_mrr_due.go) |
 | `openrails.stripe_fees` | Stripe charges, refunds and disputes whose processor fees the general ledger has yet to read (`stripe_fee_reads`, indexed on `due_at`): each object's balance transactions are read and each fee posts once. A failed read waits and is read again; after eight failures it waits for its `books.fee.unread` finding to be fixed. [Source](../internal/modules/money/fees/stripe.go) |
+| `openrails.stripe_payouts` | Stripe payouts the general ledger has yet to read to their end (`stripe_payout_reads`, indexed on `due_at`, queued by each `payout.*` notice): each payout is booked from cash clearing through cash in transit to its bank account, with its reserve lines; one not yet paid is read again at its arrival date and each hour after. A failed read waits and is read again; after eight failures it waits for its `books.payout.unread` finding to be fixed. [Source](../internal/modules/money/payouts/stripe.go) |
 
 ## Inspect a running deployment
 

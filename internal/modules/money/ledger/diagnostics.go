@@ -109,6 +109,7 @@ type RollupDrift struct {
 	Currency      string     `json:"currency"`
 	AccountType   string     `json:"account_type"`
 	PSPID         *uuid.UUID `json:"psp_id,omitempty"`
+	BankAccountID *uuid.UUID `json:"bank_account_id,omitempty"`
 	Bucket        *time.Time `json:"bucket,omitempty"`
 	TransferType  string     `json:"transfer_type,omitempty"`
 	ProductID     *uuid.UUID `json:"product_id,omitempty"`
@@ -135,6 +136,7 @@ type SignBreach struct {
 	Currency      string     `json:"currency"`
 	AccountType   string     `json:"account_type"`
 	PSPID         *uuid.UUID `json:"psp_id,omitempty"`
+	BankAccountID *uuid.UUID `json:"bank_account_id,omitempty"`
 	CustomerID    *uuid.UUID `json:"customer_id,omitempty"`
 	CreditsPosted int64      `json:"credits_posted"`
 	DebitsPosted  int64      `json:"debits_posted"`
@@ -156,6 +158,7 @@ type SideWarning struct {
 	AccountType   string     `json:"account_type"`
 	Class         string     `json:"class"`
 	PSPID         *uuid.UUID `json:"psp_id,omitempty"`
+	BankAccountID *uuid.UUID `json:"bank_account_id,omitempty"`
 	CreditsPosted int64      `json:"credits_posted"`
 	DebitsPosted  int64      `json:"debits_posted"`
 }
@@ -245,7 +248,7 @@ func CheckSides(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]SideWarn
 	}
 	var out []SideWarning
 	for _, row := range rows {
-		out = append(out, SideWarning{Currency: row.Currency, AccountType: row.AccountType, Class: row.Class, PSPID: row.PspID,
+		out = append(out, SideWarning{Currency: row.Currency, AccountType: row.AccountType, Class: row.Class, PSPID: row.PspID, BankAccountID: row.BankAccountID,
 			CreditsPosted: row.CreditsPosted, DebitsPosted: row.DebitsPosted})
 	}
 	return out, nil
@@ -263,7 +266,7 @@ func CheckSignBreaches(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]S
 	}
 	var out []SignBreach
 	for _, row := range rows {
-		out = append(out, SignBreach{Currency: row.Currency, AccountType: row.AccountType, PSPID: row.PspID, CustomerID: row.CustomerID,
+		out = append(out, SignBreach{Currency: row.Currency, AccountType: row.AccountType, PSPID: row.PspID, BankAccountID: row.BankAccountID, CustomerID: row.CustomerID,
 			CreditsPosted: row.CreditsPosted, DebitsPosted: row.DebitsPosted})
 	}
 	return out, nil
@@ -367,7 +370,7 @@ func CheckRollupDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]Ro
 	var out []RollupDrift
 	for _, row := range totals {
 		out = append(out, RollupDrift{
-			Book: row.Book, Currency: row.Currency, AccountType: row.AccountType, PSPID: row.PspID,
+			Book: row.Book, Currency: row.Currency, AccountType: row.AccountType, PSPID: row.PspID, BankAccountID: row.BankAccountID,
 			StoredCredits: row.StoredCredits, LoggedCredits: row.LoggedCredits,
 			StoredDebits: row.StoredDebits, LoggedDebits: row.LoggedDebits,
 		})
@@ -375,7 +378,7 @@ func CheckRollupDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]Ro
 	for _, row := range days {
 		bucket := row.BucketAt
 		out = append(out, RollupDrift{
-			Book: row.Book, Currency: row.Currency, AccountType: row.AccountType, PSPID: row.PspID,
+			Book: row.Book, Currency: row.Currency, AccountType: row.AccountType, PSPID: row.PspID, BankAccountID: row.BankAccountID,
 			Bucket: &bucket, TransferType: row.TransferType, ProductID: row.ProductID,
 			StoredCredits: row.StoredCredits, LoggedCredits: row.LoggedCredits,
 			StoredDebits: row.StoredDebits, LoggedDebits: row.LoggedDebits,

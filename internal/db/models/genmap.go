@@ -251,6 +251,7 @@ func SubscriptionFromGen(s gen.BillingSubscription) (*Subscription, error) {
 		ct := CancelType(*s.CancelType)
 		m.CancelType = &ct
 	}
+	m.UnverifiedReason = s.UnverifiedReason
 	m.RememberLifecycle()
 	return m, nil
 }

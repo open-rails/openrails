@@ -37,38 +37,45 @@ func TestBooks(t *testing.T) {
 		customer := billing.CustomerID(uuid.New())
 		fundBooks(t, w, customer, "USD", 1000)
 		c, psp := customer.UUID(), fixturePSP(t, w)
+		bank := fixtureBankAccount(t, w, psp, "USD")
 
 		// Every account type opens through the chart, in its book and class,
 		// with its sign rules, scoped as the chart says: a merchant-wide
-		// general-ledger account by Open, before any business transaction.
+		// general-ledger account by Open, before any business transaction,
+		// bank cash in its bank account's currency.
 		booksOpen(t, w, mid, "USD")
+		var opened int
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(w, "ledger_accounts")+" WHERE merchant_id=$1 AND account_type='bank_cash' AND bank_account_id=$2 AND currency='USD'", mid, bank).Scan(&opened))
+		require.Equal(t, 1, opened, "Open gives a bank account its bank cash")
 		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
 			for _, a := range books.Chart() {
-				var cust, p *uuid.UUID
+				r := books.Ref{Type: a.Type}
 				switch a.Scope {
 				case books.Customer:
-					cust = &c
+					r.Customer = &c
 				case books.PSP:
-					p = &psp
+					r.PSP = &psp
+				case books.Bank:
+					r.Bank = &bank
 				}
-				if _, _, err := books.EnsureAccount(ctx, q, mid, a.Type, "USD", cust, p); err != nil {
+				if _, _, err := books.EnsureAccount(ctx, q, mid, r, "USD"); err != nil {
 					return err
 				}
 			}
 			return nil
 		}))
 		type stored struct {
-			book, class      string
-			dmnec, cmned     bool
-			customer, hasPSP bool
+			book, class               string
+			dmnec, cmned              bool
+			customer, hasPSP, hasBank bool
 		}
-		rows, err := w.pool.Query(t.Context(), "SELECT account_type, book, class, debits_must_not_exceed_credits, credits_must_not_exceed_debits, customer_id IS NOT NULL, psp_id IS NOT NULL FROM "+booksTable(w, "ledger_accounts")+" WHERE merchant_id=$1 AND currency='USD'", mid)
+		rows, err := w.pool.Query(t.Context(), "SELECT account_type, book, class, debits_must_not_exceed_credits, credits_must_not_exceed_debits, customer_id IS NOT NULL, psp_id IS NOT NULL, bank_account_id IS NOT NULL FROM "+booksTable(w, "ledger_accounts")+" WHERE merchant_id=$1 AND currency='USD'", mid)
 		require.NoError(t, err)
 		accounts := map[string]stored{}
 		for rows.Next() {
 			var typ string
 			var s stored
-			require.NoError(t, rows.Scan(&typ, &s.book, &s.class, &s.dmnec, &s.cmned, &s.customer, &s.hasPSP))
+			require.NoError(t, rows.Scan(&typ, &s.book, &s.class, &s.dmnec, &s.cmned, &s.customer, &s.hasPSP, &s.hasBank))
 			accounts[typ] = s
 		}
 		require.NoError(t, rows.Err())
@@ -77,7 +84,7 @@ func TestBooks(t *testing.T) {
 			require.Equal(t, stored{
 				book: string(a.Book), class: string(a.Class),
 				dmnec: a.DebitsMustNotExceedCredits, cmned: a.CreditsMustNotExceedDebits,
-				customer: a.Scope == books.Customer, hasPSP: a.Scope == books.PSP,
+				customer: a.Scope == books.Customer, hasPSP: a.Scope == books.PSP, hasBank: a.Scope == books.Bank,
 			}, accounts[string(a.Type)], a.Type)
 		}
 
@@ -109,6 +116,8 @@ func TestBooks(t *testing.T) {
 			{"general", "asset", "customer_balance", nil, "EUR", false, "ledger_accounts_type_check"},
 			{"units", "retired", "units_redeemed", &c, "EUR", false, "ledger_accounts_scope_check"},
 			{"general", "asset", "cash_clearing", nil, "EUR", false, "ledger_accounts_scope_check"},
+			{"general", "asset", "cash_in_transit", nil, "EUR", false, "ledger_accounts_general_sign_check"},
+			{"general", "asset", "bank_cash", nil, "EUR", false, "ledger_accounts_scope_check"},
 			{"general", "liability", "unapplied_cash", nil, "EUR", false, "ledger_accounts_general_sign_check"},
 			{"general", "revenue", "usage_revenue", nil, "EUR", true, "ledger_accounts_general_sign_check"},
 			{"general", "revenue", "usage_revenue", nil, "GOLD", false, "ledger_accounts_general_currency_check"},
@@ -309,7 +318,7 @@ func TestBooks(t *testing.T) {
 			var id uuid.UUID
 			require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
 				var err error
-				id, _, err = books.EnsureAccount(ctx, q, mid, typ, currency, customer, nil)
+				id, _, err = books.EnsureAccount(ctx, q, mid, books.Ref{Type: typ, Customer: customer}, currency)
 				return err
 			}))
 			return id
@@ -665,7 +674,7 @@ func TestBooks(t *testing.T) {
 		release()
 		require.NoError(t, first.wait())
 		require.NoError(t, second.wait())
-		require.Equal(t, [3]int64{2 * 2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, a.alpha, "USD"))
+		require.Equal(t, [3]int64{2 * 2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, a.alpha, "USD", settledBy(w)))
 		require.Equal(t, [2]int64{4 * 100, 0}, booksTotal(t, w, "general", "usage_revenue"))
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
 	})
@@ -1083,6 +1092,15 @@ func fixturePSP(t *testing.T, w *world) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
 	require.NoError(t, w.pool.QueryRow(t.Context(), "INSERT INTO "+booksTable(w, "psps")+" (merchant_id, key, rail, environment, account_id) VALUES ($1, 'books', 'nmi', 'test', $2) RETURNING id", w.alpha.MerchantID().UUID(), uuid.NewString()).Scan(&id))
+	return id
+}
+
+// fixtureBankAccount is a bank account psp pays alpha out to.
+func fixtureBankAccount(t *testing.T, w *world, psp uuid.UUID, currency string) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	require.NoError(t, w.pool.QueryRow(t.Context(), "INSERT INTO "+booksTable(w, "bank_accounts")+" (merchant_id, psp_id, ref, last4, currency) VALUES ($1, $2, $3, '6789', $4) RETURNING id",
+		w.alpha.MerchantID().UUID(), psp, "ba_"+strings.ReplaceAll(uuid.NewString(), "-", ""), currency).Scan(&id))
 	return id
 }
 

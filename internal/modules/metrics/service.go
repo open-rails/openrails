@@ -25,7 +25,8 @@ import (
 // Service executes validated metrics plans. Merchant scoping is structural:
 // every statement runs inside MerchantTx with an explicit merchant predicate.
 type Service struct {
-	db *db.DB
+	db    *db.DB
+	cache *resultCache
 }
 
 // NewService binds the metrics engine to the database.
@@ -80,8 +81,55 @@ func (s *Service) Zone(ctx context.Context) (*time.Location, error) {
 	return time.LoadLocation(settings.Config.AccountingTimezone)
 }
 
-// Execute runs a validated plan and returns the merged tabular result.
+// Execute runs a validated plan and returns the merged tabular result; a
+// plan reading the MRR facts or the live revenue schedules may take its
+// figures from the cache (Cache). Every read reports the known-throughs at
+// it: they are never cached.
 func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var res *Result
+	if s.cacheable(plan, mid.UUID()) {
+		res, err = s.cache.do(ctx, cacheKey(s.db.DataPool().Schema(), mid.UUID(), plan), func(ctx context.Context) (*Result, error) { return s.execute(ctx, plan) })
+		res = clone(res)
+	} else {
+		res, err = s.execute(ctx, plan)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := s.freshness(ctx, plan, res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// clone is a copy of res whose rows the caller may change: a computation
+// answers every caller waiting on it with one result.
+func clone(res *Result) *Result {
+	if res == nil {
+		return nil
+	}
+	out := *res
+	out.Rows = cloneRows(res.Rows)
+	out.CompareRows = cloneRows(res.CompareRows)
+	return &out
+}
+
+func cloneRows(rows [][]any) [][]any {
+	if rows == nil {
+		return nil
+	}
+	out := make([][]any, len(rows))
+	for i, row := range rows {
+		out[i] = append([]any(nil), row...)
+	}
+	return out
+}
+
+func (s *Service) execute(ctx context.Context, plan *Plan) (*Result, error) {
 	rows, err := s.run(ctx, plan)
 	if err != nil {
 		return nil, err
@@ -233,6 +281,9 @@ func (s *Service) run(ctx context.Context, plan *Plan) ([][]any, error) {
 
 	groups := map[string]*group{}
 	if err := s.runUsage(ctx, plan, groups); err != nil {
+		return nil, err
+	}
+	if err := s.runRunoff(ctx, plan, groups); err != nil {
 		return nil, err
 	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

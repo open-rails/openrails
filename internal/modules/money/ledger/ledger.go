@@ -314,7 +314,7 @@ func (l *Ledger) ensureAccount(ctx context.Context, t AccountType, currency stri
 	if err := l.CountUnits(ctx, currency); err != nil {
 		return uuid.Nil, false, err
 	}
-	return books.EnsureAccount(ctx, l.q, l.merchant, t, currency, customer, nil)
+	return books.EnsureAccount(ctx, l.q, l.merchant, books.Ref{Type: t, Customer: customer}, currency)
 }
 
 // CountUnits records each of codes that is one of the merchant's units and

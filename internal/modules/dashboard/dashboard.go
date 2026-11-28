@@ -51,7 +51,7 @@ type Widget = billing.DashboardWidget
 type Dashboard = billing.Dashboard
 
 // MaxWidgets caps a layout; a dashboard is a page, not a database.
-const MaxWidgets = 60
+const MaxWidgets = 80
 
 // DecodePut strictly decodes the PUT /v1/merchant/dashboard body
 // {"widgets":[...]}: unknown keys anywhere (incl. inside widget queries) fail

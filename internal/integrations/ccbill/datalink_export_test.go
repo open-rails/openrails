@@ -29,3 +29,20 @@ func TestDataLinkWindowsAreADayAtMostAndContiguous(t *testing.T) {
 		t.Errorf("an empty range asks nothing: %v", w)
 	}
 }
+
+func TestDataLinkExportRowsReadTheGuidesDefaultColumns(t *testing.T) {
+	signup := DataLinkExportRow{TransactionType: DataLinkTxnNew, Fields: []string{"NEW", "999999", "0000", "0123", "20240105103000", "Ann", "Lee", "ann", "pw",
+		"1 Main", "Town", "AZ", "85001", "US", "ann@example.com", "", "ACTIVE", "2.95", "2", "23.00", "30", "Y", "VISA", "", ""}}
+	got, ok := signup.Signup()
+	want := Signup{Username: "ann", Email: "ann@example.com", InitialAmount: "2.95", InitialDays: 2, RecurringAmount: "23.00", RecurringDays: 30}
+	if !ok || got != want || signup.SubscriptionID() != "0123" || signup.Timestamp() != "20240105103000" {
+		t.Fatalf("NEW row read as %+v (%v)", got, ok)
+	}
+	expire := DataLinkExportRow{TransactionType: DataLinkTxnExpire, Fields: []string{"EXPIRE", "999999", "0000", "0123", "2024-04-05", "2024-03-20", "N"}}
+	if expire.ExpireDate() != "2024-04-05" || expire.CancelDate() != "2024-03-20" {
+		t.Fatalf("EXPIRE row read expire %q cancel %q", expire.ExpireDate(), expire.CancelDate())
+	}
+	if _, ok := expire.Signup(); ok {
+		t.Fatal("an EXPIRE row is no signup")
+	}
+}

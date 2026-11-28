@@ -52,6 +52,20 @@ type MetricsResult struct {
 	Rows         [][]any             `json:"rows"`
 	CompareRange *MetricsResultRange `json:"compare_range,omitempty"`
 	CompareRows  [][]any             `json:"compare_rows,omitempty"`
+	// Freshness is each PSP's known-through at the read. After a stale PSP's,
+	// the result is incomplete: its cash and payments are missing (null,
+	// never zero) where no current PSP adds to them, its rebills due then are
+	// left out, and its subscriptions keep their last known state. A stale
+	// PSP with data and a null known-through leaves the whole range so.
+	Freshness []PSPKnownThrough `json:"freshness"`
+	// CompleteThrough is the earliest known-through of a stale PSP with data;
+	// null when none has one (every PSP with data current, or each stale one
+	// undated: see Freshness).
+	CompleteThrough *time.Time `json:"complete_through"`
+	// KnownThrough is, when every PSP with data is stale, the latest of their
+	// known-throughs: what the data is as of. Null otherwise, or when none
+	// has one.
+	KnownThrough *time.Time `json:"known_through"`
 }
 
 // MetricsResultRange is the [From, To) a result covers.
@@ -124,6 +138,9 @@ type MetricsMeasure struct {
 	// standing (ListDisputePrograms) says which level is reached, minimum
 	// counts applied, which the ratio alone does not.
 	Program DisputeProgram `json:"program,omitempty"`
+	// Per is a dimension a query groups the measure by or filters to one
+	// value of (balance by account): its sum across it means nothing.
+	Per string `json:"per,omitempty"`
 }
 
 // MetricsDimension is one axis to group or filter by.

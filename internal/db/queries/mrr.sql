@@ -1,69 +1,31 @@
--- billing.subscription_mrr, its movements and rollups. Triggers write them;
--- these are the reads and the due work.
-
--- name: ListDueSubscriptionMRR :many
--- CROSS-MERCHANT: subscriptions whose MRR time alone changes at or before
--- at, in due order. The read is indexed on next_change_at, so an idle pass
--- reads no row.
-SELECT m.next_change_at::timestamptz AS next_change_at, m.merchant_id, m.subscription_id
-FROM billing.subscription_mrr m
-WHERE m.next_change_at <= sqlc.arg(at)::timestamptz
-  AND (sqlc.narg(after_at)::timestamptz IS NULL
-       OR (m.next_change_at, m.merchant_id, m.subscription_id) > (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_merchant_id)::uuid, sqlc.narg(after_subscription_id)::uuid))
-ORDER BY m.next_change_at, m.merchant_id, m.subscription_id
-LIMIT sqlc.arg(row_limit)::int;
-
--- name: EffectDueSubscriptionMRR :one
--- One due subscription leaves MRR at its end; false when it is no longer due.
-SELECT billing.effect_due_mrr(sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_id)::uuid, sqlc.arg(at)::timestamptz)::boolean AS effected;
+-- MRR facts: subscription_mrr, movements and their lines, risk cases and
+-- episodes. Triggers write them; these are the reads.
 
 -- name: ListSubscriptionMRR :many
--- The MRR of a page of subscriptions, each with its scheduled change and its
--- open risk case.
-SELECT m.subscription_id, m.currency, m.mrr, m.recorded_risk::text[] AS risk,
-       e.kind AS scheduled_kind, e.mrr_delta AS scheduled_amount, e.effective_at AS scheduled_effective_at,
-       c.entry_reason AS risk_entry_reason, c.opened_at AS risk_since
+-- A page of subscriptions' MRR rows, each with its risk case at at: open, or
+-- closed at an end still ahead.
+SELECT m.subscription_id, m.currency, m.mrr, m.ends_at, c.entry_reason AS risk_entry_reason, c.opened_at AS risk_since
 FROM billing.subscription_mrr m
-LEFT JOIN billing.mrr_scheduled e ON e.merchant_id = m.merchant_id AND e.subscription_id = m.subscription_id AND e.status = 'scheduled'
-LEFT JOIN billing.mrr_risk_cases c ON c.merchant_id = m.merchant_id AND c.subscription_id = m.subscription_id AND c.closed_at IS NULL
+LEFT JOIN billing.mrr_risk_cases c ON c.merchant_id = m.merchant_id AND c.subscription_id = m.subscription_id
+    AND (c.closed_at IS NULL OR c.closed_at > sqlc.arg(at)::timestamptz)
 WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[]);
 
--- name: ListMRRRiskDueMerchants :many
--- CROSS-MERCHANT: the merchants with queued risk changes, ids only. The queue
--- holds only changes not yet claimed.
-SELECT DISTINCT d.merchant_id
-FROM billing.mrr_risk_due d
-ORDER BY d.merchant_id;
+-- name: ListScheduledMRRChanges :many
+-- A page of subscriptions' scheduled changes that move MRR, priced now.
+SELECT x.subscription_id::uuid AS subscription_id, x.effective_at::timestamptz AS effective_at, x.amount::bigint AS amount
+FROM billing.mrr_scheduled_changes(sqlc.arg(merchant_id)::uuid) x
+WHERE x.subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[]);
 
--- name: EffectDueMRRRisk :one
--- Claims up to batch of the merchant's queued risk changes (customer_id's
--- alone, when named) that no other worker holds and none set aside, and
--- re-evaluates their customers; returns how many it claimed.
-SELECT billing.effect_due_mrr_risk(sqlc.arg(merchant_id)::uuid, sqlc.arg(batch)::int, sqlc.narg(customer_id)::uuid)::int AS claimed;
+-- name: ListMRRRiskNow :many
+-- A page of subscriptions' reasons at risk at at, as state says, and since
+-- when state says they hold; an open case dates them instead.
+SELECT n.subscription_id::uuid AS subscription_id, n.reasons::text[] AS reasons, n.since::timestamptz AS since
+FROM billing.mrr_risk_now(sqlc.arg(merchant_id)::uuid, sqlc.arg(at)::timestamptz) n
+WHERE n.subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[]);
 
--- name: ListMRRRiskDueCustomers :many
--- The merchant's customers with queued risk changes not set aside.
-SELECT DISTINCT d.customer_id
-FROM billing.mrr_risk_due d
-WHERE d.merchant_id = sqlc.arg(merchant_id)::uuid AND (d.held_until IS NULL OR d.held_until <= now())
-ORDER BY d.customer_id
-LIMIT sqlc.arg(row_limit)::int;
-
--- name: SetAsideMRRRiskCustomer :execrows
--- Sets aside a customer whose evaluation failed alone: drains skip its
--- queued changes for an hour, then try it again.
-UPDATE billing.mrr_risk_due d
-SET held_until = now() + interval '1 hour'
-FROM (SELECT q.id FROM billing.mrr_risk_due q
-      WHERE q.merchant_id = sqlc.arg(merchant_id)::uuid AND q.customer_id = sqlc.arg(customer_id)::uuid
-        AND (q.held_until IS NULL OR q.held_until <= now())
-      FOR UPDATE SKIP LOCKED) h
-WHERE d.merchant_id = sqlc.arg(merchant_id)::uuid AND d.id = h.id;
-
--- name: QueueRestoredMRRRisk :exec
--- A restore re-evaluates every customer with a subscription adding MRR: the
--- changes the source had queued stay at the source.
-INSERT INTO billing.mrr_risk_due (merchant_id, customer_id, changed_at)
-SELECT DISTINCT m.merchant_id, m.customer_id, sqlc.arg(at)::timestamptz
-FROM billing.subscription_mrr m
-WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.mrr > 0;
+-- name: RecordMRRHistory :exec
+-- The MRR history of the subscriptions an import landed, as of its evidence
+-- instant, the ended ones to when their paid service ended: each customer's
+-- imported movements written again.
+SELECT billing.record_mrr_history(sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_ids)::uuid[],
+    sqlc.arg(ended_subscription_ids)::uuid[], sqlc.arg(ended_ats)::timestamptz[], sqlc.arg(as_of)::timestamptz);

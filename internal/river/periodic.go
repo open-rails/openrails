@@ -28,8 +28,6 @@ var Periodics = []Periodic{
 	// Queues every Stripe PSP's endpoint pass: Stripe disables or deletes an
 	// endpoint without telling us.
 	{Args: StripeWebhookReconcileArgs{}, Every: StripeWebhookReconcileInterval},
-	// MRR risk changes queued while no drain was woken.
-	{Args: MRRRiskArgs{}, Every: MRRRiskInterval},
 }
 
 // topOfHour is the cron schedule 0 * * * * in UTC.

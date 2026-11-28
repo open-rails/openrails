@@ -134,7 +134,7 @@ func (s *nmiSource) subscription(sub nmi.V5Subscription, row nmi.RecurringReport
 	f.add(FactEmail, row.Email)
 	f.add(FactName, fullName(row.FirstName, row.LastName))
 	// NMI names no currency: the subscription's price denominates its amount.
-	data := subscriptionData{Decimal: sub.DeclaredAmount(), StartedAt: nmiTime(sub.StartDate), Paused: nmiFlag(sub.PausedSubscription)}
+	data := subscriptionData{Decimal: sub.DeclaredAmount(), StartedAt: nmiTime(sub.StartDate)}
 	if data.Decimal == "" {
 		return staged{}, fmt.Errorf("nmi subscription %s states no amount", ref)
 	}
@@ -151,6 +151,11 @@ func (s *nmiSource) subscription(sub nmi.V5Subscription, row nmi.RecurringReport
 	f.add(FactPlan, data.Plan)
 	if next := nmiTime(sub.NextBillingDate); !next.IsZero() {
 		data.NextBillingAt = &next
+	}
+	// A paused schedule bills nothing: its paid time ends at its next
+	// billing date. NMI states no pause date.
+	if nmiFlag(sub.PausedSubscription) {
+		data.Ended, data.EndedAt, data.EndKind = true, data.NextBillingAt, string(reconcile.DeclaredCancelUser)
 	}
 	data.Evidence, _ = json.Marshal(map[string]any{"source": "nmi_psp_import", "subscription": sub, "recurring": row})
 	remote, err := reconcile.NMIRemoteSubscription(sub, now)
@@ -207,7 +212,7 @@ func (s *nmiSource) history(ctx context.Context, since, until time.Time, last bo
 		remote := t
 		out = append(out, staged{kind: billing.PSPImportTransaction, ref: ref, customerRef: t.CustomerRef, subscriptionRef: t.SubscriptionID,
 			occurredAt: t.OccurredAt, facts: f, data: transactionData{TransactionID: t.TransactionID, OriginalTransactionID: t.OriginalTransactionID, Type: typ, Success: t.Success, Amount: native, Currency: strings.ToUpper(t.Currency), OccurredAt: t.OccurredAt.UTC(),
-				Remote: &remote}})
+				Recurring: nmiRecurring(t.Raw), Remote: &remote}})
 	}
 	return out, nil
 }
@@ -255,4 +260,13 @@ func nmiTime(s string) time.Time {
 func nmiFlag(v any) bool {
 	text := strings.TrimSpace(fmt.Sprint(v))
 	return text == "1" || strings.EqualFold(text, "true")
+}
+
+// nmiRecurring reports a charge NMI's recurring engine made: its action's
+// source.
+func nmiRecurring(raw json.RawMessage) bool {
+	var r struct {
+		Action struct{ Source string } `json:"action"`
+	}
+	return json.Unmarshal(raw, &r) == nil && strings.EqualFold(strings.TrimSpace(r.Action.Source), "recurring")
 }

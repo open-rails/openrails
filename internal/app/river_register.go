@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/money/fees"
+	"github.com/open-rails/openrails/internal/modules/money/payouts"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/solana/pull"
@@ -56,6 +57,11 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 			Log:     r.Log,
 		}
 		r.Verifier.Start()
+	}
+	// A stale PSP's catch-up, queued by an import, a read that succeeds while
+	// it is stale, and the due pass every hour.
+	if err := addWorker(workers, &riverjobs.PSPCatchUpWorker{Verifier: r.Verifier}); err != nil {
+		return fmt.Errorf("add PSP catch-up worker: %w", err)
 	}
 	refresh, paced := r.refreshWorkers(clock)
 	if err := addWorker(workers, refresh); err != nil {
@@ -183,10 +189,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if err := addWorker(workers, &riverjobs.CustomerMessageWorker{Messages: r.Messages}); err != nil {
 		return fmt.Errorf("add customer message worker: %w", err)
 	}
-	// MRR risk: the backstop of the drain each queued change wakes.
-	if err := addWorker(workers, &riverjobs.MRRRiskWorker{Risk: r.MRRRisk}); err != nil {
-		return fmt.Errorf("add mrr risk worker: %w", err)
-	}
 	if err := addWorker(workers, &riverjobs.ContactErasureWorker{DB: r.DB, Admissions: r.DestructiveAdmissions}); err != nil {
 		return fmt.Errorf("add contact erasure worker: %w", err)
 	}
@@ -201,7 +203,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}
 	// Every due scan, in turn, at the top of each hour. Renewals, retries,
 	// delinquency and lapses are critical: a day overdue fails job progress.
-	dunning := &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, Lifecycle: r.SubscriptionLifecycleService, Log: r.Log}
+	dunning := &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, Lifecycle: r.SubscriptionLifecycleService,
+		Readers: &r.Verifier.Builder, Log: r.Log}
 	balances := &riverjobs.BalanceWatchWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
 	delinquency := &riverjobs.DelinquencyWorker{DB: r.DB, Clock: clock, Log: r.Log}
 	expiry := &riverjobs.InvoiceExpiryWorker{DB: r.DB, Invoices: r.Invoices, Clock: clock}
@@ -224,10 +227,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		riverjobs.Scan{Kind: money.KindUsageInvoices, Run: usage.Pass, DueBy: usage.DueBy},
 		riverjobs.Scan{Kind: riverjobs.KindStoredCardRefreshDue, Run: storedCards.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindOperationWakes, Run: (&riverjobs.OperationWakes{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
-		// Cancellations at period end leave MRR at their end.
-		riverjobs.Scan{Kind: riverjobs.KindMRRDue, Run: (&riverjobs.MRRDueWorker{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
 		// Stripe's fees on the charges, refunds and disputes recorded since.
 		riverjobs.Scan{Kind: riverjobs.KindStripeFees, Run: (&fees.StripeReader{DB: r.DB, Rails: r.RailConfigs, Stripe: r.StripeClients, Log: r.Log}).Pass},
+		// Stripe's payouts: what reached the bank, what came back, what it holds.
+		riverjobs.Scan{Kind: riverjobs.KindStripePayouts, Run: (&payouts.StripeReader{DB: r.DB, Rails: r.RailConfigs, Stripe: r.StripeClients, Log: r.Log}).Pass},
 	)
 	for i := range scans {
 		scans[i].Timeout = riverjobs.ScanBudget(scans[i].Kind)
@@ -418,9 +421,6 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 	}
 	if r.Messages == nil {
 		return fmt.Errorf("billing worker runtime customer messages are required")
-	}
-	if r.MRRRisk == nil {
-		return fmt.Errorf("billing worker runtime mrr risk is required")
 	}
 	return nil
 }
