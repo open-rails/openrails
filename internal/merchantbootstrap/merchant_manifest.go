@@ -195,6 +195,7 @@ func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing
 		return nil, config.RefuseDeclarationBesideVault(req.Config, mt.Slug, mt)
 	}
 	mt, refused := ScopeDeclaration(req.Config, mt)
+	logIgnoredPreviousWebhookSecrets(ctx, req.Merchants.Log, mt)
 	set := merchantdocs.Declared(id, mt, time.Now().UTC())
 	if _, ok := refused[merchantdocs.MerchantDoc]; ok {
 		set.Merchant, set.HasMerchant = merchantdocs.Doc[merchantdocs.Merchant]{}, false
@@ -208,6 +209,21 @@ func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing
 		return nil, err
 	}
 	return set.Rejected, nil
+}
+
+// logIgnoredPreviousWebhookSecrets logs each served PSP that declares a previous webhook secret without a valid webhook_overlap_expires_at: the PSP serves and the previous secret is ignored.
+func logIgnoredPreviousWebhookSecrets(ctx context.Context, logger *slog.Logger, mt billing.MerchantDocument) {
+	for key, account := range mt.PSPs {
+		for name, secret := range account.Secrets {
+			previous := strings.ToLower(strings.TrimSpace(name))
+			if slices.Contains(merchants.PreviousWebhookSecretKeys, previous) && strings.TrimSpace(secret) != "" {
+				raw, _ := account.Settings[merchants.WebhookOverlapExpiresKey].(string)
+				if _, err := time.Parse(time.RFC3339, strings.TrimSpace(raw)); err != nil {
+					logger.ErrorContext(ctx, fmt.Sprintf("psps.%s.webhook_overlap_expires_at (RFC 3339) is required with secrets.%s; the previous secret is ignored", key, previous))
+				}
+			}
+		}
+	}
 }
 
 // ScopeDeclaration is mt without what it cannot serve, and each document it
@@ -307,15 +323,6 @@ func validatePSPDeclaration(key string, account billing.PSPConfig) (billing.PSPC
 	// A CCBill account with inline credentials must sign its FlexForm links.
 	if rail == string(models.RailCCBill) && len(account.Secrets) > 0 && strings.TrimSpace(account.Secrets["salt"]) == "" {
 		return account, fmt.Errorf("psps.%s.secrets.salt is required", key)
-	}
-	for name, secret := range account.Secrets {
-		previous := strings.ToLower(strings.TrimSpace(name))
-		if slices.Contains(merchants.PreviousWebhookSecretKeys, previous) && strings.TrimSpace(secret) != "" {
-			raw, _ := account.Settings[merchants.WebhookOverlapExpiresKey].(string)
-			if _, err := time.Parse(time.RFC3339, strings.TrimSpace(raw)); err != nil {
-				slog.Error(fmt.Sprintf("psps.%s.webhook_overlap_expires_at (RFC 3339) is required with secrets.%s; the previous secret is ignored", key, previous))
-			}
-		}
 	}
 	if rail == string(models.RailStripe) {
 		if raw, ok := account.Settings["publishable_key"]; ok {

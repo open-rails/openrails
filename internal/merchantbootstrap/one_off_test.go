@@ -58,9 +58,7 @@ func TestPSPDeclarationPreviousWebhookSecretWithoutOverlapExpiryIsIgnored(t *tes
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs bytes.Buffer
-			previousLogger := slog.Default()
-			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-			t.Cleanup(func() { slog.SetDefault(previousLogger) })
+			logger := slog.New(slog.NewTextHandler(&logs, nil))
 			accountID, previousKey := "overlap", "webhook_signing_secret_previous"
 			secrets := map[string]string{}
 			if tc.rail == billing.RailCCBill {
@@ -78,8 +76,11 @@ func TestPSPDeclarationPreviousWebhookSecretWithoutOverlapExpiryIsIgnored(t *tes
 			served, refused := ScopeDeclaration(nil, doc)
 			require.Empty(t, refused)
 			require.Contains(t, served.PSPs, "overlap")
+			logIgnoredPreviousWebhookSecrets(context.Background(), logger, served)
 			if tc.logged {
 				require.Contains(t, logs.String(), `level=ERROR msg="psps.overlap.webhook_overlap_expires_at (RFC 3339) is required with secrets.`+previousKey+`; the previous secret is ignored"`)
+			} else {
+				require.Empty(t, logs.String())
 			}
 		})
 	}
