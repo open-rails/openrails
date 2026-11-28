@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -33,7 +34,7 @@ const (
 	// claimed reference stays with this replica if it dies mid-read.
 	pollBatch = 100
 	pollLease = time.Minute
-	// pendingRecheck is the cadence while a transfer is awaited.
+	// pendingRecheck floors pending reads and continues unfinished history walks.
 	pendingRecheck = 3 * time.Second
 	// errorRecheck backs off a reference whose read failed.
 	errorRecheck = time.Minute
@@ -291,7 +292,7 @@ func (p *SolanaPayPoller) check(ctx context.Context, ledger *PayLedger, ref gen.
 			var awaiting bool
 			awaiting, readErr = p.confirmMirror(ctx, ledger, ref, sigs)
 			if awaiting && readErr == nil {
-				return pendingRecheck, nil
+				return pendingInterval(p.clock.Now().Sub(ref.CreatedAt)), nil
 			}
 		}
 	}
@@ -308,8 +309,11 @@ func (p *SolanaPayPoller) check(ctx context.Context, ledger *PayLedger, ref gen.
 	if err != nil {
 		return 0, err
 	}
-	if current.Status == ReferencePending || len(current.ScanStack) > 0 {
+	if len(current.ScanStack) > 0 {
 		return pendingRecheck, nil
+	}
+	if current.Status == ReferencePending {
+		return pendingInterval(now.Sub(current.CreatedAt)), nil
 	}
 	return watchInterval(now.Sub(current.CreatedAt)), nil
 }
@@ -343,10 +347,14 @@ func (p *SolanaPayPoller) settlePurchase(ctx context.Context, rpc *solanarpc.RPC
 	if ref.ScanBelow != nil {
 		below = *ref.ScanBelow
 	}
+	savedSeen, savedBelow := seen, below
 	if len(stack) == 0 {
 		stack, below = []string{""}, ""
 	}
 	save := func() error {
+		if seen == savedSeen && below == savedBelow && slices.Equal(stack, ref.ScanStack) {
+			return nil
+		}
 		return ledger.SaveScan(ctx, ref.Reference, nonEmpty(seen), stack, nonEmpty(below))
 	}
 	for range pagesPerPass {
@@ -478,6 +486,11 @@ func (p *SolanaPayPoller) confirmMirror(ctx context.Context, ledger *PayLedger, 
 		return false, err
 	}
 	return false, nil
+}
+
+// pendingInterval spaces idle pending reads out as a reference ages, up to 30 seconds.
+func pendingInterval(age time.Duration) time.Duration {
+	return min(max(age/10, pendingRecheck), 30*time.Second)
 }
 
 // watchInterval spaces reads of a settled reference out as it ages: minutes

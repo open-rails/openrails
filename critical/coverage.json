@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 930,
+  "scenario_count": 931,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -4382,6 +4382,11 @@
       "id": "OR-J37-S74",
       "journey": "J37",
       "name": "A confirmed Solana pull whose fork is dropped books nothing and is signed again only after its blockhash provably expired"
+    },
+    {
+      "id": "OR-J37-S75",
+      "journey": "J37",
+      "name": "An unpaid Solana Pay reference is read every few seconds at first and less often as it ages, up to every 30 seconds"
     },
     {
       "id": "OR-J38-S86",

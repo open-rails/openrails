@@ -383,6 +383,39 @@ func (s *solanaWorld) renewed(t *testing.T, sub *billing.Subscription, end time.
 }
 
 func TestSolanaContracts(t *testing.T) {
+	t.Run("OR-J37-S75/an-unpaid-reference-is-read-less-often-as-it-ages", func(t *testing.T) {
+		s := newSolanaWorld(t, false, solanaFixtureOptions{manualFleet: true})
+		invoice := s.invoice(t, false)
+		s.walletTransaction(t, invoice)
+		reference := invoice.Payment.NextAction.Payload["reference"]
+		table := pgx.Identifier{s.schema, "solana_pay_references"}.Sanitize()
+		var created, next time.Time
+		require.NoError(t, s.pool.QueryRow(t.Context(), "SELECT created_at, next_poll_at FROM "+table+" WHERE reference = $1", reference).Scan(&created, &next))
+		require.WithinDuration(t, created, next, 3*time.Second)
+		startFleet(t, s.world)
+		for _, step := range []struct {
+			age, interval time.Duration
+		}{{0, 3 * time.Second}, {2 * time.Minute, 12 * time.Second}, {10 * time.Minute, 30 * time.Second}} {
+			at := created.Add(step.age)
+			reads := s.wire.historyReads(reference)
+			if step.age > 0 {
+				s.clock.Advance(at.Sub(s.clock.Now()))
+			} else {
+				reads = 0
+			}
+			require.Eventually(t, func() bool {
+				if s.clock.Now().Before(at.Add(time.Second)) {
+					s.clock.Advance(100 * time.Millisecond)
+				}
+				err := s.pool.QueryRow(t.Context(), "SELECT next_poll_at FROM "+table+" WHERE reference = $1", reference).Scan(&next)
+				return err == nil && s.wire.historyReads(reference) > reads && next.After(s.clock.Now()) && next.Before(at.Add(45*time.Second))
+			}, 10*time.Second, 20*time.Millisecond)
+			require.WithinDuration(t, at.Add(step.interval), next, 2*time.Second, "reference age %s", step.age)
+			if step.age == 0 {
+				require.LessOrEqual(t, next.Sub(s.clock.Now()), 3*time.Second)
+			}
+		}
+	})
 	t.Run("OR-J37-S02/signed-pull-survives-process-death-before-network-submission", func(t *testing.T) {
 		s := newSolanaWorld(t, true)
 		_, sub := s.subscribe(t)
