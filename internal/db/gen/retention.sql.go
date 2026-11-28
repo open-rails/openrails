@@ -272,26 +272,27 @@ func (q *Queries) DeleteLimitWindowsBefore(ctx context.Context, arg DeleteLimitW
 	return result.RowsAffected(), nil
 }
 
-const deleteOperationLogBefore = `-- name: DeleteOperationLogBefore :execrows
+const deleteOperationLogPastRetention = `-- name: DeleteOperationLogPastRetention :execrows
 DELETE FROM billing.operation_log
 WHERE merchant_id = $1::uuid
   AND id IN (
     SELECT ol.id FROM billing.operation_log ol
     WHERE ol.merchant_id = $1::uuid
-      AND ol.occurred_at < $2::timestamptz
+      AND ol.occurred_at < now() - make_interval(days => $2::int)
     ORDER BY ol.occurred_at
     LIMIT $3::int
 )
 `
 
-type DeleteOperationLogBeforeParams struct {
-	MerchantID uuid.UUID
-	Cutoff     time.Time
-	RowLimit   int32
+type DeleteOperationLogPastRetentionParams struct {
+	MerchantID    uuid.UUID
+	RetentionDays int32
+	RowLimit      int32
 }
 
-func (q *Queries) DeleteOperationLogBefore(ctx context.Context, arg DeleteOperationLogBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteOperationLogBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+// Counted on the database clock, the one billing.guard_operation_log_delete reads.
+func (q *Queries) DeleteOperationLogPastRetention(ctx context.Context, arg DeleteOperationLogPastRetentionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOperationLogPastRetention, arg.MerchantID, arg.RetentionDays, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
