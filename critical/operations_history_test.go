@@ -459,6 +459,12 @@ FROM `+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+` WHERE merchant_id 
 			require.ErrorContains(t, err, "operation_log rows are deleted only by retention", object)
 		}
 		require.Equal(t, []string{"op_old", "op_recent"}, kept(), "a plain delete removes nothing")
+		// A purge's run lets only the purge's own transaction delete: a run left
+		// running after it committed opens nothing.
+		_, err = a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "maintenance_runs"}.Sanitize()+" (merchant_id, kind, actor) VALUES ($1, 'merchant_purge', 'critical operator')", merchant)
+		require.NoError(t, err)
+		_, err = a.pool.Exec(t.Context(), "DELETE FROM "+log+" WHERE merchant_id = $1 AND object_id = 'op_recent'", merchant)
+		require.ErrorContains(t, err, "operation_log rows are deleted only by retention", "another transaction's purge run")
 
 		runRegistered(t, startFleet(t, a.world), "openrails.cleanup_expired_data", 1)
 		require.Equal(t, []string{"op_recent"}, kept(), "retention deletes only what is past its period")
