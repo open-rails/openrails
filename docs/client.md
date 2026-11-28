@@ -193,7 +193,7 @@ live ([standalone.md](standalone.md#vault)). PostgreSQL never holds it.
 |---|---|
 | `GetMerchantConfiguration` | read name, settings and `revision`; never credentials |
 | `UpdateMerchantConfiguration` | merge settings (Vault only); `ExpectedRevision` refuses a concurrent edit (`409 revision_mismatch`) |
-| `ListPSPs`, `GetPSP` | the merchant's PSPs, with each credential's state, never its value, and `Armed`: live with its full credential set resolving, so new payments can use it |
+| `ListPSPs`, `GetPSP` | the merchant's PSPs, with each credential's state, never its value, `Armed`: live with its full credential set resolving, so new payments can use it, and `Freshness`: how far OpenRails' record of it is complete, why not further, and the fix |
 | `CreatePSP` | add a PSP (Vault only); credentials are checked with the provider before anything is stored |
 | `UpdatePSP` | rotate credentials, change public keys or custodian, or archive (Vault only); the last active PSP of a rail archives only with `AllowLast` (else `409 psp_last_active`) |
 | `PreviewPSPRouting` | which PSP a purchase would use, without charging |
