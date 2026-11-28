@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 927,
+  "scenario_count": 928,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3537,6 +3537,11 @@
       "id": "OR-J46-S18",
       "journey": "J46",
       "name": "A chargeback of a refunded charge says to contest it"
+    },
+    {
+      "id": "OR-J46-S19",
+      "journey": "J46",
+      "name": "Every notice of an unbookable Stripe chargeback is one finding"
     },
     {
       "id": "OR-J43-S08",
