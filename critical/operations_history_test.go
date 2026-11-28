@@ -5,6 +5,7 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -16,7 +17,9 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	operations "github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/riverqueue/river"
@@ -434,6 +437,79 @@ FROM `+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+` WHERE merchant_id 
 		require.Equal(t, source.ID, changeOf(t, retired[0]).Move.PriceID)
 	})
 
+	t.Run("OR-J43-S15/an-operation-is-never-sent-stale-or-again-without-a-read", func(t *testing.T) {
+		a, _ := newPSPWorld(t)
+		psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+		require.NoError(t, err)
+		database, err := producerDB(a.pool, a.schema)
+		require.NoError(t, err)
+		mid := a.alpha.MerchantID().UUID()
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		now := a.clock.Now().UTC()
+		table := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+		operation := func(key, status string, attempts int, expires, lease *time.Time) uuid.UUID {
+			var id uuid.UUID
+			require.NoError(t, a.pool.QueryRow(t.Context(), "INSERT INTO "+table+` (merchant_id, rail, intent_type, idempotency_key, status, attempts, next_attempt_at, origin, psp_id, expires_at, lease_expires_at, last_failure_reason)
+				VALUES ($1, 'stripe', 'stripe_cancel_subscription', $2, $3, $4, $5, 'system', $6, $7, $8, 'kill switch') RETURNING id`,
+				mid, key, status, attempts, now.Add(-time.Hour), psp.ID.UUID(), expires, lease).Scan(&id))
+			return id
+		}
+		claim := func(id uuid.UUID, kind string) bool {
+			claimed := false
+			require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				_, err := gen.New(tx).ClaimProviderIntentByID(ctx, gen.ClaimProviderIntentByIDParams{MerchantID: mid, ID: id, Now: now, LeaseExpiresAt: now.Add(time.Minute), Claim: kind})
+				if errors.Is(err, pgx.ErrNoRows) {
+					return nil
+				}
+				claimed = err == nil
+				return err
+			}))
+			return claimed
+		}
+
+		// A worker whose lease lapsed may have reached the provider: no claim
+		// takes its operation, whoever asks.
+		lapsed := now.Add(-time.Second)
+		abandoned := operation("abandoned", "in_flight", 1, nil, &lapsed)
+		require.False(t, claim(abandoned, "due"), "a scheduled wake never resends a lapsed attempt")
+		require.False(t, claim(abandoned, "now"), "nor does an explicit retry")
+		status, attempts, _ := intentAttempt(t, a.world, abandoned)
+		require.Equal(t, "in_flight", status)
+		require.EqualValues(t, 1, attempts)
+		row, err := intentsStore(database).PrepareDispatch(ctx, abandoned, now)
+		require.NoError(t, err)
+		require.Equal(t, "unknown_needs_verify", row.Status, "the provider is read before any retry")
+
+		// An operation that failed, then was parked, is as stale as a first
+		// try once its window passes: it expires, and the history says so.
+		window := now.Add(-time.Minute)
+		stale := operation("stale", "pending", 1, &window, nil)
+		require.False(t, claim(stale, "due"), "past its window it is not sent")
+		row, err = intentsStore(database).PrepareDispatch(ctx, stale, now)
+		require.NoError(t, err)
+		require.Equal(t, "expired", row.Status)
+		entries := operationEntries(t, a.world, a.alpha.MerchantID(), stale)
+		require.Len(t, entries, 1)
+		require.Equal(t, "expired", entries[0].Action)
+		require.Equal(t, "system", entries[0].Actor)
+
+		// A rebill on record as sent may have charged: no park puts it back,
+		// so its lease lapses into a provider read, never a stale queue.
+		lease := now.Add(time.Minute)
+		var sent uuid.UUID
+		require.NoError(t, a.pool.QueryRow(t.Context(), "INSERT INTO "+table+` (merchant_id, rail, intent_type, idempotency_key, status, attempts, next_attempt_at, origin, psp_id, expires_at, lease_expires_at, result_evidence)
+			VALUES ($1, 'stripe', 'manual_rebill', 'sent-rebill', 'in_flight', 1, $2, 'system', $3, $4, $5, '{"submitted_at": "2026-01-01T00:00:00Z"}') RETURNING id`,
+			mid, now, psp.ID.UUID(), window, lease).Scan(&sent))
+		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			reason := "kill switch"
+			parked, err := gen.New(tx).ParkProviderIntent(ctx, gen.ParkProviderIntentParams{MerchantID: mid, ID: sent, NextAttemptAt: now, Reason: &reason})
+			require.Zero(t, parked, "a sent rebill is not parked")
+			return err
+		}))
+		status, _, _ = intentAttempt(t, a.world, sent)
+		require.Equal(t, "in_flight", status)
+	})
+
 	t.Run("OR-J43-S13/a-parked-or-stale-claim-never-counts-as-sent", func(t *testing.T) {
 		a, journal := newNMIWorld(t)
 		enableLifecycleMaintenance(t, a)
@@ -504,3 +580,5 @@ FROM `+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+` WHERE merchant_id 
 		}
 	})
 }
+
+func intentsStore(database *db.DB) *operations.Store { return operations.NewStore(database) }

@@ -96,7 +96,9 @@ RETURNING *;
 -- wake, once the next attempt and any producer hold are due, so a second wake
 -- never retries early; 'now' is an explicit retry by the operation's owner or
 -- an operator, whatever its backoff. All honor the relevance window and live
--- leases; anything not claimable is left to the scheduled executor.
+-- leases; anything not claimable is left to the scheduled executor. An
+-- in_flight operation whose lease lapsed is never claimed: the provider may
+-- have it, so only RecoverAbandonedProviderIntentByID moves it, to a read.
 -- name: ClaimProviderIntentByID :one
 UPDATE billing.provider_intents pi
 SET status = 'in_flight',
@@ -104,16 +106,12 @@ SET status = 'in_flight',
     attempts = pi.attempts + 1,
     updated_at = now()
 WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND pi.id = sqlc.arg(id)
-  AND (
-        pi.status IN ('pending', 'failed_retryable')
-        OR (pi.status = 'in_flight' AND pi.lease_expires_at IS NOT NULL AND pi.lease_expires_at <= sqlc.arg(now)::timestamptz)
-      )
-  AND (pi.intent_type = 'subscription_collection' OR pi.status = 'in_flight' OR (pi.status = 'pending' AND pi.attempts > 0) OR pi.expires_at IS NULL OR pi.expires_at > sqlc.arg(now)::timestamptz)
+  AND pi.status IN ('pending', 'failed_retryable')
+  AND (pi.intent_type = 'subscription_collection' OR pi.expires_at IS NULL OR pi.expires_at > sqlc.arg(now)::timestamptz)
   AND CASE sqlc.arg(claim)::text
         WHEN 'first' THEN pi.status = 'pending' AND pi.attempts = 0
-        WHEN 'due' THEN pi.status = 'in_flight'
-             OR (pi.next_attempt_at <= sqlc.arg(now)::timestamptz
-                 AND (pi.lease_expires_at IS NULL OR pi.lease_expires_at <= sqlc.arg(now)::timestamptz))
+        WHEN 'due' THEN pi.next_attempt_at <= sqlc.arg(now)::timestamptz
+                 AND (pi.lease_expires_at IS NULL OR pi.lease_expires_at <= sqlc.arg(now)::timestamptz)
         WHEN 'now' THEN true
         ELSE false
       END
@@ -240,7 +238,7 @@ SET status = 'pending',
     lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'in_flight'
-  AND NOT (intent_type IN ('order_collection','subscription_collection') AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (intent_type IN ('order_collection','subscription_collection','manual_rebill') AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
   -- A stale no-send result must not undo another executor's payment fence.
   AND (intent_type <> 'nmi_sale' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'sale_submitted'))
   AND (intent_type <> 'initial_membership' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'initial_submitted'));
@@ -686,14 +684,16 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id IN (
         OR ((o.completed_at AT TIME ZONE 'UTC') + make_interval(months => l.billing_interval_months)) AT TIME ZONE 'UTC'=sqlc.arg(period_end)::timestamptz)
       AND i.status='succeeded' AND i.intent_type='nmi_sale' AND i.payload ? 'order_id')
 ORDER BY id LIMIT 2;
--- name: ExpireProviderIntentByID :execrows
+-- An operation past its window that was never sent expires, however often a
+-- park or a failure put it back: a parked retry is as stale as a first try.
+-- name: ExpireProviderIntentByID :many
 UPDATE billing.provider_intents pi
 SET status = 'expired',
     last_failure_reason = 'relevance window elapsed before execution',
     lease_expires_at = NULL,
     updated_at = now()
-WHERE pi.id = sqlc.arg(id)::uuid AND pi.merchant_id = sqlc.arg(merchant_id)::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
-  AND NOT (pi.intent_type IN ('order_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
+WHERE pi.id = sqlc.arg(id)::uuid AND pi.merchant_id = sqlc.arg(merchant_id)::uuid AND pi.status IN ('pending', 'failed_retryable')
+  AND NOT (pi.intent_type IN ('order_collection','subscription_collection','manual_rebill') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
   AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
   AND NOT (pi.intent_type='initial_membership' AND coalesce(pi.result_evidence,'{}'::jsonb) ? 'initial_submitted')
   AND pi.expires_at IS NOT NULL
@@ -707,7 +707,8 @@ WHERE pi.id = sqlc.arg(id)::uuid AND pi.merchant_id = sqlc.arg(merchant_id)::uui
               AND f.status IN ('reconcile_required', 'requires_review')
         )
       )
-  AND pi.intent_type <> 'subscription_collection';
+  AND pi.intent_type <> 'subscription_collection'
+RETURNING pi.*;
 
 
 -- name: RecoverAbandonedProviderIntentByID :execrows

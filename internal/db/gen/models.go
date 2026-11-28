@@ -1816,7 +1816,7 @@ type BillingProviderIntent struct {
 	Actor *string
 	// Why the most recent attempt did not succeed (mode parked, kill switch, provider down, declined...). Recorded on the intent, never surfaced as an error.
 	LastFailureReason *string
-	// End of the relevance window: past this instant the intent expires with a finding instead of firing stale (NULL = relevance governed solely by the type's relevance check).
+	// End of the relevance window: an operation never sent expires past this instant instead of firing stale, however often a park or a failure put it back, and the operations history records it (NULL = relevance governed solely by the type's relevance check).
 	ExpiresAt *time.Time
 	// How the terminal status was established (e.g. {"verified_absent": true} for a delete confirmed by a provider read).
 	ResultEvidence []byte

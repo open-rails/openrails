@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 927,
+  "scenario_count": 928,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3567,6 +3567,11 @@
       "id": "OR-J43-S13",
       "journey": "J43",
       "name": "A parked or stale claim never counts as sent: a stale executor marks nothing, and a park of an admitted attempt clears its mark"
+    },
+    {
+      "id": "OR-J43-S15",
+      "journey": "J43",
+      "name": "An operation is never sent past its window or again without a provider read"
     },
     {
       "id": "OR-J45-S01",

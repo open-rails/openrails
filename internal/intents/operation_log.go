@@ -24,11 +24,14 @@ const (
 	OperationFailed     OperationPhase = "failed"
 	OperationUnknown    OperationPhase = "unknown"
 	OperationParked     OperationPhase = "parked"
+	// OperationExpired drops an operation never sent whose relevance window
+	// passed: no attempt follows.
+	OperationExpired OperationPhase = "expired"
 )
 
 // OperationPhases are the phases, in the order an attempt reaches them.
 func OperationPhases() []OperationPhase {
-	return []OperationPhase{OperationAttempting, OperationSucceeded, OperationFailed, OperationUnknown, OperationParked}
+	return []OperationPhase{OperationAttempting, OperationSucceeded, OperationFailed, OperationUnknown, OperationParked, OperationExpired}
 }
 
 var (
@@ -41,10 +44,28 @@ var (
 // call (attempting) or after it (the result), kept whatever follows. Reason
 // and evidence are scrubbed of credentials and card data.
 func (s *Store) LogOperation(ctx context.Context, intent gen.BillingProviderIntent, phase OperationPhase, reason string, evidence map[string]any) error {
+	p, entry, err := operationEntry(ctx, intent, phase, reason, evidence)
+	if err != nil {
+		return err
+	}
+	return history.WriteAhead(ctx, s.db.DataPool(), history.OperationLog, intent.MerchantID, p, entry)
+}
+
+// recordOperation writes the phase in q's transaction, for a phase that
+// commits with the intent's transition.
+func recordOperation(ctx context.Context, q *gen.Queries, intent gen.BillingProviderIntent, phase OperationPhase, reason string) error {
+	p, entry, err := operationEntry(ctx, intent, phase, reason, nil)
+	if err != nil {
+		return err
+	}
+	return history.Record(ctx, q, history.OperationLog, intent.MerchantID, p, entry)
+}
+
+func operationEntry(ctx context.Context, intent gen.BillingProviderIntent, phase OperationPhase, reason string, evidence map[string]any) (history.Provenance, history.Entry, error) {
 	// operation_log_addressed_check: an entry records which account the
 	// attempt was sent to.
 	if intent.PspID == nil && intent.CustodianID == nil {
-		return fmt.Errorf("intents: operation log for %s: %w", intent.Rail, db.ErrNoPSPInContext)
+		return history.Provenance{}, history.Entry{}, fmt.Errorf("intents: operation log for %s: %w", intent.Rail, db.ErrNoPSPInContext)
 	}
 	payload := history.Operation{Version: history.Version, Kind: intent.IntentType, Attempt: intent.Attempts, Origin: intent.Origin,
 		Executor: history.FromContext(ctx).Executor, IdempotencyKey: intent.IdempotencyKey, Reason: scrubOperationString(reason)}
@@ -55,15 +76,15 @@ func (s *Store) LogOperation(ctx context.Context, intent gen.BillingProviderInte
 	// record is what an operator reads.
 	payload, actor, err := payload.Fit(intentActor(intent))
 	if err != nil {
-		return fmt.Errorf("intents: operation log entry: %w", err)
+		return history.Provenance{}, history.Entry{}, fmt.Errorf("intents: operation log entry: %w", err)
 	}
 	// The database clock stamps it, ordering it with the holds.
 	p := history.ProvenanceAt(ctx, time.Time{})
 	p.Actor, p.Source, p.OperationID = actor, billing.LogSourceIntent, &intent.ID
-	return history.WriteAhead(ctx, s.db.DataPool(), history.OperationLog, intent.MerchantID, p, history.Entry{
+	return p, history.Entry{
 		ObjectType: history.ObjectProviderIntent, ObjectID: intent.ID.String(), Action: billing.LogAction(phase), Changes: payload,
 		Address: &history.Address{Rail: intent.Rail, PSPID: intent.PspID, CustodianID: intent.CustodianID, SubscriptionID: intent.SubscriptionID},
-	})
+	}, nil
 }
 
 // MarkSent records, in the breaker's transaction and under its lock, that

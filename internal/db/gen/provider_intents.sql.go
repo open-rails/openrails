@@ -70,16 +70,12 @@ SET status = 'in_flight',
     attempts = pi.attempts + 1,
     updated_at = now()
 WHERE pi.merchant_id = $2::uuid AND pi.id = $3
-  AND (
-        pi.status IN ('pending', 'failed_retryable')
-        OR (pi.status = 'in_flight' AND pi.lease_expires_at IS NOT NULL AND pi.lease_expires_at <= $4::timestamptz)
-      )
-  AND (pi.intent_type = 'subscription_collection' OR pi.status = 'in_flight' OR (pi.status = 'pending' AND pi.attempts > 0) OR pi.expires_at IS NULL OR pi.expires_at > $4::timestamptz)
+  AND pi.status IN ('pending', 'failed_retryable')
+  AND (pi.intent_type = 'subscription_collection' OR pi.expires_at IS NULL OR pi.expires_at > $4::timestamptz)
   AND CASE $5::text
         WHEN 'first' THEN pi.status = 'pending' AND pi.attempts = 0
-        WHEN 'due' THEN pi.status = 'in_flight'
-             OR (pi.next_attempt_at <= $4::timestamptz
-                 AND (pi.lease_expires_at IS NULL OR pi.lease_expires_at <= $4::timestamptz))
+        WHEN 'due' THEN pi.next_attempt_at <= $4::timestamptz
+                 AND (pi.lease_expires_at IS NULL OR pi.lease_expires_at <= $4::timestamptz)
         WHEN 'now' THEN true
         ELSE false
       END
@@ -99,7 +95,9 @@ type ClaimProviderIntentByIDParams struct {
 // wake, once the next attempt and any producer hold are due, so a second wake
 // never retries early; 'now' is an explicit retry by the operation's owner or
 // an operator, whatever its backoff. All honor the relevance window and live
-// leases; anything not claimable is left to the scheduled executor.
+// leases; anything not claimable is left to the scheduled executor. An
+// in_flight operation whose lease lapsed is never claimed: the provider may
+// have it, so only RecoverAbandonedProviderIntentByID moves it, to a read.
 func (q *Queries) ClaimProviderIntentByID(ctx context.Context, arg ClaimProviderIntentByIDParams) (BillingProviderIntent, error) {
 	row := q.db.QueryRow(ctx, claimProviderIntentByID,
 		arg.LeaseExpiresAt,
@@ -659,14 +657,14 @@ func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProvider
 	return i, err
 }
 
-const expireProviderIntentByID = `-- name: ExpireProviderIntentByID :execrows
+const expireProviderIntentByID = `-- name: ExpireProviderIntentByID :many
 UPDATE billing.provider_intents pi
 SET status = 'expired',
     last_failure_reason = 'relevance window elapsed before execution',
     lease_expires_at = NULL,
     updated_at = now()
-WHERE pi.id = $1::uuid AND pi.merchant_id = $2::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
-  AND NOT (pi.intent_type IN ('order_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
+WHERE pi.id = $1::uuid AND pi.merchant_id = $2::uuid AND pi.status IN ('pending', 'failed_retryable')
+  AND NOT (pi.intent_type IN ('order_collection','subscription_collection','manual_rebill') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
   AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
   AND NOT (pi.intent_type='initial_membership' AND coalesce(pi.result_evidence,'{}'::jsonb) ? 'initial_submitted')
   AND pi.expires_at IS NOT NULL
@@ -681,6 +679,7 @@ WHERE pi.id = $1::uuid AND pi.merchant_id = $2::uuid AND (pi.status = 'failed_re
         )
       )
   AND pi.intent_type <> 'subscription_collection'
+RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.lease_expires_at, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id, pi.destructive_run_class, pi.custodian_id, pi.subject, pi.credential, pi.destructive_action_id, pi.sent_attempt
 `
 
 type ExpireProviderIntentByIDParams struct {
@@ -690,17 +689,62 @@ type ExpireProviderIntentByIDParams struct {
 	BreakerHeldTypes []string
 }
 
-func (q *Queries) ExpireProviderIntentByID(ctx context.Context, arg ExpireProviderIntentByIDParams) (int64, error) {
-	result, err := q.db.Exec(ctx, expireProviderIntentByID,
+// An operation past its window that was never sent expires, however often a
+// park or a failure put it back: a parked retry is as stale as a first try.
+func (q *Queries) ExpireProviderIntentByID(ctx context.Context, arg ExpireProviderIntentByIDParams) ([]BillingProviderIntent, error) {
+	rows, err := q.db.Query(ctx, expireProviderIntentByID,
 		arg.ID,
 		arg.MerchantID,
 		arg.Now,
 		arg.BreakerHeldTypes,
 	)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected(), nil
+	defer rows.Close()
+	var items []BillingProviderIntent
+	for rows.Next() {
+		var i BillingProviderIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.LeaseExpiresAt,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+			&i.Subject,
+			&i.Credential,
+			&i.DestructiveActionID,
+			&i.SentAttempt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const fenceDestructiveProviderSend = `-- name: FenceDestructiveProviderSend :execrows
@@ -2519,7 +2563,7 @@ SET status = 'pending',
     lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = $4::uuid AND id = $5 AND status = 'in_flight'
-  AND NOT (intent_type IN ('order_collection','subscription_collection') AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (intent_type IN ('order_collection','subscription_collection','manual_rebill') AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
   -- A stale no-send result must not undo another executor's payment fence.
   AND (intent_type <> 'nmi_sale' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'sale_submitted'))
   AND (intent_type <> 'initial_membership' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'initial_submitted'))

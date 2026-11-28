@@ -210,7 +210,7 @@ func newIntentsLogCmd() *cobra.Command {
 	cmd.Flags().StringVar(&provider, "rail", "", "Rail filter (e.g. nmi, stripe)")
 	cmd.Flags().StringVar(&intent, "intent", "", "Provider intent id filter")
 	cmd.Flags().StringVar(&psp, "psp", "", "PSP id filter")
-	cmd.Flags().StringVar(&phase, "phase", "", "Phase filter: attempting, succeeded, failed, unknown, parked")
+	cmd.Flags().StringVar(&phase, "phase", "", "Phase filter: attempting, succeeded, failed, unknown, parked, expired")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
 	cmd.Flags().StringVar(&merchant, "merchant", "", "Merchant public name or id:<uuid> (required)")
 	cmd.Flags().IntVar(&limit, "limit", 500, "Maximum rows to list")

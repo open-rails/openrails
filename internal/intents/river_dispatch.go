@@ -22,7 +22,8 @@ func OperationTerminal(status string) bool {
 }
 
 // PrepareDispatch touches only this operation. Expiration retains every existing
-// submission/hold guard. A lost executor lease becomes an unknown result, never
+// submission/hold guard, and an expired operation is written to the operations
+// history. A lost executor lease becomes an unknown result, never
 // an execute retry: the provider may already have accepted the mutation.
 func (s *Store) PrepareDispatch(ctx context.Context, id uuid.UUID, now time.Time) (gen.BillingProviderIntent, error) {
 	mid, err := merchant.Require(ctx)
@@ -32,7 +33,20 @@ func (s *Store) PrepareDispatch(ctx context.Context, id uuid.UUID, now time.Time
 	if _, err := s.db.Gen(ctx).RecoverAbandonedProviderIntentByID(ctx, gen.RecoverAbandonedProviderIntentByIDParams{MerchantID: mid.UUID(), ID: id, Now: now}); err != nil {
 		return gen.BillingProviderIntent{}, err
 	}
-	if _, err := s.db.Gen(ctx).ExpireProviderIntentByID(ctx, gen.ExpireProviderIntentByIDParams{MerchantID: mid.UUID(), ID: id, Now: now, BreakerHeldTypes: DestructiveIntentTypes()}); err != nil {
+	// The expiry and its history entry commit together.
+	if err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		expired, err := q.ExpireProviderIntentByID(ctx, gen.ExpireProviderIntentByIDParams{MerchantID: mid.UUID(), ID: id, Now: now, BreakerHeldTypes: DestructiveIntentTypes()})
+		if err != nil {
+			return err
+		}
+		for _, row := range expired {
+			if err := recordOperation(ctx, q, row, OperationExpired, "relevance window elapsed before execution"); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
 		return gen.BillingProviderIntent{}, err
 	}
 	return s.Get(ctx, id)

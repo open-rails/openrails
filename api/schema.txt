@@ -19,6 +19,7 @@ migration 0015_deposits_and_reserves.up.sql sha256:2345658c4a3f9fbbdabd1a00aa87f
 migration 0016_import_history.up.sql sha256:d93ddf39d190cbfa6054687c6b792e5332a89bb821b2b56e86e44b96a6d35090
 migration 0017_known_through.up.sql sha256:d480fa70ea1a83b9654f4011f6434f5b8f96a6b2be9f0c551142fb1706527eb5
 migration 0018_imported_known_through.up.sql sha256:7c0547c340bbe151baf5562ebbffca5dc8fb681351ae40d84a7b63554339ff3f
+migration 0019_operation_log_expired.up.sql sha256:f5c9d8d76e4172505f0915c0ba1f2856b478d746b09c41edb1965afc22a5d499
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1805,7 +1806,7 @@ table billing.operation_log
   column psp_id uuid
   column custodian_id uuid
   column subscription_id uuid
-  constraint operation_log_action_check CHECK ((action = ANY (ARRAY['attempting'::text, 'succeeded'::text, 'failed'::text, 'unknown'::text, 'parked'::text])))
+  constraint operation_log_action_check CHECK ((action = ANY (ARRAY['attempting'::text, 'succeeded'::text, 'failed'::text, 'unknown'::text, 'parked'::text, 'expired'::text])))
   constraint operation_log_actor_check CHECK (((octet_length(actor) <= 4200) AND ((actor ~ '^(staff|customer):.'::text) OR (actor ~ '^provider:[a-z][a-z0-9_]{0,31}$'::text) OR (actor = ANY (ARRAY['system'::text, 'file'::text, 'vault'::text])))))
   constraint operation_log_addressed_check CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
   constraint operation_log_changes_check CHECK (((jsonb_typeof(changes) = 'object'::text) AND (jsonb_typeof((changes -> 'version'::text)) = 'number'::text) AND (octet_length((changes)::text) <= 262144)))

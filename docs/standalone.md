@@ -849,7 +849,7 @@ Counting is per minute, per bucket and per client IP; a request over the limit i
 
 ## Provider intents
 
-Every outbound provider mutation is first a row in `billing.provider_intents`: an idempotency key, an origin (`user`, `admin`, `provider` for a provider-reported cancel, `system`), the PSP it targets and a relevance window. Its own job (`openrails.provider_operation`) claims it under a lease, rechecks relevance, gates on the merchant's write posture and the origin, executes and classifies the outcome; each attempt's phases (attempting before the provider call, then its result or a hold) are written ahead to `billing.operation_log`, the operations history. A blocked intent (provider down, write posture, credentials that do not arm) stays pending with its reason and drains when the blocker lifts; one past its relevance window is superseded or expires instead of firing stale. An ambiguous money movement is resolved by reading the provider before any retry; deletes verify, then execute.
+Every outbound provider mutation is first a row in `billing.provider_intents`: an idempotency key, an origin (`user`, `admin`, `provider` for a provider-reported cancel, `system`), the PSP it targets and a relevance window. Its own job (`openrails.provider_operation`) claims it under a lease, rechecks relevance, gates on the merchant's write posture and the origin, executes and classifies the outcome; each attempt's phases (attempting before the provider call, then its result or a hold) are written ahead to `billing.operation_log`, the operations history. A blocked intent (provider down, write posture, credentials that do not arm) stays pending with its reason and drains when the blocker lifts; one past its relevance window is superseded or expires instead of firing stale, even after a park put it back, and the operations history records the expiry (`expired`). An attempt whose worker lost its lease is never claimed again: it becomes unknown and the provider is read first. An ambiguous money movement is resolved by reading the provider before any retry; deletes verify, then execute.
 
 Intents follow the PSP id, not its key: they never execute against another
 account. To move to another account, declare a new PSP and archive the old one
@@ -860,7 +860,7 @@ credential first, or by editing the manifest and restarting.
 
 ```sh
 openrails intents --merchant <name> [--status active|pending|…|all] [--rail nmi] [--type manual_rebill] [--format json]
-openrails intents-log --merchant <name> [--rail] [--intent] [--psp] [--phase attempting|succeeded|failed|unknown|parked]
+openrails intents-log --merchant <name> [--rail] [--intent] [--psp] [--phase attempting|succeeded|failed|unknown|parked|expired]
 openrails intents resolve --merchant <name> --intent <id> [--step S] (--receipt <provider id> | --not-executed) --reason TEXT
 ```
 
