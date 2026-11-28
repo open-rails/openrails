@@ -622,21 +622,7 @@ func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {
 		if err := scoped.markFailed(ctx, id); err != nil {
 			return err
 		}
-		lot, err := d.Gen(ctx).GetPurchasedCreditGrant(ctx, gen.GetPurchasedCreditGrantParams{MerchantID: mid.UUID(), PaymentID: *payment.RefundedPaymentID})
-		if err != nil {
-			if db.IsNotFound(err) {
-				return nil
-			}
-			return err
-		}
-		// What the failed refund withdrew comes back. A lot that lapsed while
-		// the provider result was unresolved expires again in the same
-		// transaction.
-		if err := purchasedcredits.New(d, s.clock).ReleaseRefund(ctx, *payment.RefundedPaymentID, id); err != nil {
-			return err
-		}
-		_, err = credits.New(d.Gen(ctx), mid.UUID(), s.now).ExpireLapsed(ctx, payment.CustomerID, lot.Unit)
-		return err
+		return purchasedcredits.New(d, s.clock).ReleaseRefund(ctx, *payment.RefundedPaymentID, id)
 	})
 }
 

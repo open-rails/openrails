@@ -24,6 +24,7 @@ import (
 func TestMixedInvoiceCreditRefunds(t *testing.T) {
 	t.Run("OR-J22-S07/a-pending-credit-line-refund-takes-the-whole-lot-off-the-balance-at-once", mixedPendingRefund)
 	t.Run("OR-J22-S51/a-refused-refund-gives-its-credit-back", mixedRefusedRefund)
+	t.Run("OR-J22-S52/a-refund-refused-after-its-lot-lapsed-expires-what-it-gives-back", mixedRefundRefusedAcrossLapse)
 	t.Run("OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first", mixedReversals)
 	t.Run("OR-J22-S09/won-dispute-credit-stays-when-a-refund-found-none", mixedDisputeAroundRefund)
 }
@@ -198,6 +199,70 @@ func mixedRefusedRefund(t *testing.T) {
 		pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+" WHERE merchant_id = $1 AND credit_grant_id = $2 AND book = 'units'", a.alpha.MerchantID().UUID(), lot.UUID()).Scan(&withdrawn, &restored))
 	require.EqualValues(t, 25_000_000, withdrawn)
 	require.EqualValues(t, 25_000_000, restored)
+	require.Empty(t, lotLegs(t, a.world, lot, "refund_deferred"))
+}
+
+func mixedRefundRefusedAcrossLapse(t *testing.T) {
+	m := newMixedSale(t, func(w *world) { w.clock.Advance(-366 * 24 * time.Hour) })
+	a, p := m.a, m.p
+	payment := m.buy(t, "mixed-refused-refund-across-lapse")
+	lot := paymentLot(t, a.alpha, m.customer, payment)
+	grant, err := a.alpha.GetCreditGrant(t.Context(), lot)
+	require.NoError(t, err)
+	require.NotNil(t, grant.ExpiresAt)
+	gate := &wireGate{arrived: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(gate.unblock)
+	p.mu.Lock()
+	p.refuseRefund = true
+	p.refundGate = gate
+	p.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		_, _ = a.alpha.RefundPayment(t.Context(), "credit-pack-refused-across-lapse", payment, billing.RefundPaymentParams{Amount: 4_000_000, Reason: "Return part of the credit pack"})
+		close(done)
+	}()
+	select {
+	case <-gate.arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("refund did not reach the provider barrier")
+	}
+	balance(t, a.alpha, m.customer, 15_000_000, 0, 15_000_000)
+	a.clock.Advance(grant.ExpiresAt.Add(time.Second).Sub(a.clock.Now()))
+	fleet := startFleet(t, a.world)
+	runRegistered(t, fleet, "openrails.billing_pass", 1)
+	balance(t, a.alpha, m.customer, 0, 0, 0)
+	gate.unblock()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("refused refund did not finish")
+	}
+	var status string
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT status FROM "+pgx.Identifier{a.schema, "payments"}.Sanitize()+" WHERE merchant_id = $1 AND refunded_payment_id = $2",
+		a.alpha.MerchantID().UUID(), payment.UUID()).Scan(&status))
+	require.Equal(t, "failed", status)
+	balance(t, a.alpha, m.customer, 0, 0, 0)
+	grant, err = a.alpha.GetCreditGrant(t.Context(), lot)
+	require.NoError(t, err)
+	require.Zero(t, grant.RemainingAmount)
+	require.EqualValues(t, 25_000_000, grant.ExpiredAmount)
+	require.Zero(t, grant.RefundedAmount)
+	require.Equal(t, billing.CreditGrantExpired, grant.State)
+	var expired, restored int
+	var restoredAmount int64
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FILTER (WHERE lt.transfer_type = 'credit_expire'), count(*) FILTER (WHERE lt.transfer_type = 'credit_refund_restore' AND ca.account_type = 'units_expired'), COALESCE(sum(lt.amount) FILTER (WHERE lt.transfer_type = 'credit_refund_restore' AND ca.account_type = 'units_expired'), 0) FROM "+
+		pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+" lt JOIN "+pgx.Identifier{a.schema, "ledger_accounts"}.Sanitize()+" ca ON ca.id = lt.credit_account_id AND ca.merchant_id = lt.merchant_id WHERE lt.merchant_id = $1 AND lt.credit_grant_id = $2 AND lt.book = 'units'",
+		a.alpha.MerchantID().UUID(), lot.UUID()).Scan(&expired, &restored, &restoredAmount))
+	require.Equal(t, 1, expired)
+	require.Equal(t, 1, restored)
+	require.EqualValues(t, 10_000_000, restoredAmount)
+	deferred, released := lotMoney(t, a.world, lot)
+	require.Equal(t, deferred, released)
+	var breakage int64
+	for _, amount := range lotLegs(t, a.world, lot, "credit_breakage") {
+		breakage += amount
+	}
+	require.EqualValues(t, 10_000_000, breakage)
 	require.Empty(t, lotLegs(t, a.world, lot, "refund_deferred"))
 }
 

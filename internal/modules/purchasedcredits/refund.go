@@ -115,12 +115,28 @@ func (s *Service) ReleaseRefund(ctx context.Context, paymentID, reversal uuid.UU
 		if err != nil {
 			return err
 		}
+		retired := state.Withdrawn > 0 && lot.ExpiresAt != nil && !lot.ExpiresAt.After(s.now())
 		if state.Withdrawn > 0 {
-			if err := postUnits(ctx, ledger.New(q, mid.UUID()), lot, reversal, ledger.UnitsRefunded, ledger.CustomerUnits, state.Withdrawn, ledger.CreditRefundRestore, "credit_release"); err != nil {
+			to := ledger.CustomerUnits
+			if retired {
+				to = ledger.UnitsExpired
+			}
+			if err := postUnits(ctx, ledger.New(q, mid.UUID()), lot, reversal, ledger.UnitsRefunded, to, state.Withdrawn, ledger.CreditRefundRestore, "credit_release"); err != nil {
 				return err
 			}
 		}
-		return credits.New(q, mid.UUID(), s.now).SyncRefunding(ctx, paymentID)
+		lots := credits.New(q, mid.UUID(), s.now)
+		if err := lots.SyncRefunding(ctx, paymentID); err != nil {
+			return err
+		}
+		if retired {
+			if lot, err = lots.Get(ctx, lot.ID); err != nil {
+				return err
+			}
+			return books.New(q, mid.UUID()).MoveCredit(ctx, books.CreditLotOf(lot), books.CreditMove{Kind: books.CreditExpired, At: s.now(),
+				Coord: books.Coord{Operation: books.OpCreditRefund, Source: "credit_release", SourceID: reversal.String()}})
+		}
+		return nil
 	})
 }
 
@@ -282,7 +298,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			var faceDelta, withdrawn, retired, expired, revoked, repaid int64
 			// more is what this call withdraws beyond what the request did,
 			// excess what the request withdrew beyond the reversal's share.
-			var more, excess int64
+			var more, excess, retiredExcess int64
 			retiredAccount := ledger.UnitsRevoked
 			source := "credit"
 			lossSource := "consumed_credit"
@@ -356,7 +372,12 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 				// Its request posted at "credit"; what it settles beyond or short
 				// of that posts apart.
 				source = "credit_settled"
-				if err := postUnits(ctx, l, g, reversalID, ledger.UnitsRefunded, ledger.CustomerUnits, excess, ledger.CreditRefundRestore, "credit_excess"); err != nil {
+				to := ledger.CustomerUnits
+				if g.ExpiresAt != nil && !g.ExpiresAt.After(s.now()) {
+					to = ledger.UnitsExpired
+					retiredExcess = excess
+				}
+				if err := postUnits(ctx, l, g, reversalID, ledger.UnitsRefunded, to, excess, ledger.CreditRefundRestore, "credit_excess"); err != nil {
 					return 0, err
 				}
 			}
@@ -406,11 +427,24 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 				if err != nil {
 					return 0, err
 				}
-				return faceDelta, gl.ReverseCredit(ctx, books.CreditLotOf(g), books.CreditReversal{
+				lot := books.CreditLotOf(g)
+				// The retired excess is still deferred until it expires below.
+				lot.Refunding += retiredExcess
+				if err := gl.ReverseCredit(ctx, lot, books.CreditReversal{
 					Reversal: reversalID, Chargeback: reversal.ReversalKind != nil && *reversal.ReversalKind == reversalChargeback,
 					Cash: cashDelta, CashAccount: account, Repaid: units.repaid, Consumed: units.consumed, Lapsed: units.expired + units.revoked,
 					At: at, Now: s.now(), Zone: zone,
-				})
+				}); err != nil {
+					return 0, err
+				}
+				if retiredExcess == 0 {
+					return faceDelta, nil
+				}
+				if g, err = lots.Get(ctx, g.ID); err != nil {
+					return 0, err
+				}
+				return faceDelta, gl.MoveCredit(ctx, books.CreditLotOf(g), books.CreditMove{Kind: books.CreditExpired, At: at,
+					Coord: books.Coord{Operation: books.OpCreditRefund, Source: "credit_excess", SourceID: reversalID.String()}})
 			}
 			restore := ":" + reversesID.String()
 			if err := leg(ledger.UnitsRefunded, ledger.CustomerUnits, units.withdrawn, ledger.CreditRefundRestore, source); err != nil {
@@ -482,11 +516,26 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			case committed.Withdrawn > 0:
 				// Reversals that settled first took the whole line: what the
 				// request withdrew goes back.
-				if err := postUnits(ctx, ledger.New(q, mid.UUID()), g, reversalID, ledger.UnitsRefunded, ledger.CustomerUnits, committed.Withdrawn, ledger.CreditRefundRestore, "credit_excess"); err != nil {
+				to := ledger.CustomerUnits
+				retired := g.ExpiresAt != nil && !g.ExpiresAt.After(s.now())
+				if retired {
+					to = ledger.UnitsExpired
+				}
+				if err := postUnits(ctx, ledger.New(q, mid.UUID()), g, reversalID, ledger.UnitsRefunded, to, committed.Withdrawn, ledger.CreditRefundRestore, "credit_excess"); err != nil {
 					return err
 				}
-				if err := credits.New(q, mid.UUID(), s.now).SyncRefunding(ctx, paymentID); err != nil {
+				lots := credits.New(q, mid.UUID(), s.now)
+				if err := lots.SyncRefunding(ctx, paymentID); err != nil {
 					return err
+				}
+				if retired {
+					if g, err = lots.Get(ctx, g.ID); err != nil {
+						return err
+					}
+					if err := books.New(q, mid.UUID()).MoveCredit(ctx, books.CreditLotOf(g), books.CreditMove{Kind: books.CreditExpired, At: s.now(),
+						Coord: books.Coord{Operation: books.OpCreditRefund, Source: "credit_excess", SourceID: reversalID.String()}}); err != nil {
+						return err
+					}
 				}
 			}
 			return decide(reversalID, cash, units)

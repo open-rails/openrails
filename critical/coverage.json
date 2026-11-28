@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 928,
+  "scenario_count": 929,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2287,6 +2287,11 @@
       "id": "OR-J22-S51",
       "journey": "J22",
       "name": "A refund the provider refuses gives back the credit it took off the balance, its money never left deferral"
+    },
+    {
+      "id": "OR-J22-S52",
+      "journey": "J22",
+      "name": "A refund refused after its lot lapsed expires the credit it gives back, and its money breaks"
     },
     {
       "id": "OR-J26-S54",

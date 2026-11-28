@@ -1188,6 +1188,9 @@
     "OR-J22-S51": [
       "TestMixedInvoiceCreditRefunds/OR-J22-S51/a-refused-refund-gives-its-credit-back"
     ],
+    "OR-J22-S52": [
+      "TestMixedInvoiceCreditRefunds/OR-J22-S52/a-refund-refused-after-its-lot-lapsed-expires-what-it-gives-back"
+    ],
     "OR-J26-S54": [
       "TestUsageBillingContracts/OR-J26-S54/a-running-charge-is-billed-through-the-bill-date-before-its-daily-posting"
     ],
