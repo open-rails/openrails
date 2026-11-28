@@ -20,7 +20,6 @@ migration 0016_import_history.up.sql sha256:d93ddf39d190cbfa6054687c6b792e5332a8
 migration 0017_known_through.up.sql sha256:d480fa70ea1a83b9654f4011f6434f5b8f96a6b2be9f0c551142fb1706527eb5
 migration 0018_imported_known_through.up.sql sha256:7c0547c340bbe151baf5562ebbffca5dc8fb681351ae40d84a7b63554339ff3f
 migration 0019_operation_log_delete_guard.up.sql sha256:0c5ee5e3aba04f3b347a4d6f794e22274770aaca40fe46807c57a4407ea9ebf4
-migration 0020_drop_payment_credit_grant_snapshot.up.sql sha256:d5912dcbe72b40ffea4f051a3cbce015c634aebcadae0ed64668c583c6f4522f
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -2142,6 +2141,7 @@ table billing.payments
   column destructive_run_id uuid
   column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
   column money_movement text NOT NULL DEFAULT 'none'::text
+  column credit_grant_snapshot jsonb
   column invoice_id uuid
   column ledger_transfer_id uuid
   column quantity integer

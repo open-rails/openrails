@@ -71,6 +71,16 @@ func ValidateValues(p Profile, values []*string) error {
 			return fmt.Errorf("invalid catalog application digest")
 		}
 	}
+	if p.Name == "payments" {
+		if raw := value(p, values, "credit_grant_snapshot"); raw != nil && *raw != "null" {
+			var benefit models.CreditGrantSnapshot
+			currency := value(p, values, "currency")
+			status := value(p, values, "status")
+			if json.Unmarshal([]byte(*raw), &benefit) != nil || benefit.Validate() != nil || currency == nil || benefit.Currency != *currency || status != nil && *status == "succeeded" && benefit.StartsAt.IsZero() {
+				return fmt.Errorf("invalid purchased credit payment snapshot")
+			}
+		}
+	}
 	if p.Name == "subscriptions" {
 		policy, rail, binding := value(p, values, "collection_policy"), value(p, values, "rail"), value(p, values, "rail_subscription_id")
 		if policy == nil || !models.CollectionPolicy(*policy).Valid() || rail == nil {

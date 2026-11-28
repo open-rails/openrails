@@ -22,7 +22,6 @@ sql:
       - "internal/migrate/postgres/0017_known_through.up.sql"
       - "internal/migrate/postgres/0018_imported_known_through.up.sql"
       - "internal/migrate/postgres/0019_operation_log_delete_guard.up.sql"
-      - "internal/migrate/postgres/0020_drop_payment_credit_grant_snapshot.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:
