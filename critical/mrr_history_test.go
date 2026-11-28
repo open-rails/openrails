@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/migrate"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/sqlschema"
 )
 
 // An import brings the merchant's history: what it lands adds MRR from each
@@ -273,31 +274,7 @@ func TestMRRHistory(t *testing.T) {
 func TestMRRHistoryUpgrade(t *testing.T) {
 	t.Run("OR-J42-S41/an-upgrade-turns-openings-into-history-and-keeps-live-movements", func(t *testing.T) {
 		ctx := t.Context()
-		dsn := os.Getenv("OPENRAILS_CRITICAL_DSN")
-		require.NotEmpty(t, dsn, "OPENRAILS_CRITICAL_DSN must name a disposable PostgreSQL database; critical scenarios never skip")
-		pool, err := pgxpool.New(ctx, dsn)
-		require.NoError(t, err)
-		schema := criticalSchema()
-		t.Cleanup(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			_, err := pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
-			require.NoError(t, err)
-			pool.Close()
-		})
-		logger := slog.New(slog.DiscardHandler)
-		earlier := fstest.MapFS{}
-		names, err := fs.Glob(postgresmigrations.FS, "*.up.sql")
-		require.NoError(t, err)
-		for _, name := range names {
-			if name >= "0016_" {
-				continue
-			}
-			data, err := fs.ReadFile(postgresmigrations.FS, name)
-			require.NoError(t, err)
-			earlier[name] = &fstest.MapFile{Data: data}
-		}
-		require.NoError(t, migrate.Apply(ctx, pool, migrate.Options{Schema: schema, Chain: earlier, Logger: logger}))
+		pool, schema, logger := beforeImportHistory(t)
 		table := func(name string) string { return pgx.Identifier{schema, name}.Sanitize() }
 		exec := func(sql string, args ...any) {
 			t.Helper()
@@ -369,4 +346,122 @@ func TestMRRHistoryUpgrade(t *testing.T) {
 		_, err = pool.Exec(ctx, "DELETE FROM "+table("mrr_movements")+" WHERE merchant_id = $1", m)
 		require.Error(t, err, "history stays immutable")
 	})
+
+	t.Run("OR-J42-S42/an-upgrade-turns-thousands-of-openings-into-history-without-a-lock-per-customer", func(t *testing.T) {
+		ctx := t.Context()
+		pool, schema, logger := beforeImportHistory(t)
+		table := func(name string) string { return pgx.Identifier{schema, name}.Sanitize() }
+		exec := func(sql string, args ...any) {
+			t.Helper()
+			_, err := pool.Exec(ctx, sql, args...)
+			require.NoError(t, err, sql)
+		}
+		m, psp, product, price := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		exec("INSERT INTO "+table("merchants")+" (id, slug, status) VALUES ($1, 'upgrade-1423-books', 'active')", m)
+		exec("INSERT INTO "+table("psps")+" (id, merchant_id, key, rail, environment, account_id) VALUES ($1, $2, 'ccbill', 'ccbill', 'test', '999999-0000')", psp, m)
+		exec("INSERT INTO "+table("products")+" (id, merchant_id, key, display_name, tier_rank, archived) VALUES ($1, $2, 'member', 'Member', 0, false)", product, m)
+		exec("INSERT INTO "+table("prices")+" (id, merchant_id, product_id, key, amount, currency, archived, billing_interval_hours) VALUES ($1, $2, $3, 'member', 10000000, 'USD', false, 720)",
+			price, m, product)
+		// More customers than PostgreSQL's default lock table holds (64 per
+		// connection, 100 connections), landed as the build before did: books
+		// of a thousand, each opening its live memberships at the import.
+		// Every seventh had already ended and opened nothing.
+		const customers, book = 7000, 1000
+		start, asOf := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC), time.Date(2025, 9, 1, 10, 0, 0, 0, time.UTC)
+		for first := 0; first < customers; first += book {
+			tx, err := pool.Begin(ctx)
+			require.NoError(t, err)
+			for _, q := range []struct {
+				sql  string
+				args []any
+			}{
+				{"SELECT set_config('openrails.mrr_cause', 'import', true)", nil},
+				{"INSERT INTO " + table("customers") + ` (id, merchant_id, created_at, last_seen_at)
+					SELECT md5('customer' || g)::uuid, $1, $2, $2 FROM generate_series($3::int, $4::int) g`, []any{m, start, first, first + book - 1}},
+				{"INSERT INTO " + table("subscriptions") + ` (id, merchant_id, customer_id, product_id, price_id, status, rail, collection_policy, rail_subscription_id, psp_id,
+					started_at, current_period_starts_at, current_period_ends_at, canceled_at, ended_at, cancel_type, cancel_feedback, created_at, updated_at)
+					SELECT md5('subscription' || g)::uuid, $1, md5('customer' || g)::uuid, $2, $3, CASE WHEN x.ended THEN 'canceled' ELSE 'active' END,
+					       'ccbill', 'provider', '93' || lpad(g::text, 16, '0'), $4, x.started,
+					       CASE WHEN x.ended THEN x.ends - interval '30 days' ELSE $5::timestamptz - interval '12 days' END,
+					       CASE WHEN x.ended THEN x.ends ELSE $5::timestamptz + interval '18 days' END,
+					       CASE WHEN x.ended THEN x.ends END, CASE WHEN x.ended THEN x.ends END, CASE WHEN x.ended THEN 'user' END,
+					       CASE WHEN x.ended THEN 'imported: declared user_canceled' END, x.started, CASE WHEN x.ended THEN x.ends ELSE $5::timestamptz END
+					  FROM generate_series($6::int, $7::int) g
+					 CROSS JOIN LATERAL (SELECT g % 7 = 0 AS ended, $8::timestamptz + make_interval(days => g % 500) AS started,
+					                            $8::timestamptz + make_interval(days => g % 500 + 60) AS ends) x`,
+					[]any{m, product, price, psp, asOf, first, first + book - 1, start}},
+			} {
+				_, err := tx.Exec(ctx, q.sql, q.args...)
+				require.NoError(t, err, q.sql)
+			}
+			require.NoError(t, tx.Commit(ctx))
+		}
+		var openings int
+		require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM "+table("mrr_movements")+" WHERE merchant_id = $1 AND kind = 'opening'", m).Scan(&openings))
+		require.Equal(t, customers-customers/7, openings, "before: an opening per live membership")
+
+		// The conversion, where the locks it holds can be counted: a lock per
+		// customer exhausts the lock table of a large merchant's upgrade.
+		content, err := fs.ReadFile(postgresmigrations.FS, "0016_import_history.up.sql")
+		require.NoError(t, err)
+		upgrade, err := sqlschema.Rewrite(string(content), schema)
+		require.NoError(t, err)
+		tx, err := pool.Begin(ctx)
+		require.NoError(t, err)
+		_, err = tx.Exec(ctx, upgrade)
+		require.NoError(t, err)
+		var locks int
+		require.NoError(t, tx.QueryRow(ctx, "SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'advisory'").Scan(&locks))
+		require.NoError(t, tx.Rollback(ctx))
+		require.LessOrEqual(t, locks, 1, "the conversion of %d customers holds no lock per customer", customers)
+
+		began := time.Now()
+		require.NoError(t, migrate.Apply(ctx, pool, migrate.Options{Schema: schema, Logger: logger}), "an upgrade over thousands of openings")
+		t.Logf("the upgrade converted %d customers in %s", customers, time.Since(began).Round(time.Millisecond))
+		var news, churns, total, imported int
+		var mrr int64
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE v.kind = 'new' AND v.occurred_at = s.started_at),
+			       count(*) FILTER (WHERE v.kind = 'churn' AND v.occurred_at = s.ended_at), count(*), count(*) FILTER (WHERE v.imported),
+			       COALESCE(sum(v.delta) FILTER (WHERE v.occurred_at <= now()), 0)
+			  FROM `+table("mrr_movements")+` v JOIN `+table("subscriptions")+` s ON s.merchant_id = v.merchant_id AND s.customer_id = v.customer_id
+			 WHERE v.merchant_id = $1`, m).Scan(&news, &churns, &total, &imported, &mrr))
+		require.Equal(t, customers, news, "each customer is new at its membership's start")
+		require.Equal(t, customers/7, churns, "each ended membership churns at its end")
+		require.Equal(t, customers+customers/7, total)
+		require.Equal(t, total, imported)
+		require.Equal(t, int64(customers-customers/7)*10_000_000, mrr, "the live memberships' MRR stands")
+	})
+}
+
+// beforeImportHistory builds a schema at the migration before imports wrote
+// history, for an upgrade to run over.
+func beforeImportHistory(t *testing.T) (*pgxpool.Pool, string, *slog.Logger) {
+	t.Helper()
+	ctx := t.Context()
+	dsn := os.Getenv("OPENRAILS_CRITICAL_DSN")
+	require.NotEmpty(t, dsn, "OPENRAILS_CRITICAL_DSN must name a disposable PostgreSQL database; critical scenarios never skip")
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	schema := criticalSchema()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_, err := pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+		require.NoError(t, err)
+		pool.Close()
+	})
+	logger := slog.New(slog.DiscardHandler)
+	earlier := fstest.MapFS{}
+	names, err := fs.Glob(postgresmigrations.FS, "*.up.sql")
+	require.NoError(t, err)
+	for _, name := range names {
+		if name >= "0016_" {
+			continue
+		}
+		data, err := fs.ReadFile(postgresmigrations.FS, name)
+		require.NoError(t, err)
+		earlier[name] = &fstest.MapFile{Data: data}
+	}
+	require.NoError(t, migrate.Apply(ctx, pool, migrate.Options{Schema: schema, Chain: earlier, Logger: logger}))
+	return pool, schema, logger
 }

@@ -1672,6 +1672,9 @@
     "OR-J42-S41": [
       "TestMRRHistoryUpgrade/OR-J42-S41/an-upgrade-turns-openings-into-history-and-keeps-live-movements"
     ],
+    "OR-J42-S42": [
+      "TestMRRHistoryUpgrade/OR-J42-S42/an-upgrade-turns-thousands-of-openings-into-history-without-a-lock-per-customer"
+    ],
     "OR-J42-S36": [
       "TestMRRFacts/OR-J42-S36/at-risk-mrr-follows-a-price-change-during-a-case"
     ],
