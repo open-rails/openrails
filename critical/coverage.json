@@ -2746,7 +2746,7 @@
     {
       "id": "OR-J25-S44",
       "journey": "J25",
-      "name": "A revocation or refund that empties a balance tells the host but not the customer; a lapse tells both, as expired"
+      "name": "A revocation or refund that empties a balance tells the host and the customer; a lapse tells the customer its credits expired"
     },
     {
       "id": "OR-J29-S37",

@@ -1565,7 +1565,7 @@
       "TestBalanceLooks/OR-J25-S43/a-look-at-a-balance-without-pending-usage-needs-no-event-store"
     ],
     "OR-J25-S44": [
-      "TestBalanceLooks/OR-J25-S44/a-revocation-or-refund-that-empties-the-balance-tells-the-host-not-the-customer-a-lapse-tells-both"
+      "TestBalanceLooks/OR-J25-S44/a-revocation-or-refund-that-empties-the-balance-tells-the-host-and-the-customer-a-lapse-says-expired"
     ],
     "OR-J29-S37": [
       "TestDueWork/OR-J29-S37/an-operation-scheduled-ahead-is-not-stuck"

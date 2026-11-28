@@ -199,17 +199,19 @@ func TestBalanceLooks(t *testing.T) {
 		require.EqualValues(t, 1000, lotExpired(t, w.alpha, lot))
 		balance(t, w.alpha, customer, 300, 0, 300)
 	})
-	t.Run("OR-J25-S44/a-revocation-or-refund-that-empties-the-balance-tells-the-host-not-the-customer-a-lapse-tells-both", func(t *testing.T) {
+	t.Run("OR-J25-S44/a-revocation-or-refund-that-empties-the-balance-tells-the-host-and-the-customer-a-lapse-says-expired", func(t *testing.T) {
 		w, fleet := setup(t)
 		customer, lot := watchedCustomer(t, w, fleet, 1000, nil)
 		_, err := w.alpha.RevokeCreditGrant(t.Context(), "", lot, billing.RevokeCreditGrantParams{Reason: "critical adjustment"})
 		require.NoError(t, err)
 		settled(t, fleet, customer)
 		require.Len(t, balanceOutbox(t, w, customer, "balance.depleted"), 1)
-		var notices int
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "notification_events"}.Sanitize()+
-			" WHERE customer_id = $1 AND event_type IN ('balance_depleted', 'balance_low')", customer.UUID()).Scan(&notices))
-		require.Zero(t, notices)
+		var notices, generic, low int
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FILTER (WHERE event_type = 'balance_depleted'), count(*) FILTER (WHERE event_type = 'balance_depleted' AND data->>'reason' IS NULL), count(*) FILTER (WHERE event_type = 'balance_low') FROM "+pgx.Identifier{w.schema, "notification_events"}.Sanitize()+
+			" WHERE customer_id = $1 AND event_type IN ('balance_depleted', 'balance_low')", customer.UUID()).Scan(&notices, &generic, &low))
+		require.Equal(t, 1, notices)
+		require.Equal(t, 1, generic)
+		require.Zero(t, low)
 		var depleted bool
 		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT depleted_at IS NOT NULL FROM "+pgx.Identifier{w.schema, "balance_watches"}.Sanitize()+
 			" WHERE customer_id = $1", customer.UUID()).Scan(&depleted))
@@ -245,9 +247,11 @@ func TestBalanceLooks(t *testing.T) {
 		settled(t, fleet, customer)
 		balance(t, w.alpha, customer, 0, 0, 0)
 		require.Len(t, balanceOutbox(t, w, customer, "balance.depleted"), 1)
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "notification_events"}.Sanitize()+
-			" WHERE customer_id = $1 AND event_type IN ('balance_depleted', 'balance_low')", customer.UUID()).Scan(&notices))
-		require.Zero(t, notices)
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FILTER (WHERE event_type = 'balance_depleted'), count(*) FILTER (WHERE event_type = 'balance_depleted' AND data->>'reason' IS NULL), count(*) FILTER (WHERE event_type = 'balance_low') FROM "+pgx.Identifier{w.schema, "notification_events"}.Sanitize()+
+			" WHERE customer_id = $1 AND event_type IN ('balance_depleted', 'balance_low')", customer.UUID()).Scan(&notices, &generic, &low))
+		require.Equal(t, 1, notices)
+		require.Equal(t, 1, generic)
+		require.Zero(t, low)
 		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT depleted_at IS NOT NULL FROM "+pgx.Identifier{w.schema, "balance_watches"}.Sanitize()+
 			" WHERE customer_id = $1", customer.UUID()).Scan(&depleted))
 		require.True(t, depleted)

@@ -340,29 +340,12 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 	}
 	// Low and depleted crossed in one look are one customer notice.
 	if notice != "" {
-		// A look a change queued (its watch marked due) that expired nothing
-		// sees that change as its latest movement: a refund, chargeback or
-		// revocation that depletes the balance is not told to the customer.
-		// The host is still told.
-		quiet := false
-		if notice == models.NotificationBalanceDepleted && watch.NextCheckAt.Equal(time.Unix(0, 0)) && expired == 0 {
-			latest, err := q.LatestCustomerTransferType(ctx, gen.LatestCustomerTransferTypeParams{MerchantID: key.MerchantID, CustomerID: key.CustomerID, Currency: currency})
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
-			switch ledger.TransferType(latest) {
-			case ledger.CreditRefund, ledger.CreditRevoke, ledger.CreditRefundFunding, ledger.OwedReopened:
-				quiet = true
-			}
-		}
 		reason := ""
 		if notice == models.NotificationBalanceDepleted && expired > 0 {
 			reason = "expired"
 		}
-		if !quiet {
-			if err := notifyBalance(ctx, q, key.MerchantID, notice, event, reason); err != nil {
-				return err
-			}
+		if err := notifyBalance(ctx, q, key.MerchantID, notice, event, reason); err != nil {
+			return err
 		}
 		fundedAt = nil
 	}

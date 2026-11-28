@@ -66,18 +66,12 @@ or a lapsing lot); `openrails.balance_watch` takes watches due by `next_check_at
 once per crossing (a funding re-arms them) and sets the next look: at a lot's
 lapse or where a running charge's accrual crosses a line. It posts no running
 charge: the daily posting does.
-The host is always told: `balance.depleted` goes out at zero capacity whatever
-emptied the balance, so it can stop running charges. The customer is not told
-of a depletion a refund, chargeback or revocation caused: when the look was
-queued by a change, expired nothing itself, and the customer's latest
-units-book movement is `credit_refund`, `credit_revoke`, `credit_refund_funding`
-or `owed_reopened` (`LatestCustomerTransferType`), it sends the host event and
-skips the customer's `balance_depleted`. A low notice is sent as before.
-Otherwise spending and lapses tell the customer the balance ran out; a look that
-expired the lot that emptied it sends `balance_depleted` with reason `expired`.
-The reason is there only when that look posted the expiry; a lot that another
-posting expired first (a usage posting expires lapsed lots too) gets the
-generic text.
+A depletion sends `balance.depleted` to the host and `balance_depleted` to the
+customer whatever emptied the balance (spending, a lapse, a refund, a chargeback
+or a revocation). A look that itself expired
+the lot that emptied it sends `balance_depleted` with reason `expired`.
+A lot that another posting expired first (a usage posting expires lapsed lots
+too) gets the generic text.
 A balance is low once what the customer may spend is at or under an amount:
 its own (`customer_low_balance_lines`), else the merchant's
 `balance_notices.low_amounts` for the currency, else none; it is depleted at
