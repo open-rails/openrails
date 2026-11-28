@@ -1708,6 +1708,9 @@
     "OR-J38-S47": [
       "TestProviderTime/OR-J38-S47/a-missed-ccbill-cancellation-read-on-a-paced-day-keeps-the-paid-period"
     ],
+    "OR-J38-S48": [
+      "TestCCBillIdentity/OR-J38-S48/a-notice-for-a-subscription-openrails-does-not-hold-answers-200-and-changes-nothing"
+    ],
     "OR-J28-S11": [
       "TestProviderTime/OR-J28-S11/a-ccbill-account-another-merchant-declares-is-refused-before-a-probe"
     ],

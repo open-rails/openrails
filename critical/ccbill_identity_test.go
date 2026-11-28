@@ -176,7 +176,7 @@ func TestCCBillIdentity(t *testing.T) {
 		t.Run("another-number-matches-nothing", func(t *testing.T) {
 			for _, other := range []string{"0112233445566778898", "1122334455667788990"} {
 				status, body := ccbillNotice(t, a, "Cancellation", map[string]any{"subscriptionId": other, "reason": "user", "source": "webAdmin"})
-				require.NotEqual(t, http.StatusOK, status, "%s names no subscription: %s", other, body)
+				require.Equal(t, http.StatusOK, status, "%s names no subscription: %s", other, body)
 			}
 			sub := onlySubscription(t, a.alpha, alice)
 			require.Equal(t, ccbillStored, *sub.RailSubscriptionID)
@@ -472,6 +472,56 @@ func TestCCBillIdentity(t *testing.T) {
 		require.Equal(t, http.StatusOK, status, body)
 		require.Equal(t, billing.SubscriptionActive, onlySubscription(t, a.alpha, carol).Status, "the late rebill restores it")
 		require.True(t, entitledTo(t, a.alpha, carol, "ccbill:member"))
+	})
+
+	t.Run("OR-J38-S48/a-notice-for-a-subscription-openrails-does-not-hold-answers-200-and-changes-nothing", func(t *testing.T) {
+		a := ccbillWebhookWorld(t)
+		price := ccbillMemberPrice(t, a.alpha)
+		alice := customerOf(a.alice)
+		now := a.clock.Now().UTC().Truncate(time.Second)
+		paid := now.Add(5 * 24 * time.Hour)
+		importLegacyCCBill(t, a.alpha, now)(legacyCCBillMember(alice, price, ccbillStored, "0812233445566778801", paid))
+		before := onlySubscription(t, a.alpha, alice)
+		require.Equal(t, billing.SubscriptionActive, before.Status)
+		require.Nil(t, before.CanceledAt)
+		paymentsBefore, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{})
+		require.NoError(t, err)
+		const unknown = "0998877665544332211"
+		for _, notice := range []struct {
+			event  string
+			fields map[string]any
+		}{
+			{"Cancellation", map[string]any{"reason": "user", "source": "webAdmin"}},
+			{"Expiration", map[string]any{}},
+			{"BillingDateChange", map[string]any{"nextRenewalDate": paid.Format(time.DateOnly)}},
+			{"CustomerDataUpdate", map[string]any{}},
+			{"RenewalFailure", map[string]any{"transactionId": "0912233445566779901", "nextRetryDate": paid.Format(time.DateOnly), "renewalDate": now.Format(time.DateOnly)}},
+			{"UserReactivation", map[string]any{"transactionId": "0912233445566779902"}},
+			{"RenewalSuccess", map[string]any{"transactionId": "0912233445566779903", "billedAmount": "10.00", "billedCurrencyCode": "840",
+				"timestamp": now.Format(time.DateTime), "nextRenewalDate": paid.Format(time.DateOnly), "cardType": "VISA", "last4": "1111"}},
+		} {
+			t.Run(notice.event, func(t *testing.T) {
+				notice.fields["subscriptionId"] = unknown
+				for range 2 {
+					status, body := ccbillNotice(t, a, notice.event, notice.fields)
+					require.Equal(t, http.StatusOK, status, body)
+					require.Equal(t, before, onlySubscription(t, a.alpha, alice))
+					require.True(t, entitledTo(t, a.alpha, alice, "ccbill:member"))
+					payments, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{})
+					require.NoError(t, err)
+					require.Equal(t, paymentsBefore.Items, payments.Items, "no payment is recorded")
+					findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.ledger.unbooked"})
+					require.NoError(t, err)
+					if notice.event == "RenewalSuccess" {
+						require.Len(t, findings.Items, 1)
+						require.Equal(t, "provider_bill_unresolved", findings.Items[0].Evidence["operation"])
+						require.Equal(t, notice.fields["transactionId"], findings.Items[0].Evidence["transaction_id"])
+					} else {
+						require.Empty(t, findings.Items)
+					}
+				}
+			})
+		}
 	})
 
 	t.Run("OR-J38-S81/a-failed-rebill-cancel-on-a-decided-end-keeps-it-decided", func(t *testing.T) {

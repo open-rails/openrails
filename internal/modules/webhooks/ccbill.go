@@ -1012,7 +1012,8 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 		sub, err := subscriptions.NewSubscriptionRepo(db.NewWithPgxTx(s.Log, tx)).GetByPSPSubscriptionID(ctx, string(models.RailCCBill), data.SubscriptionID)
 		if err != nil {
 			if db.IsNotFound(err) {
-				return fmt.Errorf("subscription not found for rail subscription ID: %s", data.SubscriptionID)
+				s.Log.WarnContext(ctx, "CCBill notice names a subscription OpenRails does not hold; answered without effect", "eventType", s.Data.EventType, "rail_subscription_id", data.SubscriptionID)
+				return MarkWebhookProcessedInTx(ctx, tx)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
 		}
@@ -1040,7 +1041,8 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 		sub, err := subService.GetByPSPSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
 		if err != nil {
 			if db.IsNotFound(err) {
-				return fmt.Errorf("subscription not found for rail subscription ID: %s", pSubscriptionID)
+				s.Log.WarnContext(ctx, "CCBill notice names a subscription OpenRails does not hold; answered without effect", "eventType", s.Data.EventType, "rail_subscription_id", pSubscriptionID)
+				return MarkWebhookProcessedInTx(ctx, tx)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
 		}
@@ -1075,6 +1077,10 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		d := db.NewWithPgxTx(s.Log, tx)
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), railSubID)
 		if err != nil {
+			if db.IsNotFound(err) {
+				s.Log.WarnContext(ctx, "CCBill notice names a subscription OpenRails does not hold; answered without effect", "eventType", s.Data.EventType, "rail_subscription_id", railSubID)
+				return nil
+			}
 			return fmt.Errorf("load subscription for reactivation: %w", err)
 		}
 		if sub.Status != models.StatusCanceled {
@@ -1472,10 +1478,12 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 
 	var blocked error
 	var sub *models.Subscription
+	var subscriptionNotFound bool
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := db.NewWithPgxTx(s.Log, tx)
 		var err error
 		if sub, err = subscriptions.NewSubscriptionRepo(d).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), railSubID); err != nil {
+			subscriptionNotFound = db.IsNotFound(err)
 			return fmt.Errorf("failed to get subscription for renewal: %w", err)
 		}
 		at := ccbillEventPurchasedAt(data.Timestamp)
@@ -1521,6 +1529,10 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 			Metadata: map[string]any{"rail_subscription_id": railSubID, "next_renewal_date": data.NextRenewalDate}}); holdErr != nil {
 			return holdErr
 		}
+		if subscriptionNotFound {
+			s.Log.WarnContext(ctx, "CCBill notice names a subscription OpenRails does not hold; answered without effect", "eventType", s.Data.EventType, "rail_subscription_id", railSubID)
+			return nil
+		}
 		return err
 	}
 	if blocked == nil {
@@ -1560,6 +1572,10 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		d := db.NewWithPgxTx(s.Log, tx)
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), railSubID)
 		if err != nil {
+			if db.IsNotFound(err) {
+				s.Log.WarnContext(ctx, "CCBill notice names a subscription OpenRails does not hold; answered without effect", "eventType", s.Data.EventType, "rail_subscription_id", railSubID)
+				return nil
+			}
 			return fmt.Errorf("subscription not found: %w", err)
 		}
 		now := s.now().UTC()

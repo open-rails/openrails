@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 928,
+  "scenario_count": 929,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3037,6 +3037,11 @@
       "id": "OR-J38-S47",
       "journey": "J38",
       "name": "A CCBill cancellation whose webhook was missed, read from a paced day of transactions with no roster, cancels at the period end and keeps the time paid for"
+    },
+    {
+      "id": "OR-J38-S48",
+      "journey": "J38",
+      "name": "A CCBill notice for a subscription OpenRails does not hold answers 200 and changes nothing; a rebill for one is recorded once for review"
     },
     {
       "id": "OR-J28-S11",

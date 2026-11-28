@@ -166,7 +166,8 @@ func (s *CCBillWebhookService) ccbillMirrorEvent(ctx context.Context, railSubID 
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), railSubID)
 		if err != nil {
 			if db.IsNotFound(err) {
-				return fmt.Errorf("subscription not found for rail subscription ID: %s", railSubID)
+				s.Log.WarnContext(ctx, "CCBill notice names a subscription OpenRails does not hold; answered without effect", "eventType", s.Data.EventType, "rail_subscription_id", railSubID)
+				return nil
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
 		}
