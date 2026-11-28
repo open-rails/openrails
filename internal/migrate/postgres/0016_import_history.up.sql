@@ -20,12 +20,12 @@ COMMENT ON COLUMN billing.mrr_movement_lines.imported IS 'A subscription''s chan
 
 -- A movement is never rewritten. A scheduled one is deleted when a later
 -- settlement writes the customer's ends again; an imported one when an import
--- writes the customer's history again (openrails.mrr_history_customer).
+-- writes the merchant's history again (openrails.mrr_history_merchant).
 CREATE OR REPLACE FUNCTION billing.guard_mrr_movement() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 BEGIN
     IF TG_OP = 'DELETE' AND (OLD.scheduled
-        OR OLD.imported AND OLD.customer_id::text = current_setting('openrails.mrr_history_customer', true)) THEN
+        OR OLD.imported AND OLD.merchant_id::text = current_setting('openrails.mrr_history_merchant', true)) THEN
         RETURN OLD;
     END IF;
     RAISE EXCEPTION '% is not permitted on immutable billing facts in %', TG_OP, TG_TABLE_NAME USING ERRCODE='23514';
@@ -34,11 +34,10 @@ $$;
 CREATE OR REPLACE FUNCTION billing.guard_mrr_movement_line() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 BEGIN
-    IF TG_OP = 'DELETE' AND EXISTS (SELECT 1 FROM billing.mrr_movements v WHERE v.merchant_id = OLD.merchant_id AND v.id = OLD.movement_id AND v.scheduled) THEN
+    IF TG_OP = 'DELETE' AND OLD.imported AND OLD.merchant_id::text = current_setting('openrails.mrr_history_merchant', true) THEN
         RETURN OLD;
     END IF;
-    IF TG_OP = 'DELETE' AND OLD.imported AND EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id = OLD.merchant_id AND s.id = OLD.subscription_id
-        AND s.customer_id::text = current_setting('openrails.mrr_history_customer', true)) THEN
+    IF TG_OP = 'DELETE' AND EXISTS (SELECT 1 FROM billing.mrr_movements v WHERE v.merchant_id = OLD.merchant_id AND v.id = OLD.movement_id AND v.scheduled) THEN
         RETURN OLD;
     END IF;
     RAISE EXCEPTION '% is not permitted on immutable billing facts in %', TG_OP, TG_TABLE_NAME USING ERRCODE='23514';
@@ -53,51 +52,41 @@ BEGIN
         CREATE TEMP TABLE mrr_history_input (
             merchant_id uuid NOT NULL, customer_id uuid NOT NULL, subscription_id uuid NOT NULL, cutoff timestamptz NOT NULL,
             currency text NOT NULL, product_id uuid NOT NULL, price_id uuid NOT NULL, mrr bigint NOT NULL) ON COMMIT DROP;
-    END IF;
-    IF to_regclass('pg_temp.mrr_history_lines') IS NULL THEN
         CREATE TEMP TABLE mrr_history_lines (
-            at timestamptz NOT NULL, subscription_id uuid NOT NULL, currency text NOT NULL, product_id uuid NOT NULL, price_id uuid NOT NULL,
-            mrr_before bigint NOT NULL, mrr_after bigint NOT NULL, cause text NOT NULL) ON COMMIT DROP;
+            customer_id uuid NOT NULL, at timestamptz NOT NULL, subscription_id uuid NOT NULL, currency text NOT NULL, product_id uuid NOT NULL,
+            price_id uuid NOT NULL, mrr_before bigint NOT NULL, mrr_after bigint NOT NULL, cause text NOT NULL) ON COMMIT DROP;
+        CREATE TEMP TABLE mrr_history_movements (
+            id uuid NOT NULL, customer_id uuid NOT NULL, currency text NOT NULL, at timestamptz NOT NULL, kind text NOT NULL, delta bigint NOT NULL,
+            mrr_before bigint NOT NULL, mrr_after bigint NOT NULL, logo_delta integer NOT NULL, customer_logo_delta integer NOT NULL,
+            cohort_at timestamptz NOT NULL, cause text NOT NULL, voluntary boolean) ON COMMIT DROP;
     END IF;
 END;
 $$;
-COMMENT ON FUNCTION billing.mrr_history_tables() IS 'Creates the session''s working tables of billing.write_mrr_history (pg_temp.mrr_history_input and mrr_history_lines), dropped at commit.';
+COMMENT ON FUNCTION billing.mrr_history_tables() IS 'Creates the session''s working tables of billing.write_mrr_history (pg_temp.mrr_history_input, mrr_history_lines and mrr_history_movements), dropped at commit.';
 
--- One customer's MRR history as its imports tell it. pg_temp.mrr_history_input
--- names the subscriptions it adds, each with the instant its import read
--- (cutoff) and what it added then (0 when it had ended): each adds from its
--- start, priced by the bills it paid (a change of price or seats dated at the
--- bill's period), to its end when that came by its cutoff; its last price is
--- what it added at its cutoff. Lines earlier imports wrote stay as written.
--- The customer's imported movements are written again from all of them in
--- time order, each classified by the customer's MRR then (the sum of its
--- movements dated by then, live ones included), as a settlement classifies;
--- then every end ahead of p_as_of is written again as a scheduled movement.
--- Live movements stand.
-CREATE FUNCTION billing.write_mrr_history(p_merchant uuid, p_customer uuid, p_as_of timestamptz) RETURNS void
+-- The MRR history of the merchant's customers pg_temp.mrr_history_input
+-- names, set-based. Each subscription it names adds from its start, priced
+-- by the bills it paid (a change of price or seats dated at the bill's
+-- period), to its end when that came by its cutoff (the instant its import
+-- read); its last price is what it added then (mrr, 0 when it had ended).
+-- Lines earlier imports wrote of the customers' other subscriptions stay as
+-- written. Each customer's imported movements are written again from all of
+-- them, each classified by the customer's MRR then (the sum of its movements
+-- dated by then, live ones included) as a settlement classifies; then every
+-- end ahead of p_as_of again as a scheduled movement. Live movements stand.
+-- It takes no lock: its caller holds the merchant's MRR or its tables.
+CREATE FUNCTION billing.write_mrr_history(p_merchant uuid, p_as_of timestamptz) RETURNS void
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' SET enable_seqscan TO off SET plan_cache_mode TO force_custom_plan AS $$
-DECLARE
-    v_at timestamptz;
-    v_currency text;
-    v_end record;
-    v_total bigint;
-    v_before bigint;
-    v_after bigint;
-    v_logo integer;
-    v_active integer;
-    v_first timestamptz;
-    v_cause text;
-    v_kind text;
-    v_movement uuid;
 BEGIN
-    PERFORM pg_advisory_xact_lock(hashtextextended('openrails.mrr:' || p_merchant::text || ':' || p_customer::text, 0));
+    ANALYZE mrr_history_input;
     DELETE FROM mrr_history_lines;
+    DELETE FROM mrr_history_movements;
 
-    -- The subscriptions this import adds: its segments, each from the bill
-    -- that began it, on what it then billed.
-    INSERT INTO mrr_history_lines (at, subscription_id, currency, product_id, price_id, mrr_before, mrr_after, cause)
+    -- The subscriptions named: their segments, each from the bill that began
+    -- it, on what it then billed.
+    INSERT INTO mrr_history_lines (customer_id, at, subscription_id, currency, product_id, price_id, mrr_before, mrr_after, cause)
     WITH span AS (
-        SELECT i.subscription_id, i.cutoff, i.currency AS cut_currency, i.product_id AS cut_product, i.price_id AS cut_price, i.mrr AS cut_mrr,
+        SELECT i.customer_id, i.subscription_id, i.cutoff, i.currency AS cut_currency, i.product_id AS cut_product, i.price_id AS cut_price, i.mrr AS cut_mrr,
                s.price_id AS sub_price, COALESCE(s.quantity, 1) AS sub_quantity, s.cancel_type,
                CASE WHEN p.trial_duration_hours IS NOT NULL THEN s.started_at + make_interval(hours => p.trial_duration_hours) ELSE s.started_at END AS starts,
                CASE WHEN i.mrr > 0 THEN NULL::timestamptz
@@ -105,7 +94,7 @@ BEGIN
           FROM mrr_history_input i
           JOIN billing.subscriptions s ON s.merchant_id = p_merchant AND s.id = i.subscription_id
           JOIN billing.prices p ON p.merchant_id = p_merchant AND p.id = s.price_id
-         WHERE i.merchant_id = p_merchant AND i.customer_id = p_customer
+         WHERE i.merchant_id = p_merchant
     ),
     paid AS (
         -- Added MRR at its cutoff, or ended by then after it began.
@@ -140,160 +129,205 @@ BEGIN
     valued AS (
         -- What each segment added; the last, of one that added MRR at its
         -- cutoff, is what it added then.
-        SELECT g.subscription_id, g.at, g.ord,
-               CASE WHEN x.last AND pd.cut_mrr > 0 THEN pd.cut_currency ELSE pr.currency END AS currency,
-               CASE WHEN x.last AND pd.cut_mrr > 0 THEN pd.cut_product ELSE pr.product_id END AS product_id,
-               CASE WHEN x.last AND pd.cut_mrr > 0 THEN pd.cut_price ELSE g.price_id END AS price_id,
-               CASE WHEN x.last AND pd.cut_mrr > 0 THEN pd.cut_mrr ELSE billing.price_mrr(pr, g.quantity) END AS mrr,
-               g.price_id AS billed_price, g.quantity
-          FROM segment g
+        SELECT pd.customer_id, g.subscription_id, g.at, g.ord,
+               CASE WHEN g.last AND pd.cut_mrr > 0 THEN pd.cut_currency ELSE pr.currency END AS currency,
+               CASE WHEN g.last AND pd.cut_mrr > 0 THEN pd.cut_product ELSE pr.product_id END AS product_id,
+               CASE WHEN g.last AND pd.cut_mrr > 0 THEN pd.cut_price ELSE g.price_id END AS price_id,
+               CASE WHEN g.last AND pd.cut_mrr > 0 THEN pd.cut_mrr ELSE billing.price_mrr(pr, g.quantity) END AS mrr,
+               g.price_id AS billed_price
+          FROM (SELECT g.*, row_number() OVER (PARTITION BY g.subscription_id ORDER BY g.at DESC, g.ord DESC) = 1 AS last FROM segment g) g
           JOIN paid pd ON pd.subscription_id = g.subscription_id
           JOIN billing.prices pr ON pr.merchant_id = p_merchant AND pr.id = g.price_id
-         CROSS JOIN LATERAL (SELECT NOT EXISTS (SELECT 1 FROM segment g2 WHERE g2.subscription_id = g.subscription_id
-                                                 AND (g2.at, g2.ord) > (g.at, g.ord)) AS last) x
     ),
     step AS (
         SELECT v.*, lag(v.currency) OVER w AS prev_currency, lag(v.product_id) OVER w AS prev_product, lag(v.price_id) OVER w AS prev_price,
-               lag(v.billed_price) OVER w AS prev_billed, lag(v.mrr) OVER w AS prev_mrr, row_number() OVER w AS n
+               lag(v.billed_price) OVER w AS prev_billed, lag(v.mrr) OVER w AS prev_mrr, row_number() OVER w AS n,
+               count(*) OVER (PARTITION BY v.subscription_id) AS steps
           FROM valued v WINDOW w AS (PARTITION BY v.subscription_id ORDER BY v.at, v.ord)
     ),
     lines AS (
         -- Entering, changing, or leaving one product and entering another.
-        SELECT s.at, s.subscription_id, s.currency, s.product_id, s.price_id, 0::bigint AS mrr_before, s.mrr AS mrr_after, 'subscribed' AS cause
+        SELECT s.customer_id, s.at, s.subscription_id, s.currency, s.product_id, s.price_id, 0::bigint AS mrr_before, s.mrr AS mrr_after, 'subscribed' AS cause
           FROM step s WHERE s.n = 1
         UNION ALL
-        SELECT s.at, s.subscription_id, s.currency, s.product_id, s.price_id, s.prev_mrr, s.mrr,
+        SELECT s.customer_id, s.at, s.subscription_id, s.currency, s.product_id, s.price_id, s.prev_mrr, s.mrr,
                CASE WHEN s.billed_price IS DISTINCT FROM s.prev_billed THEN 'price_change' ELSE 'seat_change' END
           FROM step s WHERE s.n > 1 AND (s.currency, s.product_id) = (s.prev_currency, s.prev_product)
         UNION ALL
-        SELECT s.at, s.subscription_id, s.prev_currency, s.prev_product, s.prev_price, s.prev_mrr, 0, 'price_change'
+        SELECT s.customer_id, s.at, s.subscription_id, s.prev_currency, s.prev_product, s.prev_price, s.prev_mrr, 0, 'price_change'
           FROM step s WHERE s.n > 1 AND (s.currency, s.product_id) IS DISTINCT FROM (s.prev_currency, s.prev_product)
         UNION ALL
-        SELECT s.at, s.subscription_id, s.currency, s.product_id, s.price_id, 0, s.mrr, 'price_change'
+        SELECT s.customer_id, s.at, s.subscription_id, s.currency, s.product_id, s.price_id, 0, s.mrr, 'price_change'
           FROM step s WHERE s.n > 1 AND (s.currency, s.product_id) IS DISTINCT FROM (s.prev_currency, s.prev_product)
         UNION ALL
         -- Its end, from what its last segment added.
-        SELECT pd.ends, s.subscription_id, s.currency, s.product_id, s.price_id, s.mrr, 0, billing.mrr_cancel_cause(pd.cancel_type)
+        SELECT s.customer_id, pd.ends, s.subscription_id, s.currency, s.product_id, s.price_id, s.mrr, 0, billing.mrr_cancel_cause(pd.cancel_type)
           FROM step s JOIN paid pd ON pd.subscription_id = s.subscription_id
-         WHERE pd.ends IS NOT NULL AND NOT EXISTS (SELECT 1 FROM step s2 WHERE s2.subscription_id = s.subscription_id AND s2.n > s.n)
+         WHERE pd.ends IS NOT NULL AND s.n = s.steps
     )
-    SELECT l.at, l.subscription_id, l.currency, l.product_id, l.price_id, l.mrr_before, l.mrr_after, l.cause
+    SELECT l.customer_id, l.at, l.subscription_id, l.currency, l.product_id, l.price_id, l.mrr_before, l.mrr_after, l.cause
       FROM lines l WHERE l.mrr_before <> l.mrr_after;
 
-    -- What earlier imports wrote of the customer's other subscriptions.
-    INSERT INTO mrr_history_lines (at, subscription_id, currency, product_id, price_id, mrr_before, mrr_after, cause)
-    SELECT l.occurred_at, l.subscription_id, l.currency, l.product_id, l.price_id, l.mrr_before, l.mrr_after, l.cause
+    -- What earlier imports wrote of the customers' other subscriptions.
+    INSERT INTO mrr_history_lines (customer_id, at, subscription_id, currency, product_id, price_id, mrr_before, mrr_after, cause)
+    SELECT s.customer_id, l.occurred_at, l.subscription_id, l.currency, l.product_id, l.price_id, l.mrr_before, l.mrr_after, l.cause
       FROM billing.subscriptions s
       JOIN billing.mrr_movement_lines l ON l.merchant_id = p_merchant AND l.subscription_id = s.id AND l.imported
-     WHERE s.merchant_id = p_merchant AND s.customer_id = p_customer
+     WHERE s.merchant_id = p_merchant AND s.customer_id IN (SELECT i.customer_id FROM mrr_history_input i WHERE i.merchant_id = p_merchant)
        AND NOT EXISTS (SELECT 1 FROM mrr_history_input i WHERE i.merchant_id = p_merchant AND i.subscription_id = s.id);
+    ANALYZE mrr_history_lines;
 
-    -- The customer's imported movements, and its ends ahead, go.
-    PERFORM set_config('openrails.mrr_history_customer', p_customer::text, true);
+    -- The customers' imported movements, and their ends ahead, go.
+    PERFORM set_config('openrails.mrr_history_merchant', p_merchant::text, true);
     DELETE FROM billing.mrr_movement_lines l
      USING billing.mrr_movements v
-     WHERE v.merchant_id = p_merchant AND v.customer_id = p_customer AND (v.imported AND NOT v.scheduled OR v.scheduled AND v.occurred_at > p_as_of)
+     WHERE v.merchant_id = p_merchant AND v.customer_id IN (SELECT i.customer_id FROM mrr_history_input i WHERE i.merchant_id = p_merchant)
+       AND (v.imported AND NOT v.scheduled OR v.scheduled AND v.occurred_at > p_as_of)
        AND l.merchant_id = p_merchant AND l.movement_id = v.id;
     DELETE FROM billing.mrr_movement_lines l
      USING billing.subscriptions s
-     WHERE s.merchant_id = p_merchant AND s.customer_id = p_customer
+     WHERE s.merchant_id = p_merchant AND s.customer_id IN (SELECT i.customer_id FROM mrr_history_input i WHERE i.merchant_id = p_merchant)
        AND l.merchant_id = p_merchant AND l.subscription_id = s.id AND l.movement_id IS NULL AND l.imported;
     DELETE FROM billing.mrr_movements v
-     WHERE v.merchant_id = p_merchant AND v.customer_id = p_customer AND (v.imported AND NOT v.scheduled OR v.scheduled AND v.occurred_at > p_as_of);
-    PERFORM set_config('openrails.mrr_history_customer', '', true);
+     WHERE v.merchant_id = p_merchant AND v.customer_id IN (SELECT i.customer_id FROM mrr_history_input i WHERE i.merchant_id = p_merchant)
+       AND (v.imported AND NOT v.scheduled OR v.scheduled AND v.occurred_at > p_as_of);
+    PERFORM set_config('openrails.mrr_history_merchant', '', true);
 
-    -- In time order: per instant, per currency whose MRR changed, a movement
-    -- classified by the customer's MRR then, with its lines.
-    FOR v_at IN SELECT DISTINCT h.at FROM mrr_history_lines h ORDER BY 1 LOOP
-        SELECT count(*) FILTER (WHERE x.mrr > 0) INTO v_active
-          FROM (SELECT sum(v.delta) AS mrr FROM billing.mrr_movements v
-                 WHERE v.merchant_id = p_merchant AND v.customer_id = p_customer AND v.occurred_at <= v_at
-                 GROUP BY v.currency) x;
-        FOR v_currency IN SELECT DISTINCT h.currency FROM mrr_history_lines h WHERE h.at = v_at ORDER BY 1 LOOP
-            SELECT COALESCE(sum(h.mrr_after - h.mrr_before), 0) INTO v_total FROM mrr_history_lines h WHERE h.at = v_at AND h.currency = v_currency;
-            v_movement := NULL;
-            IF v_total <> 0 THEN
-                SELECT COALESCE(sum(v.delta), 0), min(v.cohort_at) INTO v_before, v_first FROM billing.mrr_movements v
-                 WHERE v.merchant_id = p_merchant AND v.customer_id = p_customer AND v.currency = v_currency AND v.occurred_at <= v_at;
-                v_after := v_before + v_total;
-                v_logo := (v_after > 0)::integer - (v_before > 0)::integer;
-                SELECT p.cause INTO v_cause
-                  FROM (SELECT h.subscription_id, h.cause, sum(h.mrr_after - h.mrr_before) AS net
-                          FROM mrr_history_lines h WHERE h.at = v_at AND h.currency = v_currency
-                         GROUP BY h.subscription_id, h.cause) p
-                 WHERE p.net <> 0 ORDER BY (p.cause = 'upgrade') DESC, abs(p.net) DESC, p.subscription_id LIMIT 1;
-                v_kind := CASE
-                    WHEN v_before = 0 THEN CASE WHEN v_first IS NULL THEN 'new' ELSE 'reactivation' END
-                    WHEN v_after = 0 THEN 'churn'
-                    WHEN v_total > 0 THEN 'expansion'
-                    ELSE 'contraction'
-                END;
-                v_first := COALESCE(v_first, v_at);
-                v_active := v_active + v_logo;
-                INSERT INTO billing.mrr_movements (merchant_id, customer_id, currency, kind, delta, mrr_before, mrr_after, logo_delta,
-                    customer_logo_delta, cohort_at, cause, voluntary, occurred_at, scheduled, imported)
-                VALUES (p_merchant, p_customer, v_currency, v_kind, v_total, v_before, v_after, v_logo,
-                    (v_active > 0)::integer - (v_active - v_logo > 0)::integer, v_first, v_cause,
-                    CASE WHEN v_kind = 'churn' THEN v_cause IN ('canceled', 'merchant_canceled') END, v_at, false, true)
-                RETURNING id INTO v_movement;
-            END IF;
-            INSERT INTO billing.mrr_movement_lines (merchant_id, movement_id, subscription_id, product_id, price_id, delta, mrr_before, mrr_after,
-                subscriber_delta, cause, occurred_at, currency, imported)
-            SELECT p_merchant, v_movement, h.subscription_id, h.product_id, h.price_id, h.mrr_after - h.mrr_before, h.mrr_before, h.mrr_after,
-                   (h.mrr_after > 0)::integer - (h.mrr_before > 0)::integer, h.cause, v_at, v_currency, true
-              FROM mrr_history_lines h WHERE h.at = v_at AND h.currency = v_currency;
-        END LOOP;
-    END LOOP;
+    -- Per customer, instant and currency whose MRR changed, a movement
+    -- classified by the customer's MRR then: its movements that stand dated
+    -- by then and its history before. Counted across its currencies, the
+    -- ones with MRR give its logo.
+    INSERT INTO mrr_history_movements (id, customer_id, currency, at, kind, delta, mrr_before, mrr_after, logo_delta, customer_logo_delta, cohort_at, cause, voluntary)
+    WITH history AS (
+        SELECT h.customer_id, h.currency, h.at, sum(h.mrr_after - h.mrr_before)::bigint AS delta
+          FROM mrr_history_lines h GROUP BY h.customer_id, h.currency, h.at
+    ),
+    stand AS (
+        SELECT v.customer_id, v.currency, v.occurred_at AS at, sum(v.delta)::bigint AS delta, min(v.cohort_at) AS first
+          FROM billing.mrr_movements v
+         WHERE v.merchant_id = p_merchant AND v.customer_id IN (SELECT i.customer_id FROM mrr_history_input i WHERE i.merchant_id = p_merchant)
+         GROUP BY v.customer_id, v.currency, v.occurred_at
+    ),
+    events AS (
+        SELECT s.customer_id, s.currency, s.at, 0 AS ord, s.delta, s.first FROM stand s
+        UNION ALL
+        SELECT h.customer_id, h.currency, h.at, 1, h.delta, h.at FROM history h WHERE h.delta <> 0
+    ),
+    level AS (
+        SELECT e.*, COALESCE(sum(e.delta) OVER earlier, 0)::bigint AS before, min(e.first) OVER earlier AS prior_first
+          FROM events e
+        WINDOW earlier AS (PARTITION BY e.customer_id, e.currency ORDER BY e.at, e.ord ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)
+    ),
+    logo AS (
+        SELECT l.*, l.before + l.delta AS after, (l.before + l.delta > 0)::integer - (l.before > 0)::integer AS logo
+          FROM level l
+    ),
+    active AS (
+        SELECT g.*, sum(g.logo) OVER (PARTITION BY g.customer_id ORDER BY g.at, g.ord, g.currency ROWS UNBOUNDED PRECEDING) AS active,
+               CASE WHEN g.before = 0 THEN CASE WHEN g.prior_first IS NULL THEN 'new' ELSE 'reactivation' END
+                    WHEN g.after = 0 THEN 'churn'
+                    WHEN g.delta > 0 THEN 'expansion'
+                    ELSE 'contraction' END AS kind
+          FROM logo g
+    ),
+    cause AS (
+        -- An upgrade explains the whole movement; otherwise its largest
+        -- change does.
+        SELECT DISTINCT ON (p.customer_id, p.currency, p.at) p.customer_id, p.currency, p.at, p.cause
+          FROM (SELECT h.customer_id, h.currency, h.at, h.subscription_id, h.cause, sum(h.mrr_after - h.mrr_before) AS net
+                  FROM mrr_history_lines h GROUP BY h.customer_id, h.currency, h.at, h.subscription_id, h.cause) p
+         WHERE p.net <> 0
+         ORDER BY p.customer_id, p.currency, p.at, (p.cause = 'upgrade') DESC, abs(p.net) DESC, p.subscription_id
+    )
+    SELECT uuidv7(), a.customer_id, a.currency, a.at, a.kind, a.delta, a.before, a.after, a.logo,
+           (a.active > 0)::integer - (a.active - a.logo > 0)::integer, COALESCE(a.prior_first, a.at), c.cause,
+           CASE WHEN a.kind = 'churn' THEN c.cause IN ('canceled', 'merchant_canceled') END
+      FROM active a
+      JOIN cause c ON c.customer_id = a.customer_id AND c.currency = a.currency AND c.at = a.at
+     WHERE a.ord = 1
+     ORDER BY a.at, a.customer_id, a.currency;
+    INSERT INTO billing.mrr_movements (merchant_id, id, customer_id, currency, kind, delta, mrr_before, mrr_after, logo_delta,
+        customer_logo_delta, cohort_at, cause, voluntary, occurred_at, scheduled, imported)
+    SELECT p_merchant, m.id, m.customer_id, m.currency, m.kind, m.delta, m.mrr_before, m.mrr_after, m.logo_delta,
+           m.customer_logo_delta, m.cohort_at, m.cause, m.voluntary, m.at, false, true
+      FROM mrr_history_movements m ORDER BY m.id;
+    -- A move between products at an equal MRR is lines alone.
+    INSERT INTO billing.mrr_movement_lines (merchant_id, movement_id, subscription_id, product_id, price_id, delta, mrr_before, mrr_after,
+        subscriber_delta, cause, occurred_at, currency, imported)
+    SELECT p_merchant, m.id, h.subscription_id, h.product_id, h.price_id, h.mrr_after - h.mrr_before, h.mrr_before, h.mrr_after,
+           (h.mrr_after > 0)::integer - (h.mrr_before > 0)::integer, h.cause, h.at, h.currency, true
+      FROM mrr_history_lines h
+      LEFT JOIN mrr_history_movements m ON m.customer_id = h.customer_id AND m.currency = h.currency AND m.at = h.at
+     ORDER BY h.at, h.customer_id, h.currency, h.subscription_id;
 
-    -- Each end ahead of the import, by when it comes: churn, or contraction
-    -- when other MRR stays.
-    SELECT count(*) FILTER (WHERE x.mrr > 0) INTO v_active
-      FROM (SELECT sum(v.delta) AS mrr FROM billing.mrr_movements v
-             WHERE v.merchant_id = p_merchant AND v.customer_id = p_customer AND v.occurred_at <= p_as_of
-             GROUP BY v.currency) x;
-    FOR v_end IN
-        SELECT m.currency, m.ends_at AS at, sum(m.mrr)::bigint AS level,
+    -- Each end ahead of p_as_of, by when it comes: churn, or contraction when
+    -- other MRR stays.
+    DELETE FROM mrr_history_movements;
+    INSERT INTO mrr_history_movements (id, customer_id, currency, at, kind, delta, mrr_before, mrr_after, logo_delta, customer_logo_delta, cohort_at, cause, voluntary)
+    WITH ends AS (
+        SELECT m.customer_id, m.currency, m.ends_at AS at, sum(m.mrr)::bigint AS level,
                (array_agg(billing.mrr_cancel_cause(s.cancel_type) ORDER BY m.mrr DESC, m.subscription_id))[1] AS cause
           FROM billing.subscription_mrr m
           JOIN billing.subscriptions s ON s.merchant_id = m.merchant_id AND s.id = m.subscription_id
-         WHERE m.merchant_id = p_merchant AND m.customer_id = p_customer AND m.mrr > 0 AND m.ends_at > p_as_of
-         GROUP BY m.currency, m.ends_at
-         ORDER BY m.ends_at, m.currency
-    LOOP
-        SELECT COALESCE(sum(v.delta), 0), min(v.cohort_at) INTO v_before, v_first FROM billing.mrr_movements v
-         WHERE v.merchant_id = p_merchant AND v.customer_id = p_customer AND v.currency = v_end.currency AND v.occurred_at < v_end.at;
-        v_after := v_before - v_end.level;
-        v_logo := -(v_after = 0)::integer;
-        v_kind := CASE WHEN v_after = 0 THEN 'churn' ELSE 'contraction' END;
-        v_active := v_active + v_logo;
-        INSERT INTO billing.mrr_movements (merchant_id, customer_id, currency, kind, delta, mrr_before, mrr_after, logo_delta,
-            customer_logo_delta, cohort_at, cause, voluntary, occurred_at, scheduled, imported)
-        VALUES (p_merchant, p_customer, v_end.currency, v_kind, -v_end.level, v_before, v_after, v_logo,
-            (v_active > 0)::integer - (v_active - v_logo > 0)::integer, v_first, v_end.cause,
-            CASE WHEN v_kind = 'churn' THEN v_end.cause IN ('canceled', 'merchant_canceled') END, v_end.at, true, false)
-        RETURNING id INTO v_movement;
-        INSERT INTO billing.mrr_movement_lines (merchant_id, movement_id, subscription_id, product_id, price_id, delta, mrr_before, mrr_after,
-            subscriber_delta, cause, occurred_at, currency, imported)
-        SELECT p_merchant, v_movement, m.subscription_id, m.product_id, m.price_id, -m.mrr, m.mrr, 0, -1,
-               billing.mrr_cancel_cause(s.cancel_type), v_end.at, v_end.currency, false
-          FROM billing.subscription_mrr m
-          JOIN billing.subscriptions s ON s.merchant_id = m.merchant_id AND s.id = m.subscription_id
-         WHERE m.merchant_id = p_merchant AND m.customer_id = p_customer AND m.currency = v_end.currency
-           AND m.ends_at = v_end.at AND m.mrr > 0;
-    END LOOP;
+         WHERE m.merchant_id = p_merchant AND m.customer_id IN (SELECT i.customer_id FROM mrr_history_input i WHERE i.merchant_id = p_merchant)
+           AND m.mrr > 0 AND m.ends_at > p_as_of
+         GROUP BY m.customer_id, m.currency, m.ends_at
+    ),
+    placed AS (
+        -- The MRR before: its movements dated before the end, less the ends
+        -- ahead of it.
+        SELECT e.*, (x.mrr - COALESCE(sum(e.level) OVER earlier, 0))::bigint AS before, x.first
+          FROM ends e
+         CROSS JOIN LATERAL (SELECT COALESCE(sum(v.delta), 0) AS mrr, min(v.cohort_at) AS first FROM billing.mrr_movements v
+                              WHERE v.merchant_id = p_merchant AND v.customer_id = e.customer_id AND v.currency = e.currency AND v.occurred_at < e.at) x
+        WINDOW earlier AS (PARTITION BY e.customer_id, e.currency ORDER BY e.at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)
+    ),
+    logo AS (
+        SELECT p.*, p.before - p.level AS after, -(p.before - p.level = 0)::integer AS logo
+          FROM placed p
+    ),
+    active AS (
+        SELECT g.*, n.active + sum(g.logo) OVER (PARTITION BY g.customer_id ORDER BY g.at, g.currency ROWS UNBOUNDED PRECEDING) AS active
+          FROM logo g
+         CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE x.mrr > 0) AS active
+                               FROM (SELECT sum(v.delta) AS mrr FROM billing.mrr_movements v
+                                      WHERE v.merchant_id = p_merchant AND v.customer_id = g.customer_id AND v.occurred_at <= p_as_of
+                                      GROUP BY v.currency) x) n
+    )
+    SELECT uuidv7(), a.customer_id, a.currency, a.at, CASE WHEN a.after = 0 THEN 'churn' ELSE 'contraction' END, -a.level, a.before, a.after, a.logo,
+           (a.active > 0)::integer - (a.active - a.logo > 0)::integer, a.first, a.cause,
+           CASE WHEN a.after = 0 THEN a.cause IN ('canceled', 'merchant_canceled') END
+      FROM active a
+     ORDER BY a.at, a.customer_id, a.currency;
+    INSERT INTO billing.mrr_movements (merchant_id, id, customer_id, currency, kind, delta, mrr_before, mrr_after, logo_delta,
+        customer_logo_delta, cohort_at, cause, voluntary, occurred_at, scheduled, imported)
+    SELECT p_merchant, m.id, m.customer_id, m.currency, m.kind, m.delta, m.mrr_before, m.mrr_after, m.logo_delta,
+           m.customer_logo_delta, m.cohort_at, m.cause, m.voluntary, m.at, true, false
+      FROM mrr_history_movements m ORDER BY m.id;
+    INSERT INTO billing.mrr_movement_lines (merchant_id, movement_id, subscription_id, product_id, price_id, delta, mrr_before, mrr_after,
+        subscriber_delta, cause, occurred_at, currency, imported)
+    SELECT p_merchant, m.id, r.subscription_id, r.product_id, r.price_id, -r.mrr, r.mrr, 0, -1,
+           billing.mrr_cancel_cause(s.cancel_type), m.at, m.currency, false
+      FROM mrr_history_movements m
+      JOIN billing.subscription_mrr r ON r.merchant_id = p_merchant AND r.customer_id = m.customer_id AND r.currency = m.currency
+       AND r.ends_at = m.at AND r.mrr > 0
+      JOIN billing.subscriptions s ON s.merchant_id = p_merchant AND s.id = r.subscription_id
+     ORDER BY m.id, r.subscription_id;
+    DELETE FROM mrr_history_movements;
+    DELETE FROM mrr_history_lines;
 END;
 $$;
-COMMENT ON FUNCTION billing.write_mrr_history(p_merchant uuid, p_customer uuid, p_as_of timestamptz) IS 'Writes one customer''s imported MRR history again: the subscriptions pg_temp.mrr_history_input names from their start, priced by their bills, to their end or what they added at their import, beside the lines earlier imports wrote; in time order, each movement classified by the customer''s MRR then, live movements included; then its ends ahead of p_as_of as scheduled movements.';
+COMMENT ON FUNCTION billing.write_mrr_history(p_merchant uuid, p_as_of timestamptz) IS 'Writes the imported MRR history of the merchant''s customers pg_temp.mrr_history_input names, set-based: their subscriptions from their start, priced by their bills, to their end or what they added at their import, beside the lines earlier imports wrote; each movement classified by the customer''s MRR then, live movements included; then their ends ahead of p_as_of as scheduled movements. Takes no lock.';
 
 -- The import's entry: the subscriptions it landed, at its evidence instant.
 -- Each adds what its subscription_mrr row holds then; one an earlier import
 -- already wrote keeps its history. Their rows are then recorded: the commit
--- settles nothing of them.
+-- settles nothing of them. One lock for the merchant, whatever the book's
+-- size: an import writes its MRR alone, and settlements wait for it.
 CREATE FUNCTION billing.record_mrr_history(p_merchant uuid, p_subscriptions uuid[], p_as_of timestamptz) RETURNS void
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' SET enable_seqscan TO off SET plan_cache_mode TO force_custom_plan AS $$
-DECLARE
-    v_customer uuid;
 BEGIN
+    PERFORM pg_advisory_xact_lock(hashtextextended('openrails.mrr:' || p_merchant::text, 0));
     PERFORM billing.mrr_history_tables();
     DELETE FROM mrr_history_input;
     INSERT INTO mrr_history_input (merchant_id, customer_id, subscription_id, cutoff, currency, product_id, price_id, mrr)
@@ -302,9 +336,7 @@ BEGIN
       FROM billing.subscription_mrr m
      WHERE m.merchant_id = p_merchant AND m.subscription_id = ANY(p_subscriptions)
        AND NOT EXISTS (SELECT 1 FROM billing.mrr_movement_lines l WHERE l.merchant_id = p_merchant AND l.subscription_id = m.subscription_id AND l.imported);
-    FOR v_customer IN SELECT DISTINCT i.customer_id FROM mrr_history_input i ORDER BY 1 LOOP
-        PERFORM billing.write_mrr_history(p_merchant, v_customer, p_as_of);
-    END LOOP;
+    PERFORM billing.write_mrr_history(p_merchant, p_as_of);
     UPDATE billing.subscription_mrr m
        SET recorded_currency = m.currency, recorded_product_id = m.product_id, recorded_price_id = m.price_id,
            recorded_mrr = m.mrr, recorded_ends_at = m.ends_at
@@ -315,7 +347,7 @@ BEGIN
     DELETE FROM mrr_history_input;
 END;
 $$;
-COMMENT ON FUNCTION billing.record_mrr_history(p_merchant uuid, p_subscriptions uuid[], p_as_of timestamptz) IS 'Records the MRR history of the subscriptions an import landed, as of its evidence instant p_as_of: each customer''s history written again (billing.write_mrr_history), then the subscriptions'' rows recorded so the commit settles nothing of them. A subscription an earlier import wrote keeps its history.';
+COMMENT ON FUNCTION billing.record_mrr_history(p_merchant uuid, p_subscriptions uuid[], p_as_of timestamptz) IS 'Records the MRR history of the subscriptions an import landed, as of its evidence instant p_as_of, under one lock for the merchant: their customers'' history written again (billing.write_mrr_history), then the subscriptions'' rows recorded so the commit settles nothing of them. A subscription an earlier import wrote keeps its history.';
 
 -- Settlements classify live changes alone: an import writes its history.
 CREATE OR REPLACE FUNCTION billing.settle_customer_mrr(p_merchant uuid, p_customer uuid) RETURNS void
@@ -341,6 +373,9 @@ BEGIN
     IF v_at IS NULL THEN
         RETURN;
     END IF;
+    -- Shared with the merchant's other settlements; an import's history
+    -- write holds it alone (billing.record_mrr_history).
+    PERFORM pg_advisory_xact_lock_shared(hashtextextended('openrails.mrr:' || p_merchant::text, 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('openrails.mrr:' || p_merchant::text || ':' || p_customer::text, 0));
     SELECT greatest(v_at, max(v.occurred_at)) INTO v_at FROM billing.mrr_movements v
      WHERE v.merchant_id = p_merchant AND v.customer_id = p_customer AND NOT v.scheduled;
@@ -489,8 +524,8 @@ DELETE FROM billing.mrr_movement_lines l
  WHERE l.cause = 'import' OR EXISTS (SELECT 1 FROM billing.mrr_movements v WHERE v.merchant_id = l.merchant_id AND v.id = l.movement_id AND v.cause = 'import');
 DELETE FROM billing.mrr_movements WHERE cause = 'import';
 UPDATE billing.subscription_mrr SET cause = 'subscribed' WHERE cause = 'import';
-SELECT billing.write_mrr_history(c.merchant_id, c.customer_id, now())
-  FROM (SELECT DISTINCT i.merchant_id, i.customer_id FROM mrr_history_input i ORDER BY 1, 2) c;
+SELECT billing.write_mrr_history(i.merchant_id, now())
+  FROM (SELECT DISTINCT i.merchant_id FROM mrr_history_input i ORDER BY 1) i;
 DELETE FROM mrr_history_input;
 
 -- No import names a cause, and opening is no kind.
