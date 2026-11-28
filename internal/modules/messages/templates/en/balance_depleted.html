@@ -1,2 +1,2 @@
-<p style="margin:0 0 16px;">Your balance has run out, so new usage may be refused.</p>
+<p style="margin:0 0 16px;">{{if eq .Event.Reason "expired"}}Your credits have expired, so new usage may be refused.{{else}}Your balance has run out, so new usage may be refused.{{end}}</p>
 {{with .Links.ManageBilling}}<p style="margin:0 0 16px;"><a href="{{.}}" style="display:inline-block;padding:10px 18px;background:#1f2933;color:#ffffff;text-decoration:none;border-radius:6px;">Add funds</a></p>{{else}}<p style="margin:0 0 16px;">Add funds in your account to keep going.</p>{{end}}

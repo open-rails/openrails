@@ -1555,6 +1555,9 @@
     "OR-J25-S43": [
       "TestBalanceLooks/OR-J25-S43/a-look-at-a-balance-without-pending-usage-needs-no-event-store"
     ],
+    "OR-J25-S44": [
+      "TestBalanceLooks/OR-J25-S44/a-revocation-that-empties-the-balance-sends-no-depleted-notice-a-lapse-does"
+    ],
     "OR-J29-S37": [
       "TestDueWork/OR-J29-S37/an-operation-scheduled-ahead-is-not-stuck"
     ],

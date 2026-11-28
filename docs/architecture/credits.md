@@ -66,6 +66,10 @@ or a lapsing lot); `openrails.balance_watch` takes watches due by `next_check_at
 once per crossing (a funding re-arms them) and sets the next look: at a lot's
 lapse or where a running charge's accrual crosses a line. It posts no running
 charge: the daily posting does.
+A refund, chargeback or revocation that leaves the balance depleted marks the
+crossing's notices sent without sending them (`WatchChange`, `SilenceBalanceWatchNotices`).
+Only spending and lapses tell the customer the balance ran out; a look that
+expired the lot that emptied it sends `balance_depleted` with reason `expired`.
 A balance is low once what the customer may spend is at or under an amount:
 its own (`customer_low_balance_lines`), else the merchant's
 `balance_notices.low_amounts` for the currency, else none; it is depleted at

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 931,
+  "scenario_count": 932,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2727,6 +2727,11 @@
       "id": "OR-J25-S43",
       "journey": "J25",
       "name": "While ClickHouse is out of reach a balance look at a customer without pending usage expires its lapsed lot"
+    },
+    {
+      "id": "OR-J25-S44",
+      "journey": "J25",
+      "name": "A revocation that empties a balance sends no depleted notice; a lapse that empties it does, as expired"
     },
     {
       "id": "OR-J29-S37",

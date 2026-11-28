@@ -79,7 +79,8 @@ type NotificationData struct {
 	// Reason qualifies premium_ended and subscription_canceled (user_cancel,
 	// admin, expired, non_recoverable, refund, chargeback, rail_cancel,
 	// access_ended, unknown) and invoice_collection_stopped
-	// (schedule_exhausted, non_recoverable).
+	// (schedule_exhausted, non_recoverable) and balance_depleted
+	// (expired: credit that lapsed emptied it).
 	Reason  string `json:"reason,omitempty"`
 	Message string `json:"message,omitempty"`
 	// Source names the emitter when it is not the lifecycle itself

@@ -199,6 +199,34 @@ func TestBalanceLooks(t *testing.T) {
 		require.EqualValues(t, 1000, lotExpired(t, w.alpha, lot))
 		balance(t, w.alpha, customer, 300, 0, 300)
 	})
+	t.Run("OR-J25-S44/a-revocation-that-empties-the-balance-sends-no-depleted-notice-a-lapse-does", func(t *testing.T) {
+		w, fleet := setup(t)
+		customer, lot := watchedCustomer(t, w, fleet, 1000, nil)
+		_, err := w.alpha.RevokeCreditGrant(t.Context(), "", lot, billing.RevokeCreditGrantParams{Reason: "critical adjustment"})
+		require.NoError(t, err)
+		settled(t, fleet, customer)
+		require.Empty(t, balanceOutbox(t, w, customer, "balance.depleted"))
+		var notices int
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "notification_events"}.Sanitize()+
+			" WHERE customer_id = $1 AND event_type IN ('balance_depleted', 'balance_low')", customer.UUID()).Scan(&notices))
+		require.Zero(t, notices)
+		var depleted bool
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT depleted_at IS NOT NULL FROM "+pgx.Identifier{w.schema, "balance_watches"}.Sanitize()+
+			" WHERE customer_id = $1", customer.UUID()).Scan(&depleted))
+		require.True(t, depleted)
+
+		lapse := w.clock.Now().Add(time.Hour)
+		customer2, _ := watchedCustomer(t, w, fleet, 1000, &lapse)
+		advanceTo(w, lapse.Add(time.Second))
+		require.False(t, runPass(t, fleet))
+		settled(t, fleet, customer2)
+		require.Len(t, balanceOutbox(t, w, customer2, "balance.depleted"), 1)
+		var expired int
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*), count(*) FILTER (WHERE data->>'reason' = 'expired') FROM "+pgx.Identifier{w.schema, "notification_events"}.Sanitize()+
+			" WHERE customer_id = $1 AND event_type = 'balance_depleted'", customer2.UUID()).Scan(&notices, &expired))
+		require.Equal(t, 1, notices)
+		require.Equal(t, 1, expired)
+	})
 	t.Run("OR-J25-S37/a-pass-that-waited-behind-a-look-leaves-the-watch-it-moved", func(t *testing.T) {
 		w, fleet := setup(t)
 		lapse := w.clock.Now().Add(time.Hour)
