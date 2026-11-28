@@ -2746,7 +2746,7 @@
     {
       "id": "OR-J25-S44",
       "journey": "J25",
-      "name": "A revocation that empties a balance sends no depleted notice; a lapse that empties it does, as expired"
+      "name": "A revocation or refund that empties a balance tells the host but not the customer; a lapse tells both, as expired"
     },
     {
       "id": "OR-J29-S37",
@@ -4652,6 +4652,11 @@
       "id": "OR-J25-S49",
       "journey": "J25",
       "name": "With no low amount set no balance.low is sent: a running charge is told only when depleted, at its exact instant"
+    },
+    {
+      "id": "OR-J25-S50",
+      "journey": "J25",
+      "name": "A revocation that empties a balance with a running charge still sends the host balance.depleted"
     },
     {
       "id": "OR-J06-S87",

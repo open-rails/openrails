@@ -77,6 +77,13 @@ WHERE NOT EXISTS (
 ORDER BY c.customer_id, c.currency
 ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING;
 
+-- name: LatestCustomerTransferType :one
+-- The type of a customer's latest units-book movement in one currency.
+SELECT transfer_type FROM billing.ledger_transfers
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND currency = sqlc.arg(currency)::text AND book = 'units'
+ORDER BY created_at DESC, id DESC LIMIT 1;
+
 -- InsertLedgerTransfer is the units book's one durable write, effective when
 -- it posts. ON CONFLICT DO NOTHING on
 -- ledger_transfers_operation_once_key makes once-only a database fact: a

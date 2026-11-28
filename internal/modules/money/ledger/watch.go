@@ -24,9 +24,7 @@ import (
 // customer's LockCustomerForSpend, which the look takes too (WatchAvailable's
 // hold the watch instead). Only the units
 // book reaches it: a general-ledger posting changes no spendable balance.
-// A quiet change that leaves the balance depleted marks its notices sent
-// without sending them.
-func WatchChange(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string, funded, quiet bool, now time.Time) error {
+func WatchChange(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string, funded bool, now time.Time) error {
 	key := gen.GetBalanceWatchParams{MerchantID: merchant, CustomerID: customer, Currency: currency}
 	w, err := q.GetBalanceWatch(ctx, key)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -40,25 +38,12 @@ func WatchChange(ctx context.Context, q *gen.Queries, merchant, customer uuid.UU
 			return err
 		}
 	}
-	silence := quiet && w.DepletedAt == nil && w.FloorAmount != nil
-	var available int64
-	if !w.LookEachChange || silence {
-		available, err = availableNow(ctx, q, merchant, customer, currency, now)
+	look := w.LookEachChange
+	if !look {
+		available, err := availableNow(ctx, q, merchant, customer, currency, now)
 		if err != nil {
 			return err
 		}
-		if silence && available <= *w.FloorAmount {
-			if err := q.SilenceBalanceWatchNotices(ctx, gen.SilenceBalanceWatchNoticesParams{MerchantID: merchant, CustomerID: customer, Currency: currency, Now: now}); err != nil {
-				return err
-			}
-			w.DepletedAt = &now
-			if w.LowLineAmount != nil && w.LowNotifiedAt == nil {
-				w.LowNotifiedAt = &now
-			}
-		}
-	}
-	look := w.LookEachChange
-	if !look {
 		look = crossed(w, available, funded)
 	}
 	if !look {

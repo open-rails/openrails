@@ -109,16 +109,6 @@ UPDATE billing.balance_watches SET funded_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text AND funded_at IS NULL;
 
--- name: SilenceBalanceWatchNotices :exec
--- A refund, chargeback or revocation left the balance depleted: the
--- crossing's notices count as sent, so no look sends them. A funding
--- re-arms them.
-UPDATE billing.balance_watches
-SET depleted_at = COALESCE(depleted_at, sqlc.arg(now)::timestamptz),
-    low_notified_at = CASE WHEN low_line_amount IS NULL THEN low_notified_at ELSE COALESCE(low_notified_at, sqlc.arg(now)::timestamptz) END
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-  AND currency = sqlc.arg(currency)::text;
-
 -- name: ListDueBalanceWatches :many
 -- The watches due, across merchants, in key order: an idle pass reads no row.
 SELECT merchant_id, customer_id, currency, next_check_at::timestamptz AS next_check_at FROM billing.balance_watches

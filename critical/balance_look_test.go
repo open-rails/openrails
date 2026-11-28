@@ -199,13 +199,13 @@ func TestBalanceLooks(t *testing.T) {
 		require.EqualValues(t, 1000, lotExpired(t, w.alpha, lot))
 		balance(t, w.alpha, customer, 300, 0, 300)
 	})
-	t.Run("OR-J25-S44/a-revocation-or-refund-that-empties-the-balance-sends-no-depleted-notice-a-lapse-does", func(t *testing.T) {
+	t.Run("OR-J25-S44/a-revocation-or-refund-that-empties-the-balance-tells-the-host-not-the-customer-a-lapse-tells-both", func(t *testing.T) {
 		w, fleet := setup(t)
 		customer, lot := watchedCustomer(t, w, fleet, 1000, nil)
 		_, err := w.alpha.RevokeCreditGrant(t.Context(), "", lot, billing.RevokeCreditGrantParams{Reason: "critical adjustment"})
 		require.NoError(t, err)
 		settled(t, fleet, customer)
-		require.Empty(t, balanceOutbox(t, w, customer, "balance.depleted"))
+		require.Len(t, balanceOutbox(t, w, customer, "balance.depleted"), 1)
 		var notices int
 		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "notification_events"}.Sanitize()+
 			" WHERE customer_id = $1 AND event_type IN ('balance_depleted', 'balance_low')", customer.UUID()).Scan(&notices))
@@ -244,13 +244,28 @@ func TestBalanceLooks(t *testing.T) {
 		require.NoError(t, err)
 		settled(t, fleet, customer)
 		balance(t, w.alpha, customer, 0, 0, 0)
-		require.Empty(t, balanceOutbox(t, w, customer, "balance.depleted"))
+		require.Len(t, balanceOutbox(t, w, customer, "balance.depleted"), 1)
 		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "notification_events"}.Sanitize()+
 			" WHERE customer_id = $1 AND event_type IN ('balance_depleted', 'balance_low')", customer.UUID()).Scan(&notices))
 		require.Zero(t, notices)
 		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT depleted_at IS NOT NULL FROM "+pgx.Identifier{w.schema, "balance_watches"}.Sanitize()+
 			" WHERE customer_id = $1", customer.UUID()).Scan(&depleted))
 		require.True(t, depleted)
+	})
+	t.Run("OR-J25-S50/a-revocation-that-empties-a-balance-with-a-running-charge-still-sends-the-host-balance-depleted", func(t *testing.T) {
+		w := newWorld(t, atNoon)
+		fleet := quietFleet(t, w)
+		customer, lot := watchedCustomer(t, w, fleet, 1000, nil)
+		_, err := w.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "revoke-running-balance", CustomerID: customer, Currency: "USD", RatePerHour: 3600})
+		require.NoError(t, err)
+		settled(t, fleet, customer)
+		w.clock.Advance(100 * time.Second)
+		_, err = w.alpha.RevokeCreditGrant(t.Context(), "", lot, billing.RevokeCreditGrantParams{Reason: "critical adjustment"})
+		require.NoError(t, err)
+		settled(t, fleet, customer)
+		require.False(t, runPass(t, fleet))
+		settled(t, fleet, customer)
+		require.Len(t, balanceOutbox(t, w, customer, "balance.depleted"), 1)
 	})
 	t.Run("OR-J25-S37/a-pass-that-waited-behind-a-look-leaves-the-watch-it-moved", func(t *testing.T) {
 		w, fleet := setup(t)

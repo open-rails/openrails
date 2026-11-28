@@ -584,6 +584,27 @@ func (q *Queries) InsertLedgerUnit(ctx context.Context, arg InsertLedgerUnitPara
 	return err
 }
 
+const latestCustomerTransferType = `-- name: LatestCustomerTransferType :one
+SELECT transfer_type FROM billing.ledger_transfers
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND currency = $3::text AND book = 'units'
+ORDER BY created_at DESC, id DESC LIMIT 1
+`
+
+type LatestCustomerTransferTypeParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// The type of a customer's latest units-book movement in one currency.
+func (q *Queries) LatestCustomerTransferType(ctx context.Context, arg LatestCustomerTransferTypeParams) (string, error) {
+	row := q.db.QueryRow(ctx, latestCustomerTransferType, arg.MerchantID, arg.CustomerID, arg.Currency)
+	var transfer_type string
+	err := row.Scan(&transfer_type)
+	return transfer_type, err
+}
+
 const ledgerAccountBalance = `-- name: LedgerAccountBalance :one
 SELECT (credits_posted - debits_posted)::bigint AS balance
 FROM billing.ledger_accounts

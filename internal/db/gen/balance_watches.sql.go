@@ -363,34 +363,6 @@ func (q *Queries) ShareBalanceWatches(ctx context.Context, arg ShareBalanceWatch
 	return items, nil
 }
 
-const silenceBalanceWatchNotices = `-- name: SilenceBalanceWatchNotices :exec
-UPDATE billing.balance_watches
-SET depleted_at = COALESCE(depleted_at, $1::timestamptz),
-    low_notified_at = CASE WHEN low_line_amount IS NULL THEN low_notified_at ELSE COALESCE(low_notified_at, $1::timestamptz) END
-WHERE merchant_id = $2::uuid AND customer_id = $3::uuid
-  AND currency = $4::text
-`
-
-type SilenceBalanceWatchNoticesParams struct {
-	Now        time.Time
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-}
-
-// A refund, chargeback or revocation left the balance depleted: the
-// crossing's notices count as sent, so no look sends them. A funding
-// re-arms them.
-func (q *Queries) SilenceBalanceWatchNotices(ctx context.Context, arg SilenceBalanceWatchNoticesParams) error {
-	_, err := q.db.Exec(ctx, silenceBalanceWatchNotices,
-		arg.Now,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Currency,
-	)
-	return err
-}
-
 const stampBalanceWatchFunded = `-- name: StampBalanceWatchFunded :exec
 UPDATE billing.balance_watches SET funded_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND customer_id = $3::uuid

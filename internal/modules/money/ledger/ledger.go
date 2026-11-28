@@ -89,12 +89,6 @@ var AllTransferTypes = []TransferType{Deposit, CreditRefund, CreditRefundRestore
 // balance, and debt it paid.
 var fundingTransfers = map[TransferType]bool{Deposit: true, CreditReinstate: true, CreditRefundRestore: true, OwedPayment: true}
 
-// quietTransfers are the refunds, chargebacks and revocations that take units
-// off a balance: a balance they leave depleted is not told so. A transfer that
-// raises what is owed is not quiet: it moves the floor, and the look announces
-// a credit line it uses up.
-var quietTransfers = map[TransferType]bool{CreditRefund: true, CreditRevoke: true}
-
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
 // ledger_transfers_credit_grant_id_transfer_type_key. A reinstated lot can be
 // revoked again.
@@ -426,7 +420,7 @@ func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.Billin
 		// that crosses a line of its balance watch queues a look, and a
 		// funding re-arms its notices.
 		if t.Customer != nil {
-			if err := WatchChange(ctx, l.q, l.merchant, *t.Customer, t.Currency, fundingTransfers[t.Type], quietTransfers[t.Type], l.now()); err != nil {
+			if err := WatchChange(ctx, l.q, l.merchant, *t.Customer, t.Currency, fundingTransfers[t.Type], l.now()); err != nil {
 				return gen.BillingLedgerTransfer{}, false, fmt.Errorf("ledger: balance watch: %w", err)
 			}
 		}

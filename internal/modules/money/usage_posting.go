@@ -607,7 +607,7 @@ func (s *MoneyService) creditFall(ctx context.Context, q *gen.Queries, merchantI
 	if err := books.New(q, merchantID).ReverseUsage(ctx, books.CreditLotOf(lot), coord, now); err != nil {
 		return err
 	}
-	return ledger.WatchChange(ctx, q, merchantID, customer, currency, true, false, now)
+	return ledger.WatchChange(ctx, q, merchantID, customer, currency, true, now)
 }
 
 // periodTotals are a customer's running totals a posting prices, by period,
