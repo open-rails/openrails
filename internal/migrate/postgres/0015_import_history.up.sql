@@ -3,6 +3,8 @@
 -- customer's timeline as live changes are. Nothing is booked at the import's
 -- instant: opening goes, and the openings already written become history.
 
+-- Rewritten below: no row event may wait for commit while a table changes.
+DROP TRIGGER subscription_mrr_settle ON billing.subscription_mrr;
 DROP TRIGGER immutable_mrr_movements ON billing.mrr_movements;
 DROP TRIGGER immutable_mrr_movement_lines ON billing.mrr_movement_lines;
 
@@ -505,5 +507,7 @@ CREATE TRIGGER immutable_mrr_movements BEFORE UPDATE OR DELETE ON billing.mrr_mo
     FOR EACH ROW EXECUTE FUNCTION billing.guard_mrr_movement();
 CREATE TRIGGER immutable_mrr_movement_lines BEFORE UPDATE OR DELETE ON billing.mrr_movement_lines
     FOR EACH ROW EXECUTE FUNCTION billing.guard_mrr_movement_line();
+CREATE CONSTRAINT TRIGGER subscription_mrr_settle AFTER INSERT OR UPDATE ON billing.subscription_mrr DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION billing.settle_at_commit();
 
 COMMENT ON TABLE billing.mrr_movements IS 'One change of a customer''s MRR in one currency: new (first MRR), reactivation (MRR again after none), expansion, contraction, churn (to none; voluntary for a customer''s or merchant''s cancel) or correction (a prune or an undo). Written at the commit of the transaction that made it, or by an import at the instants of its subscriptions'' history (imported); a scheduled one (a cancellation at period end) is dated at the end and counts once that instant passes. Retention: permanent, never pruned.';
