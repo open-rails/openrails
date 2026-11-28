@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 928,
+  "scenario_count": 929,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2522,6 +2522,11 @@
       "id": "OR-J29-S73",
       "journey": "J29",
       "name": "A provider operation that ended without an explicit decline stays an abandoned-operation finding; only a decline raises none and closes an open one"
+    },
+    {
+      "id": "OR-J29-S74",
+      "journey": "J29",
+      "name": "A card deletion held by write posture stays with a person"
     },
     {
       "id": "OR-J04-S70",

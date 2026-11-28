@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
@@ -573,7 +574,8 @@ func (p *healthPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	// the stuck thresholds; a pending one counts from its next attempt until it
 	// is parked, so one scheduled ahead or deferred is not stuck, and from its
 	// creation once parked. Mode/kill-switch parks are informational (the
-	// intent's job runs it once the blocker lifts); anything else means
+	// intent's job runs it once the blocker lifts), except a customer's card
+	// deletion, which no job runs; anything else means
 	// provider failures, bad credentials or a lost job. Never repaired here:
 	// the intent's job owns it.
 	actionCutoff, verifyCutoff := now.Add(-stuckActionableAge), now.Add(-stuckVerifyAge)
@@ -610,7 +612,7 @@ const (
 // deliberate park by the merchant's write posture (intents.GateExecution and
 // the wire chokes name it). Parked is not broken — each intent's job runs it
 // when the posture lifts — so the finding is informational, not the admin
-// queue.
+// queue; a customer's card deletion has no job and stays in it.
 func isPostureParkedReason(reason string) bool { return strings.Contains(reason, "write posture") }
 
 // stuckIntentFinding diagnoses one stuck rail intent. SubjectKey is the bare
@@ -654,6 +656,12 @@ func stuckIntentFinding(si *gen.BillingProviderIntent, now time.Time) ConvergeFi
 		// surface-only: check and converge never touch the intent itself.
 	}
 	if si.LastFailureReason != nil && isPostureParkedReason(*si.LastFailureReason) {
+		// A customer's card deletion runs only on the customer's request: no
+		// job runs it when the posture lifts, so it stays with a person.
+		if intents.ManualPaymentMethodDelete(*si) {
+			f.RecommendedAction = fmt.Sprintf("Card deletion %s was refused while provider writes were off, and nothing retries it: it runs only on the customer's request. Once writes are on, ask the customer to remove the card again, or remove it at the provider.", si.ID)
+			return f
+		}
 		f.Class = ClassAuto // no Repair → reconcile_required (informational)
 		f.Severity = "low"
 	}

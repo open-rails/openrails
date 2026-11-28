@@ -405,6 +405,40 @@ func TestDueWork(t *testing.T) {
 		runRegistered(t, fleet, "openrails.merchant_health", 1)
 		require.True(t, stuck()[scheduled])
 	})
+	t.Run("OR-J29-S74/a-card-deletion-held-by-write-posture-stays-with-a-person", func(t *testing.T) {
+		a, _ := newPaymentWorld(t)
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		psp := psps.Items[0].ID.UUID()
+		intents := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+		now := a.clock.Now()
+		held := ptr("held: merchant write posture is readonly")
+		seed := func(kind, key string) string {
+			var id uuid.UUID
+			require.NoError(t, a.pool.QueryRow(t.Context(), "INSERT INTO "+intents+" (merchant_id, rail, intent_type, idempotency_key, status, attempts, next_attempt_at, last_failure_reason, origin, psp_id, created_at) VALUES ($1, 'stripe', $2, $3, 'pending', 0, $4, $5, 'user', $6, $7) RETURNING id",
+				a.alpha.MerchantID().UUID(), kind, key, now.Add(5*time.Minute), held, psp, now.Add(-48*time.Hour)).Scan(&id))
+			return id.String()
+		}
+		cancel := seed("stripe_cancel_subscription", "held-cancel")
+		deletion := seed("platform_method_delete", "held-card-delete")
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		page, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.provider_intent.stuck"})
+		require.NoError(t, err)
+		found := map[string]billing.Finding{}
+		for _, f := range page.Items {
+			found[f.SubjectKey] = f
+		}
+		require.Contains(t, found, cancel)
+		require.Equal(t, "reconcile_required", string(found[cancel].Status), "its job runs a held cancel once the posture lifts")
+		require.Contains(t, found, deletion)
+		require.Equal(t, "requires_review", string(found[deletion].Status), "no job runs a held card deletion")
+		require.NotNil(t, found[deletion].RecommendedAction)
+		require.Contains(t, *found[deletion].RecommendedAction, "ask the customer to remove the card again")
+	})
 	t.Run("OR-J04-S70/the-hourly-health-pass-raises-held-renewals", func(t *testing.T) {
 		a, _, sub := purchasedMembership(t)
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Add(3 * time.Hour).Sub(a.clock.Now()))

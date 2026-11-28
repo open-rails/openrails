@@ -81,7 +81,10 @@ budget (`customer_destructive_reservations`); a staff or host removal is admitte
 `park_reason` names the operation), then a request-only operation
 (`nmi_vault_delete`, `hyperswitch_method_delete` or `platform_method_delete`)
 verifies, then executes. Only on the provider's confirmation is the row
-`removed`; its versions stay, and an erased handle cannot be saved again.
+`removed`; its versions stay, and an erased handle cannot be saved again. No job
+retries a removal the write posture held: it runs only on a request, so its
+`life.provider_intent.stuck` finding stays with a person (`requires_review`) and says to ask
+the customer again or remove the card at the provider.
 
 ### Card-number firewall
 
