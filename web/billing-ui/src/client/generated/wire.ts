@@ -180,7 +180,7 @@ export type BalanceTransaction = {
   id: string
   customer_id: string
   currency: string
-  type: "deposit" | "expire" | "owed_accrual" | "owed_payment" | "owed_reopened" | "owed_repayment" | "owed_writeoff" | "refund" | "refund_reversed" | "reinstate" | "revoke" | "spend"
+  type: "deposit" | "expire" | "owed_accrual" | "owed_payment" | "owed_reopened" | "owed_repayment" | "owed_writeoff" | "refund" | "refund_failed" | "refund_pending" | "refund_reversed" | "reinstate" | "revoke" | "spend"
   amount: string
   credit_grant_id: string | null
   invoker: string | null
@@ -578,7 +578,8 @@ export type CreditGrant = {
   revoked_amount: string
   expired_amount: string
   refunded_amount: string
-  state: "active" | "expired" | "pending" | "refunded" | "revoked" | "scheduled" | "spent"
+  refunding_amount: string
+  state: "active" | "expired" | "pending" | "refund_pending" | "refunded" | "revoked" | "scheduled" | "spent"
   funding_source: "grant" | "import" | "promotion" | "purchase" | "recurring"
   paid_amount: string | null
   paid_currency: string | null

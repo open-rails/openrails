@@ -186,6 +186,7 @@ WITH page AS (
 SELECT g.id, g.customer_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency,
        g.source_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.created_at,
        g.units_credited AS credited, (g.units_credited - g.units_debited)::bigint AS remaining,
+       g.units_refunding AS refunding,
        revocation.reason AS revoke_reason,
        COALESCE(t.spent, 0)::bigint AS spent, COALESCE(t.expired, 0)::bigint AS expired,
        COALESCE(t.revoked, 0)::bigint AS revoked, COALESCE(t.refunded, 0)::bigint AS refunded
@@ -214,6 +215,7 @@ ORDER BY g.created_at DESC, g.id DESC;
 SELECT g.id, g.customer_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency,
        g.source_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.created_at,
        g.units_credited AS credited, (g.units_credited - g.units_debited)::bigint AS remaining,
+       g.units_refunding AS refunding,
        revocation.reason AS revoke_reason,
        COALESCE(t.spent, 0)::bigint AS spent, COALESCE(t.expired, 0)::bigint AS expired,
        COALESCE(t.revoked, 0)::bigint AS revoked, COALESCE(t.refunded, 0)::bigint AS refunded
@@ -242,6 +244,7 @@ ORDER BY g.created_at DESC, g.id DESC;
 SELECT g.id, g.customer_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency,
        g.source_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.created_at,
        g.units_credited AS credited, (g.units_credited - g.units_debited)::bigint AS remaining,
+       g.units_refunding AS refunding,
        revocation.reason AS revoke_reason,
        COALESCE(t.spent, 0)::bigint AS spent, COALESCE(t.expired, 0)::bigint AS expired,
        COALESCE(t.revoked, 0)::bigint AS revoked, COALESCE(t.refunded, 0)::bigint AS refunded

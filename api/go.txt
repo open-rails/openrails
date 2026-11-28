@@ -367,6 +367,8 @@ pkg openrails/billing, const BalanceTransactionOwedReopened BalanceTransactionTy
 pkg openrails/billing, const BalanceTransactionOwedRepayment BalanceTransactionType = "owed_repayment"
 pkg openrails/billing, const BalanceTransactionOwedWriteoff BalanceTransactionType = "owed_writeoff"
 pkg openrails/billing, const BalanceTransactionRefund BalanceTransactionType = "refund"
+pkg openrails/billing, const BalanceTransactionRefundFailed BalanceTransactionType = "refund_failed"
+pkg openrails/billing, const BalanceTransactionRefundPending BalanceTransactionType = "refund_pending"
 pkg openrails/billing, const BalanceTransactionRefundReversed BalanceTransactionType = "refund_reversed"
 pkg openrails/billing, const BalanceTransactionReinstate BalanceTransactionType = "reinstate"
 pkg openrails/billing, const BalanceTransactionRevoke BalanceTransactionType = "revoke"
@@ -625,6 +627,7 @@ pkg openrails/billing, const CreditGrantFundingGrant CreditGrantFunding = "grant
 pkg openrails/billing, const CreditGrantFundingImport CreditGrantFunding = "import"
 pkg openrails/billing, const CreditGrantFundingPromotion CreditGrantFunding = "promotion"
 pkg openrails/billing, const CreditGrantPending CreditGrantState = "pending"
+pkg openrails/billing, const CreditGrantRefundPending CreditGrantState = "refund_pending"
 pkg openrails/billing, const CreditGrantRefunded CreditGrantState = "refunded"
 pkg openrails/billing, const CreditGrantRevoked CreditGrantState = "revoked"
 pkg openrails/billing, const CreditGrantScheduled CreditGrantState = "scheduled"
@@ -1768,6 +1771,7 @@ pkg openrails/billing, type CreditGrant struct, ID CreditGrantID `json:"id"`
 pkg openrails/billing, type CreditGrant struct, PaidAmount *int64 `json:"paid_amount,string"`
 pkg openrails/billing, type CreditGrant struct, PaidCurrency *catalog.Currency `json:"paid_currency"`
 pkg openrails/billing, type CreditGrant struct, RefundedAmount int64 `json:"refunded_amount,string"`
+pkg openrails/billing, type CreditGrant struct, RefundingAmount int64 `json:"refunding_amount,string"`
 pkg openrails/billing, type CreditGrant struct, RemainingAmount int64 `json:"remaining_amount,string"`
 pkg openrails/billing, type CreditGrant struct, Replayed bool `json:"replayed"`
 pkg openrails/billing, type CreditGrant struct, RevokeReason *string `json:"revoke_reason"`

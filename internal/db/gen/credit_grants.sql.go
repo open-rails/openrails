@@ -16,6 +16,7 @@ const getCreditGrant = `-- name: GetCreditGrant :one
 SELECT g.id, g.customer_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency,
        g.source_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.created_at,
        g.units_credited AS credited, (g.units_credited - g.units_debited)::bigint AS remaining,
+       g.units_refunding AS refunding,
        revocation.reason AS revoke_reason,
        COALESCE(t.spent, 0)::bigint AS spent, COALESCE(t.expired, 0)::bigint AS expired,
        COALESCE(t.revoked, 0)::bigint AS revoked, COALESCE(t.refunded, 0)::bigint AS refunded
@@ -61,6 +62,7 @@ type GetCreditGrantRow struct {
 	CreatedAt     time.Time
 	Credited      int64
 	Remaining     int64
+	Refunding     int64
 	RevokeReason  *string
 	Spent         int64
 	Expired       int64
@@ -87,6 +89,7 @@ func (q *Queries) GetCreditGrant(ctx context.Context, arg GetCreditGrantParams) 
 		&i.CreatedAt,
 		&i.Credited,
 		&i.Remaining,
+		&i.Refunding,
 		&i.RevokeReason,
 		&i.Spent,
 		&i.Expired,
@@ -456,6 +459,7 @@ const listCreditGrantsByIDs = `-- name: ListCreditGrantsByIDs :many
 SELECT g.id, g.customer_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency,
        g.source_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.created_at,
        g.units_credited AS credited, (g.units_credited - g.units_debited)::bigint AS remaining,
+       g.units_refunding AS refunding,
        revocation.reason AS revoke_reason,
        COALESCE(t.spent, 0)::bigint AS spent, COALESCE(t.expired, 0)::bigint AS expired,
        COALESCE(t.revoked, 0)::bigint AS revoked, COALESCE(t.refunded, 0)::bigint AS refunded
@@ -502,6 +506,7 @@ type ListCreditGrantsByIDsRow struct {
 	CreatedAt     time.Time
 	Credited      int64
 	Remaining     int64
+	Refunding     int64
 	RevokeReason  *string
 	Spent         int64
 	Expired       int64
@@ -535,6 +540,7 @@ func (q *Queries) ListCreditGrantsByIDs(ctx context.Context, arg ListCreditGrant
 			&i.CreatedAt,
 			&i.Credited,
 			&i.Remaining,
+			&i.Refunding,
 			&i.RevokeReason,
 			&i.Spent,
 			&i.Expired,
@@ -799,6 +805,7 @@ WITH page AS (
 SELECT g.id, g.customer_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency,
        g.source_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.created_at,
        g.units_credited AS credited, (g.units_credited - g.units_debited)::bigint AS remaining,
+       g.units_refunding AS refunding,
        revocation.reason AS revoke_reason,
        COALESCE(t.spent, 0)::bigint AS spent, COALESCE(t.expired, 0)::bigint AS expired,
        COALESCE(t.revoked, 0)::bigint AS revoked, COALESCE(t.refunded, 0)::bigint AS refunded
@@ -849,6 +856,7 @@ type ListCustomerCreditGrantsRow struct {
 	CreatedAt     time.Time
 	Credited      int64
 	Remaining     int64
+	Refunding     int64
 	RevokeReason  *string
 	Spent         int64
 	Expired       int64
@@ -892,6 +900,7 @@ func (q *Queries) ListCustomerCreditGrants(ctx context.Context, arg ListCustomer
 			&i.CreatedAt,
 			&i.Credited,
 			&i.Remaining,
+			&i.Refunding,
 			&i.RevokeReason,
 			&i.Spent,
 			&i.Expired,

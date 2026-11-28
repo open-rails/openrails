@@ -204,8 +204,15 @@ func (s *MoneyService) ListBalanceTransactions(ctx context.Context, customer ide
 		if err != nil {
 			return page, err
 		}
+		refunds, err := unsettledRefunds(ctx, s.db.Gen(ctx), tid.UUID(), rows)
+		if err != nil {
+			return page, err
+		}
 		for _, r := range rows {
 			item := balanceTransactionFromTransfer(r)
+			if t, ok := refunds[r.SourceID]; ok && r.TransferType == "credit_refund" {
+				item.Type = t
+			}
 			item.Usage = receipts[r.ID]
 			page.Items = append(page.Items, item)
 		}
@@ -238,15 +245,51 @@ func (s *MoneyService) ListBalanceTransactions(ctx context.Context, customer ide
 	if err != nil {
 		return page, err
 	}
+	refunds, err := unsettledRefunds(ctx, s.db.Gen(ctx), tid.UUID(), rows)
+	if err != nil {
+		return page, err
+	}
 	items := make([]billing.BalanceTransaction, 0, len(rows))
 	for _, r := range rows {
 		item := balanceTransactionFromTransfer(r)
+		if t, ok := refunds[r.SourceID]; ok && r.TransferType == "credit_refund" {
+			item.Type = t
+		}
 		item.Usage = receipts[r.ID]
 		items = append(items, item)
 	}
 	return pagination.Cut(items, limit, func(t billing.BalanceTransaction) any {
 		return pagination.TimeID{At: t.CreatedAt, ID: t.ID.UUID()}
 	}), nil
+}
+
+// unsettledRefunds types the credit_refund legs among transfers whose refund
+// has not settled: refund_pending while its payment is pending, refund_failed
+// once the provider refused it. A leg names its refund in its source id.
+func unsettledRefunds(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, transfers []gen.BillingLedgerTransfer) (map[string]billing.BalanceTransactionType, error) {
+	var ids []uuid.UUID
+	for _, t := range transfers {
+		if id, err := uuid.Parse(t.SourceID); err == nil && t.TransferType == "credit_refund" {
+			ids = append(ids, id)
+		}
+	}
+	out := map[string]billing.BalanceTransactionType{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := q.ListPaymentsByIDs(ctx, gen.ListPaymentsByIDsParams{MerchantID: merchantID, Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		switch billing.PaymentStatus(row.Status) {
+		case billing.PaymentPending:
+			out[row.ID.String()] = billing.BalanceTransactionRefundPending
+		case billing.PaymentFailed:
+			out[row.ID.String()] = billing.BalanceTransactionRefundFailed
+		}
+	}
+	return out, nil
 }
 
 // GetAccountSettingsForCustomer returns the customer's stored money-account

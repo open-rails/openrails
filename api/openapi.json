@@ -14931,6 +14931,8 @@
               "owed_repayment",
               "owed_writeoff",
               "refund",
+              "refund_failed",
+              "refund_pending",
               "refund_reversed",
               "reinstate",
               "revoke",
@@ -16538,12 +16540,17 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "refunding_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "state": {
             "type": "string",
             "enum": [
               "active",
               "expired",
               "pending",
+              "refund_pending",
               "refunded",
               "revoked",
               "scheduled",
@@ -16655,6 +16662,7 @@
           "revoked_amount",
           "expired_amount",
           "refunded_amount",
+          "refunding_amount",
           "state",
           "funding_source",
           "paid_amount",

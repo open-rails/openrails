@@ -96,25 +96,30 @@ const (
 )
 
 // CreditGrantState is where a credit grant stands. The first that holds
-// wins: revoked; pending, when none of its units has posted; refunded, when
-// refunds or chargebacks of its payment took all of it, whatever its expiry;
+// wins: revoked; pending, when none of its units has posted; refund_pending,
+// while pending refunds of its payment hold units off its balance (RefundingAmount);
+// refunded, when settled refunds or chargebacks took all of it, whatever its expiry;
 // expired, past its expiry; spent, when nothing is left (what refunds took is
 // in RefundedAmount); scheduled, before it starts; else active.
 type CreditGrantState string
 
 const (
-	CreditGrantActive    CreditGrantState = "active"
-	CreditGrantScheduled CreditGrantState = "scheduled"
-	CreditGrantPending   CreditGrantState = "pending"
-	CreditGrantSpent     CreditGrantState = "spent"
-	CreditGrantExpired   CreditGrantState = "expired"
-	CreditGrantRevoked   CreditGrantState = "revoked"
-	CreditGrantRefunded  CreditGrantState = "refunded"
+	CreditGrantActive        CreditGrantState = "active"
+	CreditGrantScheduled     CreditGrantState = "scheduled"
+	CreditGrantPending       CreditGrantState = "pending"
+	CreditGrantRefundPending CreditGrantState = "refund_pending"
+	CreditGrantSpent         CreditGrantState = "spent"
+	CreditGrantExpired       CreditGrantState = "expired"
+	CreditGrantRevoked       CreditGrantState = "revoked"
+	CreditGrantRefunded      CreditGrantState = "refunded"
 )
 
 // CreditGrant is one lot of prepaid credit on a customer's balance, spent
 // soonest expiry first. Amount is what it delivered; RemainingAmount what is
 // left, and the spent, expired, revoked and refunded amounts what left it.
+// RefundedAmount is what settled refunds and chargebacks took; RefundingAmount
+// what pending refunds hold off the balance until they settle (back on the lot
+// if refused).
 // PaidAmount and PaidCurrency are what was paid for it, null for a gift.
 // SourceID is the funding's id: the payment that bought it, or the caller's
 // key. Replayed: a create that found the grant already made.
@@ -128,6 +133,7 @@ type CreditGrant struct {
 	RevokedAmount   int64               `json:"revoked_amount,string"`
 	ExpiredAmount   int64               `json:"expired_amount,string"`
 	RefundedAmount  int64               `json:"refunded_amount,string"`
+	RefundingAmount int64               `json:"refunding_amount,string"`
 	State           CreditGrantState    `json:"state"`
 	FundingSource   CreditFundingSource `json:"funding_source"`
 	PaidAmount      *int64              `json:"paid_amount,string"`
@@ -189,9 +195,12 @@ const (
 	BalanceTransactionRevoke    BalanceTransactionType = "revoke"
 	BalanceTransactionReinstate BalanceTransactionType = "reinstate"
 	// Refund takes units off the balance for a refund or chargeback of the
-	// payment that bought their lot; RefundReversed gives them back (a refused
-	// refund, a refund that settled for less, a won dispute).
+	// payment that bought their lot: refund_pending until a refund settles,
+	// refund_failed if the provider refused it. RefundReversed gives units
+	// back (a refused refund, a refund that settled for less, a won dispute).
 	BalanceTransactionRefund         BalanceTransactionType = "refund"
+	BalanceTransactionRefundPending  BalanceTransactionType = "refund_pending"
+	BalanceTransactionRefundFailed   BalanceTransactionType = "refund_failed"
 	BalanceTransactionRefundReversed BalanceTransactionType = "refund_reversed"
 	// The owed_ types move what the customer owes in arrears.
 	BalanceTransactionOwedAccrual  BalanceTransactionType = "owed_accrual"
