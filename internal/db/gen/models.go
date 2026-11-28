@@ -2313,6 +2313,8 @@ type BillingSubscription struct {
 	RetryAdvisedAt *time.Time
 	// The checkout whose payment created the subscription; NULL for one bought before checkouts were recorded, imported or started at its provider.
 	CheckoutInvoiceID *uuid.UUID
+	// Why an unverified subscription is: awaiting_provider (no read of its provider since it became unverified: our record is stale) or unconfirmed (its provider was read and could not tell). NULL unless unverified.
+	UnverifiedReason *string
 }
 
 // Append-only observed subscription card and retry changes. References and before/after values are snapshots, not charging instructions. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.
@@ -2507,4 +2509,21 @@ type BillingWebhookHealthDaily struct {
 	DayAt       time.Time
 	Rejected    int64
 	Drift       int64
+}
+
+// What OpenRails has read of each PSP, the evidence its known-through is derived from.
+type BillingPspFreshness struct {
+	MerchantID      uuid.UUID
+	PspID           uuid.UUID
+	ReadAt          *time.Time
+	FailingSince    *time.Time
+	FailedAt        *time.Time
+	Failure         *string
+	ImportedThrough *time.Time
+	StaleSince      *time.Time
+	NotifiedAt      *time.Time
+	CaughtUpAt      *time.Time
+	CatchUp         []byte
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
