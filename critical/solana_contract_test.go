@@ -392,6 +392,10 @@ func TestSolanaContracts(t *testing.T) {
 		var created, next time.Time
 		require.NoError(t, s.pool.QueryRow(t.Context(), "SELECT created_at, next_poll_at FROM "+table+" WHERE reference = $1", reference).Scan(&created, &next))
 		require.WithinDuration(t, created, next, 3*time.Second)
+		sequence := pgx.Identifier{s.schema, "scan_progress_writes"}.Sanitize()
+		function := pgx.Identifier{s.schema, "count_scan_progress_writes"}.Sanitize()
+		_, err := s.pool.Exec(t.Context(), "CREATE SEQUENCE "+sequence+"; CREATE FUNCTION "+function+"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('"+sequence+"'); RETURN NEW; END $$; CREATE TRIGGER count_scan_progress_writes AFTER UPDATE OF seen_until, scan_stack, scan_below ON "+table+" FOR EACH ROW EXECUTE FUNCTION "+function+"()")
+		require.NoError(t, err)
 		startFleet(t, s.world)
 		for _, step := range []struct {
 			age, interval time.Duration
@@ -415,6 +419,9 @@ func TestSolanaContracts(t *testing.T) {
 				require.LessOrEqual(t, next.Sub(s.clock.Now()), 3*time.Second)
 			}
 		}
+		var called bool
+		require.NoError(t, s.pool.QueryRow(t.Context(), "SELECT is_called FROM "+sequence).Scan(&called))
+		require.False(t, called, "an idle read writes no scan progress")
 	})
 	t.Run("OR-J37-S02/signed-pull-survives-process-death-before-network-submission", func(t *testing.T) {
 		s := newSolanaWorld(t, true)

@@ -4386,7 +4386,7 @@
     {
       "id": "OR-J37-S75",
       "journey": "J37",
-      "name": "An unpaid Solana Pay reference is read every few seconds at first and less often as it ages, up to every 30 seconds"
+      "name": "An unpaid Solana Pay reference is read every few seconds at first and less often as it ages, up to every 30 seconds, and an idle read writes nothing back"
     },
     {
       "id": "OR-J38-S86",
