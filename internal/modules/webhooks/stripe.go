@@ -311,6 +311,12 @@ var HandledStripeEventTypes = []string{
 	"price.created",
 	"price.updated",
 	"price.deleted",
+	"payout.created",
+	"payout.updated",
+	"payout.paid",
+	"payout.failed",
+	"payout.canceled",
+	"payout.reconciliation_completed",
 }
 
 func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string, evt stripeEvent) error {
@@ -365,6 +371,9 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 		return s.markCatalogObjectDirty(ctx, eventType, "product", obj)
 	case "price.created", "price.updated", "price.deleted":
 		return s.markCatalogObjectDirty(ctx, eventType, "price", obj)
+	// A payout's notice queues its read; the books read the payout itself.
+	case "payout.created", "payout.updated", "payout.paid", "payout.failed", "payout.canceled", "payout.reconciliation_completed":
+		return s.queuePayoutRead(ctx, eventType, obj)
 	default:
 		s.Log.InfoContext(ctx, "stripe webhook ignored (not handled)", "event_type", eventType)
 		return nil

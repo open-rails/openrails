@@ -35,6 +35,21 @@ type BillingBalanceWatch struct {
 	LookEachChange bool
 }
 
+// A bank account, or card, a PSP pays the merchant out to, as that PSP names it: recorded by the first payout read that names it. Its bank_cash account holds what PSPs deposited there. Retention: permanent, never pruned.
+type BillingBankAccount struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	PspID      uuid.UUID
+	// The PSP's id for it: a Stripe external account (ba_, card_) or payout method.
+	Ref string
+	// The bank's name, or a card's brand, as the PSP reports it.
+	Name      *string
+	Last4     *string
+	Currency  string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 // Global by design, one row: the PostgreSQL cluster (system identifier), database and schema this billing book was armed in. Every provider write reads it; anywhere else the book is a copy and is readonly until `openrails book arm`. A promoted physical replica keeps all three; a physical clone does too, so rotate PSP credentials before running one.
 type BillingBookIdentity struct {
 	Singleton        bool
@@ -871,23 +886,26 @@ type BillingLedgerAccount struct {
 	Book string
 	// The account type's class, which sets its normal side: units book held, owed, issued, retired or clearing; general ledger asset, contra_asset, liability, revenue, contra_revenue, expense or equity.
 	Class string
-	// The PSP of a cash_clearing account, one per PSP and currency; NULL for every other account.
+	// The PSP of a cash_clearing, cash_in_transit or processor_reserve account, one per PSP and currency; NULL for every other account.
 	PspID *uuid.UUID
+	// The bank account of a bank_cash account, one per bank account and currency; NULL for every other account.
+	BankAccountID *uuid.UUID
 }
 
-// What the transfers of one type credited and debited the accounts of one type in one 15-minute UTC bucket of effective_at: per merchant, book, currency, account type, bucket, transfer type, (cash_clearing) PSP and product. A reader groups buckets into days in the accounting timezone; a value at a past instant is the total less the flows after it. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers. Retention: permanent, never pruned.
+// What the transfers of one type credited and debited the accounts of one type in one 15-minute UTC bucket of effective_at: per merchant, book, currency, account type, bucket, transfer type, the account's PSP or bank account, and product. A reader groups buckets into days in the accounting timezone; a value at a past instant is the total less the flows after it. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers. Retention: permanent, never pruned.
 type BillingLedgerDaily struct {
 	MerchantID  uuid.UUID
 	Book        string
 	Currency    string
 	AccountType string
 	// The start of the 15-minute UTC bucket: date_bin('15 minutes', effective_at, '2000-01-01 00:00:00+00').
-	BucketAt     time.Time
-	TransferType string
-	PspID        *uuid.UUID
-	ProductID    *uuid.UUID
-	Credits      int64
-	Debits       int64
+	BucketAt      time.Time
+	TransferType  string
+	PspID         *uuid.UUID
+	ProductID     *uuid.UUID
+	Credits       int64
+	Debits        int64
+	BankAccountID *uuid.UUID
 }
 
 // Transfers this transaction posted whose rollups it has not yet kept: transaction scratch, empty at commit.
@@ -931,7 +949,7 @@ type BillingLedgerTransfer struct {
 	RevenueScheduleID *uuid.UUID
 }
 
-// What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account's balance, since that account keeps no counters; settling it raises books.sign_breach when it crosses that account's sign rule, and never refuses the commit. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.
+// What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and its PSP (cash_clearing, cash_in_transit, processor_reserve) or bank account (bank_cash). It is a merchant-wide general-ledger account's balance, since that account keeps no counters; settling it raises books.sign_breach when it crosses that account's sign rule, and never refuses the commit. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.
 type BillingLedgerTypeTotal struct {
 	MerchantID    uuid.UUID
 	Book          string
@@ -940,6 +958,7 @@ type BillingLedgerTypeTotal struct {
 	PspID         *uuid.UUID
 	CreditsPosted int64
 	DebitsPosted  int64
+	BankAccountID *uuid.UUID
 }
 
 // A merchant's own unit as the units book first counted it: written when a catalog write first names it or the book first holds it, under the units lock a settings change takes, with the scale its document in the file or Vault then declared. Loading a configuration that rescales or removes it serves this scale instead, with a finding. Retention: permanent, never pruned.
@@ -2215,6 +2234,18 @@ type BillingStripeFeeRead struct {
 	Ref  string
 	Kind string
 	// When it is read next; a failed read waits longer each time, and after eight failures waits (infinity) until its books.fee.unread finding is fixed; a dispute whose status changes is read again at once.
+	DueAt     time.Time
+	Attempts  int32
+	LastError *string
+	CreatedAt time.Time
+}
+
+// A Stripe payout the general ledger has yet to read to its end: queued by each notice of it, read by the billing pass's stripe_payouts scan, deleted once it is paid, failed or canceled and its reserve lines are read.
+type BillingStripePayoutRead struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	PayoutID   string
+	// When it is read next: a payout not yet paid at its arrival date and each hour after; a failed read waits longer each time, and after eight failures waits (infinity) until its books.payout.unread finding is fixed. A notice reads it at once.
 	DueAt     time.Time
 	Attempts  int32
 	LastError *string

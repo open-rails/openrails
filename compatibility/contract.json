@@ -1825,9 +1825,14 @@
       "type CounterDrift struct {\n\tAccountID     uuid.UUID  `json:\"account_id\"`\n\tMerchantID    uuid.UUID  `json:\"merchant_id\"`\n\tBook          string     `json:\"book\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
       "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n\tLots         []LotDrift           `json:\"lot_drifts\"`\n\tRollups      []RollupDrift        `json:\"rollup_drifts\"`\n\tSigns        []SignBreach         `json:\"sign_breaches\"`\n\n\tSides        []SideWarning           `json:\"side_warnings\"`\n\tApplications []books.Overapplication `json:\"overapplied_payments\"`\n\tUnscheduled  []books.UnscheduledLine `json:\"unscheduled_lines\"`\n\n\tAwaiting    []books.UnscheduledLine     `json:\"awaiting_lines\"`\n\tUnposted    []books.UnpostedPayment     `json:\"unposted_payments\"`\n\tMisbalanced []books.MisbalancedReversal `json:\"misbalanced_reversals\"`\n\n\tReceivables []books.ReceivableDrift `json:\"receivable_drifts\"`\n}",
       "type LotDrift struct {\n\tCreditGrantID     uuid.UUID `json:\"credit_grant_id\"`\n\tMerchantID        uuid.UUID `json:\"merchant_id\"`\n\tCustomerID        uuid.UUID `json:\"customer_id\"`\n\tUnit              string    `json:\"unit\"`\n\tStoredCredited    int64     `json:\"stored_credited\"`\n\tLoggedCredited    int64     `json:\"logged_credited\"`\n\tStoredDebited     int64     `json:\"stored_debited\"`\n\tLoggedDebited     int64     `json:\"logged_debited\"`\n\tStoredRefunding   int64     `json:\"stored_refunding\"`\n\tExpectedRefunding int64     `json:\"expected_refunding\"`\n\n\tStoredDeferredCredited int64 `json:\"stored_deferred_credited\"`\n\tLoggedDeferredCredited int64 `json:\"logged_deferred_credited\"`\n\tStoredDeferredDebited  int64 `json:\"stored_deferred_debited\"`\n\tLoggedDeferredDebited  int64 `json:\"logged_deferred_debited\"`\n}",
-      "type RollupDrift struct {\n\tBook          string     `json:\"book\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tBucket        *time.Time `json:\"bucket,omitempty\"`\n\tTransferType  string     `json:\"transfer_type,omitempty\"`\n\tProductID     *uuid.UUID `json:\"product_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
-      "type SideWarning struct {\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tClass         string     `json:\"class\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tCreditsPosted int64      `json:\"credits_posted\"`\n\tDebitsPosted  int64      `json:\"debits_posted\"`\n}",
-      "type SignBreach struct {\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tCreditsPosted int64      `json:\"credits_posted\"`\n\tDebitsPosted  int64      `json:\"debits_posted\"`\n}"
+      "type RollupDrift struct {\n\tBook          string     `json:\"book\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tBankAccountID *uuid.UUID `json:\"bank_account_id,omitempty\"`\n\tBucket        *time.Time `json:\"bucket,omitempty\"`\n\tTransferType  string     `json:\"transfer_type,omitempty\"`\n\tProductID     *uuid.UUID `json:\"product_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
+      "type SideWarning struct {\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tClass         string     `json:\"class\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tBankAccountID *uuid.UUID `json:\"bank_account_id,omitempty\"`\n\tCreditsPosted int64      `json:\"credits_posted\"`\n\tDebitsPosted  int64      `json:\"debits_posted\"`\n}",
+      "type SignBreach struct {\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tBankAccountID *uuid.UUID `json:\"bank_account_id,omitempty\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tCreditsPosted int64      `json:\"credits_posted\"`\n\tDebitsPosted  int64      `json:\"debits_posted\"`\n}"
+    ],
+    "internal/modules/money/payouts": [
+      "type balanceTransaction struct {\n\tID          string `json:\"id\"`\n\tAmount      int64  `json:\"amount\"`\n\tFee         int64  `json:\"fee\"`\n\tCurrency    string `json:\"currency\"`\n\tCreated     int64  `json:\"created\"`\n\tAvailableOn int64  `json:\"available_on\"`\n\tType        string `json:\"type\"`\n}",
+      "type destination struct {\n\tID       string `json:\"id\"`\n\tObject   string `json:\"object\"`\n\tBankName string `json:\"bank_name\"`\n\tBrand    string `json:\"brand\"`\n\tLast4    string `json:\"last4\"`\n\tCurrency string `json:\"currency\"`\n}",
+      "type payout struct {\n\tID                   string `json:\"id\"`\n\tAmount               int64  `json:\"amount\"`\n\tCurrency             string `json:\"currency\"`\n\tArrivalDate          int64  `json:\"arrival_date\"`\n\tAutomatic            bool   `json:\"automatic\"`\n\tStatus               string `json:\"status\"`\n\tReconciliationStatus string `json:\"reconciliation_status\"`\n\tPayoutMethod         string `json:\"payout_method\"`\n}"
     ],
     "internal/modules/payment": [
       "type PurchaseResponse struct {\n\tStatus string `json:\"status\"`\n\tAction string `json:\"action,omitempty\"`\n\n\tCode           string     `json:\"code,omitempty\"`\n\tMessage        string     `json:\"message,omitempty\"`\n\tSubscriptionID *uuid.UUID `json:\"subscription_id,omitempty\"`\n\tPaymentID      *uuid.UUID `json:\"payment_id,omitempty\"`\n\tTransactionID  string     `json:\"transaction_id,omitempty\"`\n\tRedirectURL    string     `json:\"redirect_url,omitempty\"`\n\tDelayedStart   *time.Time `json:\"delayed_start,omitempty\"`\n}",
@@ -3863,7 +3868,6 @@
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "http": "net/http",
-      "io": "io",
       "json": "encoding/json",
       "logx": "github.com/open-rails/openrails/internal/logx",
       "math": "math",
@@ -3876,6 +3880,7 @@
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
       "time": "time",
       "url": "net/url",
+      "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/money/invoice_profile.go": {
@@ -3914,6 +3919,31 @@
       "pagination": "github.com/open-rails/openrails/internal/pagination",
       "syntax": "github.com/open-rails/openrails/internal/catalogrules/syntax",
       "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/modules/money/payouts/stripe.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "books": "github.com/open-rails/openrails/internal/modules/money/books",
+      "calendarutil": "github.com/open-rails/openrails/internal/shared/calendarutil",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fees": "github.com/open-rails/openrails/internal/modules/money/fees",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
+      "json": "encoding/json",
+      "logx": "github.com/open-rails/openrails/internal/logx",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
+      "recommend": "github.com/open-rails/openrails/internal/reconcile/recommend",
+      "slog": "log/slog",
+      "strings": "strings",
+      "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
+      "time": "time",
+      "url": "net/url",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },

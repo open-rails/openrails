@@ -27,6 +27,11 @@
 //     is 2.9% of the settled amount plus 30 minor units, a refund's 0 (unless
 //     RefundReturningFee returns part of it), a dispute's DisputeFee, which a
 //     won dispute returns with the charge.
+//   - Payouts and reserves are what Payout, SetPayoutStatus, ReserveHold and
+//     ReserveRelease make: every payout goes to BankAccount; an automatic
+//     one pays out each payments-balance transaction not yet paid out and
+//     lists them (balance transactions' payout and type filters) once paid,
+//     failed or canceled; a manual one is refused the payout filter.
 //   - Products and prices are what AddProduct and AddPrice seed. Lists honor
 //     active (prices list only active ones unless asked) and never show
 //     inline prices; a by-id read does. Moving a subscription onto an

@@ -45,47 +45,53 @@ func (a Account) merchantWide() bool { return a.Book == General && a.Scope != Cu
 
 // EnsureAccount get-or-creates one account of the chart in a currency, with
 // the chart's book, class and sign rules: a customer-scoped type names its
-// customer, cash_clearing its PSP. created reports this call made it; one a
-// concurrent writer created first is read back. A merchant-wide
-// general-ledger account is Open's to create; one created here, inside the
-// caller's transaction, raises OpenedLateFindingType once.
-func EnsureAccount(ctx context.Context, q *gen.Queries, merchant uuid.UUID, t AccountType, currency string, customer, psp *uuid.UUID) (id uuid.UUID, created bool, err error) {
-	acct, ok := Lookup(t)
+// customer, a PSP-scoped one its PSP, bank_cash its bank account. created
+// reports this call made it; one a concurrent writer created first is read
+// back. A merchant-wide general-ledger account is Open's to create; one
+// created here, inside the caller's transaction, raises OpenedLateFindingType
+// once.
+func EnsureAccount(ctx context.Context, q *gen.Queries, merchant uuid.UUID, r Ref, currency string) (id uuid.UUID, created bool, err error) {
+	acct, ok := Lookup(r.Type)
 	if !ok {
-		return uuid.Nil, false, fmt.Errorf("books: unknown account type %q", t)
+		return uuid.Nil, false, fmt.Errorf("books: unknown account type %q", r.Type)
 	}
-	if (acct.Scope == Customer) != (customer != nil) || (acct.Scope == PSP) != (psp != nil) {
-		return uuid.Nil, false, fmt.Errorf("books: a %s account is %s-scoped", t, acct.Scope)
+	if (acct.Scope == Customer) != (r.Customer != nil) || (acct.Scope == PSP) != (r.PSP != nil) || (acct.Scope == Bank) != (r.Bank != nil) {
+		return uuid.Nil, false, fmt.Errorf("books: a %s account is %s-scoped", r.Type, acct.Scope)
 	}
-	get := gen.GetLedgerAccountParams{MerchantID: merchant, AccountType: string(t), Currency: currency, CustomerID: customer, PspID: psp}
+	get := gen.GetLedgerAccountParams{MerchantID: merchant, AccountType: string(r.Type), Currency: currency, CustomerID: r.Customer, PspID: r.PSP, BankAccountID: r.Bank}
 	row, err := q.GetLedgerAccount(ctx, get)
 	if err == nil {
 		return row.ID, false, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, false, fmt.Errorf("books: get %s account: %w", t, err)
+		return uuid.Nil, false, fmt.Errorf("books: get %s account: %w", r.Type, err)
 	}
-	if created, err = insertAccount(ctx, q, merchant, acct, currency, customer, psp); err != nil {
+	if created, err = insertAccount(ctx, q, merchant, acct, currency, r); err != nil {
 		return uuid.Nil, false, err
 	}
 	if created && acct.merchantWide() {
-		if err := openedLate(ctx, q, merchant, t, currency, psp); err != nil {
+		if err := openedLate(ctx, q, merchant, r, currency); err != nil {
 			return uuid.Nil, false, err
 		}
 	}
 	row, err = q.GetLedgerAccount(ctx, get)
 	if err != nil {
-		return uuid.Nil, false, fmt.Errorf("books: get %s account: %w", t, err)
+		return uuid.Nil, false, fmt.Errorf("books: get %s account: %w", r.Type, err)
 	}
 	return row.ID, created, nil
 }
 
 // openedLate records a merchant-wide account a posting had to create.
-func openedLate(ctx context.Context, q *gen.Queries, merchant uuid.UUID, t AccountType, currency string, psp *uuid.UUID) error {
+func openedLate(ctx context.Context, q *gen.Queries, merchant uuid.UUID, r Ref, currency string) error {
+	t := r.Type
 	subject, evidence := string(t)+"/"+currency, map[string]string{"account_type": string(t), "currency": currency}
-	if psp != nil {
-		subject += "/" + psp.String()
-		evidence["psp_id"] = psp.String()
+	if r.PSP != nil {
+		subject += "/" + r.PSP.String()
+		evidence["psp_id"] = r.PSP.String()
+	}
+	if r.Bank != nil {
+		subject += "/" + r.Bank.String()
+		evidence["bank_account_id"] = r.Bank.String()
 	}
 	raw, err := json.Marshal(evidence)
 	if err != nil {
@@ -103,10 +109,10 @@ func openedLate(ctx context.Context, q *gen.Queries, merchant uuid.UUID, t Accou
 }
 
 // insertAccount creates one account unless a concurrent writer did.
-func insertAccount(ctx context.Context, q *gen.Queries, merchant uuid.UUID, acct Account, currency string, customer, psp *uuid.UUID) (bool, error) {
+func insertAccount(ctx context.Context, q *gen.Queries, merchant uuid.UUID, acct Account, currency string, r Ref) (bool, error) {
 	_, err := q.InsertLedgerAccount(ctx, gen.InsertLedgerAccountParams{
 		MerchantID: merchant, Book: string(acct.Book), Class: string(acct.Class),
-		CustomerID: customer, PspID: psp, AccountType: string(acct.Type), Currency: currency,
+		CustomerID: r.Customer, PspID: r.PSP, BankAccountID: r.Bank, AccountType: string(acct.Type), Currency: currency,
 		DebitsMustNotExceedCredits: acct.DebitsMustNotExceedCredits,
 		CreditsMustNotExceedDebits: acct.CreditsMustNotExceedDebits,
 	})
@@ -121,8 +127,9 @@ func insertAccount(ctx context.Context, q *gen.Queries, merchant uuid.UUID, acct
 
 // Open makes a merchant's general ledger whole in a short transaction of its
 // own: in every currency its catalog prices in, every currency named and
-// every currency already open, every merchant-wide account and each of its
-// PSPs' cash clearing. A merchant's own unit is not money and is skipped. It
+// every currency already open, every merchant-wide account, each of its PSPs'
+// own accounts, and each bank account's bank cash in the bank account's
+// currency. A merchant's own unit is not money and is skipped. It
 // runs where a currency or PSP becomes sellable, outside any business
 // transaction, so no first posting waits on another's uncommitted account;
 // once whole it only reads.
@@ -143,20 +150,32 @@ func Open(ctx context.Context, pool *db.Pool, merchant uuid.UUID, currencies ...
 	if err != nil {
 		return fmt.Errorf("books: read the PSPs: %w", err)
 	}
+	banks, err := q.ListGeneralLedgerBankAccounts(ctx, merchant)
+	if err != nil {
+		return fmt.Errorf("books: read the bank accounts: %w", err)
+	}
 	type key struct {
-		t        AccountType
-		currency string
-		psp      uuid.UUID
+		t         AccountType
+		currency  string
+		psp, bank uuid.UUID
 	}
 	have := map[key]bool{}
 	var money []string
 	for _, a := range open {
-		var psp uuid.UUID
+		var psp, bank uuid.UUID
 		if a.PspID != nil {
 			psp = *a.PspID
 		}
-		have[key{AccountType(a.AccountType), a.Currency, psp}] = true
+		if a.BankAccountID != nil {
+			bank = *a.BankAccountID
+		}
+		have[key{AccountType(a.AccountType), a.Currency, psp, bank}] = true
 		money = append(money, a.Currency)
+	}
+	for _, b := range banks {
+		if CheckCurrency(b.Currency) == nil {
+			money = append(money, b.Currency)
+		}
 	}
 	for _, c := range append(sellable, currencies...) {
 		if CheckCurrency(c) == nil {
@@ -167,7 +186,7 @@ func Open(ctx context.Context, pool *db.Pool, merchant uuid.UUID, currencies ...
 	type missing struct {
 		acct     Account
 		currency string
-		psp      *uuid.UUID
+		ref      Ref
 	}
 	var want []missing
 	for _, c := range slices.Compact(money) {
@@ -175,13 +194,19 @@ func Open(ctx context.Context, pool *db.Pool, merchant uuid.UUID, currencies ...
 			switch {
 			case !a.merchantWide():
 			case a.Scope == System:
-				if !have[key{a.Type, c, uuid.Nil}] {
-					want = append(want, missing{a, c, nil})
+				if !have[key{a.Type, c, uuid.Nil, uuid.Nil}] {
+					want = append(want, missing{a, c, Ref{Type: a.Type}})
 				}
-			default:
+			case a.Scope == PSP:
 				for _, p := range psps {
-					if !have[key{a.Type, c, p}] {
-						want = append(want, missing{a, c, &p})
+					if !have[key{a.Type, c, p, uuid.Nil}] {
+						want = append(want, missing{a, c, Ref{Type: a.Type, PSP: &p}})
+					}
+				}
+			case a.Scope == Bank:
+				for _, b := range banks {
+					if b.Currency == c && !have[key{a.Type, c, uuid.Nil, b.ID}] {
+						want = append(want, missing{a, c, Ref{Type: a.Type, Bank: &b.ID}})
 					}
 				}
 			}
@@ -193,7 +218,7 @@ func Open(ctx context.Context, pool *db.Pool, merchant uuid.UUID, currencies ...
 	return pool.CommittedMerchantTx(ctx, billing.MerchantID(merchant), func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		for _, m := range want {
-			if _, err := insertAccount(ctx, q, merchant, m.acct, m.currency, nil, m.psp); err != nil {
+			if _, err := insertAccount(ctx, q, merchant, m.acct, m.currency, m.ref); err != nil {
 				return err
 			}
 		}
@@ -225,12 +250,13 @@ func New(q *gen.Queries, merchant uuid.UUID) *Books {
 	return &Books{q: q, merchant: merchant}
 }
 
-// Ref names a general-ledger account: its type, and the customer or PSP its
+// Ref names an account: its type, and the customer, PSP or bank account its
 // scope needs.
 type Ref struct {
 	Type     AccountType
 	Customer *uuid.UUID
 	PSP      *uuid.UUID
+	Bank     *uuid.UUID
 }
 
 // Posting is one general-ledger transfer.
@@ -260,11 +286,11 @@ func (b *Books) Post(ctx context.Context, p Posting) (tr gen.BillingLedgerTransf
 	if err := p.check(); err != nil {
 		return tr, false, err
 	}
-	debit, _, err := EnsureAccount(ctx, b.q, b.merchant, p.Debit.Type, p.Currency, p.Debit.Customer, p.Debit.PSP)
+	debit, _, err := EnsureAccount(ctx, b.q, b.merchant, p.Debit, p.Currency)
 	if err != nil {
 		return tr, false, err
 	}
-	credit, _, err := EnsureAccount(ctx, b.q, b.merchant, p.Credit.Type, p.Currency, p.Credit.Customer, p.Credit.PSP)
+	credit, _, err := EnsureAccount(ctx, b.q, b.merchant, p.Credit, p.Currency)
 	if err != nil {
 		return tr, false, err
 	}
@@ -304,6 +330,9 @@ func (p Posting) check() error {
 	}
 	if err := p.Coord.Validate(); err != nil {
 		return err
+	}
+	if _, ok := SourceBasis(p.Coord.Source); ProviderFigure(p.Type) && !ok {
+		return fmt.Errorf("books: a %s posts at a provider source of known basis, not %q", p.Type, p.Coord.Source)
 	}
 	if p.Amount <= 0 {
 		return fmt.Errorf("books: amount must be positive")

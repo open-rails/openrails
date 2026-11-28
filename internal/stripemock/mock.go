@@ -105,11 +105,16 @@ type Mock struct {
 	// thinEvents are the v2 events a thin destination was sent, by id.
 	thinEvents map[string]Object
 
-	// balances are the balance transactions charges, refunds and disputes
-	// made, settled in settlement at settleRate when it is set.
+	// balances are the balance transactions charges, refunds, disputes,
+	// payouts and reserves made, settled in settlement at settleRate when it
+	// is set.
 	balances   map[string]Object
 	settlement string
 	settleRate float64
+	// payouts are the account's payouts; paidOut names the payout that paid
+	// each balance transaction out.
+	payouts map[string]Object
+	paidOut map[string]string
 }
 
 // New starts a Mock on a loopback listener; see URL and Close.
@@ -128,7 +133,8 @@ func NewUnstarted(opts Options) *Mock {
 	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{}, advice: map[string]Advice{}, blocks: map[string]string{},
 		intents: map[string]Object{}, charges: map[string]Object{}, disputes: map[string]Object{}, balances: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, schedules: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
 		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{}, webhookEndpoints: map[string][]Object{},
-		products: map[string]Object{}, prices: map[string]Object{}, inline: map[string]bool{}, thinEvents: map[string]Object{}}
+		products: map[string]Object{}, prices: map[string]Object{}, inline: map[string]bool{}, thinEvents: map[string]Object{},
+		payouts: map[string]Object{}, paidOut: map[string]string{}}
 }
 
 // URL is the loopback API root: Deps.ProviderEndpoints.StripeAPIURL.
@@ -323,6 +329,10 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 		return m.paymentMethodDomain(r, form, seg)
 	case seg[0] == "webhook_endpoints":
 		return m.webhookEndpoint(r, form, seg)
+	case seg[0] == "payouts" || seg[0] == "balance_transactions" && len(seg) == 1:
+		if status, out, ok := m.payoutLocked(r, seg, q); ok {
+			return status, out
+		}
 	case r.Method == http.MethodGet && (seg[0] == "invoices" || seg[0] == "invoice_payments"):
 		return m.invoiceRead(seg, q)
 	case r.Method == http.MethodGet && p == "/v1/customers/search":

@@ -1,6 +1,7 @@
 // Package fees posts the processor fees a PSP charged to the general ledger.
-// Stripe reports each fee on a balance transaction of the charge, refund or
-// dispute it belongs to; NMI and CCBill fees are left to the bank feed.
+// Stripe reports each fee on a balance transaction of the charge, refund,
+// dispute or payout it belongs to; NMI and CCBill fees are left to the bank
+// feed.
 package fees
 
 import (
@@ -8,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
@@ -33,7 +34,7 @@ import (
 const (
 	// CoordSource names a fee's coordinate: its source id is the balance
 	// transaction's, so each posts once whoever reads it.
-	CoordSource = "stripe_balance_transaction"
+	CoordSource = books.StripeBalanceTransaction
 	// UnreadFindingType is the finding a read that keeps failing raises; the
 	// read waits until it is resolved.
 	UnreadFindingType = "books.fee.unread"
@@ -172,34 +173,49 @@ func (r *StripeReader) post(ctx context.Context, row gen.ListDueStripeFeeReadsRo
 	if len(currencies) > 0 {
 		books.Prepare(ctx, r.DB.DataPool(), r.Log, row.MerchantID, currencies...)
 	}
-	typ, expense := books.ProcessorFee, books.ProcessorFees
+	typ := books.ProcessorFee
 	if row.Kind == "dispute" {
-		typ, expense = books.ChargebackFee, books.ChargebackFees
+		typ = books.ChargebackFee
 	}
-	psp := row.PspID
 	return r.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		ledger := books.New(r.DB.NewWithPgxTx(tx).Gen(ctx), row.MerchantID)
 		for _, bt := range transactions {
-			if bt.Fee == 0 {
-				continue
-			}
-			currency := strings.ToUpper(bt.Currency)
-			amount, err := moneyutil.RailMinorToNative(currency, moneyutil.Cents(absMinor(bt.Fee)))
-			if err != nil {
-				return fmt.Errorf("stripe fees: balance transaction %s: %w", bt.ID, err)
-			}
-			debit, credit := books.Ref{Type: expense}, books.Ref{Type: books.CashClearing, PSP: &psp}
-			if bt.Fee < 0 {
-				debit, credit = credit, debit
-			}
-			if _, _, err := ledger.Post(ctx, books.Posting{Debit: debit, Credit: credit, Amount: amount, Currency: currency, Type: typ,
-				Coord:       books.Coord{Operation: books.Operation(typ), Source: CoordSource, SourceID: bt.ID},
-				EffectiveAt: time.Unix(bt.Created, 0).UTC()}); err != nil {
-				return fmt.Errorf("stripe fees: balance transaction %s: %w", bt.ID, err)
+			if err := PostFee(ctx, ledger, row.PspID, typ, bt.ID, bt.Fee, bt.Currency, bt.Created); err != nil {
+				return err
 			}
 		}
 		return nil
 	})
+}
+
+// PostFee posts one Stripe balance transaction's fee once, at the balance
+// transaction: typ (processor_fee, or chargeback_fee for a dispute) DR its
+// expense / CR the PSP's cash clearing, the other way round for a negative
+// fee, in the transaction's currency at its creation. A zero fee posts
+// nothing.
+func PostFee(ctx context.Context, ledger *books.Books, psp uuid.UUID, typ books.TransferType, id string, fee int64, currency string, created int64) error {
+	if fee == 0 {
+		return nil
+	}
+	expense := books.ProcessorFees
+	if typ == books.ChargebackFee {
+		expense = books.ChargebackFees
+	}
+	currency = strings.ToUpper(currency)
+	amount, err := moneyutil.RailMinorToNative(currency, moneyutil.Cents(absMinor(fee)))
+	if err != nil {
+		return fmt.Errorf("stripe fees: balance transaction %s: %w", id, err)
+	}
+	debit, credit := books.Ref{Type: expense}, books.Ref{Type: books.CashClearing, PSP: &psp}
+	if fee < 0 {
+		debit, credit = credit, debit
+	}
+	if _, _, err := ledger.Post(ctx, books.Posting{Debit: debit, Credit: credit, Amount: amount, Currency: currency, Type: typ,
+		Coord:       books.Coord{Operation: books.Operation(typ), Source: CoordSource, SourceID: id},
+		EffectiveAt: time.Unix(created, 0).UTC()}); err != nil {
+		return fmt.Errorf("stripe fees: balance transaction %s: %w", id, err)
+	}
+	return nil
 }
 
 func absMinor(v int64) int64 {
@@ -311,29 +327,5 @@ func (s stripeReads) transaction(ctx context.Context, raw json.RawMessage) ([]ba
 }
 
 func (s stripeReads) get(ctx context.Context, path string, query url.Values, into any) error {
-	target := stripeapi.APIBase + path
-	if len(query) > 0 {
-		target += "?" + query.Encode()
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+s.key)
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("stripe fees: GET %s answered %d", path, resp.StatusCode)
-	}
-	if err := json.Unmarshal(body, into); err != nil {
-		return fmt.Errorf("stripe fees: parse %s: %w", path, err)
-	}
-	return nil
+	return stripeapi.Get(ctx, s.client, s.key, path, query, into)
 }

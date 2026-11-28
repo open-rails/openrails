@@ -42,7 +42,7 @@ var merchantOwnedTables = []string{
 	"payment_attempts", "rebill_cycles", "payment_method_versions", "mandates",
 	"solana_pay_receipts", "solana_pay_references",
 	"operation_log", "provider_intents",
-	"invoice_attempts", "product_access", "stripe_fee_reads", "disputes", "fraud_reports", "payments", "customer_paid_totals", "network_activity_daily", "subscriptions",
+	"invoice_attempts", "product_access", "stripe_fee_reads", "stripe_payout_reads", "disputes", "fraud_reports", "payments", "customer_paid_totals", "network_activity_daily", "subscriptions",
 	"money_settings", "payment_methods", "psp_customers",
 	// The directory's copy of the merchant's customers and the tokens it
 	// pushes them with.
@@ -75,6 +75,8 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsDisputes(ctx, id)
 	case "stripe_fee_reads":
 		return q.CountMerchantRowsStripeFeeReads(ctx, id)
+	case "stripe_payout_reads":
+		return q.CountMerchantRowsStripePayoutReads(ctx, id)
 	case "fraud_reports":
 		return q.CountMerchantRowsFraudReports(ctx, id)
 	case "network_activity_daily":
@@ -131,6 +133,8 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsDisputes(ctx, id)
 	case "stripe_fee_reads":
 		return q.PurgeMerchantRowsStripeFeeReads(ctx, id)
+	case "stripe_payout_reads":
+		return q.PurgeMerchantRowsStripePayoutReads(ctx, id)
 	case "fraud_reports":
 		return q.PurgeMerchantRowsFraudReports(ctx, id)
 	case "network_activity_daily":
@@ -177,7 +181,7 @@ func notCaptured(counts map[string]int, secrets int) []string {
 		fmt.Sprintf("CONFIGURATION. %d Vault configuration documents are listed by name; no credential is ever read or written out. "+
 			"A purge deletes them from Vault, and nothing here can recreate them; a file holding the configuration stays the operator's.", secrets),
 		"CATALOG IDENTITY. Default and creator catalog IDs and owner-subject bindings are retained with the tombstoned merchant; product/price purge does not reassign or erase this ownership metadata.",
-		"THE APPEND-ONLY SPINE. ledger_transfers, ledger_accounts, grants, credit_grants, credit_grant_events, " +
+		"THE APPEND-ONLY SPINE. ledger_transfers, ledger_accounts and the bank_accounts they name, grants, credit_grants, credit_grant_events, " +
 			"subscription_status_transitions and the configuration history (change_log) are not purged (the app role holds no DELETE on them) " +
 			"and are not captured here either. After a purge they outlive the control-plane rows " +
 			"they referenced.",

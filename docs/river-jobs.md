@@ -65,6 +65,7 @@ Each `openrails.billing_pass` job runs these scans in order within its own River
 | `openrails.stored_card_refresh_due` | Stored cards due for account updater checks before renewal. [Source](../internal/river/jobs_stored_card_refresh.go) |
 | `openrails.operation_wakes` | Live provider operations more than an hour overdue that need another wake. [Source](../internal/river/jobs_operation_wakes.go) |
 | `openrails.stripe_fees` | Stripe charges, refunds and disputes whose processor fees the general ledger has yet to read (`stripe_fee_reads`, indexed on `due_at`): each object's balance transactions are read and each fee posts once. A failed read waits and is read again; after eight failures it waits for its `books.fee.unread` finding to be fixed. [Source](../internal/modules/money/fees/stripe.go) |
+| `openrails.stripe_payouts` | Stripe payouts the general ledger has yet to read to their end (`stripe_payout_reads`, indexed on `due_at`, queued by each `payout.*` notice): each payout is booked from cash clearing through cash in transit to its bank account, with its reserve lines; one not yet paid is read again at its arrival date and each hour after. A failed read waits and is read again; after eight failures it waits for its `books.payout.unread` finding to be fixed. [Source](../internal/modules/money/payouts/stripe.go) |
 
 ## Inspect a running deployment
 

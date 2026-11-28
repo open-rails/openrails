@@ -2377,6 +2377,15 @@
       "TestCreditBooksEdges/OR-J40-S42/staff-refunds-of-revoked-or-spent-credit-are-conflicts-and-move-nothing/spent",
       "TestCreditBooksEdges/OR-J40-S42/staff-refunds-of-revoked-or-spent-credit-are-conflicts-and-move-nothing"
     ],
+    "OR-J40-S60": [
+      "TestStripePayouts/OR-J40-S60/a-payout-and-its-reserve-lines-are-read-exactly-and-only-read"
+    ],
+    "OR-J40-S61": [
+      "TestStripePayouts/OR-J40-S61/a-payout-lands-a-reserve-is-held-and-released-and-a-failed-payout-comes-back"
+    ],
+    "OR-J40-S62": [
+      "TestStripePayouts/OR-J40-S62/after-a-known-history-the-books-balance-each-day-ledger-audit-is-clean-and-a-restore-carries-them"
+    ],
     "OR-J41-S18": [
       "TestRevenueReversals/OR-J41-S18/a-partial-refund-while-service-runs-is-a-price-reduction-with-catch-up"
     ],
