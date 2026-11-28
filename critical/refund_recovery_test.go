@@ -438,6 +438,77 @@ func TestRefundRecovery(t *testing.T) {
 		}
 	})
 
+	t.Run("OR-J20-S10/a-late-nmi-void-revokes-only-the-period-its-sale-paid-for", func(t *testing.T) {
+		for _, name := range []string{"late", "latest"} {
+			t.Run(name, func(t *testing.T) {
+				a, p, sub := nmiEngineMembership(t)
+				access := func(want bool) {
+					t.Helper()
+					check, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"nmi:engine"}})
+					require.NoError(t, err)
+					require.Equal(t, want, check.Entitlements["nmi:engine"])
+				}
+				access(true)
+				paid, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
+				require.NoError(t, err)
+				require.Len(t, paid.Items, 1)
+				first := paid.Items[0]
+				sale := p.core.LastSale()
+				require.Equal(t, sale.TransactionID, first.TransactionID)
+				if name == "late" {
+					due := *sub.CurrentPeriodEndsAt
+					a.clock.Advance(due.Sub(a.clock.Now()))
+					runRegistered(t, startFleet(t, a.world), "openrails.billing_pass", 1)
+					require.Eventually(t, func() bool {
+						current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+						return err == nil && current.CurrentPeriodStartsAt.Equal(due)
+					}, 20*time.Second, 20*time.Millisecond)
+					paid, err = a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
+					require.NoError(t, err)
+					require.Len(t, paid.Items, 2)
+					sub, err = a.alpha.GetSubscription(t.Context(), sub.ID)
+					require.NoError(t, err)
+				}
+				p.core.Void(sale.TransactionID)
+				event := map[string]any{
+					"event_id": "dashboard-void", "event_type": "transaction.void.success",
+					"event_body": map[string]any{
+						"transaction_id": sale.TransactionID, "amount": "10.00", "currency": "USD",
+						"merchant": map[string]string{"id": "critical-gateway"},
+					},
+				}
+				status, raw := nmiSignedDelivery(t, a, event, "dashboard-void")
+				require.Equal(t, http.StatusOK, status, raw)
+				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+				require.NoError(t, err)
+				access(name == "late")
+				if name == "late" {
+					require.Equal(t, billing.SubscriptionCanceled, current.Status)
+					require.NotNil(t, current.EndedAt)
+					require.Equal(t, sub.CurrentPeriodEndsAt, current.EndedAt)
+					require.True(t, current.EndedAt.After(a.clock.Now()))
+				} else {
+					require.Equal(t, billing.SubscriptionCanceled, current.Status)
+					require.NotNil(t, current.EndedAt)
+					require.False(t, current.EndedAt.After(a.clock.Now()))
+				}
+				payment, err := a.alpha.GetPayment(t.Context(), first.ID)
+				require.NoError(t, err)
+				require.Len(t, payment.Refunds, 1)
+				require.Equal(t, first.Amount, payment.AmountRefunded)
+				for _, other := range paid.Items {
+					if other.ID == first.ID {
+						continue
+					}
+					payment, err := a.alpha.GetPayment(t.Context(), other.ID)
+					require.NoError(t, err)
+					require.Empty(t, payment.Refunds)
+					require.Zero(t, payment.AmountRefunded)
+				}
+			})
+		}
+	})
+
 	t.Run("OR-J20-S70/a-dashboard-refund-lands-while-the-roster-cannot-be-read", func(t *testing.T) {
 		a, p, invoice := purchasedSale(t)
 		payment := *invoice.Payment.PaymentID

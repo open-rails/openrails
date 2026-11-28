@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 929,
+  "scenario_count": 930,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -662,6 +662,11 @@
       "id": "OR-J20-S09",
       "journey": "J20",
       "name": "A full NMI dashboard refund ends the engine membership and prevents renewal, redelivery changes nothing, and a partial refund keeps access and renewal"
+    },
+    {
+      "id": "OR-J20-S10",
+      "journey": "J20",
+      "name": "A late NMI void revokes only the period its sale paid for, and a void of the latest sale ends the membership"
     },
     {
       "id": "OR-J21-S01",
