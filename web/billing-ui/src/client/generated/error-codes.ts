@@ -351,7 +351,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   provider_cancel_held: { status: 409, type: "invalid_request_error", meaning: "Canceling needs a destructive provider action that is not armed for this merchant." },
   provider_outcome_unknown: { status: 409, type: "api_error", meaning: "The provider did not confirm the outcome; read the resource before retrying." },
   provider_price_unreadable: { status: 502, type: "api_error", meaning: "The provider did not answer for the provider price's terms; retry." },
-  provider_writes_disabled: { status: 503, type: "api_error", meaning: "Provider writes are off for the merchant, so it takes no payment; the message names why (the merchant's write posture)." },
+  provider_writes_disabled: { status: 503, type: "api_error", meaning: "Provider writes are off for the merchant, so it takes no payment." },
   provider_writes_held: { status: 409, type: "invalid_request_error", meaning: "The merchant's writes are `readonly` (`openrails merchant writes`), so a change that moves money or writes to a provider waits; the proposal stays open." },
   psp_claim_requires_proof: { status: 403, type: "authorization_error", meaning: "Claiming a provider account needs credentials that prove control of it." },
   psp_credentials_rejected: { status: 400, type: "invalid_request_error", meaning: "The provider rejected the credentials, or answered that they are not in the PSP's declared environment." },

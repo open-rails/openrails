@@ -172,25 +172,26 @@ func (s *InvoiceAttemptService) Clock() clockwork.Clock {
 
 func (s *InvoiceAttemptService) requireProviderWrites(ctx context.Context) error {
 	if s == nil {
-		return ProviderWritesDisabled("write posture is unknown (nothing wired)")
+		return ErrProviderWritesDisabled
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
 	if posture := (controls.View{DB: s.db}).Posture(ctx, mid.UUID()); posture.ReadOnly() {
-		return ProviderWritesDisabled(posture.Reason)
+		s.db.Log.WarnContext(ctx, "provider writes disabled", "merchant_id", mid.String(), "reason", posture.Reason)
+		return ErrProviderWritesDisabled
 	}
 	return nil
 }
 
 // ErrProviderWritesDisabled refuses a payment while the merchant's provider
-// writes are off; ProviderWritesDisabled names why.
-var ErrProviderWritesDisabled = apperr.New(http.StatusServiceUnavailable, billing.CodeProviderWritesDisabled, "provider writes are off")
+// writes are off.
+var ErrProviderWritesDisabled = apperr.New(http.StatusServiceUnavailable, billing.CodeProviderWritesDisabled, "the merchant is not taking payments right now")
 
-// ProviderWritesDisabled is ErrProviderWritesDisabled naming its reason.
-func ProviderWritesDisabled(reason string) error {
-	return apperr.New(http.StatusServiceUnavailable, billing.CodeProviderWritesDisabled, "provider writes are off, so the merchant takes no payment: "+reason)
+// ProviderWritesDisabled refuses a payment with a customer-safe message.
+func ProviderWritesDisabled(message string) error {
+	return apperr.New(http.StatusServiceUnavailable, billing.CodeProviderWritesDisabled, message)
 }
 
 // priceHasSolanaRecurring reports whether a price carries a published Solana

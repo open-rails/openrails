@@ -309,10 +309,15 @@ func TestPSPControls(t *testing.T) {
 				_, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 				require.NoError(t, err, "read-only credential probes are allowed in both postures")
 				if mode == "readonly" {
+					const reason = "processor maintenance window"
+					operator(t, a.world, "writes", "full", "alpha", "prepare payment refusal")
+					operator(t, a.world, "writes", "readonly", "alpha", reason)
 					input := saleInput(t, a, p.provider)
 					status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "readonly-purchase"})
 					require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
 					require.Contains(t, string(raw), `"code":"provider_writes_disabled"`)
+					require.NotContains(t, string(raw), reason)
+					require.NotContains(t, string(raw), "openrails merchant writes")
 					require.Empty(t, p.provider.effects(t))
 					// Writes are one merchant's: alpha's are full while beta's stay readonly.
 					operator(t, a.world, "writes", "full", "alpha", "reviewed")
@@ -349,7 +354,8 @@ func TestPSPControls(t *testing.T) {
 			status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "copied-book-purchase"})
 			require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
 			require.Contains(t, string(raw), `"code":"provider_writes_disabled"`)
-			require.Contains(t, string(raw), "copy of the billing book", "a full merchant posture does not lift the copy's fence")
+			require.NotContains(t, string(raw), "copy of the billing book")
+			require.NotContains(t, string(raw), "openrails book arm")
 			require.Empty(t, p.provider.effects(t))
 			hostCLI(t, a.world, "book", "arm", "--by", "critical verified operator")
 			input.Payment.Token = p.provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})

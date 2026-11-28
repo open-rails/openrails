@@ -44,7 +44,7 @@ const (
 	CodeInternalError          ErrorCode = "internal_error"
 	CodeServiceUnavailable     ErrorCode = "service_unavailable"
 	// CodeProviderWritesDisabled: the merchant's write posture holds its
-	// provider writes; the message names why.
+	// provider writes.
 	CodeProviderWritesDisabled ErrorCode = "provider_writes_disabled"
 	CodeIdempotencyKeyReused   ErrorCode = "idempotency_key_reused"
 	CodeIdempotencyKeyInUse    ErrorCode = "idempotency_key_in_use"
@@ -320,7 +320,7 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeRateLimitExceeded, 429, limit, "Too many requests; Retry-After says when to try again."},
 	{CodeInternalError, 500, fault, "OpenRails failed; request_id identifies the failure in its logs."},
 	{CodeServiceUnavailable, 503, fault, "A dependency is temporarily unavailable; retry."},
-	{CodeProviderWritesDisabled, 503, fault, "Provider writes are off for the merchant, so it takes no payment; the message names why (the merchant's write posture)."},
+	{CodeProviderWritesDisabled, 503, fault, "Provider writes are off for the merchant, so it takes no payment."},
 	{CodeIdempotencyKeyReused, 422, invalid, "The idempotency key already committed with different terms."},
 	{CodeIdempotencyKeyInUse, 409, invalid, "The request first sent with this Idempotency-Key is still running; retry once it finishes."},
 	{CodeInsufficientCredits, 402, card, "The customer's credit balance does not cover the operation."},
