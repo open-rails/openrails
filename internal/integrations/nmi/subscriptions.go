@@ -163,7 +163,11 @@ func (c *NMIClient) UpdateSubscriptionPaymentSource(ctx context.Context, subscri
 		return err
 	}
 	if !isDirectResponseApproved(output) {
-		return fmt.Errorf("failed to update subscription payment source: %s", responseText(output, response))
+		err := fmt.Errorf("failed to update subscription payment source: %s", responseText(output, response))
+		if UncertainResponseCode(parseMobiusResponseCode(output)) {
+			return ambiguous(err)
+		}
+		return err
 	}
 
 	return nil
