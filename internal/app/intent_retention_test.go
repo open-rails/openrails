@@ -11,6 +11,7 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/retention"
 )
@@ -20,8 +21,8 @@ import (
 // and every type on it is one a handler runs.
 func TestOutboxIntentTypesAreOneList(t *testing.T) {
 	want := slices.Sorted(slices.Values(retention.OutboxIntentTypes))
-	registry := (&Runtime{Log: slog.Default(), DB: &db.DB{Log: slog.Default()}, PurchaseService: &payment.PurchaseService{}}).buildIntentRegistry(clockwork.NewFakeClock())
-	registered := append(registry.Types(), "account_updater") // registered once a collection resolver is wired
+	registry := (&Runtime{Log: slog.Default(), DB: &db.DB{Log: slog.Default()}, PurchaseService: &payment.PurchaseService{}, CollectionResolver: &money.MerchantCollectionAdapterBuilder{}}).buildIntentRegistry(clockwork.NewFakeClock())
+	registered := registry.Types()
 	for _, typ := range want {
 		if !slices.Contains(registered, typ) {
 			t.Errorf("retention.OutboxIntentTypes names %q, which no handler runs", typ)
