@@ -366,6 +366,8 @@ pkg openrails/billing, const BalanceTransactionOwedPayment BalanceTransactionTyp
 pkg openrails/billing, const BalanceTransactionOwedReopened BalanceTransactionType = "owed_reopened"
 pkg openrails/billing, const BalanceTransactionOwedRepayment BalanceTransactionType = "owed_repayment"
 pkg openrails/billing, const BalanceTransactionOwedWriteoff BalanceTransactionType = "owed_writeoff"
+pkg openrails/billing, const BalanceTransactionRefund BalanceTransactionType = "refund"
+pkg openrails/billing, const BalanceTransactionRefundReversed BalanceTransactionType = "refund_reversed"
 pkg openrails/billing, const BalanceTransactionReinstate BalanceTransactionType = "reinstate"
 pkg openrails/billing, const BalanceTransactionRevoke BalanceTransactionType = "revoke"
 pkg openrails/billing, const BalanceTransactionSpend BalanceTransactionType = "spend"

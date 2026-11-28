@@ -188,6 +188,11 @@ const (
 	BalanceTransactionExpire    BalanceTransactionType = "expire"
 	BalanceTransactionRevoke    BalanceTransactionType = "revoke"
 	BalanceTransactionReinstate BalanceTransactionType = "reinstate"
+	// Refund takes units off the balance for a refund or chargeback of the
+	// payment that bought their lot; RefundReversed gives them back (a refused
+	// refund, a refund that settled for less, a won dispute).
+	BalanceTransactionRefund         BalanceTransactionType = "refund"
+	BalanceTransactionRefundReversed BalanceTransactionType = "refund_reversed"
 	// The owed_ types move what the customer owes in arrears.
 	BalanceTransactionOwedAccrual  BalanceTransactionType = "owed_accrual"
 	BalanceTransactionOwedPayment  BalanceTransactionType = "owed_payment"

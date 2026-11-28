@@ -180,7 +180,7 @@ export type BalanceTransaction = {
   id: string
   customer_id: string
   currency: string
-  type: "deposit" | "expire" | "owed_accrual" | "owed_payment" | "owed_reopened" | "owed_repayment" | "owed_writeoff" | "reinstate" | "revoke" | "spend"
+  type: "deposit" | "expire" | "owed_accrual" | "owed_payment" | "owed_reopened" | "owed_repayment" | "owed_writeoff" | "refund" | "refund_reversed" | "reinstate" | "revoke" | "spend"
   amount: string
   credit_grant_id: string | null
   invoker: string | null

@@ -14930,6 +14930,8 @@
               "owed_reopened",
               "owed_repayment",
               "owed_writeoff",
+              "refund",
+              "refund_reversed",
               "reinstate",
               "revoke",
               "spend"

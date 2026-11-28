@@ -88,9 +88,9 @@ func balanceTransactionFromTransfer(r gen.BillingLedgerTransfer) billing.Balance
 	txType, amount := billing.BalanceTransactionType(r.TransferType), r.Amount
 	switch r.TransferType {
 	case "credit_refund":
-		txType, amount = billing.BalanceTransactionRevoke, -amount
+		txType, amount = billing.BalanceTransactionRefund, -amount
 	case "credit_refund_restore":
-		txType = billing.BalanceTransactionReinstate
+		txType = billing.BalanceTransactionRefundReversed
 	case "credit_spend":
 		txType, amount = billing.BalanceTransactionSpend, -amount
 	case "credit_expire":

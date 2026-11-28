@@ -208,6 +208,18 @@ func mixedRefusedRefund(t *testing.T) {
 	require.EqualValues(t, 25_000_000, withdrawn)
 	require.EqualValues(t, 25_000_000, restored)
 	require.Empty(t, lotLegs(t, a.world, lot, "refund_deferred"))
+	transactions, err := a.alpha.ListBalanceTransactions(t.Context(), m.customer, billing.BalanceTransactionListParams{Currency: "USD"})
+	require.NoError(t, err)
+	amounts := map[billing.BalanceTransactionType][]int64{}
+	for _, entry := range transactions.Items {
+		if entry.CreditGrantID != nil && *entry.CreditGrantID == lot {
+			amounts[entry.Type] = append(amounts[entry.Type], entry.Amount)
+		}
+	}
+	require.Equal(t, []int64{-25_000_000}, amounts[billing.BalanceTransactionRefund])
+	require.Equal(t, []int64{25_000_000}, amounts[billing.BalanceTransactionRefundReversed])
+	require.Empty(t, amounts[billing.BalanceTransactionRevoke])
+	require.Empty(t, amounts[billing.BalanceTransactionReinstate])
 }
 
 func mixedRefundRefusedAcrossLapse(t *testing.T) {
