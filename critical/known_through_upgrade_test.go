@@ -82,10 +82,13 @@ func TestKnownThroughUpgrade(t *testing.T) {
 		exec("INSERT INTO "+table("psp_freshness")+" (merchant_id, psp_id, failing_since, failed_at, failure, stale_since) VALUES ($1, $2, $3, $3, 'not_configured', $3)",
 			m, psps["paykings"], paykingsFailed)
 		// ccbill: a book of a dump landed later with no schedule, and nothing
-		// read since. Its newest source fact is a renewal's period start; the
-		// import stamped a cancel the source did not date at its own run.
-		ccbillLatest, ccbillRun := now.Add(-27*day), now.Add(-3*day)
-		subscribe("ccbill", "ccbill", "host", now.Add(-90*day), ccbillLatest, ccbillLatest.Add(month), nil)
+		// read since. Its newest source fact is a subscription's start. At its
+		// own run the import computed that one's period from a legacy expiry
+		// and stamped a cancel the source did not date: neither is an event
+		// CCBill reported.
+		ccbillLatest, ccbillPeriod, ccbillRun := now.Add(-27*day), now.Add(-5*day), now.Add(-3*day)
+		subscribe("ccbill", "ccbill", "host", ccbillLatest, ccbillPeriod, ccbillPeriod.Add(month), nil)
+		subscribe("ccbill", "ccbill", "host", now.Add(-90*day), now.Add(-60*day), now.Add(-30*day), nil)
 		subscribe("ccbill", "ccbill", "host", now.Add(-200*day), now.Add(-100*day), now.Add(-70*day), &ccbillRun)
 		// stripe: provider-owned rows, never imported.
 		subscribe("stripe", "stripe", "provider", now.Add(-5*day), now.Add(-5*day), now.Add(25*day), nil)
@@ -113,7 +116,7 @@ func TestKnownThroughUpgrade(t *testing.T) {
 		} {
 			f := known[key]
 			require.False(t, f.Current, key)
-			require.True(t, f.KnownThrough.Equal(want.at), "%s known through %s, not %s: never an instant the import stamped at its run", key, want.at, f.KnownThrough)
+			require.True(t, f.KnownThrough.Equal(want.at), "%s known through %s, not %s: never a period or cancel the import stamped at its run", key, want.at, f.KnownThrough)
 			require.Equal(t, want.source, f.Source, key)
 		}
 		require.Equal(t, billing.PSPImported, known["paykings"].Cause, "imported, not connected: not merely without credentials")
