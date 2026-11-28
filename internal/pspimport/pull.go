@@ -234,6 +234,11 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 		}
 		through = until
 	}
+	if scope.Rail == "nmi" {
+		if err := im.inferSchedules(ctx, row); err != nil {
+			return err
+		}
+	}
 	newly, err := im.link(ctx, row)
 	if err != nil {
 		return err

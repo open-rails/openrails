@@ -248,6 +248,107 @@ func TestPSPImportHistory(t *testing.T) {
 		require.Equal(t, []int64{20_000_000, 20_000_000}, paid(t, iw, customerOf(iw.alice)))
 		require.False(t, iw.entitled(t, customerOf(iw.alice), "member:gold"))
 	})
+
+	t.Run("OR-J38-S17/a-stripe-subscription-that-paid-for-nothing-ends-at-its-start-and-adds-no-mrr", func(t *testing.T) {
+		iw := bootImportWorldDeclaring(t, true, func(w *world) { w.clock.Advance(-90 * 24 * time.Hour) }, "stripe")
+		iw.api = iw.alpha
+		iw.stripe.AddProduct("prod_basic", "Basic")
+		iw.stripe.AddPrice(stripemock.Price{ID: "price_basic", Product: "prod_basic", Amount: 999, Interval: "month"})
+		carol := authtest.NewUser(t, iw.auth)
+		day := 24 * time.Hour
+		t0 := iw.clock.Now().Truncate(time.Second)
+		at := func(d time.Duration) { iw.clock.Advance(t0.Add(d).Sub(iw.clock.Now())) }
+		// Alice's first payment never completed; Bob canceled before his did;
+		// Carol paid a month and canceled.
+		expired := iw.stripe.AddIncompleteSubscription(iw.stripe.AddCustomer(iw.alice.Email, "Alice", nil), "pm_alice", "price_basic", 999, t0, t0.Add(30*day))
+		iw.stripe.SetSubscriptionStatus(expired, "incomplete_expired", false)
+		at(5 * day)
+		dropped := iw.stripe.AddIncompleteSubscription(iw.stripe.AddCustomer(iw.bob.Email, "Bob", nil), "pm_bob", "price_basic", 999, t0.Add(5*day), t0.Add(35*day))
+		at(7 * day)
+		iw.stripe.CancelSubscription(dropped)
+		at(10 * day)
+		paying := iw.stripe.AddSubscription(iw.stripe.AddCustomer(carol.Email, "Carol", nil), "pm_carol", "price_basic", 999, t0.Add(10*day), t0.Add(40*day))
+		at(50 * day)
+		iw.stripe.CancelSubscription(paying)
+		at(80 * day)
+		iw.start(t)
+
+		imp := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "stripe"}})
+		_, err := iw.api.CreateProduct(t.Context(), billing.CreateProductParams{Key: "basic", DisplayName: "Basic", Entitlements: []string{"member:basic"}})
+		require.NoError(t, err)
+		_, err = iw.api.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductKey: "basic", Key: "stripe-basic", PSP: "stripe", PriceID: "price_basic"})
+		require.NoError(t, err)
+		require.NoError(t, iw.link(t, imp.ID, billing.LinkPSPImportParams{}))
+		recs := iw.apply(t, imp.ID)
+		for _, ref := range []string{expired, dropped, paying} {
+			require.Equal(t, billing.PSPImportImported, recs[ref].State, "%s: %v", ref, deref(recs[ref].Reason))
+		}
+		ended(t, only(t, iw, customerOf(iw.alice)), t0, t0, t0, "provider")
+		ended(t, only(t, iw, customerOf(iw.bob)), t0.Add(5*day), t0.Add(5*day), t0.Add(5*day), "user")
+		ended(t, only(t, iw, customerOf(carol)), t0.Add(10*day), t0.Add(50*day), t0.Add(50*day), "user")
+		require.Empty(t, mrrMoves(t, iw.world, iw.alpha, customerOf(iw.alice)), "no new and churn for what served nothing")
+		require.Empty(t, mrrMoves(t, iw.world, iw.alpha, customerOf(iw.bob)))
+		require.Equal(t, []string{mrrKind("USD", "new", 9_990_000), mrrKind("USD", "churn", -9_990_000)}, mrrKinds(mrrMoves(t, iw.world, iw.alpha, customerOf(carol))))
+	})
+
+	t.Run("OR-J38-S18/a-deleted-nmi-schedule-is-inferred-from-its-recurring-sales-ended-only", func(t *testing.T) {
+		iw := bootImportWorld(t, "nmi")
+		iw.api = iw.alpha
+		day := 24 * time.Hour
+		start := iw.clock.Now().Add(-200 * day).Truncate(day)
+		iw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
+		// Alice's schedule billed three months and was deleted: NMI lists it no
+		// more and its sales name it not.
+		vault := iw.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
+		iw.nmi.EditVault(vault, func(v *nmimock.Vault) { v.Email = iw.alice.Email })
+		gone := iw.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: "gold", Amount: "20.00", Days: 30, Created: start, NextBilling: start.Add(90 * day), Order: "invoice-gone"})
+		var sales []nmimock.Sale
+		for i := range 3 {
+			sales = append(sales, iw.nmi.AddScheduleSale(gone, start.Add(time.Duration(i)*30*day)))
+		}
+		iw.nmi.DeleteSchedule(gone)
+		// Bob's deleted schedule billed an amount no price has: its sale stays
+		// history without a subscription.
+		other := iw.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "1111"})
+		iw.nmi.EditVault(other, func(v *nmimock.Vault) { v.Email = iw.bob.Email })
+		odd := iw.nmi.AddSchedule(nmimock.Schedule{Vault: other, Plan: "gold", Amount: "13.00", Days: 30, Created: start.Add(5 * day), NextBilling: start.Add(35 * day), Order: "invoice-odd"})
+		iw.nmi.AddScheduleSale(odd, start.Add(5*day))
+		iw.nmi.DeleteSchedule(odd)
+		iw.start(t)
+
+		since := start.Add(-day)
+		imp := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}, HistorySince: &since})
+		_, err := iw.api.CreateProduct(t.Context(), billing.CreateProductParams{Key: "gold", DisplayName: "Gold", Entitlements: []string{"member:gold"}})
+		require.NoError(t, err)
+		_, err = iw.api.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductKey: "gold", Key: "nmi-gold", PSP: "nmi", PlanID: "gold"})
+		require.NoError(t, err)
+		require.NoError(t, iw.link(t, imp.ID, billing.LinkPSPImportParams{}))
+		recs := iw.apply(t, imp.ID)
+		ref := "inferred:" + sales[0].TransactionID
+		require.Equal(t, billing.PSPImportImported, recs[ref].State, "%v", deref(recs[ref].Reason))
+
+		sub := only(t, iw, customerOf(iw.alice))
+		require.NotNil(t, sub.RailSubscriptionID)
+		require.Equal(t, ref, *sub.RailSubscriptionID, "marked inferred: no NMI id is spelled so")
+		ended(t, sub, start, start.Add(90*day), start.Add(90*day), "provider")
+		page, err := iw.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customerOf(iw.alice), PageRequest: billing.PageRequest{Limit: 100}})
+		require.NoError(t, err)
+		require.Len(t, page.Items, 3)
+		for _, p := range page.Items {
+			require.EqualValues(t, 20_000_000, p.Amount)
+			require.NotNil(t, p.SubscriptionID)
+			require.Equal(t, sub.ID, *p.SubscriptionID, "its sales are its payments")
+		}
+		require.Equal(t, []string{mrrKind("USD", "new", 20_000_000), mrrKind("USD", "churn", -20_000_000)}, mrrKinds(mrrMoves(t, iw.world, iw.alpha, customerOf(iw.alice))))
+		require.False(t, iw.entitled(t, customerOf(iw.alice), "member:gold"))
+
+		require.Empty(t, iw.subscriptions(t, customerOf(iw.bob)), "a run no price prices is not inferred")
+		bobs, err := iw.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customerOf(iw.bob), PageRequest: billing.PageRequest{Limit: 100}})
+		require.NoError(t, err)
+		require.Len(t, bobs.Items, 1)
+		require.EqualValues(t, 13_000_000, bobs.Items[0].Amount)
+		require.Nil(t, bobs.Items[0].SubscriptionID)
+	})
 }
 
 // findingErrors lists the merchant's findings of types, each with the error

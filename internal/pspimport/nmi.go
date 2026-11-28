@@ -212,7 +212,7 @@ func (s *nmiSource) history(ctx context.Context, since, until time.Time, last bo
 		remote := t
 		out = append(out, staged{kind: billing.PSPImportTransaction, ref: ref, customerRef: t.CustomerRef, subscriptionRef: t.SubscriptionID,
 			occurredAt: t.OccurredAt, facts: f, data: transactionData{TransactionID: t.TransactionID, OriginalTransactionID: t.OriginalTransactionID, Type: typ, Success: t.Success, Amount: native, Currency: strings.ToUpper(t.Currency), OccurredAt: t.OccurredAt.UTC(),
-				Remote: &remote}})
+				Recurring: nmiRecurring(t.Raw), Remote: &remote}})
 	}
 	return out, nil
 }
@@ -260,4 +260,13 @@ func nmiTime(s string) time.Time {
 func nmiFlag(v any) bool {
 	text := strings.TrimSpace(fmt.Sprint(v))
 	return text == "1" || strings.EqualFold(text, "true")
+}
+
+// nmiRecurring reports a charge NMI's recurring engine made: its action's
+// source.
+func nmiRecurring(raw json.RawMessage) bool {
+	var r struct {
+		Action struct{ Source string } `json:"action"`
+	}
+	return json.Unmarshal(raw, &r) == nil && strings.EqualFold(strings.TrimSpace(r.Action.Source), "recurring")
 }

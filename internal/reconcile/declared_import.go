@@ -80,6 +80,11 @@ type DeclaredSubscriptionFact struct {
 type DeclaredOutcome struct {
 	Code   string // imported | already_present | blocked
 	Reason string
+	// SubscriptionID is the row an imported fact created.
+	SubscriptionID uuid.UUID
+	// ServiceEndedAt is when an imported ended fact's paid service ended,
+	// where its MRR ends (DeclaredSubscriptionFact.ServiceEnd).
+	ServiceEndedAt *time.Time
 }
 
 const (
@@ -513,11 +518,35 @@ func ImportDeclaredSubscriptions(
 			}
 		}
 		out[f.SourceID] = DeclaredOutcome{Code: outcome}
+		if outcome == DeclaredImported {
+			o := DeclaredOutcome{Code: outcome, SubscriptionID: subID}
+			if f.CancelKind != DeclaredCancelNone {
+				end := f.ServiceEnd()
+				o.ServiceEndedAt = &end
+			}
+			out[f.SourceID] = o
+		}
 	}
 	if book.needsAdmission() {
 		return out, ErrDeclaredAdmission
 	}
 	return out, book.end(ctx, database)
+}
+
+// ServiceEnd is when an ended fact's paid service ended: its paid-through
+// end, whether it was canceled for that end or recorded canceled after it
+// lapsed; an immediate end (a chargeback or a provider's termination) at its
+// cancel when that came first; without a paid-through end, its cancel.
+func (f *DeclaredSubscriptionFact) ServiceEnd() time.Time {
+	cancel := f.CancelAt.UTC()
+	if f.PaidThrough == nil || f.PaidThrough.IsZero() {
+		return cancel
+	}
+	end := f.PaidThrough.UTC()
+	if f.CancelKind != DeclaredCancelUser && cancel.Before(end) {
+		return cancel
+	}
+	return end
 }
 
 // insertDeclaredCanceled writes an explicitly-canceled fact directly: settled

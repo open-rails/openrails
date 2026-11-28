@@ -18,8 +18,10 @@
 //
 // History: an ended subscription lands canceled where its paid service ended
 // (Stripe's ended_at, else its last paid invoice's period; CCBill's expire
-// date) for the provider's reason, with its charges; nothing is canceled or
-// deleted at the provider.
+// date) for the provider's reason, with its charges; one that paid for
+// nothing ends at its start. A deleted NMI schedule is inferred from a run of
+// recurring sales on one vault, order and amount (inferSchedules), ended
+// only. Nothing is canceled or deleted at the provider.
 //
 // Steps run on the psp_import River queue. Transient failures (network,
 // timeout, 5xx, 429, an unreachable secret store) retry attempt^4 seconds

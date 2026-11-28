@@ -144,3 +144,30 @@ func (q *Queries) ListSubscriptionMRR(ctx context.Context, arg ListSubscriptionM
 	}
 	return items, nil
 }
+
+const recordMRRHistory = `-- name: RecordMRRHistory :exec
+SELECT billing.record_mrr_history($1::uuid, $2::uuid[],
+    $3::uuid[], $4::timestamptz[], $5::timestamptz)
+`
+
+type RecordMRRHistoryParams struct {
+	MerchantID           uuid.UUID
+	SubscriptionIds      []uuid.UUID
+	EndedSubscriptionIds []uuid.UUID
+	EndedAts             []time.Time
+	AsOf                 time.Time
+}
+
+// The MRR history of the subscriptions an import landed, as of its evidence
+// instant, the ended ones to when their paid service ended: each customer's
+// imported movements written again.
+func (q *Queries) RecordMRRHistory(ctx context.Context, arg RecordMRRHistoryParams) error {
+	_, err := q.db.Exec(ctx, recordMRRHistory,
+		arg.MerchantID,
+		arg.SubscriptionIds,
+		arg.EndedSubscriptionIds,
+		arg.EndedAts,
+		arg.AsOf,
+	)
+	return err
+}

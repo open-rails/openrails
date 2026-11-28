@@ -136,10 +136,6 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 		txdb := database.NewWithPgxTx(tx)
 		qx := txdb.Qx(ctx)
 		q := txdb.Gen(ctx)
-		// What the book adopts opens MRR; it is not new business.
-		if err := db.SetMRRCause(ctx, q, db.MRRCauseImport); err != nil {
-			return err
-		}
 
 		// Lifecycle clock pinned at AsOf so re-runs are deterministic. The
 		// service and deferred-delete scheduler share this transaction so no
@@ -484,10 +480,16 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 				}
 			}
 		}
+		var created, ended []uuid.UUID
+		var ends []time.Time
 		for src, o := range outcomes {
 			switch o.Code {
 			case reconcile.DeclaredImported:
 				res.Imported = append(res.Imported, src)
+				created = append(created, o.SubscriptionID)
+				if o.ServiceEndedAt != nil {
+					ended, ends = append(ended, o.SubscriptionID), append(ends, *o.ServiceEndedAt)
+				}
 			case reconcile.DeclaredAlreadyPresent:
 				res.Skipped = append(res.Skipped, src)
 				if o.Reason != "" {
@@ -506,6 +508,15 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 		// grant and record the import's own effect as a repair.
 		if err := deriveImportedAccess(ctx, q, merchantID, opts.Book, opts.Clock); err != nil {
 			return fmt.Errorf("derive imported access: %w", err)
+		}
+		// What the book landed adds MRR from its start, at its own dates:
+		// nothing is booked at the import.
+		if len(created) > 0 {
+			slices.SortFunc(created, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+			if err := q.RecordMRRHistory(ctx, gen.RecordMRRHistoryParams{MerchantID: merchantID.UUID(), SubscriptionIds: created,
+				EndedSubscriptionIds: ended, EndedAts: ends, AsOf: asOf}); err != nil {
+				return fmt.Errorf("record imported MRR history: %w", err)
+			}
 		}
 		sort.Strings(res.Imported)
 		sort.Strings(res.Skipped)
