@@ -385,6 +385,11 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 				if err := postUnits(ctx, l, g, reversalID, ledger.UnitsRefunded, to, excess, ledger.CreditRefundRestore, "credit_excess"); err != nil {
 					return 0, err
 				}
+				if excess > 0 && to == ledger.CustomerUnits && g.ExpiresAt != nil {
+					if err := ledger.WatchLapsingCredit(ctx, q, gen.WatchLapsingCreditParams{MerchantID: mid.UUID(), CustomerID: g.CustomerID, Currency: g.Unit, Now: s.now()}); err != nil {
+						return 0, fmt.Errorf("credits: watch the lapsing lot: %w", err)
+					}
+				}
 			}
 			// The reversal is settled: its units are no longer refunding.
 			if err := lots.SyncRefunding(ctx, paymentID); err != nil {
@@ -528,6 +533,11 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 				}
 				if err := postUnits(ctx, ledger.New(q, mid.UUID()), g, reversalID, ledger.UnitsRefunded, to, committed.Withdrawn, ledger.CreditRefundRestore, "credit_excess"); err != nil {
 					return err
+				}
+				if !retired && g.ExpiresAt != nil {
+					if err := ledger.WatchLapsingCredit(ctx, q, gen.WatchLapsingCreditParams{MerchantID: mid.UUID(), CustomerID: g.CustomerID, Currency: g.Unit, Now: s.now()}); err != nil {
+						return fmt.Errorf("credits: watch the lapsing lot: %w", err)
+					}
 				}
 				lots := credits.New(q, mid.UUID(), s.now)
 				if err := lots.SyncRefunding(ctx, paymentID); err != nil {
