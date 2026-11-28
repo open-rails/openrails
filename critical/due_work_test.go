@@ -417,14 +417,15 @@ func TestDueWork(t *testing.T) {
 		intents := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
 		now := a.clock.Now()
 		held := ptr("held: merchant write posture is readonly")
-		seed := func(kind, key string) string {
+		card, customer := uuid.New(), uuid.New()
+		seed := func(kind, key, payload string) string {
 			var id uuid.UUID
-			require.NoError(t, a.pool.QueryRow(t.Context(), "INSERT INTO "+intents+" (merchant_id, rail, intent_type, idempotency_key, status, attempts, next_attempt_at, last_failure_reason, origin, psp_id, created_at) VALUES ($1, 'stripe', $2, $3, 'pending', 0, $4, $5, 'user', $6, $7) RETURNING id",
-				a.alpha.MerchantID().UUID(), kind, key, now.Add(5*time.Minute), held, psp, now.Add(-48*time.Hour)).Scan(&id))
+			require.NoError(t, a.pool.QueryRow(t.Context(), "INSERT INTO "+intents+" (merchant_id, rail, intent_type, idempotency_key, status, attempts, next_attempt_at, last_failure_reason, origin, psp_id, created_at, payload) VALUES ($1, 'stripe', $2, $3, 'pending', 0, $4, $5, 'user', $6, $7, $8::jsonb) RETURNING id",
+				a.alpha.MerchantID().UUID(), kind, key, now.Add(5*time.Minute), held, psp, now.Add(-48*time.Hour), payload).Scan(&id))
 			return id.String()
 		}
-		cancel := seed("stripe_cancel_subscription", "held-cancel")
-		deletion := seed("platform_method_delete", "held-card-delete")
+		cancel := seed("stripe_cancel_subscription", "held-cancel", `{}`)
+		deletion := seed("platform_method_delete", "held-card-delete", `{"payment_method_id": "`+card.String()+`", "customer_id": "`+customer.String()+`"}`)
 		runRegistered(t, fleet, "openrails.merchant_health", 1)
 		page, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.provider_intent.stuck"})
 		require.NoError(t, err)
@@ -437,7 +438,13 @@ func TestDueWork(t *testing.T) {
 		require.Contains(t, found, deletion)
 		require.Equal(t, "requires_review", string(found[deletion].Status), "no job runs a held card deletion")
 		require.NotNil(t, found[deletion].RecommendedAction)
-		require.Contains(t, *found[deletion].RecommendedAction, "ask the customer to remove the card again")
+		action := *found[deletion].RecommendedAction
+		require.Contains(t, action, "ask the customer to remove the card again")
+		pm, cus := billing.PaymentMethodID(card).String(), billing.CustomerID(customer).String()
+		require.Contains(t, action, "DELETE /v1/admin/customers/"+cus+"/payment-methods/"+pm, "staff remove it through OpenRails, never only at the provider")
+		local, _ := found[deletion].Evidence["local"].(map[string]any)
+		require.Equal(t, pm, local["payment_method_id"], "the finding names the card")
+		require.Equal(t, cus, local["customer_id"], "and its customer")
 	})
 	t.Run("OR-J04-S70/the-hourly-health-pass-raises-held-renewals", func(t *testing.T) {
 		a, _, sub := purchasedMembership(t)

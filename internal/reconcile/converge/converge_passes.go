@@ -612,8 +612,30 @@ const (
 // deliberate park by the merchant's write posture (intents.GateExecution and
 // the wire chokes name it). Parked is not broken — each intent's job runs it
 // when the posture lifts — so the finding is informational, not the admin
-// queue; a customer's card deletion has no job and stays in it.
+// queue; a card removal has no job and stays in it.
 func isPostureParkedReason(reason string) bool { return strings.Contains(reason, "write posture") }
+
+// heldCardDeletionTarget names the card and customer a card removal acts on,
+// from its payload: customer_id, or user_id on a native vault removal.
+func heldCardDeletionTarget(si *gen.BillingProviderIntent) (card, customer string) {
+	var target struct {
+		PaymentMethodID uuid.UUID `json:"payment_method_id"`
+		CustomerID      uuid.UUID `json:"customer_id"`
+		UserID          string    `json:"user_id"`
+	}
+	if json.Unmarshal(si.Payload, &target) != nil {
+		return "", ""
+	}
+	if target.PaymentMethodID != uuid.Nil {
+		card = billing.PaymentMethodID(target.PaymentMethodID).String()
+	}
+	if target.CustomerID != uuid.Nil {
+		customer = billing.CustomerID(target.CustomerID).String()
+	} else if id, err := billing.ParseCustomerID(target.UserID); err == nil {
+		customer = id.String()
+	}
+	return card, customer
+}
 
 // stuckIntentFinding diagnoses one stuck rail intent. SubjectKey is the bare
 // intent id; Provider is the intent's own rail.
@@ -656,10 +678,17 @@ func stuckIntentFinding(si *gen.BillingProviderIntent, now time.Time) ConvergeFi
 		// surface-only: check and converge never touch the intent itself.
 	}
 	if si.LastFailureReason != nil && isPostureParkedReason(*si.LastFailureReason) {
-		// A customer's card deletion runs only on the customer's request: no
+		// A card removal runs only when a customer or staff asks for it: no
 		// job runs it when the posture lifts, so it stays with a person.
 		if intents.ManualPaymentMethodDelete(*si) {
-			f.RecommendedAction = fmt.Sprintf("Card deletion %s was refused while provider writes were off, and nothing retries it: it runs only on the customer's request. Once writes are on, ask the customer to remove the card again, or remove it at the provider.", si.ID)
+			card, customer := heldCardDeletionTarget(si)
+			if card != "" {
+				ev["payment_method_id"] = card
+			}
+			if customer != "" {
+				ev["customer_id"] = customer
+			}
+			f.RecommendedAction = fmt.Sprintf("Card removal %s (payment method %s, customer %s) was held while provider writes were off, and nothing retries it: it runs only when a removal is asked for again. Once writes are on, ask the customer to remove the card again, or remove it with DELETE /v1/admin/customers/%s/payment-methods/%s.", si.ID, card, customer, customer, card)
 			return f
 		}
 		f.Class = ClassAuto // no Repair → reconcile_required (informational)
