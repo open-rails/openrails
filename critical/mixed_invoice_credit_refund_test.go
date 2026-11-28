@@ -25,6 +25,9 @@ func TestMixedInvoiceCreditRefunds(t *testing.T) {
 	t.Run("OR-J22-S07/a-pending-credit-line-refund-takes-the-whole-lot-off-the-balance-at-once", mixedPendingRefund)
 	t.Run("OR-J22-S51/a-refused-refund-gives-its-credit-back", mixedRefusedRefund)
 	t.Run("OR-J22-S52/a-refund-refused-after-its-lot-lapsed-expires-what-it-gives-back", mixedRefundRefusedAcrossLapse)
+	t.Run("OR-J22-S55/a-refused-whole-pack-refund-of-an-arrears-customer-still-expires-at-its-lapse", mixedArrearsRefusedRefund)
+	t.Run("OR-J22-S56/a-refund-settling-for-less-than-it-withdrew-after-the-lapse-retires-the-difference", mixedRefundExcessAcrossLapse)
+	t.Run("OR-J22-S57/units-a-settled-refund-gives-back-to-an-arrears-customers-lot-still-expire-at-its-lapse", mixedArrearsRefundExcess)
 	t.Run("OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first", mixedReversals)
 	t.Run("OR-J22-S09/won-dispute-credit-stays-when-a-refund-found-none", mixedDisputeAroundRefund)
 }
@@ -272,6 +275,212 @@ func mixedRefundRefusedAcrossLapse(t *testing.T) {
 	}
 	require.EqualValues(t, 10_000_000, breakage)
 	require.Empty(t, lotLegs(t, a.world, lot, "refund_deferred"))
+}
+
+func mixedArrearsRefusedRefund(t *testing.T) {
+	m := newMixedSale(t, func(w *world) { w.clock.Advance(-366 * 24 * time.Hour) })
+	a, p := m.a, m.p
+	_, err := a.alpha.UpdateCustomer(t.Context(), m.customer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 5000}}})
+	require.NoError(t, err)
+	payment := m.buy(t, "mixed-arrears-refused")
+	lot := paymentLot(t, a.alpha, m.customer, payment)
+	grant, err := a.alpha.GetCreditGrant(t.Context(), lot)
+	require.NoError(t, err)
+	require.NotNil(t, grant.ExpiresAt)
+	gate := &wireGate{arrived: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(gate.unblock)
+	p.mu.Lock()
+	p.refuseRefund = true
+	p.refundGate = gate
+	p.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		_, _ = a.alpha.RefundPayment(t.Context(), "arrears-pack-refused", payment, billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Return the credit pack"})
+		close(done)
+	}()
+	select {
+	case <-gate.arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("refund did not reach the provider barrier")
+	}
+	balance(t, a.alpha, m.customer, 0, 0, 0)
+	fleet := quietFleet(t, a.world)
+	runRegistered(t, fleet, "openrails.billing_pass", 1)
+	var watches int
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(a.world, "balance_watches")+" WHERE merchant_id=$1 AND customer_id=$2",
+		a.alpha.MerchantID().UUID(), m.customer.UUID()).Scan(&watches))
+	require.Zero(t, watches)
+	gate.unblock()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("refused refund did not finish")
+	}
+	var status string
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT status FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND refunded_payment_id=$2",
+		a.alpha.MerchantID().UUID(), payment.UUID()).Scan(&status))
+	require.Equal(t, "failed", status)
+	balance(t, a.alpha, m.customer, 25_000_000, 0, 25_000_000)
+	a.clock.Advance(grant.ExpiresAt.Add(time.Second).Sub(a.clock.Now()))
+	runRegistered(t, fleet, "openrails.billing_pass", 1)
+	grant, err = a.alpha.GetCreditGrant(t.Context(), lot)
+	require.NoError(t, err)
+	require.EqualValues(t, 25_000_000, grant.ExpiredAmount)
+	require.Zero(t, grant.RemainingAmount)
+	balance(t, a.alpha, m.customer, 0, 0, 0)
+}
+
+func mixedRefundExcessAcrossLapse(t *testing.T) {
+	m := newMixedSale(t, func(w *world) { w.clock.Advance(-366 * 24 * time.Hour) })
+	a, p := m.a, m.p
+	pack, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "small-pack", DisplayName: "Small pack", Ownership: catalog.OwnershipConsumable,
+		CreditGrant: &catalog.CreditGrantSpec{Currency: "USD", Amount: ptr(int64(7)), ExpiresAfterDays: ptr(365)}})
+	require.NoError(t, err)
+	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: pack.ID, Key: "small-pack", UnitAmount: 10_000_000, Currency: "USD"})
+	require.NoError(t, err)
+	m.lines = []billing.InvoiceLineParams{{PriceID: price.ID}, m.lines[1]}
+	payment := m.buy(t, "mixed-excess-across-lapse")
+	lot := paymentLot(t, a.alpha, m.customer, payment)
+	grant, err := a.alpha.GetCreditGrant(t.Context(), lot)
+	require.NoError(t, err)
+	require.NotNil(t, grant.ExpiresAt)
+	p.mu.Lock()
+	p.lostRefundResponse = true
+	p.mu.Unlock()
+	_, _ = a.alpha.RefundPayment(t.Context(), "excess-first", payment, billing.RefundPaymentParams{Amount: 4_000_000, Reason: "Part back"})
+	balance(t, a.alpha, m.customer, 5, 0, 5)
+	// Keep the first refund unresolved while the second settles.
+	p.core.Intercept(func(r *http.Request) bool { return r.Method == http.MethodGet && r.URL.Path == "/v1/refunds" },
+		func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+			return answer(r, http.StatusServiceUnavailable, `{"error":{"type":"api_error","message":"refund evidence unavailable"}}`), nil
+		})
+	gate := &wireGate{arrived: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(gate.unblock)
+	p.mu.Lock()
+	p.lostRefundResponse = false
+	p.refundGate = gate
+	p.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		_, _ = a.alpha.RefundPayment(t.Context(), "excess-second", payment, billing.RefundPaymentParams{Amount: 6_000_000, Reason: "Rest back"})
+		close(done)
+	}()
+	select {
+	case <-gate.arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("refund did not reach the provider barrier")
+	}
+	balance(t, a.alpha, m.customer, 0, 0, 0)
+	a.clock.Advance(grant.ExpiresAt.Add(time.Second).Sub(a.clock.Now()))
+	fleet := quietFleet(t, a.world)
+	runRegistered(t, fleet, "openrails.billing_pass", 1)
+	gate.unblock()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("refund did not finish")
+	}
+	read, err := a.alpha.GetPayment(t.Context(), payment)
+	require.NoError(t, err)
+	require.EqualValues(t, 6_000_000, read.AmountRefunded)
+	p.core.ClearIntercepts()
+	a.clock.Advance(20 * time.Minute)
+	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
+	require.NoError(t, err)
+	for _, job := range jobs.Jobs {
+		if job.State != rivertype.JobStateCompleted && job.State != rivertype.JobStateRunning {
+			_, err = fleet.JobRetry(t.Context(), job.ID)
+			require.NoError(t, err)
+		}
+	}
+	require.Eventually(t, func() bool {
+		read, err := a.alpha.GetPayment(t.Context(), payment)
+		return err == nil && read.AmountRefunded == 10_000_000
+	}, 20*time.Second, 20*time.Millisecond)
+	balance(t, a.alpha, m.customer, 0, 0, 0)
+	var excess int
+	var amount int64
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*), COALESCE(sum(lt.amount), 0) FROM "+booksTable(a.world, "ledger_transfers")+
+		" lt JOIN "+booksTable(a.world, "ledger_accounts")+" da ON da.id=lt.debit_account_id AND da.merchant_id=lt.merchant_id JOIN "+booksTable(a.world, "ledger_accounts")+
+		" ca ON ca.id=lt.credit_account_id AND ca.merchant_id=lt.merchant_id WHERE lt.merchant_id=$1 AND lt.credit_grant_id=$2 AND lt.book='units' AND lt.source='credit_excess' AND da.account_type='units_refunded' AND ca.account_type='units_expired'",
+		a.alpha.MerchantID().UUID(), lot.UUID()).Scan(&excess, &amount))
+	require.Equal(t, 1, excess)
+	require.EqualValues(t, 1, amount)
+	deferred, released := lotMoney(t, a.world, lot)
+	require.Equal(t, deferred, released)
+	// The retired unit breaks $1.428572; the refunds take that part from recognized revenue.
+	require.ElementsMatch(t, []int64{5_714_285, 2_857_143}, lotLegs(t, a.world, lot, "refund_deferred"))
+	require.ElementsMatch(t, []int64{285_715, 1_142_857}, lotLegs(t, a.world, lot, "refund_recognized"))
+	require.Equal(t, []int64{1_428_572}, lotLegs(t, a.world, lot, "credit_breakage"))
+	require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", "id:"+a.alpha.MerchantID().String()), "Ledger integrity OK")
+}
+
+func mixedArrearsRefundExcess(t *testing.T) {
+	m := newMixedSale(t, func(w *world) { w.clock.Advance(-366 * 24 * time.Hour) })
+	a, p := m.a, m.p
+	_, err := a.alpha.UpdateCustomer(t.Context(), m.customer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 5000}}})
+	require.NoError(t, err)
+	pack, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "small-pack", DisplayName: "Small pack", Ownership: catalog.OwnershipConsumable,
+		CreditGrant: &catalog.CreditGrantSpec{Currency: "USD", Amount: ptr(int64(7)), ExpiresAfterDays: ptr(365)}})
+	require.NoError(t, err)
+	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: pack.ID, Key: "small-pack", UnitAmount: 10_000_000, Currency: "USD"})
+	require.NoError(t, err)
+	m.lines = []billing.InvoiceLineParams{{PriceID: price.ID}, m.lines[1]}
+	payment := m.buy(t, "mixed-arrears-excess")
+	lot := paymentLot(t, a.alpha, m.customer, payment)
+	grant, err := a.alpha.GetCreditGrant(t.Context(), lot)
+	require.NoError(t, err)
+	require.NotNil(t, grant.ExpiresAt)
+	p.mu.Lock()
+	p.lostRefundResponse = true
+	p.mu.Unlock()
+	_, _ = a.alpha.RefundPayment(t.Context(), "arrears-excess-first", payment, billing.RefundPaymentParams{Amount: 4_000_000, Reason: "Part back"})
+	balance(t, a.alpha, m.customer, 5, 0, 5)
+	// Keep the first refund unresolved while the second settles.
+	p.core.Intercept(func(r *http.Request) bool { return r.Method == http.MethodGet && r.URL.Path == "/v1/refunds" },
+		func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+			return answer(r, http.StatusServiceUnavailable, `{"error":{"type":"api_error","message":"refund evidence unavailable"}}`), nil
+		})
+	gate := &wireGate{arrived: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(gate.unblock)
+	p.mu.Lock()
+	p.lostRefundResponse = false
+	p.refundGate = gate
+	p.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		_, _ = a.alpha.RefundPayment(t.Context(), "arrears-excess-second", payment, billing.RefundPaymentParams{Amount: 6_000_000, Reason: "Rest back"})
+		close(done)
+	}()
+	select {
+	case <-gate.arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("refund did not reach the provider barrier")
+	}
+	balance(t, a.alpha, m.customer, 0, 0, 0)
+	fleet := quietFleet(t, a.world)
+	runRegistered(t, fleet, "openrails.billing_pass", 1)
+	var watches int
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(a.world, "balance_watches")+" WHERE merchant_id=$1 AND customer_id=$2",
+		a.alpha.MerchantID().UUID(), m.customer.UUID()).Scan(&watches))
+	require.Zero(t, watches)
+	gate.unblock()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("refund did not finish")
+	}
+	read, err := a.alpha.GetPayment(t.Context(), payment)
+	require.NoError(t, err)
+	require.EqualValues(t, 6_000_000, read.AmountRefunded)
+	balance(t, a.alpha, m.customer, 1, 0, 1)
+	a.clock.Advance(grant.ExpiresAt.Add(time.Second).Sub(a.clock.Now()))
+	runRegistered(t, fleet, "openrails.billing_pass", 1)
+	grant, err = a.alpha.GetCreditGrant(t.Context(), lot)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, grant.ExpiredAmount)
+	require.Zero(t, grant.RemainingAmount)
+	balance(t, a.alpha, m.customer, 0, 0, 0)
 }
 
 func mixedReversals(t *testing.T) {

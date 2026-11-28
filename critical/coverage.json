@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 931,
+  "scenario_count": 934,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2302,6 +2302,21 @@
       "id": "OR-J22-S54",
       "journey": "J22",
       "name": "A grant that has already expired or overflows the ledger is refused as invalid; an identical replay after its expiry still replays"
+    },
+    {
+      "id": "OR-J22-S55",
+      "journey": "J22",
+      "name": "A refused whole-pack refund of an arrears customer still expires at its lapse"
+    },
+    {
+      "id": "OR-J22-S56",
+      "journey": "J22",
+      "name": "A refund settling for less than it withdrew after the lapse retires the difference"
+    },
+    {
+      "id": "OR-J22-S57",
+      "journey": "J22",
+      "name": "Units a settled refund gives back to an arrears customer's lot still expire at its lapse"
     },
     {
       "id": "OR-J26-S54",
