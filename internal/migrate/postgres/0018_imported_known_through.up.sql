@@ -3,17 +3,19 @@
 -- is stored, and imported_from says which rule dated it.
 
 ALTER TABLE billing.psp_freshness ADD COLUMN imported_from text CHECK (imported_from IN ('as_of', 'latest_record'));
-COMMENT ON COLUMN billing.psp_freshness.imported_from IS 'How imported_through was found: as_of, an import''s own evidence instant; latest_record, the latest instant the PSP''s imported records carry, for an import that recorded none (complete through at least it).';
+COMMENT ON COLUMN billing.psp_freshness.imported_from IS 'How imported_through was found: as_of, an import''s own evidence instant; latest_record, for an import that recorded none, the latest instant the provider''s own records it brought carry (subscription and period starts, payments): complete through at least it.';
 UPDATE billing.psp_freshness SET imported_from = 'as_of' WHERE imported_through IS NOT NULL;
 ALTER TABLE billing.psp_freshness ADD CONSTRAINT psp_freshness_imported_check CHECK ((imported_through IS NULL) = (imported_from IS NULL));
 COMMENT ON COLUMN billing.psp_freshness.imported_through IS 'The evidence instant of the latest import naming the PSP; imported_from says how it was found.';
 
 -- An import's as_of survives where it stamped it: on a host book's accepted
 -- schedules and recurring mandates, and as an applied PSP import's pull. Else
--- the latest instant its host-landed subscriptions and their payments carry.
--- A PSP so dated is stale from it until a catch-up reads the gap.
+-- the latest instant the provider's own records carry: its host-landed
+-- subscriptions' starts and their payments. A cancel or an end the import may
+-- have stamped at its own run time is not one. A PSP so dated is stale from
+-- it until a catch-up reads the gap.
 WITH host AS (
-    SELECT s.merchant_id, s.psp_id, s.id, s.started_at, s.canceled_at
+    SELECT s.merchant_id, s.psp_id, s.id, s.started_at, s.current_period_starts_at
       FROM billing.subscriptions s
      WHERE s.facts_authority = 'host' AND s.deleted_at IS NULL
 ), stated AS (
@@ -26,7 +28,7 @@ WITH host AS (
     SELECT i.merchant_id, i.psp_id, i.pulled_at
       FROM billing.psp_imports i WHERE i.status = 'applied' AND i.pulled_at IS NOT NULL
 ), recorded AS (
-    SELECT h.merchant_id, h.psp_id, greatest(h.started_at, h.canceled_at) AS at FROM host h
+    SELECT h.merchant_id, h.psp_id, greatest(h.started_at, h.current_period_starts_at) AS at FROM host h
     UNION ALL
     SELECT h.merchant_id, h.psp_id, y.purchased_at
       FROM host h JOIN billing.payments y ON y.merchant_id = h.merchant_id AND y.subscription_id = h.id AND y.psp_id = h.psp_id

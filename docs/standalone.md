@@ -1020,6 +1020,8 @@ with usage needs an event store holding none of the merchant's; without a store
 an export refuses a merchant with pending usage. The event log, active
 destructive incidents and pending actions are not in an archive.
 
+An archive carries each PSP's import date but none of the source's reads of it: a restored PSP an import brought is stale from that date until the destination reads the gap.
+
 **Not backups:** the purge inventory (counts and document names only; after a
 purge, PITR is the only way back), a provider read (providers hold no access,
 grants or ledger) and `undo-run` (one operation).

@@ -44,8 +44,9 @@ func TestKnownThroughUpgrade(t *testing.T) {
 			exec("INSERT INTO "+table("psps")+" (id, merchant_id, key, rail, environment, account_id) VALUES ($1, $2, $3, $4, 'test', $5)", psps[p.key], m, p.key, p.rail, p.account)
 		}
 		// A subscription as a book lands it (host) or a provider's evidence
-		// does, each its own customer's.
-		subscribe := func(psp, rail, authority, status string, started time.Time, canceled *time.Time) (uuid.UUID, uuid.UUID) {
+		// does, each its own customer's: its start, its current period and,
+		// once canceled, when the cancel was recorded.
+		subscribe := func(psp, rail, authority string, started, periodStart, periodEnd time.Time, canceled *time.Time) (uuid.UUID, uuid.UUID) {
 			t.Helper()
 			customer, sub := uuid.New(), uuid.New()
 			policy := "provider"
@@ -53,14 +54,10 @@ func TestKnownThroughUpgrade(t *testing.T) {
 				policy = "nmi_schedule"
 			}
 			exec("INSERT INTO "+table("customers")+" (id, merchant_id, created_at, last_seen_at) VALUES ($1, $2, $3, $3)", customer, m, started)
-			periodStart, periodEnd := started, started.Add(720*time.Hour)
-			for periodEnd.Before(now) && canceled == nil {
-				periodStart, periodEnd = periodEnd, periodEnd.Add(720*time.Hour)
-			}
+			status := "active"
 			var cancelType, feedback *string
 			if canceled != nil {
-				cancelType, feedback = ptr("user"), ptr("imported: declared user_canceled")
-				periodStart, periodEnd = canceled.Add(-720*time.Hour), *canceled
+				status, cancelType, feedback = "canceled", ptr("user"), ptr("imported: declared user_canceled")
 			}
 			exec("INSERT INTO "+table("subscriptions")+` (id, merchant_id, customer_id, product_id, price_id, status, rail, collection_policy, rail_subscription_id, psp_id,
 				started_at, current_period_starts_at, current_period_ends_at, canceled_at, ended_at, cancel_type, cancel_feedback, created_at, updated_at, facts_authority)
@@ -68,28 +65,30 @@ func TestKnownThroughUpgrade(t *testing.T) {
 				sub, m, customer, product, price, status, rail, "sub-"+sub.String()[:8], psps[psp], started, periodStart, periodEnd, canceled, cancelType, feedback, authority, policy)
 			return sub, customer
 		}
+		month := 30 * day
 
 		// mobius: a book landed after imports recorded their as_of.
 		mobiusAsOf, mobiusFailed := now.Add(-24*day), now.Add(-24*day+time.Minute)
-		subscribe("mobius", "nmi", "host", "active", now.Add(-60*day), nil)
+		subscribe("mobius", "nmi", "host", now.Add(-60*day), now.Add(-30*day), now, nil)
 		exec("INSERT INTO "+table("psp_freshness")+" (merchant_id, psp_id, imported_through, failing_since, failed_at, failure, stale_since) VALUES ($1, $2, $3, $4, $4, 'not_configured', $4)",
 			m, psps["mobius"], mobiusAsOf, mobiusFailed)
 		// paykings: a book landed before, its schedule accepted at its as_of;
 		// then a read failed, as the build before recorded it.
 		paykingsAsOf, paykingsFailed := now.Add(-30*day), now.Add(-2*day)
-		sub, customer := subscribe("paykings", "nmi", "host", "active", now.Add(-50*day), nil)
+		sub, customer := subscribe("paykings", "nmi", "host", now.Add(-65*day), now.Add(-35*day), now.Add(-5*day), nil)
 		exec("INSERT INTO "+table("provider_schedules")+` (merchant_id, subscription_id, customer_id, psp_id, accepted_version, source_reference, provider_reference,
 			first_due_at, cadence_hours, cadence_months, accepted_bill, created_at) VALUES ($1, $2, $3, $4, 1, 'paykings-schedule', 'paykings-schedule', $5, 720, 0, '{}', $6)`,
-			m, sub, customer, psps["paykings"], now.Add(10*day), paykingsAsOf)
+			m, sub, customer, psps["paykings"], now.Add(-5*day), paykingsAsOf)
 		exec("INSERT INTO "+table("psp_freshness")+" (merchant_id, psp_id, failing_since, failed_at, failure, stale_since) VALUES ($1, $2, $3, $3, 'not_configured', $3)",
 			m, psps["paykings"], paykingsFailed)
-		// ccbill: a book landed before with no schedule, and nothing read
-		// since; its latest record is a cancel.
-		ccbillLatest := now.Add(-27 * day)
-		subscribe("ccbill", "ccbill", "host", "active", now.Add(-90*day), nil)
-		subscribe("ccbill", "ccbill", "host", "canceled", now.Add(-200*day), &ccbillLatest)
+		// ccbill: a book of a dump landed later with no schedule, and nothing
+		// read since. Its newest source fact is a renewal's period start; the
+		// import stamped a cancel the source did not date at its own run.
+		ccbillLatest, ccbillRun := now.Add(-27*day), now.Add(-3*day)
+		subscribe("ccbill", "ccbill", "host", now.Add(-90*day), ccbillLatest, ccbillLatest.Add(month), nil)
+		subscribe("ccbill", "ccbill", "host", now.Add(-200*day), now.Add(-100*day), now.Add(-70*day), &ccbillRun)
 		// stripe: provider-owned rows, never imported.
-		subscribe("stripe", "stripe", "provider", "active", now.Add(-5*day), nil)
+		subscribe("stripe", "stripe", "provider", now.Add(-5*day), now.Add(-5*day), now.Add(25*day), nil)
 
 		require.NoError(t, migrate.Apply(ctx, pool, migrate.Options{Schema: schema, Logger: logger}), "an upgrade over imports that recorded no as_of")
 
@@ -114,7 +113,7 @@ func TestKnownThroughUpgrade(t *testing.T) {
 		} {
 			f := known[key]
 			require.False(t, f.Current, key)
-			require.True(t, f.KnownThrough.Equal(want.at), "%s known through %s, not %s", key, want.at, f.KnownThrough)
+			require.True(t, f.KnownThrough.Equal(want.at), "%s known through %s, not %s: never an instant the import stamped at its run", key, want.at, f.KnownThrough)
 			require.Equal(t, want.source, f.Source, key)
 		}
 		require.Equal(t, billing.PSPImported, known["paykings"].Cause, "imported, not connected: not merely without credentials")

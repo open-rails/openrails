@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 926,
+  "scenario_count": 927,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1167,6 +1167,11 @@
       "id": "OR-J31-S15",
       "journey": "J31",
       "name": "A canceled unresolved renewal retains its access revocation evidence through terminal completion and archive restore"
+    },
+    {
+      "id": "OR-J31-S16",
+      "journey": "J31",
+      "name": "A restored archive keeps what an import brought of each PSP and when: the destination reads the PSP stale from the import's as_of, known through it, never undated, and none of the source's reads move"
     },
     {
       "id": "OR-J32-S01",

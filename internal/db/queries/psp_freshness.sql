@@ -53,6 +53,12 @@ ON CONFLICT (merchant_id, psp_id) DO UPDATE SET
     imported_from = CASE WHEN psp_freshness.imported_through > EXCLUDED.imported_through THEN psp_freshness.imported_from ELSE 'as_of' END,
     updated_at = now();
 
+-- A restored archive's PSPs an import brought are stale from it: the
+-- destination has read none of them.
+-- name: OpenRestoredPSPEpisodes :exec
+UPDATE billing.psp_freshness SET stale_since = imported_through, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND stale_since IS NULL AND read_at IS NULL AND imported_through IS NOT NULL;
+
 -- name: LockPSPFreshness :one
 SELECT * FROM billing.psp_freshness
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid

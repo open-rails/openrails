@@ -52,6 +52,28 @@ func archiveBytes(t *testing.T, client *openrails.Client) []byte {
 }
 
 func TestBillingArchive(t *testing.T) {
+	t.Run("OR-J31-S16/a-restored-psp-keeps-what-its-import-brought-and-when", func(t *testing.T) {
+		a, p := newNMIWorld(t, unconnectedNMI)
+		b := importNMIBook(t, a, p, 3*24*time.Hour)
+		fleet := quietFleet(t, a.world)
+		require.Eventually(t, func() bool { return pspFreshness(t, a.alpha, "nmi").Cause == billing.PSPImported }, 20*time.Second, 20*time.Millisecond,
+			"the import finds its PSP cannot be read")
+		catchUpsSettled(t, fleet)
+		archive := archiveBytes(t, a.alpha)
+		_, client := archiveTarget(t, a.world, func(w *world) { w.deps.NMITransport = a.deps.NMITransport })
+		_, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err)
+		f := pspFreshness(t, client, "nmi")
+		require.True(t, f.HasData)
+		require.False(t, f.Current, "the destination has read none of it")
+		require.NotNil(t, f.KnownThrough, "never undated after a restore")
+		require.True(t, f.KnownThrough.Equal(b.asOf), "known through the import's as_of, not %s", f.KnownThrough)
+		require.Equal(t, billing.KnownThroughImport, f.Source)
+		require.NotNil(t, f.StaleSince)
+		require.True(t, f.StaleSince.Equal(b.asOf), "stale from the import until the destination reads the gap")
+		require.Nil(t, f.LastReadAt, "the source's reads stay behind")
+		require.Nil(t, f.FailingSince)
+	})
 	t.Run("OR-J31-S15/canceled-renewal-retains-revocation-evidence-through-restore", func(t *testing.T) {
 		a, p, sub := nmiEngineMembership(t)
 		p.core.LoseSales(1)

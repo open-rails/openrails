@@ -780,6 +780,9 @@
     "OR-J31-S15": [
       "TestBillingArchive/OR-J31-S15/canceled-renewal-retains-revocation-evidence-through-restore"
     ],
+    "OR-J31-S16": [
+      "TestBillingArchive/OR-J31-S16/a-restored-psp-keeps-what-its-import-brought-and-when"
+    ],
     "OR-J32-S01": [
       "TestMerchantHost/OR-J32-S01/provision-find-list-rename-retains-identity"
     ],
