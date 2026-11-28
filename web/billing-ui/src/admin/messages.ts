@@ -1123,7 +1123,8 @@ export const billingAdminMessages = {
     "No new payment uses it: its credentials are incomplete or do not resolve.",
   ": data through ": ": data through ",
   " days old; ": " days old; ",
-  ": no data read yet; ": ": no data read yet; ",
+  " (latest imported record)": " (latest imported record)",
+  ": data through an unknown date; ": ": data through an unknown date; ",
   " since ": " since ",
   " subscriptions, ": " subscriptions, ",
   " MRR awaiting ": " MRR awaiting ",
@@ -1131,6 +1132,8 @@ export const billingAdminMessages = {
   "Show to now": "Show to now",
   "Show as of ": "Show as of ",
   "Incomplete after ": "Incomplete after ",
+  "Incomplete: ": "Incomplete: ",
+  "undated data from ": "undated data from ",
   "imported, not connected": "imported, not connected",
   "Connect it to bring the data up to date.":
     "Connect it to bring the data up to date.",
