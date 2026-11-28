@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 934,
+  "scenario_count": 935,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2744,6 +2744,11 @@
       "name": "While ClickHouse is out of reach a balance look at a customer without pending usage expires its lapsed lot"
     },
     {
+      "id": "OR-J25-S44",
+      "journey": "J25",
+      "name": "A revocation or refund that empties a balance tells the host and the customer; a lapse tells the customer its credits expired"
+    },
+    {
       "id": "OR-J29-S37",
       "journey": "J29",
       "name": "A provider operation scheduled ahead is no stuck finding however long ago it was queued; one a day past its attempt, or parked or failing for a day, is"
@@ -4647,6 +4652,11 @@
       "id": "OR-J25-S49",
       "journey": "J25",
       "name": "With no low amount set no balance.low is sent: a running charge is told only when depleted, at its exact instant"
+    },
+    {
+      "id": "OR-J25-S50",
+      "journey": "J25",
+      "name": "A revocation that empties a balance with a running charge still sends the host balance.depleted"
     },
     {
       "id": "OR-J06-S87",

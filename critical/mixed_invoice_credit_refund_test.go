@@ -120,6 +120,23 @@ func mixedPendingRefund(t *testing.T) {
 	// $10 is the credit line's whole amount: all 25 credits left the balance
 	// when the refund was asked for.
 	balance(t, a.alpha, m.customer, 5_000_000, 0, 5_000_000)
+	lot := paymentLot(t, a.alpha, m.customer, payment)
+	grant := lotMatchesLedger(t, a.world, lot)
+	require.Equal(t, billing.CreditGrantRefundPending, grant.State)
+	require.EqualValues(t, 25_000_000, grant.RefundingAmount)
+	require.Zero(t, grant.RefundedAmount)
+	refundType := func() billing.BalanceTransactionType {
+		transactions, err := a.alpha.ListBalanceTransactions(t.Context(), m.customer, billing.BalanceTransactionListParams{Currency: "USD"})
+		require.NoError(t, err)
+		for _, entry := range transactions.Items {
+			if entry.CreditGrantID != nil && *entry.CreditGrantID == lot && entry.Amount == -25_000_000 {
+				return entry.Type
+			}
+		}
+		require.FailNow(t, "refund withdrawal is in the balance history")
+		return ""
+	}
+	require.Equal(t, billing.BalanceTransactionRefundPending, refundType())
 	_, err = a.alpha.RevokeCreditGrant(t.Context(), "", paymentLot(t, a.alpha, m.customer, payment), billing.RevokeCreditGrantParams{Reason: "abuse"})
 	requireCode(t, err, billing.CodeCreditGrantHeld)
 
@@ -159,11 +176,15 @@ func mixedPendingRefund(t *testing.T) {
 	// The refund's settlement posted the usage first: it drew the goodwill
 	// credit, and the refund's lot was already off the balance.
 	balance(t, a.alpha, m.customer, 1_000_000, 0, 1_000_000)
+	grant = lotMatchesLedger(t, a.world, lot)
+	require.Equal(t, billing.CreditGrantRefunded, grant.State)
+	require.EqualValues(t, 25_000_000, grant.RefundedAmount)
+	require.Zero(t, grant.RefundingAmount)
+	require.Equal(t, billing.BalanceTransactionRefund, refundType())
 	var losses int
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+
 		" WHERE merchant_id = $1 AND operation = 'purchased_credit_refund' AND source = 'consumed_credit'", a.alpha.MerchantID().UUID()).Scan(&losses))
 	require.Zero(t, losses, "no refunded credit was spent")
-	lot := paymentLot(t, a.alpha, m.customer, payment)
 	require.Equal(t, []int64{10_000_000}, lotLegs(t, a.world, lot, "refund_deferred"), "its 25 unspent credits were worth the line's $10")
 	require.Empty(t, lotLegs(t, a.world, lot, "refund_recognized"))
 }
@@ -211,6 +232,18 @@ func mixedRefusedRefund(t *testing.T) {
 	require.EqualValues(t, 25_000_000, withdrawn)
 	require.EqualValues(t, 25_000_000, restored)
 	require.Empty(t, lotLegs(t, a.world, lot, "refund_deferred"))
+	transactions, err := a.alpha.ListBalanceTransactions(t.Context(), m.customer, billing.BalanceTransactionListParams{Currency: "USD"})
+	require.NoError(t, err)
+	amounts := map[billing.BalanceTransactionType][]int64{}
+	for _, entry := range transactions.Items {
+		if entry.CreditGrantID != nil && *entry.CreditGrantID == lot {
+			amounts[entry.Type] = append(amounts[entry.Type], entry.Amount)
+		}
+	}
+	require.Equal(t, []int64{-25_000_000}, amounts[billing.BalanceTransactionRefundFailed])
+	require.Equal(t, []int64{25_000_000}, amounts[billing.BalanceTransactionRefundReversed])
+	require.Empty(t, amounts[billing.BalanceTransactionRevoke])
+	require.Empty(t, amounts[billing.BalanceTransactionReinstate])
 }
 
 func mixedRefundRefusedAcrossLapse(t *testing.T) {

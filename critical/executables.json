@@ -1564,6 +1564,9 @@
     "OR-J25-S43": [
       "TestBalanceLooks/OR-J25-S43/a-look-at-a-balance-without-pending-usage-needs-no-event-store"
     ],
+    "OR-J25-S44": [
+      "TestBalanceLooks/OR-J25-S44/a-revocation-or-refund-that-empties-the-balance-tells-the-host-and-the-customer-a-lapse-says-expired"
+    ],
     "OR-J29-S37": [
       "TestDueWork/OR-J29-S37/an-operation-scheduled-ahead-is-not-stuck"
     ],
@@ -2988,6 +2991,9 @@
     ],
     "OR-J25-S49": [
       "TestLowBalanceAmounts/OR-J25-S49/with-no-amount-set-a-running-charge-is-told-only-when-depleted-at-its-exact-instant"
+    ],
+    "OR-J25-S50": [
+      "TestBalanceLooks/OR-J25-S50/a-revocation-that-empties-a-balance-with-a-running-charge-still-sends-the-host-balance-depleted"
     ],
     "OR-J06-S87": [
       "TestStripeWebhookDueWork/OR-J06-S87/an-unresolved-undeclared-account-alerts-once-and-stays-open"

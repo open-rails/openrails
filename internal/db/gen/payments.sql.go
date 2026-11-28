@@ -110,7 +110,7 @@ const createPayment = `-- name: CreatePayment :execrows
 INSERT INTO billing.payments (
     id, merchant_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, discount_code,
-    discount_reason, discount_metadata, credit_grant_snapshot,
+    discount_reason, discount_metadata,
     metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
@@ -122,51 +122,50 @@ INSERT INTO billing.payments (
     $9::text,
     $10, $11,
     $12, $13,
-    $14, $15,
-    $16,
+    $14,
+    $15,
+    COALESCE(NULLIF($16::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($17::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($18::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $19, $20, $21,
-    $22::uuid,
-    $23, $24, $25, $26,
-    $27,
-    $28::text, $29::uuid, $30::int, $31::text, $32::uuid
+    $18, $19, $20,
+    $21::uuid,
+    $22, $23, $24, $25,
+    $26,
+    $27::text, $28::uuid, $29::int, $30::text, $31::uuid
 )
 `
 
 type CreatePaymentParams struct {
-	ID                  uuid.UUID
-	MerchantID          uuid.UUID
-	Channel             string
-	Rail                *string
-	TransactionID       string
-	Amount              int64
-	ListAmount          int64
-	Currency            string
-	Status              string
-	SubscriptionID      *uuid.UUID
-	RefundedPaymentID   *uuid.UUID
-	DiscountCode        *string
-	DiscountReason      *string
-	DiscountMetadata    []byte
-	CreditGrantSnapshot []byte
-	Metadata            []byte
-	PurchasedAt         time.Time
-	CreatedAt           time.Time
-	CardBrand           *string
-	CardLast4           *string
-	CustomerID          uuid.UUID
-	PspID               *uuid.UUID
-	AttemptKind         *string
-	FailureCode         *string
-	FailureReason       *string
-	ReversalKind        *string
-	TokenType           *string
-	MoneyMovement       string
-	InvoiceID           *uuid.UUID
-	Quantity            *int32
-	RefundReason        *string
-	PaymentMethodID     *uuid.UUID
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	Channel           string
+	Rail              *string
+	TransactionID     string
+	Amount            int64
+	ListAmount        int64
+	Currency          string
+	Status            string
+	SubscriptionID    *uuid.UUID
+	RefundedPaymentID *uuid.UUID
+	DiscountCode      *string
+	DiscountReason    *string
+	DiscountMetadata  []byte
+	Metadata          []byte
+	PurchasedAt       time.Time
+	CreatedAt         time.Time
+	CardBrand         *string
+	CardLast4         *string
+	CustomerID        uuid.UUID
+	PspID             *uuid.UUID
+	AttemptKind       *string
+	FailureCode       *string
+	FailureReason     *string
+	ReversalKind      *string
+	TokenType         *string
+	MoneyMovement     string
+	InvoiceID         *uuid.UUID
+	Quantity          *int32
+	RefundReason      *string
+	PaymentMethodID   *uuid.UUID
 }
 
 // billing.payments — immutable payment event log.
@@ -188,7 +187,6 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (i
 		arg.DiscountCode,
 		arg.DiscountReason,
 		arg.DiscountMetadata,
-		arg.CreditGrantSnapshot,
 		arg.Metadata,
 		arg.PurchasedAt,
 		arg.CreatedAt,
@@ -217,7 +215,7 @@ const createPaymentIfNotExists = `-- name: CreatePaymentIfNotExists :execrows
 INSERT INTO billing.payments (
     id, merchant_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, discount_code,
-    discount_reason, discount_metadata, credit_grant_snapshot,
+    discount_reason, discount_metadata,
     metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
@@ -229,52 +227,51 @@ INSERT INTO billing.payments (
     $9::text,
     $10, $11,
     $12, $13,
-    $14, $15,
-    $16,
+    $14,
+    $15,
+    COALESCE(NULLIF($16::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($17::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($18::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $19, $20, $21,
-    $22::uuid,
-    $23, $24, $25, $26,
-    $27,
-    $28::text, $29::uuid, $30::int, $31::text, $32::uuid
+    $18, $19, $20,
+    $21::uuid,
+    $22, $23, $24, $25,
+    $26,
+    $27::text, $28::uuid, $29::int, $30::text, $31::uuid
 )
 ON CONFLICT DO NOTHING
 `
 
 type CreatePaymentIfNotExistsParams struct {
-	ID                  uuid.UUID
-	MerchantID          uuid.UUID
-	Channel             string
-	Rail                *string
-	TransactionID       string
-	Amount              int64
-	ListAmount          int64
-	Currency            string
-	Status              string
-	SubscriptionID      *uuid.UUID
-	RefundedPaymentID   *uuid.UUID
-	DiscountCode        *string
-	DiscountReason      *string
-	DiscountMetadata    []byte
-	CreditGrantSnapshot []byte
-	Metadata            []byte
-	PurchasedAt         time.Time
-	CreatedAt           time.Time
-	CardBrand           *string
-	CardLast4           *string
-	CustomerID          uuid.UUID
-	PspID               *uuid.UUID
-	AttemptKind         *string
-	FailureCode         *string
-	FailureReason       *string
-	ReversalKind        *string
-	TokenType           *string
-	MoneyMovement       string
-	InvoiceID           *uuid.UUID
-	Quantity            *int32
-	RefundReason        *string
-	PaymentMethodID     *uuid.UUID
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	Channel           string
+	Rail              *string
+	TransactionID     string
+	Amount            int64
+	ListAmount        int64
+	Currency          string
+	Status            string
+	SubscriptionID    *uuid.UUID
+	RefundedPaymentID *uuid.UUID
+	DiscountCode      *string
+	DiscountReason    *string
+	DiscountMetadata  []byte
+	Metadata          []byte
+	PurchasedAt       time.Time
+	CreatedAt         time.Time
+	CardBrand         *string
+	CardLast4         *string
+	CustomerID        uuid.UUID
+	PspID             *uuid.UUID
+	AttemptKind       *string
+	FailureCode       *string
+	FailureReason     *string
+	ReversalKind      *string
+	TokenType         *string
+	MoneyMovement     string
+	InvoiceID         *uuid.UUID
+	Quantity          *int32
+	RefundReason      *string
+	PaymentMethodID   *uuid.UUID
 }
 
 func (q *Queries) CreatePaymentIfNotExists(ctx context.Context, arg CreatePaymentIfNotExistsParams) (int64, error) {
@@ -293,7 +290,6 @@ func (q *Queries) CreatePaymentIfNotExists(ctx context.Context, arg CreatePaymen
 		arg.DiscountCode,
 		arg.DiscountReason,
 		arg.DiscountMetadata,
-		arg.CreditGrantSnapshot,
 		arg.Metadata,
 		arg.PurchasedAt,
 		arg.CreatedAt,

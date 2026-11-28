@@ -728,6 +728,7 @@ export const billingAdminMessages = {
   Refund: "Refund",
   "Refund payment": "Refund payment",
   Refunded: "Refunded",
+  Refunding: "Refunding",
   Refunds: "Refunds",
   "Register event properties used by filters or matrix rates.":
     "Register event properties used by filters or matrix rates.",

@@ -66,10 +66,6 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 	if err != nil {
 		return gen.CreatePaymentParams{}, err
 	}
-	creditSnap, err := models.PointerToJSONB(p.CreditGrantSnapshot)
-	if err != nil {
-		return gen.CreatePaymentParams{}, err
-	}
 	movement, err := resolveMoneyMovement(p)
 	if err != nil {
 		return gen.CreatePaymentParams{}, err
@@ -103,37 +99,36 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		quantity = &q
 	}
 	return gen.CreatePaymentParams{
-		ID:                  p.ID,
-		Channel:             string(channel),
-		Rail:                rail,
-		TransactionID:       p.TransactionID,
-		Amount:              p.Amount,
-		ListAmount:          p.ListAmount,
-		Currency:            currency,
-		Status:              p.Status,
-		PspID:               p.PspID,
-		SubscriptionID:      p.SubscriptionID,
-		RefundedPaymentID:   p.RefundedPaymentID,
-		DiscountCode:        p.DiscountCode,
-		DiscountReason:      p.DiscountReason,
-		DiscountMetadata:    discountMeta,
-		CreditGrantSnapshot: creditSnap,
-		Metadata:            meta,
-		PurchasedAt:         p.PurchasedAt,
-		CreatedAt:           p.CreatedAt,
-		CardBrand:           p.CardBrand,
-		CardLast4:           p.CardLast4,
-		CustomerID:          p.CustomerID,
-		AttemptKind:         p.AttemptKind,
-		FailureCode:         p.FailureCode,
-		FailureReason:       p.FailureReason,
-		ReversalKind:        p.ReversalKind,
-		RefundReason:        refundReason(p),
-		PaymentMethodID:     p.PaymentMethodID,
-		TokenType:           p.TokenType,
-		MoneyMovement:       string(movement),
-		InvoiceID:           p.InvoiceID,
-		Quantity:            quantity,
+		ID:                p.ID,
+		Channel:           string(channel),
+		Rail:              rail,
+		TransactionID:     p.TransactionID,
+		Amount:            p.Amount,
+		ListAmount:        p.ListAmount,
+		Currency:          currency,
+		Status:            p.Status,
+		PspID:             p.PspID,
+		SubscriptionID:    p.SubscriptionID,
+		RefundedPaymentID: p.RefundedPaymentID,
+		DiscountCode:      p.DiscountCode,
+		DiscountReason:    p.DiscountReason,
+		DiscountMetadata:  discountMeta,
+		Metadata:          meta,
+		PurchasedAt:       p.PurchasedAt,
+		CreatedAt:         p.CreatedAt,
+		CardBrand:         p.CardBrand,
+		CardLast4:         p.CardLast4,
+		CustomerID:        p.CustomerID,
+		AttemptKind:       p.AttemptKind,
+		FailureCode:       p.FailureCode,
+		FailureReason:     p.FailureReason,
+		ReversalKind:      p.ReversalKind,
+		RefundReason:      refundReason(p),
+		PaymentMethodID:   p.PaymentMethodID,
+		TokenType:         p.TokenType,
+		MoneyMovement:     string(movement),
+		InvoiceID:         p.InvoiceID,
+		Quantity:          quantity,
 	}, nil
 }
 

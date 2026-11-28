@@ -283,7 +283,8 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 		return nil
 	}
 	// Lots that lapsed are settled in the order they lapsed.
-	if _, err := txSvc.creditLots(q, key.MerchantID).ExpireLapsedBy(ctx, key.CustomerID, currency, now); err != nil {
+	expired, err := txSvc.creditLots(q, key.MerchantID).ExpireLapsedBy(ctx, key.CustomerID, currency, now)
+	if err != nil {
 		return err
 	}
 	bal, err := txSvc.deriveBalance(ctx, q, key.MerchantID, key.CustomerID, currency)
@@ -339,7 +340,11 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 	}
 	// Low and depleted crossed in one look are one customer notice.
 	if notice != "" {
-		if err := notifyBalance(ctx, q, key.MerchantID, notice, event); err != nil {
+		reason := ""
+		if notice == models.NotificationBalanceDepleted && expired > 0 {
+			reason = "expired"
+		}
+		if err := notifyBalance(ctx, q, key.MerchantID, notice, event, reason); err != nil {
 			return err
 		}
 		fundedAt = nil
@@ -542,10 +547,10 @@ func enqueueBalanceEvent(ctx context.Context, q *gen.Queries, merchantID uuid.UU
 // notifyBalance writes the customer's notification event of a crossing, its
 // id derived from the crossing so a retried look writes it once. It is
 // emailed when the merchant turns its type on.
-func notifyBalance(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, kind models.NotificationEventType, event billing.BalanceHostEvent) error {
+func notifyBalance(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, kind models.NotificationEventType, event billing.BalanceHostEvent, reason string) error {
 	available, owed, line := event.AvailableAmount, event.OwedAmount, event.LowBalanceAmount
 	data, err := json.Marshal(billing.NotificationData{
-		Currency: event.Currency, AvailableAmount: &available, OwedAmount: &owed, LowBalanceAmount: &line,
+		Currency: event.Currency, AvailableAmount: &available, OwedAmount: &owed, LowBalanceAmount: &line, Reason: reason,
 	})
 	if err != nil {
 		return err

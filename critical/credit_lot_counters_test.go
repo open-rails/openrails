@@ -49,10 +49,10 @@ func lotMatchesLedger(t *testing.T, w *world, id billing.CreditGrantID) billing.
 	require.LessOrEqual(t, debited, credited, "a lot never gives more than it holds")
 	if credited == 0 {
 		require.Equal(t, billing.CreditGrantPending, lot.State, "a lot none of whose units posted is pending")
-		require.Zero(t, lot.SpentAmount+lot.ExpiredAmount+lot.RevokedAmount+lot.RefundedAmount+lot.RemainingAmount)
+		require.Zero(t, lot.SpentAmount+lot.ExpiredAmount+lot.RevokedAmount+lot.RefundedAmount+lot.RefundingAmount+lot.RemainingAmount)
 		return *lot
 	}
-	require.Equal(t, lot.Amount, lot.SpentAmount+lot.ExpiredAmount+lot.RevokedAmount+lot.RefundedAmount+lot.RemainingAmount,
+	require.Equal(t, lot.Amount, lot.SpentAmount+lot.ExpiredAmount+lot.RevokedAmount+lot.RefundedAmount+lot.RefundingAmount+lot.RemainingAmount,
 		"what left the lot and what is left make up what it delivered")
 	return *lot
 }

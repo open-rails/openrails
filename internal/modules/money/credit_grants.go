@@ -32,13 +32,16 @@ var (
 // creditGrantFromRow reads a lot's state from its columns, in
 // billing.CreditGrantState's order.
 func creditGrantFromRow(row gen.GetCreditGrantRow, now time.Time) billing.CreditGrant {
+	refunded := row.Refunded - row.Refunding
 	state := billing.CreditGrantActive
 	switch {
 	case row.RevokedAt != nil:
 		state = billing.CreditGrantRevoked
 	case row.Credited == 0:
 		state = billing.CreditGrantPending
-	case row.Remaining <= 0 && row.Refunded > 0 && row.Spent == 0 && row.Expired == 0:
+	case row.Refunding > 0:
+		state = billing.CreditGrantRefundPending
+	case row.Remaining <= 0 && refunded > 0 && row.Spent == 0 && row.Expired == 0:
 		state = billing.CreditGrantRefunded
 	case row.ExpiresAt != nil && !row.ExpiresAt.After(now):
 		state = billing.CreditGrantExpired
@@ -54,7 +57,7 @@ func creditGrantFromRow(row gen.GetCreditGrantRow, now time.Time) billing.Credit
 	}
 	return billing.CreditGrant{ID: billing.CreditGrantID(row.ID), CustomerID: billing.CustomerID(row.CustomerID), Currency: catalog.Currency(row.Unit),
 		Amount: row.Units, SpentAmount: row.Spent, RemainingAmount: row.Remaining, RevokedAmount: row.Revoked,
-		ExpiredAmount: row.Expired, RefundedAmount: row.Refunded, State: state,
+		ExpiredAmount: row.Expired, RefundedAmount: refunded, RefundingAmount: row.Refunding, State: state,
 		FundingSource: billing.CreditFundingSource(row.FundingSource), PaidAmount: row.PaidAmount, PaidCurrency: paidCurrency,
 		SourceID: sourceRef(credits.FundingSource(row.FundingSource), row.SourceID), Description: row.Description,
 		StartsAt: row.StartsAt, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt,

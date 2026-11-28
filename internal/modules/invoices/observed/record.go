@@ -320,11 +320,5 @@ func sameJSON(a, b []byte) bool {
 }
 func sameID(a, b *uuid.UUID) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
 func samePayment(a, b *models.Payment) bool {
-	return sameID(a.InvoiceID, b.InvoiceID) && sameID(a.SubscriptionID, b.SubscriptionID) && sameID(a.PspID, b.PspID) && a.CustomerID == b.CustomerID && a.Amount == b.Amount && a.ListAmount == b.ListAmount && sameGrant(a.CreditGrantSnapshot, b.CreditGrantSnapshot) && a.Currency == b.Currency && a.Rail == b.Rail && a.TransactionID == b.TransactionID && a.RefundedPaymentID == nil && a.MoneyMovement == b.MoneyMovement && (a.Status == "succeeded" || a.Status == "refunded")
-}
-
-func sameGrant(a, b *models.CreditGrantSnapshot) bool {
-	x, _ := json.Marshal(a)
-	y, _ := json.Marshal(b)
-	return bytes.Equal(x, y)
+	return sameID(a.InvoiceID, b.InvoiceID) && sameID(a.SubscriptionID, b.SubscriptionID) && sameID(a.PspID, b.PspID) && a.CustomerID == b.CustomerID && a.Amount == b.Amount && a.ListAmount == b.ListAmount && a.Currency == b.Currency && a.Rail == b.Rail && a.TransactionID == b.TransactionID && a.RefundedPaymentID == nil && a.MoneyMovement == b.MoneyMovement && (a.Status == "succeeded" || a.Status == "refunded")
 }
