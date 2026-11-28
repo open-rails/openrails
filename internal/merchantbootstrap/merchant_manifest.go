@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"slices"
@@ -309,10 +310,10 @@ func validatePSPDeclaration(key string, account billing.PSPConfig) (billing.PSPC
 	}
 	for name, secret := range account.Secrets {
 		previous := strings.ToLower(strings.TrimSpace(name))
-		if (previous == "webhook_signing_secret_previous" || previous == "webhook_token_previous") && strings.TrimSpace(secret) != "" {
+		if slices.Contains(merchants.PreviousWebhookSecretKeys, previous) && strings.TrimSpace(secret) != "" {
 			raw, _ := account.Settings[merchants.WebhookOverlapExpiresKey].(string)
 			if _, err := time.Parse(time.RFC3339, strings.TrimSpace(raw)); err != nil {
-				return account, fmt.Errorf("psps.%s.webhook_overlap_expires_at (RFC 3339) is required with secrets.%s", key, previous)
+				slog.Error(fmt.Sprintf("psps.%s.webhook_overlap_expires_at (RFC 3339) is required with secrets.%s; the previous secret is ignored", key, previous))
 			}
 		}
 	}

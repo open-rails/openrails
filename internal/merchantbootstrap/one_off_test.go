@@ -1,7 +1,9 @@
 package merchantbootstrap
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -41,13 +43,13 @@ func TestAOneOffToolsStripeWriteIsSentOnItsPSPsCheck(t *testing.T) {
 	require.Len(t, stripe.Submitted("/v1/refunds"), 1)
 }
 
-func TestPSPDeclarationPreviousWebhookSecretNeedsOverlapExpiry(t *testing.T) {
+func TestPSPDeclarationPreviousWebhookSecretWithoutOverlapExpiryIsIgnored(t *testing.T) {
 	const previous = "previous-webhook-secret-at-least-32-characters"
 	for _, tc := range []struct {
 		name             string
 		rail             billing.Rail
 		previous, expiry string
-		refused          bool
+		logged           bool
 	}{
 		{"missing expiry", billing.RailNMI, previous, "", true},
 		{"invalid expiry", billing.RailCCBill, previous, "invalid", true},
@@ -55,6 +57,10 @@ func TestPSPDeclarationPreviousWebhookSecretNeedsOverlapExpiry(t *testing.T) {
 		{"empty previous secret", billing.RailNMI, "", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previousLogger := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previousLogger) })
 			accountID, previousKey := "overlap", "webhook_signing_secret_previous"
 			secrets := map[string]string{}
 			if tc.rail == billing.RailCCBill {
@@ -70,12 +76,10 @@ func TestPSPDeclarationPreviousWebhookSecretNeedsOverlapExpiry(t *testing.T) {
 				Rail: tc.rail, AccountID: accountID, Secrets: secrets, Settings: settings,
 			}}}
 			served, refused := ScopeDeclaration(nil, doc)
-			if tc.refused {
-				require.Equal(t, "psps.overlap.webhook_overlap_expires_at (RFC 3339) is required with secrets."+previousKey, refused[merchantdocs.PSPDoc("overlap")])
-				require.NotContains(t, served.PSPs, "overlap")
-			} else {
-				require.Empty(t, refused)
-				require.Contains(t, served.PSPs, "overlap")
+			require.Empty(t, refused)
+			require.Contains(t, served.PSPs, "overlap")
+			if tc.logged {
+				require.Contains(t, logs.String(), `level=ERROR msg="psps.overlap.webhook_overlap_expires_at (RFC 3339) is required with secrets.`+previousKey+`; the previous secret is ignored"`)
 			}
 		})
 	}
