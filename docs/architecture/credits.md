@@ -71,9 +71,13 @@ crossing's notices sent without sending them (`WatchChange`, `SilenceBalanceWatc
 It is judged against the floor the last look stored, so a chargeback or refund
 that reopens debt (`owed_reopened`, the `repaid_owed` leg of
 `credit_refund_funding`) is not silenced: when that debt uses up the credit
-line, the next look announces it.
+line, the next look announces it. A watch has no floor until its first look,
+so a refund or chargeback that lands before then is not silenced either.
 Only spending and lapses tell the customer the balance ran out; a look that
 expired the lot that emptied it sends `balance_depleted` with reason `expired`.
+The reason is there only when that look posted the expiry; a lot that another
+posting expired first (a usage posting expires lapsed lots too) gets the
+generic text.
 A balance is low once what the customer may spend is at or under an amount:
 its own (`customer_low_balance_lines`), else the merchant's
 `balance_notices.low_amounts` for the currency, else none; it is depleted at
